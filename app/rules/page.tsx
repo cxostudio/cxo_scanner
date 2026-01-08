@@ -385,7 +385,7 @@ export default function RulesPage() {
 
         <div style={{ marginBottom: '1rem', padding: '1rem', background: '#f0f7ff', borderRadius: '8px', borderLeft: '4px solid #667eea' }}>
           <p style={{ margin: 0, color: '#666', fontSize: '0.95rem' }}>
-            <strong>💡  Tip:</strong> Rules are automatically loaded from the JSON file when you first open the website. Use "Import Predefined Rules" to add them to your existing rules. New rules you add will be automatically saved to the JSON file.
+            <strong>💡  Tip:</strong> Rules  are automatically loaded from the JSON file when you first open the website. Use "Import Predefined Rules" to add them to your existing rules. New rules you add will be automatically saved to the JSON file.
           </p>
         </div>
 
