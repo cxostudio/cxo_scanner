@@ -118,7 +118,17 @@ export async function POST(request: NextRequest) {
       })
       
       // Wait a bit more for any delayed JavaScript execution
-      await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds for dynamic content
+      await new Promise(resolve => setTimeout(resolve, 3000)) // Wait 3 seconds for dynamic content
+      
+      // Scroll to ensure all content is loaded
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight / 2)
+      })
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      await page.evaluate(() => {
+        window.scrollTo(0, 0)
+      })
+      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
@@ -126,17 +136,23 @@ export async function POST(request: NextRequest) {
       })
       
       // Get key HTML elements (buttons, links, headings) for CTA detection
+      // Sort for consistency - same order every time
       const keyElements = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
-          .slice(0, 20) // Limit to first 20 interactive elements
-          .map(el => el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || '')
+          .map(el => {
+            const text = el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || ''
+            return text
+          })
           .filter(text => text.length > 0)
+          .sort() // Sort alphabetically for consistency
+          .slice(0, 30) // Increased limit and sort first
           .join(' | ')
         
         const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-          .slice(0, 10)
           .map(h => h.textContent?.trim())
           .filter(text => text && text.length > 0)
+          .sort() // Sort alphabetically for consistency
+          .slice(0, 15) // Increased limit
           .join(' | ')
         
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}`
@@ -201,8 +217,8 @@ export async function POST(request: NextRequest) {
             passed: z.boolean(),
             reason: z.string().max(500), // Detailed explanation for better understanding
           }),
-          prompt: `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}\n\nAnalyze if this rule is met. Provide a DETAILED explanation in Hindi/English mix that anyone can understand:\n\nIf PASSED: Explain clearly what elements you found that meet the rule. Be specific - mention actual buttons, links, text, or features you detected. Example: "Rule passed because: The homepage has clear 'Shop Now' and 'Explore Collections' buttons. The 404 page includes a product carousel with clickable items and navigation links to homepage. All buttons have action verbs like 'Buy', 'Add to Cart'."\n\nIf FAILED: Explain clearly what is missing or wrong. Be specific about what should be there but isn't. Example: "Rule failed because: No clear CTAs found on the 404 error page - only error message text. Buttons use generic labels like 'Click Here' instead of action verbs. No product carousels or navigation links to guide users."\n\nFor CTA rules: Look for buttons, links, carousels, product displays, navigation menus, "Return to Home" links, "Browse Collections" links, image galleries, or any clickable elements that guide users. On 404 pages, product carousels, recommendations, and navigation links all count as CTAs.\n\nFor button/interactive element rules: Check for button elements, clickable links, or text that suggests interactive elements (like "Add to Cart", "Buy Now", "Shop Now"). If you find clear button-like text or interactive elements with action verbs, consider it PASSED. Note: You cannot verify hover states or CSS styling from HTML content alone, so focus on the presence of button elements and action-oriented text.\n\nRespond with passed (true/false) and a detailed, easy-to-understand reason explaining WHY it passed or failed.`,
-          temperature: 0.2,
+          prompt: `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}\n\nIMPORTANT: Analyze this rule CONSISTENTLY. For the same website content, you MUST return the SAME result every time. Be deterministic in your evaluation.\n\nAnalyze if this rule is met. Provide a DETAILED explanation in Hindi/English mix that anyone can understand:\n\nIf PASSED: Explain clearly what elements you found that meet the rule. Be specific - mention actual buttons, links, text, or features you detected. Example: "Rule passed because: The homepage has clear 'Shop Now' and 'Explore Collections' buttons. The 404 page includes a product carousel with clickable items and navigation links to homepage. All buttons have action verbs like 'Buy', 'Add to Cart'."\n\nIf FAILED: Explain clearly what is missing or wrong. Be specific about what should be there but isn't. Example: "Rule failed because: No clear CTAs found on the 404 error page - only error message text. Buttons use generic labels like 'Click Here' instead of action verbs. No product carousels or navigation links to guide users."\n\nFor CTA rules: Look for buttons, links, carousels, product displays, navigation menus, "Return to Home" links, "Browse Collections" links, image galleries, or any clickable elements that guide users. On 404 pages, product carousels, recommendations, and navigation links all count as CTAs.\n\nEvaluation Guidelines:\n- Check the content systematically and consistently\n- If the same elements are present, give the same result\n- Be objective and deterministic in your analysis\n\nRespond with passed (true/false) and a detailed, easy-to-understand reason explaining WHY it passed or failed.`,
+          temperature: 0.0,
         })
 
         results.push({
