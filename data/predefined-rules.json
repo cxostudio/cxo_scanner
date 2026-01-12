@@ -1,77 +1,127 @@
 [
   {
-    "id": "rec2NXZ5QTVyDYSua",
-    "title": "Does every page have a clear Call-to-Action (CTA), including 404 error pages, search result pages with no results, blog posts, and the About Us page?",
-    "description": "Make sure every page on your site has a clear, action-oriented CTA. Make sure even unconventional pages—404 pages, \"no results\" search pages, blog posts, and the About Us page—direct users toward a valuable next step.\n\n**Detailed Actions**\n- **404 Error Page**: Add a CTA guiding visitors back to the homepage, product collections, or other high-value pages to keep them engaged. Examples: \"Return to Home\" or \"Browse New Arrivals.\"\n- **No Results Search Page**: Offer a CTA to browse popular products, visit a main category, or refine the search. \"Check Best Sellers\" or \"Try Again\" can help retain visitor interest.\n- **Blog Posts**: After engaging content, prompt readers to explore related products or collections. Use a CTA like \"Shop Related Products\" or \"Explore More Styles.\"\n- **About Us Page**: Encourage users to explore your products, sign up for newsletters, or follow you on social media. Examples: \"Shop Our Collection\" or \"Sign Up for Exclusive Deals.\""
+    "id": "colors-avoid-pure-black",
+    "title": "Avoid pure black for text and backgrounds",
+    "description": "Pure black (#000000) should not be used for text or backgrounds. Use softer dark tones like #333333 for text and dark gray (#121212 or #212121) for backgrounds to improve readability, reduce eye strain, and create a more professional appearance."
   },
   {
-    "id": "recEcmUYxWGuOz3vK",
-    "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
-    "description": "Make sure all button and link labels start with action verbs and convey a sense of urgency. Labels like \"Shop Now\" or \"Get Yours Today\" are clear and actionable, guiding users toward making a purchase.\n\n**Detailed Actions:**\n- **Start with a Strong Verb:** Every button label should start with a verb that describes the action users will take, such as \"Buy,\" \"Explore,\" or \"Save.\" Use language that directly signals what will happen when the button is clicked.\n- **Convey Urgency:** Add a sense of immediacy by using words like \"Now,\" \"Today,\" or \"Limited Time\" where relevant. This creates a subtle pressure, nudging users to act promptly.\n- **Customize Language for Context:** Ensure buttons align with the specific goal of the page. For example, on a product page, \"Add to Cart\" or \"Buy Now\" works well, while on a homepage, \"Explore Collection\" might fit better.\n\n**WooCommerce and Shopify Tips:**\n- For WooCommerce, go to **Appearance > Customize** and adjust button text in your theme settings if available. Some themes support custom labels for product and checkout pages without additional plugins.\n- On Shopify, use the **Theme Editor** under **Online Store > Themes > Customize** to modify button labels. Most Shopify themes allow easy button text customization on product and homepage sections directly from the editor."
+    "id": "images-lazy-loading",
+    "title": "Enable lazy loading for images and videos",
+    "description": "Images and videos should load only when they enter the viewport to reduce initial page load time and improve performance. Do not lazy load above-the-fold images, as they must load immediately."
   },
   {
-    "id": "recEqtpY2Opsp5L7J",
-    "title": "Are buttons and clickable items obviously pressable with clear hover states and visual cues?",
-    "description": "Make all buttons and clickable items visually distinct as interactive elements with clear color, shape, and hover states to encourage action and prevent confusion\n\n**Detailed Actions**\n- **Distinctive Design:** Make buttons stand out with consistent color, size, and shape across the site. Use bold colors or borders to contrast them against the background.\n- **Hover Effects:** Add hover states that change button color, underline links, or add subtle shadow effects. This reassures users the element is clickable.\n- **Positioning & Sizing:** Position buttons where users can naturally find them (e.g., at the end of a product description) and size them large enough for easy tapping on mobile.\n- **Clear Call-to-Action Text:** Ensure each button uses action-oriented text, like \"Add to Cart\" or \"Proceed to Checkout,\" instead of generic words like \"Click Here.\""
+    "id": "navigation-breadcrumbs",
+    "title": "Display breadcrumb navigation",
+    "description": "Breadcrumbs should be visible near the top of the product page to help users understand site hierarchy, navigate back to categories, and improve usability and SEO. Each breadcrumb should be clickable except the current product."
   },
   {
-    "id": "recYZBCXc8EmCPzXq",
-    "title": "Are there no annoying pop-ups appearing at inappropriate times (e.g., immediately upon landing)?",
-    "description": "Ensure pop-ups don't appear immediately upon a user's arrival. Delay them until users are engaged with the page to reduce bounce rates and improve user experience.\n\n**Detailed Actions**\n- **Set a Delay for Pop-Ups**: Instead of showing pop-ups the moment a user lands, delay them by 20-30 seconds or wait until they've scrolled a certain percentage of the page.\n- **Limit Frequency:** Show pop-ups only once per session to avoid repeated disruptions.\n- **Use Exit-Intent Pop-Ups Strategically:** Only trigger pop-ups when users are about to leave the page, which can help capture attention without intruding.\n- **Clear Call-to-Action Text:** Ensure each button uses action-oriented text, like \"Add to Cart\" or \"Proceed to Checkout,\" instead of generic words like \"Click Here.\""
+    "id": "cta-sticky-add-to-cart",
+    "title": "Sticky Add to Cart button",
+    "description": "A sticky or floating Add to Cart button should remain visible when the main CTA scrolls out of view to reduce friction and keep users focused on the primary conversion goal."
   },
   {
-    "id": "recqdZbBbXoGLLZYV",
-    "title": "Can the cookie notification bar be easily closed or approved within 2 seconds?",
-    "description": "Ensure users can dismiss or accept the cookie notification quickly—ideally in under two seconds—by making the \"Accept\" or \"Close\" button highly visible and responsive.\n\n**Detailed Actions:**\n- **Position and Visibility:** Place the cookie notification at the bottom or top of the page to avoid interrupting the browsing experience. Avoid covering the main content or obstructing key calls-to-action.\n- **Clear and Intuitive Buttons:** Use clear labels such as \"Accept\" or \"Close.\" Avoid vague terms; clarity encourages quicker engagement.\n- **Mobile Optimization:** Ensure buttons are large enough for easy tapping on mobile devices and are accessible without excessive scrolling.\n- **Fast Load Times:** Make sure the cookie bar loads with the rest of the page, preventing any delay that could frustrate users.\n- **For WooCommerce & Shopify Users:**\n    - **WooCommerce:** Consider native theme options to adjust cookie bar layout and visibility, or use the built-in customizer for many themes. Avoid adding plugins unless the theme lacks this feature.\n    - **Shopify:** Most premium themes offer customizable cookie notification options; check the theme settings first before exploring third-party solutions.\n\nIf using a plugin is necessary, select lightweight, trusted plugins that won't slow down the site."
+    "id": "social-proof-product-ratings",
+    "title": "Show product ratings near title",
+    "description": "Product ratings should appear close to the product title and include both the average rating and total number of reviews. Clicking the rating should scroll users to the reviews section."
   },
   {
-    "id": "rec6WruKWvBOCeFQj",
-    "title": "Does the site use exit-intent pop-ups to capture abandoning users?",
-    "description": "Implement exit-intent pop-ups to engage users who are about to leave the site. These pop-ups should offer incentives, such as discounts or free shipping, to encourage users to complete their purchase.\n\n**Detailed Actions:**\n- Set up exit-intent pop-ups that trigger when a user’s cursor moves toward the top of the screen (indicating they are about to leave the page).\n- Ensure the pop-up is designed to capture attention without being intrusive. Focus on a simple, clear message, such as offering a discount, a special deal, or encouraging them to complete their cart.\n- Make sure the pop-up is mobile-optimized and doesn’t disrupt the shopping experience.\n- Test pop-up designs and messaging to identify what works best for your audience.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify Apps**: [Privy - Pop Ups](https://apps.shopify.com/privy), [OptiMonk](https://apps.shopify.com/optimonk)\n- **WooCommerce Plugins**: [OptinMonster](https://optinmonster.com/)\n\nIf you use [Mailchimp](https://mailchimp.com/?currency=EUR) or [Klavyio](https://www.klaviyo.com/) for your email marketing, they also have pop-up options."
+    "id": "product-title-clarity",
+    "title": "Use descriptive and clear product titles",
+    "description": "Product titles should clearly describe the product using relevant attributes such as brand, size, color, and key characteristics. Titles should be concise, specific, and optimized for SEO (under ~65 characters)."
   },
   {
-    "id": "recSs12TogM60Mf6w",
-    "title": "Do you use pure black for text or backgrounds?",
-    "description": "Avoid using pure black (#000000) for text or backgrounds. Opt for softer dark tones like charcoal (#333333) for text and off-black colors for backgrounds.\n\nUse high contrast between text and background, but ensure the tone isn't too harsh on the eyes, improving readability and visual comfort.\n\n**Detailed Actions:**\n- **Text:** Use colors with slightly lighter shades (e.g., #333333 or #444444) for body text instead of pure black. These tones reduce the starkness that pure black creates, making reading less fatiguing, especially for longer sessions.\n- **Backgrounds:** Avoid using pure black (#000000) as a background color. Instead, choose a dark gray like #212121 or #121212. This ensures that text and images stand out while reducing visual strain.\n- **Contrast:** Ensure there's sufficient contrast between text and background, especially for accessibility. Use tools like  [Contrast Checker](https://webaim.org/resources/contrastchecker/) to verify that your combinations meet accessibility standards."
+    "id": "product-tabs",
+    "title": "Use tabs or accordions for product details",
+    "description": "Product pages should use clickable tabs or accordions (e.g. Description, Reviews, Specifications) to reduce clutter, improve scannability, and make information easier to access."
   },
   {
-    "id": "recXu35FN9ZA6WTTT",
-    "title": "When submitting a form for a discount code, is the discount code shown directly on the website?",
-    "description": "Display the discount code directly on the website immediately after the user signs up, instead of solely sending it to their inbox. This can be done through a pop-up, banner, or confirmation message after completing the sign-up process.\n\n**Detailed Actions:** After users submit their discount code request, display the code directly on the page—preferably in a clear, attention-grabbing way (e.g., with a popup, banner, or on the page itself). Avoid redirecting users to a separate page, as it creates friction and potentially drops conversions. Ensure that users can easily copy the code for easy application at checkout.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**: Use apps like **[Privy](https://www.privy.com/), [Mailchimp](https://mailchimp.com/)** or **[Klaviyo](https://www.klaviyo.com/)** to create on-site pop-ups or banners that reveal the discount code immediately upon sign-up.\n- **WooCommerce**: Utilize plugins such as **[OptinMonster](https://optinmonster.com/)** to display the code directly on the site as soon as the user submits their email."
+    "id": "benefits-near-title",
+    "title": "Highlight key benefits near product title",
+    "description": "A short list of 2–3 key benefits should be displayed near the product title to quickly communicate value and capture attention. Benefits should be specific, impactful, and aligned with key selling points."
   },
   {
-    "id": "recFTSjmOpDrdWa3D",
-    "title": "Does the hero section highlight the main benefits of shopping with you (e.g., \"Easy returns\", \"Free shipping\", \"Satisfaction guaranteed\")?",
-    "description": "Make sure your hero section prominently displays the key benefits of shopping with you, such as \"Easy returns,\" \"Free shipping,\" and \"Satisfaction guaranteed.\" This helps potential customers quickly understand what sets your store apart.\n\n**Detailed Actions:**\n- **Identify Key Benefits:** Determine the top 2-3 benefits that resonate most with your target audience. Use customer feedback and competitive analysis to guide your choices.\n- **Design Integration:** Ensure these benefits are visually integrated into the hero section. Use eye-catching graphics and concise text.\n- **Responsive Design:** Make sure that the hero section and its benefits are optimized for both desktop and mobile views. Check for readability and accessibility.\n- **Testing:** Conduct A/B testing to see which benefits resonate most with your audience. This can involve changing the phrasing, placement, or design of the benefits.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Customize your theme settings to include the benefits in the hero section or use apps like [Shogun Page Builder](https://getshogun.com/page-builder) for more control over layout.\n- **WooCommerce**\n    - Use a page builder plugin like [Elementor](https://elementor.com/) or [WPBakery](https://wpbakery.com/) to customize your hero section easily."
+    "id": "image-annotations",
+    "title": "Include annotations in product images",
+    "description": "Product images should include annotations or badges highlighting key benefits or differentiators to visually communicate value faster than text alone."
   },
   {
-    "id": "recM631vdg2m8Zdzp",
-    "title": "Has the hero section been tested using a 5-second test to ensure key messages are clear?",
-    "description": "Conduct a 5-second test using tools like [UsabilityHub](https://www.lyssna.com/features/five-second-testing/) (they normally give some free credits) or [UserTesting](https://www.usertesting.com/) to evaluate whether users can identify the main message, value proposition, and CTA in the hero section within the first 5 seconds of viewing."
+    "id": "image-thumbnails",
+    "title": "Show thumbnails in product image gallery",
+    "description": "The product gallery should include visible thumbnails to allow users to quickly browse all images without excessive scrolling."
   },
   {
-    "id": "recyjfTDztnJgcdtY",
-    "title": "Is the value proposition clearly stated on the homepage (e.g., with a tagline or welcome blurb)?",
-    "description": "Clearly define your unique value proposition (UVP) in a prominent position, such as near the hero section, using concise and compelling language.\n\n**Detailed Actions:**\n- **Craft a Compelling Tagline:** Create a succinct tagline (ideally under 10 words) that encapsulates your brand's essence and what makes you stand out from competitors. This should be the first thing users see when they land on your homepage.\n- **Positioning:** Place your value proposition in a high-visibility area of your homepage, such as the hero section or above the fold. It should be one of the first elements a visitor encounters.\n- **Visual Elements:** Use engaging visuals or background images that complement your value proposition and evoke the right emotions. Ensure the text is legible against the background.\n- **Test Variations:** Utilize A/B testing to experiment with different taglines or placements to see which resonates most with your audience."
+    "id": "image-square-format",
+    "title": "Use square images for consistency",
+    "description": "All product images should use a 1:1 square aspect ratio to maintain visual consistency, prevent layout shifts, and improve the overall gallery appearance."
   },
   {
-    "id": "recblVIL6b63VlubQ",
-    "title": "Does the hero section contain one or two visually prominent CTAs above the fold with relevant copy (e.g., “Shop Now”, “Explore Collections”)?",
-    "description": "Place CTAs prominently above the fold, ensuring they are visually distinct with compelling, action-oriented text.\n\n**Detailed Actions:**\n1. **Identify Key Actions:** Determine the primary actions you want visitors to take upon landing on your site. This could include \"Shop Now,\" \"Explore Collections,\" or \"Get Started.\"\n2. **Design CTAs for Visibility:** Use contrasting colors and ample whitespace to make CTAs stand out. Ensure they are large enough to be easily clickable on both desktop and mobile devices.\n3. **Positioning:** Place the CTAs prominently in the hero section, ensuring they are visible without scrolling. Consider the flow of the design to guide users’ eyes towards these buttons.\n4. **Testing Variations:** Use A/B testing to experiment with different copy and design elements for your CTAs. Track which variations lead to higher engagement and conversion rates."
+    "id": "image-multiple-angles",
+    "title": "Show product from multiple angles",
+    "description": "Product images should display multiple angles and close-ups, and include contextual or scale references where relevant, to reduce uncertainty and increase buyer confidence."
   },
   {
-    "id": "recbtnaZ7nEchnx8O",
-    "title": "Are specific deals, special offers, or urgency offers highlighted near the top of the homepage?",
-    "description": "Ensure that any current deals, special offers, or urgency-based promotions (like limited-time sales) are prominently displayed at the top of your homepage.\n\n**Detailed Actions:**\n1. **Highlight Key Offers**: Use eye-catching banners or hero sections to showcase deals and offers. Make them large and visually distinct with contrasting colors.\n2. **Use Clear Call-to-Action (CTA)**: Incorporate strong CTAs like \"Shop Now\" or \"Grab the Deal\" to guide users directly to the promotions.\n3. **Update Regularly**: Refresh the offers frequently to keep content dynamic. Implement an automatic rotation for banners or ads to highlight new deals."
+    "id": "image-mobile-navigation",
+    "title": "Enable swipe or arrows on mobile galleries",
+    "description": "On mobile devices, product image galleries should support swipe gestures or clear navigation arrows to ensure smooth browsing and engagement."
   },
   {
-    "id": "rec802tQDyuzJxxZd",
-    "title": "Are the most important product categories shown first, with descriptive photos near the top of the homepage?",
-    "description": "Display key product categories with clear, high-quality images and brief descriptions to help users easily find what they're looking for.\n\n**What Counts as Product Categories:**\n- **Navigation Menu Categories:** Product category links in the navigation menu (like \"Our Bottles\", \"Shop\", \"Products\", \"Collections\", \"Bottles\", \"Shoes\", \"Clothing\") - these ARE SUFFICIENT even without separate photos\n- **Hero Section Product Images:** Product images displayed in the hero section or main banner (like water bottles, shoes, clothing items) - these count as \"descriptive photos near the top\"\n- **Category Sections:** Dedicated category sections on the homepage with product images\n\n**What \"Near the Top\" Means:**\n- Navigation menu (top of page)\n- Hero section (main banner area)\n- First visible area (above the fold)\n\n**PASS if ANY ONE of these is true:**\n- Navigation menu has product categories (like \"Our Bottles\", \"Shop\", \"Products\", \"Collections\") - EVEN WITHOUT PHOTOS\n- OR hero section has product images (water bottles, shoes, clothing, any product photos)\n- OR both navigation categories AND hero product images\n\n**FAIL only if ALL of these are true:**\n- No product category links in navigation menu\n- AND no product images in hero section\n- AND no category sections with photos on homepage\n\n**Important Notes:**\n- Navigation menu categories (like \"Our Bottles\", \"Cobrand\") DO NOT need separate photos - they are sufficient by themselves\n- Hero section product images count as \"descriptive photos near the top\"\n- If you see \"Our Bottles\" in navigation = product category = PASS\n- If you see product image in hero section = descriptive photo = PASS\n\n**Detailed Actions:**\n1. **Identify Key Categories:** Determine which product categories drive the most sales or align with your current marketing strategy. This can be based on sales data, customer feedback, or seasonal trends.\n2. **Visual Placement:** Position these categories above the fold to ensure they are immediately visible when a user lands on your homepage. Use high-quality images that clearly represent the products within each category.\n3. **Responsive Design:** Ensure that the layout adapts well to different screen sizes, maintaining visibility on both desktop and mobile devices."
+    "id": "image-background-consistency",
+    "title": "Maintain consistent image backgrounds",
+    "description": "Product images should use consistent, clean backgrounds (e.g. white or light gray) to improve perceived professionalism and avoid visual distractions."
   },
   {
-    "id": "recspAXgCOM7wTkLm",
-    "title": "Does the store use special category pages (e.g., best-sellers, new arrivals, sales) that take users into a shopping mode?",
-    "description": "Check if the homepage displays special category sections or links (like \"Best Sellers\", \"New Arrivals\", \"On Sale\", \"Sale\") that guide users into shopping mode by showcasing products directly on the homepage.\n\n**What Counts as Special Category Pages/Sections:**\n- **Category Sections on Homepage:** Dedicated sections on the homepage showing \"Best Sellers\", \"New Arrivals\", \"On Sale\", \"Sale\", \"Featured Products\", \"Popular Products\", or similar category labels\n- **Category Links/Buttons:** Clickable links or buttons that lead to category pages (e.g., \"Shop Best Sellers\", \"View New Arrivals\", \"Browse Sale Items\")\n- **Product Displays by Category:** Product grids, carousels, or lists organized by categories like \"Best Sellers\", \"New Arrivals\", \"On Sale\"\n- **Category Navigation:** Navigation menu items or homepage sections that clearly indicate special shopping categories\n\n**What \"Shopping Mode\" Means:**\n- Direct product displays on the homepage (not just text links)\n- Visual product showcases (images, product cards, carousels)\n- Clear category organization that encourages browsing and shopping\n- Sections that make products the focal point of the homepage\n\n**What to Check:**\n- **Homepage Sections:** Look for sections labeled \"Best Sellers\", \"New Arrivals\", \"On Sale\", \"Sale\", \"Featured\", \"Popular\", or similar category names\n- **Product Displays:** Check if products are displayed directly on the homepage (not just links to category pages)\n- **Category Links:** Look for clickable category links or buttons (e.g., \"Shop Best Sellers\", \"View New Arrivals\")\n- **Visual Organization:** Verify that products are organized by categories with clear labels\n- **Shopping Focus:** Check if the homepage makes products the focal point (product images, product cards, product grids)\n\n**PASS if (ANY ONE of these is true):**\n- Homepage has sections labeled \"Best Sellers\", \"New Arrivals\", \"On Sale\", \"Sale\", \"Featured\", or similar category names\n- OR products are displayed directly on the homepage organized by categories (Best Sellers, New Arrivals, etc.)\n- OR there are clear category links/buttons on the homepage (e.g., \"Shop Best Sellers\", \"View New Arrivals\", \"Browse Sale\")\n- OR navigation menu or homepage has special category links that take users to shopping pages\n- Products are the focal point of the homepage (product images, product cards, product displays visible)\n\n**FAIL if (ALL of these are true):**\n- No special category sections on the homepage (no \"Best Sellers\", \"New Arrivals\", \"Sale\" sections)\n- AND no products are displayed directly on the homepage\n- AND no category links or buttons are present\n- AND homepage focuses only on brand story/content without product displays\n- AND no clear way to enter \"shopping mode\" from the homepage\n\n**Important Notes:**\n- Special category sections (like \"Best Sellers\", \"New Arrivals\", \"On Sale\") can be on the homepage itself - they don't need to be separate pages\n- Products displayed directly on the homepage organized by categories = shopping mode\n- Category links/buttons that lead to shopping pages = shopping mode\n- The homepage should make products the focal point, not just brand content\n- Look for category labels like \"Best Sellers\", \"New Arrivals\", \"Sale\", \"Featured\", \"Popular\", \"On Sale\""
+    "id": "image-before-after",
+    "title": "Include before-and-after images when applicable",
+    "description": "For products where results matter, before-and-after images should be included to demonstrate effectiveness and increase trust."
+  },
+  {
+    "id": "description-benefits-over-features",
+    "title": "Focus on benefits in product descriptions",
+    "description": "Product descriptions should emphasize how features translate into customer benefits, helping users understand how the product improves their life or solves a problem."
+  },
+  {
+    "id": "product-comparison",
+    "title": "Include a product comparison section",
+    "description": "A comparison section should highlight how the product compares to alternatives, reducing decision fatigue and reinforcing value."
+  },
+  {
+    "id": "ugc-customer-photos",
+    "title": "Show customer photos using the product",
+    "description": "Real customer photos should be featured on the product page to increase social proof, authenticity, and buyer confidence."
+  },
+  {
+    "id": "video-testimonials",
+    "title": "Add video testimonials",
+    "description": "Video testimonials from real customers should be included to increase trust, engagement, and conversion rates."
+  },
+  {
+    "id": "variant-preselection",
+    "title": "Preselect the most common variant",
+    "description": "The most commonly chosen size or color should be preselected to reduce friction and speed up the purchasing process."
+  },
+  {
+    "id": "cta-prominence",
+    "title": "Make the main CTA the most prominent element",
+    "description": "The primary CTA (Add to Cart or Buy Now) should stand out visually, be placed above the fold, and contrast clearly with the background."
+  },
+  {
+    "id": "free-shipping-threshold",
+    "title": "Highlight free shipping threshold near CTA",
+    "description": "If applicable, the free shipping threshold should be clearly displayed near the main CTA to encourage higher order values."
+  },
+  {
+    "id": "trust-badges-near-cta",
+    "title": "Display trust signals near the CTA",
+    "description": "Security badges and payment logos should be positioned near the Add to Cart or Checkout buttons to reassure users and reduce hesitation."
+  },
+  {
+    "id": "quantity-discounts",
+    "title": "Offer quantity or bulk discounts",
+    "description": "Quantity discounts should be clearly presented to incentivize higher order values and reduce pricing uncertainty."
+  },
+  {
+    "id": "shipping-time-visibility",
+    "title": "Display shipping time near CTA",
+    "description": "Estimated delivery times should be clearly displayed near the CTA using messages like \"Order by X, get it by Y\" to reduce uncertainty and prevent abandonment."
   }
 ]
