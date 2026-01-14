@@ -685,35 +685,6 @@ export default function ScannerPage() {
           )}
         </button>
 
-        {progress && (
-          <div style={{ 
-            marginTop: '1rem', 
-            padding: '1rem', 
-            background: '#f0f7ff', 
-            borderRadius: '8px',
-            borderLeft: '4px solid #667eea'
-          }}>
-            <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>
-              <strong>Progress:</strong> Processing batch {progress.current} of {progress.total}
-            </p>
-            <div style={{ 
-              marginTop: '0.5rem', 
-              width: '100%', 
-              height: '8px', 
-              background: '#e0e0e0', 
-              borderRadius: '4px',
-              overflow: 'hidden'
-            }}>
-              <div style={{ 
-                width: `${(progress.current / progress.total) * 100}%`, 
-                height: '100%', 
-                background: '#667eea',
-                transition: 'width 0.3s ease'
-              }}></div>
-            </div>
-          </div>
-        )}
-
         {error && (
           <div className="result-card result-failure" style={{ marginTop: '1rem' }}>
             <strong>Error:</strong> {error}
