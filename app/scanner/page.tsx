@@ -112,6 +112,15 @@ const JSONRulesSchema = z.union([
   return [data]
 })
 
+interface BatchData {
+  batchId: string
+  url: string
+  rules: Rule[]
+  batchIndex: number
+  totalBatches: number
+  timestamp: number
+}
+
 export default function ScannerPage() {
   const [url, setUrl] = useState('')
   const [rules, setRules] = useState<Rule[]>([])
@@ -122,11 +131,49 @@ export default function ScannerPage() {
   const [mounted, setMounted] = useState(false)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [jsonRulesError, setJsonRulesError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
 
   useEffect(() => {
     setMounted(true)
     loadRules()
+    checkPendingBatches()
   }, [])
+
+  // Check if there are pending batches in localStorage
+  const checkPendingBatches = () => {
+    const storedBatches = localStorage.getItem('scanBatches')
+    const storedResults = localStorage.getItem('scanResults')
+    
+    if (storedBatches) {
+      try {
+        const batches: BatchData[] = JSON.parse(storedBatches)
+        const results: ScanResult[] = storedResults ? JSON.parse(storedResults) : []
+        
+        if (batches.length > 0) {
+          const shouldResume = window.confirm(
+            `Found ${batches.length} pending batch(es) from previous scan. Do you want to resume?`
+          )
+          
+          if (shouldResume) {
+            setUrl(batches[0].url)
+            setScanning(true)
+            setResults(results.length > 0 ? results : null)
+            processBatches(batches).finally(() => {
+              setScanning(false)
+            })
+          } else {
+            // Clear pending batches if user doesn't want to resume
+            localStorage.removeItem('scanBatches')
+            localStorage.removeItem('scanResults')
+          }
+        }
+      } catch (err) {
+        console.error('Error checking pending batches:', err)
+        localStorage.removeItem('scanBatches')
+        localStorage.removeItem('scanResults')
+      }
+    }
+  }
 
   const loadRules = () => {
     const stored = localStorage.getItem('websiteRules')
@@ -265,6 +312,162 @@ export default function ScannerPage() {
     }
   }
 
+  // Function 1: Divide rules into batches and save to localStorage
+  const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
+    const BATCH_SIZE = 5
+    const batches: BatchData[] = []
+    const timestamp = Date.now()
+    
+    const totalRules = rulesToScan.length
+    const remainder = totalRules % BATCH_SIZE
+    
+    // Dynamic logic: Every 5 rules = 1 batch, extra rules (1-4) distributed to first batches
+    // Example: 25 rules = 5 batches, 26-29 = 5 batches (extra in first), 30 = 6 batches, 31-34 = 6 batches, 35 = 7 batches
+    const totalBatches = Math.ceil(totalRules / BATCH_SIZE)
+    
+    let ruleIndex = 0
+    
+    // Distribute rules: Extra rules (1-4) go to FIRST batches (not last)
+    // Example: 26 rules → Batch 1 gets 6, Batch 2-5 get 5 each
+    // Example: 27 rules → Batch 1 gets 6, Batch 2 gets 6, Batch 3-5 get 5 each
+    // Example: 30 rules → All 6 batches get 5 each
+    // Example: 31 rules → Batch 1 gets 6, Batch 2-6 get 5 each
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      // Calculate batch size: First batches get extra rules if remainder exists
+      let currentBatchSize = BATCH_SIZE
+      if (remainder > 0 && batchIndex < remainder) {
+        currentBatchSize = BATCH_SIZE + 1 // Extra rule for first batches
+      }
+      
+      // Get rules for this batch
+      const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
+      
+      batches.push({
+        batchId: `batch-${timestamp}-${batchIndex}`,
+        url: urlToScan,
+        rules: batchRules,
+        batchIndex: batchIndex,
+        totalBatches: totalBatches,
+        timestamp: timestamp,
+      })
+      
+      ruleIndex += currentBatchSize
+    }
+    
+    // Save all batches to localStorage
+    localStorage.setItem('scanBatches', JSON.stringify(batches))
+    localStorage.setItem('scanResults', JSON.stringify([])) // Initialize results array
+    
+    return batches
+  }
+
+  // Function 2: Process batches from queue sequentially
+  const processBatches = async (batches: BatchData[]) => {
+    const allResults: ScanResult[] = []
+    
+    setProgress({ current: 0, total: batches.length })
+    
+    // Process each batch one by one
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i]
+      
+      try {
+        setProgress({ current: i + 1, total: batches.length })
+        console.log('Processing batch', i + 1, 'of', batches.length, '...')
+        
+        // Send batch to API
+        const response = await fetch('/api/scan', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: batch.url,
+            rules: batch.rules,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || `Failed to scan batch ${i + 1}`)
+        }
+
+        const data = await response.json()
+        
+        // Validate response
+        const ScanResultsSchema = z.array(z.object({
+          ruleId: z.string(),
+          ruleTitle: z.string(),
+          passed: z.boolean(),
+          reason: z.string(),
+        }))
+        
+        const batchResults = ScanResultsSchema.parse(data.results)
+        allResults.push(...batchResults)
+        
+        // Remove completed batch from localStorage
+        const remainingBatches = batches.slice(i + 1)
+        if (remainingBatches.length > 0) {
+          localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
+        } else {
+          localStorage.removeItem('scanBatches')
+        }
+        
+        // Update results in localStorage
+        localStorage.setItem('scanResults', JSON.stringify(allResults))
+        
+      } catch (err) {
+        console.error(`Error processing batch ${i + 1}:`, err)
+        // Add error results for failed batch
+        batch.rules.forEach(rule => {
+          allResults.push({
+            ruleId: rule.id,
+            ruleTitle: rule.title,
+            passed: false,
+            reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          })
+        })
+      }
+    }
+    
+    // Final request to combine all results (fixes Vercel timeout issue)
+    try {
+      const finalResponse = await fetch('/api/scan/combine', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          results: allResults,
+        }),
+      })
+      
+      if (finalResponse.ok) {
+        const finalData = await finalResponse.json()
+        const validatedResults = z.array(z.object({
+          ruleId: z.string(),
+          ruleTitle: z.string(),
+          passed: z.boolean(),
+          reason: z.string(),
+        })).parse(finalData.results)
+        
+        setResults(validatedResults)
+        localStorage.removeItem('scanResults')
+      } else {
+        // If final request fails, use accumulated results
+        setResults(allResults)
+        localStorage.removeItem('scanResults')
+      }
+    } catch (finalErr) {
+      // If final request fails, use accumulated results
+      console.error('Final request error:', finalErr)
+      setResults(allResults)
+      localStorage.removeItem('scanResults')
+    }
+    
+    setProgress(null)
+  }
+
   const handleScan = async () => {
     // Validate URL first
     if (!validateUrl(url)) {
@@ -292,36 +495,17 @@ export default function ScannerPage() {
       setScanning(true)
       setError(null)
       setResults(null)
+      setProgress(null)
 
-      const response = await fetch('/api/scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: validUrl,
-          rules: allRules,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to scan website')
-      }
-
-      const data = await response.json()
+      // Function 1: Prepare batches and save to localStorage
+      const batches = prepareBatches(validUrl, allRules)
+      console.log('Prepared', batches.length, 'batch(es) for scanning')
       
-      // Validate response with Zod
-      const ScanResultsSchema = z.array(z.object({
-        ruleId: z.string(),
-        ruleTitle: z.string(),
-        passed: z.boolean(),
-        reason: z.string(),
-      }))
+      // Function 2: Process batches from queue
+      await processBatches(batches)
       
-      const validatedResults = ScanResultsSchema.parse(data.results)
-      setResults(validatedResults)
       setUrlError(null)
+      toast.success('Scan completed successfully!')
     } catch (err) {
       if (err instanceof z.ZodError) {
         if (err.errors[0]?.path[0] === 'url') {
@@ -334,6 +518,10 @@ export default function ScannerPage() {
       }
     } finally {
       setScanning(false)
+      setProgress(null)
+      // Clean up localStorage
+      localStorage.removeItem('scanBatches')
+      localStorage.removeItem('scanResults')
     }
   }
 
@@ -490,12 +678,41 @@ export default function ScannerPage() {
           {scanning ? (
             <>
               <span className="loading" style={{ marginRight: '0.5rem' }}></span>
-              Scanning...
+              {progress ? `Scanning... ` : 'Scanning...'}
             </>
           ) : (
             'Scan Website'
           )}
         </button>
+
+        {progress && (
+          <div style={{ 
+            marginTop: '1rem', 
+            padding: '1rem', 
+            background: '#f0f7ff', 
+            borderRadius: '8px',
+            borderLeft: '4px solid #667eea'
+          }}>
+            <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>
+              <strong>Progress:</strong> Processing batch {progress.current} of {progress.total}
+            </p>
+            <div style={{ 
+              marginTop: '0.5rem', 
+              width: '100%', 
+              height: '8px', 
+              background: '#e0e0e0', 
+              borderRadius: '4px',
+              overflow: 'hidden'
+            }}>
+              <div style={{ 
+                width: `${(progress.current / progress.total) * 100}%`, 
+                height: '100%', 
+                background: '#667eea',
+                transition: 'width 0.3s ease'
+              }}></div>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="result-card result-failure" style={{ marginTop: '1rem' }}>
