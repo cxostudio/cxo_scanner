@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { z } from 'zod'
 import { toast } from 'react-toastify'
+import { usePathname } from "next/navigation";
+import { Check, Plus, Trash2, X } from 'lucide-react';
 
 interface Rule {
   id: string
@@ -132,12 +134,20 @@ export default function ScannerPage() {
   const [urlError, setUrlError] = useState<string | null>(null)
   const [jsonRulesError, setJsonRulesError] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
-
+  const pathname = usePathname();
   useEffect(() => {
     setMounted(true)
     loadRules()
     checkPendingBatches()
   }, [])
+
+  const linkStyle = (path: string) =>
+    `px-6 py-2 rounded-lg text-lg font-medium transition
+     ${
+       pathname === path
+         ? "bg-indigo-500 text-white shadow-md"
+         : "text-indigo-500 hover:bg-indigo-100"
+     }`;
 
   // Check if there are pending batches in localStorage
   const checkPendingBatches = () => {
@@ -538,42 +548,60 @@ export default function ScannerPage() {
   const overallStatus = getOverallStatus()
 
   return (
-    <div className="container">
-      <nav className="nav">
-        <ul className="nav-links">
-          <li><Link href="/" className="nav-link">Home</Link></li>
-          <li><Link href="/rules" className="nav-link">Rules</Link></li>
-          <li><Link href="/scanner" className="nav-link active">Scanner</Link></li>
+    <div className="bg-[linear-gradient(135deg,#667eea,#764ba2)] py-6 px-4 min-h-screen">
+      {/* Navigation */}
+      <nav className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg px-6 py-4">
+        <ul className="flex items-center gap-6">
+          <li>
+            <Link href="/" className={linkStyle("/")}>
+              Home
+            </Link>
+          </li>
+          <li>
+            <Link href="/rules" className={linkStyle("/rules")}>
+              Rules
+            </Link>
+          </li>
+          <li>
+            <Link href="/scanner" className={linkStyle("/scanner")}>
+              Scanner
+            </Link>
+          </li>
         </ul>
       </nav>
 
-      <div className="card">
-        <h1 style={{ marginBottom: '2rem', color: '#333' }}>Scan Website</h1>
+      <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-lg px-6 py-6 mt-4">
+        <h1 className="text-3xl font-bold text-gray-800 mb-8">Scan Website</h1>
 
-        <div style={{ marginBottom: '2rem', padding: '1rem', background: '#f0f7ff', borderRadius: '8px', borderLeft: '4px solid #667eea' }}>
-          <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>
-            <strong>✅ JavaScript Support:</strong> This tool uses a headless browser to detect content loaded via JavaScript. 
-            Dynamically loaded content will be analyzed along with static HTML.
-          </p>
+        {/* JavaScript Support Section */}
+        <div className="mb-8 p-4 bg-green-50 rounded-lg border border-green-200">
+          <div className="flex items-start gap-3">
+            <Check className="text-green-600 mt-0.5 shrink-0" size={20} />
+            <p className="m-0 text-gray-700 text-sm leading-relaxed">
+              <strong className="text-gray-800">JavaScript Support:</strong> This tool uses a headless browser to detect content loaded via JavaScript. 
+              Dynamically loaded content will be analyzed along with static HTML.
+            </p>
+          </div>
         </div>
 
         {rules.length === 0 && !jsonRules.trim() && (
-          <div className="result-card result-pending" style={{ marginBottom: '2rem', padding: '1rem' }}>
-            <p style={{ margin: 0 }}>
-              <strong>⚠️ No rules defined yet.</strong> Please <Link href="/rules" style={{ color: '#667eea', fontWeight: 'bold' }}>add rules</Link> or paste JSON rules below.
+          <div className="mb-8 p-4 bg-yellow-50 rounded-lg border-l-4 border-yellow-500">
+            <p className="m-0 text-gray-700">
+              <strong>⚠️ No rules defined yet.</strong> Please <Link href="/rules" className="text-indigo-600 font-bold hover:underline">add rules</Link> or paste JSON rules below.
             </p>
           </div>
         )}
 
-        <div style={{ marginBottom: '2rem' }}>
-          <label className="label" style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
+        {/* Rules JSON Section */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3">
+          <label className="block text-md font-medium text-gray-700 mb-2">
             Rules JSON (Optional)
-            <span style={{ fontSize: '0.9rem', fontWeight: 'normal', color: '#666', marginLeft: '0.5rem' }}>
-              - Add JSON rules to the list
-            </span>
           </label>
+          <p className="text-gray-600 text-sm mb-2">-Add JSON rules to the list</p>      
+          </div>      
           <textarea
-            className="textarea"
+            className="w-full p-4 h-48 border-2 border-gray-300 rounded-lg text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             value={jsonRules}
             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
               setJsonRules(e.target.value)
@@ -582,58 +610,51 @@ export default function ScannerPage() {
               }
             }}
             onBlur={() => validateJsonRules(jsonRules)}
-            placeholder={`Example JSON formats:\n\nStandard: [{"id": "rule1", "title": "Privacy Policy", "description": "Website must have privacy policy"}]\n\nFields format: {"id": "rec123", "fields": {"Conversion Checkpoint": "Title", "Required Actions": "Description"}}\n\nCamelCase: {"id": "rec123", "conversionCheckpoint": "Title", "requiredActions": "Description"}`}
+            placeholder={`[{"id": "rule1", "title": "Privacy Policy", "description": "Website must have privacy policy"}]\n\nOR\n\n{"id": "rec123", "fields": {"Conversion Checkpoint": "Title", "Required Actions": "Description"}}\n\nOR\n\n{"id": "rec123", "conversionCheckpoint": "Title", "requiredActions": "Description"}`}
             disabled={scanning}
-            style={{ 
-              fontSize: '0.9rem', 
-              fontFamily: 'monospace',
-              minHeight: '150px',
-              borderColor: jsonRulesError ? '#dc3545' : undefined
-            }}
           />
           {jsonRulesError && (
-            <p style={{ color: '#dc3545', fontSize: '0.875rem', marginTop: '0.5rem', marginBottom: 0 }}>
+            <p className="text-red-500 text-sm mt-2 mb-0">
               {jsonRulesError}
             </p>
           )}
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+          <div className="flex items-center gap-3 mt-3">
             <button
-              className="btn btn-secondary"
+              className="py-2 px-6 rounded-lg font-medium text-sm text-white inline-flex items-center gap-2
+                bg-gray-500 hover:bg-gray-600
+                transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleAddJsonRules}
               disabled={scanning || !jsonRules.trim()}
-              style={{ 
-                fontSize: '0.9rem', 
-                padding: '0.75rem 1.5rem'
-              }}
             >
-              ➕ Add Rules to List
+              <Plus size={18} /> Add Rules to List
             </button>
             <button
-              className="btn"
+              className="py-2 px-6 rounded-lg font-medium text-sm text-white inline-flex items-center gap-2
+                bg-gray-500 hover:bg-gray-600
+                transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => {
                 setJsonRules('')
                 setJsonRulesError(null)
               }}
               disabled={scanning || !jsonRules.trim()}
-              style={{ 
-                fontSize: '0.9rem', 
-                padding: '0.75rem 1.5rem',
-                background: '#6c757d'
-              }}
+              title="Clear"
             >
-              🗑️ Clear
+              <Trash2 size={18} /> Clear
             </button>
           </div>
-          <p style={{ marginTop: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+          <p className="text-gray-600 text-sm mt-3 mb-0">
             Enter rules in JSON format and click "Add Rules to List". Duplicate rules will be automatically removed.
           </p>
         </div>
 
-        <div style={{ marginBottom: '2rem' }}>
-          <label className="label" style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>Website URL</label>
+        {/* Website URL Section */}
+        <div className="mb-8">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Website URL
+          </label>
           <input
             type="text"
-            className="input"
+            className="w-full p-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             value={url}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               setUrl(e.target.value)
@@ -644,66 +665,56 @@ export default function ScannerPage() {
             onBlur={() => validateUrl(url)}
             placeholder="https://example.com or example.com"
             disabled={scanning}
-            style={{ 
-              fontSize: '1rem', 
-              padding: '1rem',
-              border: `2px solid ${urlError ? '#dc3545' : '#e0e0e0'}`,
-              borderRadius: '8px',
-              width: '100%'
-            }}
           />
           {urlError && (
-            <p style={{ color: '#dc3545', fontSize: '0.875rem', marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+            <p className="text-red-500 text-sm mt-2 mb-0">
               {urlError}
             </p>
           )}
           {!urlError && (
-            <p style={{ marginTop: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+            <p className="text-gray-600 text-sm mt-2 mb-0">
               Enter the website URL here (e.g., google.com, https://example.com)
             </p>
           )}
         </div>
 
-        <button
-          className="btn"
-          onClick={handleScan}
-          disabled={scanning || !url.trim()}
-          style={{ 
-            fontSize: '1.1rem', 
-            padding: '1rem 2rem',
-            width: '100%',
-            maxWidth: '300px'
-          }}
-        >
-          {scanning ? (
-            <>
-              <span className="loading" style={{ marginRight: '0.5rem' }}></span>
-              {progress ? `Scanning... ` : 'Scanning...'}
-            </>
-          ) : (
-            'Scan Website'
-          )}
-        </button>
+        {/* Scan Website Button */}
+        <div className="flex justify-center mb-8">
+          <button
+            className="w-full max-w-md py-4 px-8 rounded-lg font-semibold text-lg text-white inline-flex items-center justify-center gap-2
+              bg-linear-to-r from-[#667eea] to-[#764ba2]
+              hover:from-[#5568d3] hover:to-[#653a8f]
+              transition-all duration-200 shadow-lg hover:shadow-xl
+              disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg"
+            onClick={handleScan}
+            disabled={scanning || !url.trim()}
+            title="Scan Website"
+          >
+            {scanning ? (
+              <>
+                <span className="loading mr-2"></span>
+                {progress ? `Scanning... ` : 'Scanning...'}
+              </>
+            ) : (
+              'Scan Website'
+            )}
+          </button>
+        </div>
 
         {error && (
-          <div className="result-card result-failure" style={{ marginTop: '1rem' }}>
+          <div className="p-4 bg-red-50 rounded-lg border border-red-500 mb-4">
             <strong>Error:</strong> {error}
           </div>
         )}
 
         {results && (
-              <div style={{ marginTop: '2rem' }}>
+              <div className="mt-8">
                 <div
-                  className={`result-card ${
-                    overallStatus === 'success'
-                      ? 'result-success'
-                      : overallStatus === 'partial'
-                      ? 'result-pending'
-                      : 'result-failure'
-                  }`}
-                  style={{ marginBottom: '1.5rem' }}
+                  title="Scan Results"
+                  className={`p-4 bg-white rounded-lg border-0 mb-4 
+                    ${overallStatus === 'success' ? 'bg-green-100' : overallStatus === 'partial' ? 'bg-yellow-100' : 'bg-red-200'}`}
                 >
-                  <h2 style={{ marginBottom: '0.5rem' }}>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-2">
                     Scan Results for {url}
                   </h2>
                   <p>
@@ -713,30 +724,43 @@ export default function ScannerPage() {
                   </p>
                 </div>
 
-                <h3 style={{ marginBottom: '1rem', color: '#333' }}>Detailed Results:</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Detailed Results:</h3>
                 {results.map((result) => (
                   <div
                     key={result.ruleId}
-                    className={`result-card ${
-                      result.passed ? 'result-success' : 'result-failure'
+                    title={result.ruleTitle}
+                    className={`p-4 rounded-lg mb-4 ${
+                      result.passed 
+                        ? 'bg-green-100' 
+                        : 'bg-red-200'
                     }`}
-                    style={{ marginBottom: '1rem' }}
                   >
-                    <h4 style={{ marginBottom: '0.5rem' }}>
-                      {result.ruleTitle} - {result.passed ? '✓ Passed' : '✗ Failed'}
+                    <h4 className="text-base font-bold text-gray-900 mb-3">
+                      {result.ruleTitle} - {result.passed ? 'Passed' : 'Failed'}
                     </h4>
-                    <div style={{ 
-                      color: '#666', 
-                      lineHeight: '1.6',
-                      padding: '0.75rem',
-                      background: result.passed ? '#f0f9ff' : '#fff5f5',
-                      borderRadius: '6px',
-                      borderLeft: `3px solid ${result.passed ? '#10b981' : '#ef4444'}`
-                    }}>
-                      <strong style={{ color: result.passed ? '#059669' : '#dc2626', display: 'block', marginBottom: '0.5rem' }}>
-                        {result.passed ? '✓ Why it Passed:' : '✗ Why it Failed:'}
-                      </strong>
-                      <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{result.reason}</p>
+                    <div className={`p-4 rounded-lg ${
+                      result.passed
+                        ? 'bg-green-50 border-l-4 border-green-500'
+                        : 'bg-red-50 border-l-4 border-red-500'
+                    }`}>
+                      <div className={`flex items-center gap-2 mb-2 ${
+                        result.passed ? 'text-green-700' : 'text-red-700'
+                      }`}>
+                        {result.passed ? (
+                          <>
+                            <Check size={18} className="shrink-0" />
+                            <strong className="text-base font-semibold">Why it Passed:</strong>
+                          </>
+                        ) : (
+                          <>
+                            <X size={18} className="shrink-0" />
+                            <strong className="text-base font-semibold">Why it Failed:</strong>
+                          </>
+                        )}
+                      </div>
+                      <p className="m-0 text-gray-900 text-sm leading-relaxed whitespace-pre-wrap">
+                        {result.reason}
+                      </p>
                     </div>
                   </div>
                 ))}
