@@ -50,6 +50,7 @@ export default function Home() {
         if (prev < analysisSteps.length - 1) {
           return prev + 1
         }
+        clearInterval(interval)
         return prev
       })
     }, 2000)
@@ -70,7 +71,7 @@ export default function Home() {
             <h1 className="text-2xl font-bold text-gray-900">
               <span className="font-bold">CXO</span>
               <span className="font-normal text-gray-600">studio</span>
-            </h1>
+        </h1>
           </div>
           
           {/* Back Button and Progress Bar */}
@@ -245,7 +246,7 @@ export default function Home() {
                 <div className="mt-8">
                   <button
                     onClick={handleNext}
-                    className="w-full py-[18px] rounded-xl transition font-semibold text-sm text-center bg-black text-white hover:bg-gray-800"
+                    className="w-full py-[18px] rounded-xl transition font-semibold text-sm text-center bg-black text-white hover:bg-gray-800 cursor-pointer"
                   >
                     Continue ›
                   </button>
@@ -259,7 +260,7 @@ export default function Home() {
                       }
                     }}
                     disabled={!websiteUrl || !email}
-                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center ${
+                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${
                       !websiteUrl || !email
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-black text-white hover:bg-gray-800'
@@ -273,13 +274,13 @@ export default function Home() {
           ) : (
            <>
             <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center">
-        <span>Analyzing your URL</span>
-        <span className="loader ml-2">
-          <span></span>
-          <span></span>
-          <span></span>
-        </span>
-      </h2>
+              <span>Analyzing your URL</span>
+                <span className="loader ml-2">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+          </h2>
 
       {/* Phone */}
       <div className="flex justify-center mb-8">
@@ -291,13 +292,14 @@ export default function Home() {
         {analysisSteps.map((title, index : number) => {
           const isCompleted = index < mounted
           const isActive = index === mounted
+          const shouldAnimateOut = isCompleted && mounted > index + 1
 
           return (
             <div
               key={index}
-              className={`flex items-center gap-4 p-4 rounded-xl border ${
+              className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-700 ${
                 isCompleted
-                  ? 'border-green-500'
+                  ? `border-green-500 ${shouldAnimateOut ? 'step-completed slide-out-right' : ''}`
                   : isActive
                   ? 'border-black'
                   : 'border-gray-300'
@@ -312,9 +314,9 @@ export default function Home() {
               )}
 
               <span
-                className={
+                className={`${
                   isActive ? 'text-black font-medium' : 'text-gray-400'
-                }
+                } ${isCompleted ? 'line-through' : ''}`}
               >
                 {title}
               </span>
@@ -325,7 +327,7 @@ export default function Home() {
            </>
           )}
         </div>
-        
+
         {/* Social Proof Footer - Only show when not analyzing */}
         {!showAnalyze && (
           <div className="my-[18px] border-t border-gray-100">

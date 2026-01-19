@@ -53,3 +53,28 @@
     opacity: 1;
   }
 }
+
+.step-completed {
+  animation: slideOutRight 0.8s ease-out forwards;
+}
+
+@keyframes slideOutRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+    max-height: 100px;
+    margin-bottom: 12px;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(150%);
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+}
