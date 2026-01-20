@@ -1,12 +1,55 @@
 'use client'
 
-
 import { useState,useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Cog, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { z } from 'zod'
+import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 
+interface Rule {
+  id: string
+  title: string
+  description: string
+}
+
+interface ScanResult {
+  ruleId: string
+  ruleTitle: string
+  passed: boolean
+  reason: string
+}
+
+interface BatchData {
+  batchId: string
+  url: string
+  rules: Rule[]
+  batchIndex: number
+  totalBatches: number
+  timestamp: number
+}
+
+const RuleSchema = z.object({
+  id: z.string().min(1, 'Rule ID is required'),
+  title: z.string().min(1, 'Rule title is required').max(200, 'Rule title must be less than 200 characters'),
+  description: z.string().min(1, 'Rule description is required').max(5000, 'Rule description must be less than 5000 characters'),
+})
+
+const URLSchema = z.string()
+  .min(1, 'URL is required')
+  .refine((url) => {
+    try {
+      const validUrl = url.startsWith('http') ? url : `https://${url}`
+      new URL(validUrl)
+      return true
+    } catch {
+      return false
+    }
+  }, 'Invalid URL format')
+
 export default function Home() {
+  const router = useRouter()
   const [currentStep, setCurrentStep] = useState(1)
   const [mounted, setMounted] = useState(0)
   const [selectedChallenge, setSelectedChallenge] = useState<string | null>(null)
@@ -14,6 +57,8 @@ export default function Home() {
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [email, setEmail] = useState('')
   const [showAnalyze, setShowAnalyze] = useState(false)
+  const [rules, setRules] = useState<Rule[]>([])
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -52,24 +97,259 @@ export default function Home() {
   ]
 
   useEffect(() => {
+    // Load rules on component mount
+    loadRules()
+  }, [])
+
+  useEffect(() => {
     if (!showAnalyze) {
       setMounted(0)
       return
     }
-
-    
-    const interval = setInterval(() => {
-      setMounted((prev) => {
-        if (prev < analysisSteps.length - 1) {
-          return prev + 1
-        }
-        clearInterval(interval)
-        return prev
-      })
-    }, 2000)
-
-    return () => clearInterval(interval)
   }, [showAnalyze])
+
+  useEffect(() => {
+    if (!showAnalyze || !progress) {
+      return
+    }
+
+    // Update mounted based on batch progress
+    // Map batch progress to analysis steps
+    const totalBatches = progress.total
+    const currentBatch = progress.current
+    
+    // Calculate which step should be active based on batch progress
+    // Distribute steps evenly across batches
+    const targetStep = Math.min(
+      Math.floor((currentBatch / totalBatches) * analysisSteps.length),
+      analysisSteps.length - 1
+    )
+    
+    setMounted(targetStep)
+  }, [progress, showAnalyze])
+
+  const loadRules = async () => {
+    try {
+      // Load rules from predefined-rules.json
+      const response = await fetch('/data/predefined-rules.json')
+      if (!response.ok) {
+        throw new Error('Failed to load rules')
+      }
+      const parsed = await response.json()
+      const validatedRules = z.array(RuleSchema).parse(parsed)
+      setRules(validatedRules)
+    } catch (error) {
+      console.error('Error loading rules:', error)
+      setRules([])
+    }
+  }
+
+  const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
+    const BATCH_SIZE = 5
+    const batches: BatchData[] = []
+    const timestamp = Date.now()
+    
+    const totalRules = rulesToScan.length
+    const remainder = totalRules % BATCH_SIZE
+    const totalBatches = Math.ceil(totalRules / BATCH_SIZE)
+    
+    let ruleIndex = 0
+    
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      let currentBatchSize = BATCH_SIZE
+      if (remainder > 0 && batchIndex < remainder) {
+        currentBatchSize = BATCH_SIZE + 1
+      }
+      
+      const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
+      
+      batches.push({
+        batchId: `batch-${timestamp}-${batchIndex}`,
+        url: urlToScan,
+        rules: batchRules,
+        batchIndex: batchIndex,
+        totalBatches: totalBatches,
+        timestamp: timestamp,
+      })
+      
+      ruleIndex += currentBatchSize
+    }
+    
+    localStorage.setItem('scanBatches', JSON.stringify(batches))
+    localStorage.setItem('scanResults', JSON.stringify([]))
+    
+    return batches
+  }
+
+  const processBatches = async (batches: BatchData[]) => {
+    const allResults: ScanResult[] = []
+    
+    setProgress({ current: 0, total: batches.length })
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i]
+      
+      try {
+        setProgress({ current: i + 1, total: batches.length })
+        
+        const response = await fetch('/api/scan', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: batch.url,
+            rules: batch.rules,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || `Failed to scan batch ${i + 1}`)
+        }
+
+        const data = await response.json()
+        
+        const ScanResultsSchema = z.array(z.object({
+          ruleId: z.string(),
+          ruleTitle: z.string(),
+          passed: z.boolean(),
+          reason: z.string(),
+        }))
+        
+        const batchResults = ScanResultsSchema.parse(data.results)
+        allResults.push(...batchResults)
+        
+        const remainingBatches = batches.slice(i + 1)
+        if (remainingBatches.length > 0) {
+          localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
+        } else {
+          localStorage.removeItem('scanBatches')
+        }
+        
+        localStorage.setItem('scanResults', JSON.stringify(allResults))
+        
+      } catch (err) {
+        console.error(`Error processing batch ${i + 1}:`, err)
+        batch.rules.forEach(rule => {
+          allResults.push({
+            ruleId: rule.id,
+            ruleTitle: rule.title,
+            passed: false,
+            reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          })
+        })
+      }
+    }
+    
+    try {
+      const finalResponse = await fetch('/api/scan/combine', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          results: allResults,
+        }),
+      })
+      
+      if (finalResponse.ok) {
+        const finalData = await finalResponse.json()
+        const validatedResults = z.array(z.object({
+          ruleId: z.string(),
+          ruleTitle: z.string(),
+          passed: z.boolean(),
+          reason: z.string(),
+        })).parse(finalData.results)
+        
+        localStorage.setItem('scanResults', JSON.stringify(validatedResults))
+        localStorage.setItem('scanUrl', websiteUrl)
+        localStorage.removeItem('scanBatches')
+      } else {
+        localStorage.setItem('scanResults', JSON.stringify(allResults))
+        localStorage.setItem('scanUrl', websiteUrl)
+        localStorage.removeItem('scanBatches')
+      }
+    } catch (finalErr) {
+      console.error('Final request error:', finalErr)
+      localStorage.setItem('scanResults', JSON.stringify(allResults))
+      localStorage.setItem('scanUrl', websiteUrl)
+      localStorage.removeItem('scanBatches')
+    }
+    
+    setProgress(null)
+    // Complete all steps
+    setMounted(analysisSteps.length - 1)
+    
+    // Wait a bit then redirect
+    setTimeout(() => {
+      router.push('/scanner')
+    }, 1000)
+  }
+
+  const handleStartScan = async () => {
+    if (!websiteUrl.trim()) {
+      toast.error('Please enter a website URL')
+      return
+    }
+
+    // Ensure rules are loaded before scanning
+    let rulesToUse = rules
+    if (rulesToUse.length === 0) {
+      await loadRules()
+      // Wait a bit for state to update
+      await new Promise(resolve => setTimeout(resolve, 100))
+      rulesToUse = rules
+      
+      // If still empty, try loading directly
+      if (rulesToUse.length === 0) {
+        try {
+          
+          const response = await fetch('/data/predefined-rules.json')
+          if (!response.ok) {
+            throw new Error('Failed to load rules')
+          }
+          const parsed = await response.json()
+          const validatedRules = z.array(RuleSchema).parse(parsed)
+          rulesToUse = validatedRules
+          setRules(validatedRules)
+        } catch (error) {
+          console.error('Error loading rules:', error)
+          toast.error('Failed to load rules. Please check predefined-rules.json file.')
+          return
+        }
+      }
+    }
+
+    if (rulesToUse.length === 0) {
+      toast.error('No rules available. Please check predefined-rules.json file.')
+      return
+    }
+
+    try {
+      const validatedUrl = URLSchema.parse(websiteUrl.trim())
+      let validUrl = validatedUrl
+      if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
+        validUrl = 'https://' + validUrl
+      }
+
+      setShowAnalyze(true)
+      setMounted(0)
+      setProgress(null)
+
+      const batches = prepareBatches(validUrl, rulesToUse)
+      await processBatches(batches)
+      
+      toast.success('Scan completed successfully!')
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        toast.error(`Invalid URL: ${err.errors[0]?.message || 'Please enter a valid URL'}`)
+      } else {
+        toast.error(err instanceof Error ? err.message : 'An error occurred')
+      }
+      setShowAnalyze(false)
+    }
+  }
 
   const progressPercentage = (currentStep / totalSteps) * 100
 
@@ -95,7 +375,7 @@ export default function Home() {
         <>
           {/* Logo */}
           <div className="text-center my-[34px]">
-          <img src="/cxo_logo.png" alt="logo" className="mx-auto object-cover w-[117.54]  h-[19.95] object-cover" />
+          <img src="/cxo_logo.png" alt="logo" className="mx-auto w-[117.54] h-[19.95] object-cover" />
           </div>
           
           {/* Back Button and Progress Bar */}
@@ -214,11 +494,7 @@ export default function Home() {
               ) : (
                 <div className="mt-[91px]">
                   <button
-                    onClick={() => {
-                      if (websiteUrl && email) {
-                        setShowAnalyze(true)
-                      }
-                    }}
+                    onClick={handleStartScan}
                     disabled={!websiteUrl || !email}
                     className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${
                       !websiteUrl || !email
