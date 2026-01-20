@@ -3,6 +3,7 @@
 
 import { useState,useEffect } from 'react'
 import { Cog, Check } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import SelectButton from './components/SelectButton'
 
 export default function Home() {
@@ -13,7 +14,6 @@ export default function Home() {
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [email, setEmail] = useState('')
   const [showAnalyze, setShowAnalyze] = useState(false)
-
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -249,40 +249,76 @@ export default function Home() {
 
       {/* Steps */}
       <div className="mt-[45px]">
-        {analysisSteps.map((title, index : number) => {
-          const isCompleted = index < mounted
-          const isActive = index === mounted
-          const shouldAnimateOut = isCompleted && mounted > index + 1
+        <AnimatePresence mode="sync">
+          {analysisSteps
+            .map((title, index) => ({ title, index }))
+            .filter(({ index }) => {
+              const isCompleted = index < mounted
+              const shouldAnimateOut = isCompleted && mounted >= index + 2
+              return !shouldAnimateOut
+            })
+            .map(({ title, index }) => {
+              const isCompleted = index < mounted
+              const isActive = index === mounted
 
-          return (
-            <div
-              key={index}
-              className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border transition-all duration-700 ${
-                isCompleted
-                  ? `border-green-500 ${shouldAnimateOut ? 'step-completed slide-out-right' : ''}`
-                  : isActive
-                  ? 'border-black'
-                  : 'border-gray-300'
-              }`}
-            >
-              {isCompleted ? (
-                <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
-                  <Check className="w-5 h-5 text-white" />
-                </div>
-              ) : (
-                <Cog className={`w-5 h-5 ${isActive ? 'text-black' : 'text-gray-400'}`} />
-              )}
+              return (
+                <motion.div
+                  key={index}
+                  layout
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                  }}
+                  exit={{
+                    x: 200,          // 👉 right side slide
+                    opacity: 0,
+                    transition: {
+                      duration: 0.6,
+                      ease: 'easeInOut',
+                    },
+                  }}
+                  transition={{
+                    layout: { duration: 0.4, ease: 'easeOut' },
+                    opacity: { duration: 0.3 },
+                    y: { duration: 0.3 },
+                  }}
+                  className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border ${
+                    isCompleted
+                      ? 'border-green-500'
+                      : isActive
+                      ? 'border-black border-2'
+                      : 'border-gray-300'
+                  }`}
+                >
+                  {isCompleted ? (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                      className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0"
+                    >
+                      <Check className="w-5 h-5 text-white" />
+                    </motion.div>
+                  ) : (
+                    <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-black' : 'text-gray-400'}`} />
+                  )}
 
-              <span
-                className={`${
-                  isActive ? 'text-black  font-semibold text-[14.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[14.8px] leading-[28.8px]'
-                } ${isCompleted ? 'line-through' : ''}`}
-              >
-                {title}
-              </span>
-            </div>
-          )
-        })}
+                  <motion.span
+                    animate={{
+                      textDecoration: isCompleted ? 'line-through' : 'none',
+                    }}
+                    transition={{ duration: 0.3 }}
+                    className={`flex-1 ${
+                      isActive ? 'text-black font-semibold text-[14.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[14.8px] leading-[28.8px]'
+                    }`}
+                  >
+                    {title}
+                  </motion.span>
+                </motion.div>
+              )
+            })}
+        </AnimatePresence>
       </div>
            </>
           )}
