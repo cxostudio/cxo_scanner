@@ -1,0 +1,127 @@
+[
+  {
+    "id": "colors-avoid-pure-black",
+    "title": "Avoid pure black for text and backgrounds",
+    "description": "Pure black (#000000) should not be used for text or backgrounds. Use softer dark tones like #333333 for text and dark gray (#121212 or #212121) for backgrounds to improve readability, reduce eye strain, and create a more professional appearance."
+  },
+  {
+    "id": "images-lazy-loading",
+    "title": "Enable lazy loading for images and videos",
+    "description": "Images and videos should load only when they enter the viewport to reduce initial page load time and improve performance. Do not lazy load above-the-fold images, as they must load immediately."
+  },
+  {
+    "id": "navigation-breadcrumbs",
+    "title": "Display breadcrumb navigation",
+    "description": "Breadcrumbs should be visible near the top of the product page to help users understand site hierarchy, navigate back to categories, and improve usability and SEO. Each breadcrumb should be clickable except the current product."
+  },
+  {
+    "id": "cta-sticky-add-to-cart",
+    "title": "Sticky Add to Cart button",
+    "description": "A sticky or floating Add to Cart button should remain visible when the main CTA scrolls out of view to reduce friction and keep users focused on the primary conversion goal."
+  },
+  {
+    "id": "social-proof-product-ratings",
+    "title": "Show product ratings near title",
+    "description": "Product ratings should appear close to the product title and include both the average rating and total number of reviews. Clicking the rating should scroll users to the reviews section."
+  },
+  {
+    "id": "product-title-clarity",
+    "title": "Use descriptive and clear product titles",
+    "description": "Product titles should clearly describe the product using relevant attributes such as brand, size, color, and key characteristics. Titles should be concise, specific, and optimized for SEO (under ~65 characters)."
+  },
+  {
+    "id": "product-tabs",
+    "title": "Use tabs or accordions for product details",
+    "description": "Product pages should use clickable tabs or accordions (e.g. Description, Reviews, Specifications) to reduce clutter, improve scannability, and make information easier to access."
+  },
+  {
+    "id": "benefits-near-title",
+    "title": "Highlight key benefits near product title",
+    "description": "A short list of 2–3 key benefits should be displayed near the product title to quickly communicate value and capture attention. Benefits should be specific, impactful, and aligned with key selling points."
+  },
+  {
+    "id": "image-annotations",
+    "title": "Include annotations in product images",
+    "description": "Product images should include annotations or badges highlighting key benefits or differentiators to visually communicate value faster than text alone."
+  },
+  {
+    "id": "image-thumbnails",
+    "title": "Show thumbnails in product image gallery",
+    "description": "The product gallery should include visible thumbnails to allow users to quickly browse all images without excessive scrolling."
+  },
+  {
+    "id": "image-square-format",
+    "title": "Use square images for consistency",
+    "description": "All product images should use a 1:1 square aspect ratio to maintain visual consistency, prevent layout shifts, and improve the overall gallery appearance."
+  },
+  {
+    "id": "image-multiple-angles",
+    "title": "Show product from multiple angles",
+    "description": "Product images should display multiple angles and close-ups, and include contextual or scale references where relevant, to reduce uncertainty and increase buyer confidence."
+  },
+  {
+    "id": "image-mobile-navigation",
+    "title": "Enable swipe or arrows on mobile galleries",
+    "description": "On mobile devices, product image galleries should support swipe gestures or clear navigation arrows to ensure smooth browsing and engagement."
+  },
+  {
+    "id": "image-background-consistency",
+    "title": "Maintain consistent image backgrounds",
+    "description": "Product images should use consistent, clean backgrounds (e.g. white or light gray) to improve perceived professionalism and avoid visual distractions."
+  },
+  {
+    "id": "image-before-after",
+    "title": "Include before-and-after images when applicable",
+    "description": "For products where results matter, before-and-after images should be included to demonstrate effectiveness and increase trust."
+  },
+  {
+    "id": "description-benefits-over-features",
+    "title": "Focus on benefits in product descriptions",
+    "description": "Product descriptions should emphasize how features translate into customer benefits, helping users understand how the product improves their life or solves a problem."
+  },
+  {
+    "id": "product-comparison",
+    "title": "Include a product comparison section",
+    "description": "A comparison section should highlight how the product compares to alternatives, reducing decision fatigue and reinforcing value."
+  },
+  {
+    "id": "ugc-customer-photos",
+    "title": "Show customer photos using the product",
+    "description": "Real customer photos should be featured on the product page to increase social proof, authenticity, and buyer confidence."
+  },
+  {
+    "id": "video-testimonials",
+    "title": "Add video testimonials",
+    "description": "Video testimonials from real customers should be included to increase trust, engagement, and conversion rates."
+  },
+  {
+    "id": "variant-preselection",
+    "title": "Preselect the most common variant",
+    "description": "The most commonly chosen size or color should be preselected to reduce friction and speed up the purchasing process."
+  },
+  {
+    "id": "cta-prominence",
+    "title": "Make the main CTA the most prominent element",
+    "description": "The primary CTA (Add to Cart or Buy Now) should stand out visually, be placed above the fold, and contrast clearly with the background."
+  },
+  {
+    "id": "free-shipping-threshold",
+    "title": "Highlight free shipping threshold near CTA",
+    "description": "If applicable, the free shipping threshold should be clearly displayed near the main CTA to encourage higher order values."
+  },
+  {
+    "id": "trust-badges-near-cta",
+    "title": "Display trust signals near the CTA",
+    "description": "Security badges and payment logos should be positioned near the Add to Cart or Checkout buttons to reassure users and reduce hesitation."
+  },
+  {
+    "id": "quantity-discounts",
+    "title": "Offer quantity or bulk discounts",
+    "description": "Quantity discounts should be clearly presented to incentivize higher order values and reduce pricing uncertainty."
+  },
+  {
+    "id": "shipping-time-visibility",
+    "title": "Display shipping time near CTA",
+    "description": "Estimated delivery times should be clearly displayed near the CTA using messages like \"Order by X, get it by Y\" to reduce uncertainty and prevent abandonment."
+  }
+]
