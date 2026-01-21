@@ -145,20 +145,29 @@ export default function Home() {
   }
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
-    const BATCH_SIZE = 5
+    const BATCH_SIZE = 2
     const batches: BatchData[] = []
     const timestamp = Date.now()
     
     const totalRules = rulesToScan.length
     const remainder = totalRules % BATCH_SIZE
-    const totalBatches = Math.ceil(totalRules / BATCH_SIZE)
+    // Calculate total batches: first batch gets remainder, rest get BATCH_SIZE
+    const totalBatches = remainder > 0
+      ? 1 + Math.floor((totalRules - (BATCH_SIZE + remainder)) / BATCH_SIZE)
+      : Math.floor(totalRules / BATCH_SIZE)
     
     let ruleIndex = 0
     
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      // First batch gets remainder if exists, otherwise BATCH_SIZE
       let currentBatchSize = BATCH_SIZE
-      if (remainder > 0 && batchIndex < remainder) {
-        currentBatchSize = BATCH_SIZE + 1
+      if (batchIndex === 0 && remainder > 0) {
+        currentBatchSize = BATCH_SIZE + remainder
+      }
+      
+      // Stop if no more rules left
+      if (ruleIndex >= totalRules) {
+        break
       }
       
       const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
@@ -239,6 +248,13 @@ export default function Home() {
             reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
           })
         })
+      }
+      
+      // Add delay between batches to avoid rate limits (except for last batch)
+      if (i < batches.length - 1) {
+        // Wait 10 seconds between batches to give rate limit window time to reset
+        // Backend already handles 40s delays between rules, this is just an extra buffer
+        await new Promise(resolve => setTimeout(resolve, 10000))
       }
     }
     
@@ -385,7 +401,7 @@ export default function Home() {
                 onClick={handleBack}
                 className="w-[35px] h-[35px] rounded-lg bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 transition shrink-0 cursor-pointer"
               >
-                <span className="text-gray-700 text-xl">‹</span>
+                <span className="text-gray-700 text-xl mb-1">‹</span>
               </button>
             {/* Progress Bar */}
             <div className="flex-1 bg-gray-200 rounded-full h-2">
@@ -443,7 +459,7 @@ export default function Home() {
                 <>
                   <div>
                     <h2 className="text-[33px] leading-[48px] font-bold text-[#757575] text-center">
-                      You're almost done!
+                      <i>You're almost done!</i>
                     </h2>
                     <h2 className="text-[33px] leading-[48px] font-bold text-black text-center">
                       Let's finish your audit
