@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Groq } from 'groq-sdk'
+import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
 import puppeteer from 'puppeteer'
 
@@ -53,16 +53,16 @@ const extractRetryAfter = (errorMessage: string): number => {
 }
 
 // Retry function with exponential backoff for rate limit errors
-async function callGroqWithRetry(
-  groq: Groq,
-  params: Parameters<typeof groq.chat.completions.create>[0],
+async function callOpenRouterWithRetry(
+  openRouter: OpenRouter,
+  params: Parameters<typeof openRouter.chat.send>[0],
   maxRetries: number = 5
-): Promise<Awaited<ReturnType<typeof groq.chat.completions.create>>> {
+): Promise<Awaited<ReturnType<typeof openRouter.chat.send>>> {
   let lastError: Error | null = null
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      return await groq.chat.completions.create(params) as Awaited<ReturnType<typeof groq.chat.completions.create>>
+      return await openRouter.chat.send(params) as Awaited<ReturnType<typeof openRouter.chat.send>>
     } catch (error: any) {
       lastError = error
       const errorMessage = error?.message || ''
@@ -112,16 +112,16 @@ export async function POST(request: NextRequest) {
       validUrl = 'https://' + validUrl
     }
 
-    // Groq API support
-    const apiKey = process.env.GROQ_API_KEY
+    // OpenRouter API support
+    const apiKey = process.env.OPENROUTER_API_KEY
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API key is not configured. Please set GROQ_API_KEY in .env.local file' },
+        { error: 'API key is not configured. Please set OPENROUTER_API_KEY in .env.local file' },
         { status: 500 }
       )
     }
     
-    const groq = new Groq({
+    const openRouter = new OpenRouter({
       apiKey: apiKey,
     })
 
@@ -439,11 +439,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check each rule in batches of 2 to manage Vercel 60s timeout
+    // Check each rule in batches of 5 to manage Vercel 60s timeout
     const results: ScanResult[] = []
-    const BATCH_SIZE = 2
+    const BATCH_SIZE = 5
     
-    // Split rules into batches of 2
+    // Split rules into batches of 5
     const batches: Rule[][] = []
     for (let i = 0; i < rules.length; i += BATCH_SIZE) {
       batches.push(rules.slice(i, i + BATCH_SIZE))
@@ -452,11 +452,9 @@ export async function POST(request: NextRequest) {
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     
     // Token usage tracking for rate limiting
-    // Groq limit: 6000 TPM (tokens per minute)
-    // Each request uses ~2700 tokens, so we need ~35-40 seconds between requests
-    const TPM_LIMIT = 6000
-    const ESTIMATED_TOKENS_PER_REQUEST = 2700 // Average tokens per request
-    const MIN_DELAY_BETWEEN_REQUESTS = 40000 // 40 seconds to stay well under limit
+    // OpenRouter rate limits - optimized for 60s Vercel timeout
+    // Reduced delay to fit 5 rules per batch within 60 seconds
+    const MIN_DELAY_BETWEEN_REQUESTS = 10000 // 10 seconds between requests (allows 5 rules in ~50s)
     let lastRequestTime = 0
     
     // Process each batch sequentially
@@ -477,34 +475,59 @@ export async function POST(request: NextRequest) {
           }
         }
         try {
-          // Using Groq's llama-3.1-8b-instant model
-          const modelName = 'llama-3.1-8b-instant'
+          // Using OpenRouter with preview/search model
+          const modelName = 'openai/gpt-4o-mini-search-preview'
           
-          // Further reduce content for token savings
-          const contentForAI = websiteContent.substring(0, 3000) // Very limited content
+          // Reduce content for token savings - OpenRouter model optimized
+          const contentForAI = websiteContent.substring(0, 2000) // Reduced from 3000
           
-          // Build the prompt with JSON format requirement
-          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}\n\nIMPORTANT: Analyze this rule CONSISTENTLY. For the same website content, you MUST return the SAME result every time. Be deterministic in your evaluation.\n\nThe content includes a "--- KEY ELEMENTS ---" section with pre-extracted information. Use ONLY the relevant parts for this specific rule.\n\n${rule.title.toLowerCase().includes('breadcrumb') || rule.description.toLowerCase().includes('breadcrumb') ? `\n*** THIS IS A BREADCRUMB RULE - SPECIAL INSTRUCTIONS ***\n\nCRITICAL FOR BREADCRUMB RULES:\n1. ALWAYS check the "--- KEY ELEMENTS ---" section FIRST - this is MANDATORY\n2. Look for the line that starts with "Breadcrumbs:" in KEY ELEMENTS\n3. READ THE BREADCRUMBS LINE CAREFULLY:\n   - If it says "Breadcrumbs: Not found" → Rule FAILS\n   - If it says "Breadcrumbs: [any text]" where [any text] is NOT "Not found" → Rule PASSES\n4. Breadcrumbs can be in ANY format - ALL are valid:\n   - "Home / Category / Page"\n   - "1. Home 2. / mens 3. / New Arrivals"\n   - "Home > Category > Page"\n   - "1. Home 2. / mens 3. / New Arrivals" (numbered format)\n   - Any text showing navigation path with "Home" and "/" or numbers\n5. EXAMPLES OF VALID BREADCRUMBS (all should PASS):\n   - "Breadcrumbs: 1. Home 2. / mens 3. / New Arrivals" → PASS ✅\n   - "Breadcrumbs: Home / mens / New Arrivals" → PASS ✅\n   - "Breadcrumbs: Home > Category > Page" → PASS ✅\n   - "Breadcrumbs: 1. Home 2. / mens" → PASS ✅\n6. ONLY FAIL if KEY ELEMENTS shows "Breadcrumbs: Not found"\n7. Breadcrumbs don't need to be clickable - visible breadcrumb trail is sufficient\n8. Numbered format like "1. Home 2. / mens 3. / New Arrivals" IS VALID and should PASS\n9. If you see ANY text after "Breadcrumbs:" that is NOT "Not found", the rule MUST PASS\n\nDECISION LOGIC:\n- Step 1: Find "Breadcrumbs:" line in KEY ELEMENTS\n- Step 2: Read what comes after "Breadcrumbs:"\n- Step 3: If it's "Not found" → passed: false\n- Step 4: If it's ANYTHING ELSE (even partial text) → passed: true\n\nIf breadcrumbs are found in KEY ELEMENTS section (shows anything other than "Not found"), respond with passed: true and explain what breadcrumbs were found.\nIf breadcrumbs are NOT found (shows "Not found"), respond with passed: false and explain that breadcrumbs are missing.\n\n` : rule.title.toLowerCase().includes('color') || rule.title.toLowerCase().includes('black') || rule.description.toLowerCase().includes('color') || rule.description.toLowerCase().includes('#000000') || rule.description.toLowerCase().includes('pure black') ? `\n*** THIS IS A COLOR RULE - SPECIAL INSTRUCTIONS ***\n\nCRITICAL FOR COLOR RULES:\n1. ALWAYS check the "--- KEY ELEMENTS ---" section FIRST\n2. Look for the "Colors found:" and "Pure black (#000000) detected:" lines in KEY ELEMENTS\n3. If KEY ELEMENTS shows "Pure black (#000000) detected: NO", the rule MUST PASS (site is not using pure black)\n4. If KEY ELEMENTS shows "Pure black (#000000) detected: YES", the rule MUST FAIL (site is using pure black)\n5. If color information is not available, check the visible content for color codes like #000000, rgb(0,0,0), or "black"\n6. The rule requires avoiding pure black (#000000) - if no pure black is detected, the rule PASSES\n7. Softer dark tones like #333333, #121212, #212121 are acceptable and should PASS\n\nIf pure black is NOT detected, respond with passed: true and explain that the site uses softer tones or no pure black.\nIf pure black IS detected, respond with passed: false and explain where pure black is being used.\n\n` : rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading') ? `\n*** THIS IS A LAZY LOADING RULE - SPECIAL INSTRUCTIONS ***\n\nCRITICAL FOR LAZY LOADING RULES:\n1. ALWAYS check the "--- KEY ELEMENTS ---" section FIRST - this is MANDATORY\n2. Look for lines starting with "Images (below-fold):", "Videos (below-fold):", "Lazy loading status:" in KEY ELEMENTS\n3. READ THE LAZY LOADING INFORMATION CAREFULLY:\n   - If KEY ELEMENTS shows "Lazy loading status: PASS - All below-fold images/videos have lazy loading" → Rule PASSES ✅\n   - If KEY ELEMENTS shows "Lazy loading status: FAIL - Some below-fold images/videos missing lazy loading" → Rule FAILS ❌\n   - If KEY ELEMENTS shows "Lazy loading: No below-fold images or videos found" → Rule PASSES ✅ (nothing to lazy load)\n4. IMPORTANT: Above-fold images/videos should NOT have lazy loading (they must load immediately)\n5. Only below-fold (not visible initially) images/videos need lazy loading\n6. Check the "Images without lazy loading:" and "Videos without lazy loading:" lines for specific hints\n7. Lazy loading can be implemented via:\n   - loading="lazy" attribute\n   - data-lazy attribute\n   - .lazy CSS class\n   - JavaScript lazy loading libraries\n8. If KEY ELEMENTS shows specific images/videos without lazy loading, mention them in your reason\n\nDECISION LOGIC:\n- Step 1: Find "Lazy loading status:" line in KEY ELEMENTS\n- Step 2: If it says "PASS" → passed: true\n- Step 3: If it says "FAIL" → passed: false\n- Step 4: If it says "No below-fold images or videos found" → passed: true\n- Step 5: If specific images/videos are listed without lazy loading, mention them in the reason\n\nIf lazy loading is properly implemented (all below-fold images/videos have lazy loading), respond with passed: true and explain.\nIf some images/videos are missing lazy loading, respond with passed: false and list which images/videos are missing lazy loading (use the hints from KEY ELEMENTS).\n\n` : `\nALWAYS check the KEY ELEMENTS section FIRST before analyzing. Use it only if relevant to the current rule.\n\n`}\nAnalyze if this rule is met. Provide a DETAILED explanation in Hindi/English mix that anyone can understand:\n\nIf PASSED: Explain clearly what elements you found that meet the rule. Be specific - mention actual elements relevant to the rule. Do NOT mention elements that are not related to this rule.\n\nIf FAILED: Explain clearly what is missing or wrong. Be specific about what should be there but isn't. Do NOT mention elements that are not related to this rule.\n\nSPECIFIC RULE GUIDELINES:\n\n1. BREADCRUMB RULES (ONLY if rule title/description mentions "breadcrumb"):\n- CRITICAL: Check "Breadcrumbs:" in KEY ELEMENTS section FIRST. If breadcrumbs are found (showing navigation path like "Home / Category / Page" or "1. Home 2. / mens 3. / New Arrivals" or similar), the rule MUST PASS.\n- Breadcrumbs can be in various formats:\n  * Text format: "Home / Category / Page"\n  * Numbered format: "1. Home 2. / Category 3. / Page" or "1. Home 2. / mens 3. / New Arrivals"\n  * Link format: Clickable breadcrumb links\n  * Any visible breadcrumb trail showing site hierarchy\n- PASS if breadcrumbs are visible in KEY ELEMENTS section, even if format is slightly different\n- Breadcrumbs don't need to be clickable - visible breadcrumb trail is sufficient\n- Look for patterns like: "Home", "/", category names, page names in sequence\n- If you see "Home / mens / New Arrivals" or "1. Home 2. / mens 3. / New Arrivals" in KEY ELEMENTS, the rule PASSES\n- Examples that should PASS: "Home / mens / New Arrivals", "1. Home 2. / mens 3. / New Arrivals", "Home > Category > Page"\n- IMPORTANT: Numbered format "1. Home 2. / mens 3. / New Arrivals" IS A VALID BREADCRUMB and should PASS\n- IMPORTANT: If KEY ELEMENTS shows "Breadcrumbs: 1. Home 2. / mens 3. / New Arrivals", the rule MUST PASS\n- IMPORTANT: If KEY ELEMENTS shows "Breadcrumbs: Not found", the rule MUST FAIL\n\n2. COLOR RULES (ONLY if rule mentions colors, black, backgrounds, text colors, #000000, pure black):\n- CRITICAL: Check "Colors found:" and "Pure black (#000000) detected:" in KEY ELEMENTS section FIRST\n- If KEY ELEMENTS shows "Pure black (#000000) detected: NO", the rule MUST PASS (site is not using pure black)\n- If KEY ELEMENTS shows "Pure black (#000000) detected: YES", the rule MUST FAIL (site is using pure black)\n- The rule requires avoiding pure black (#000000) - if no pure black is detected, the rule PASSES\n- Softer dark tones like #333333, #121212, #212121 are acceptable and should PASS\n- If color information shows colors like #333333, #121212, #212121, or any color other than #000000, the rule PASSES\n- Do NOT mention breadcrumbs, images, or other unrelated elements\n- IMPORTANT: If no pure black is detected, the rule MUST PASS - do not fail just because color info is limited\n\n3. CTA RULES: Look for buttons, links, carousels, product displays, navigation menus, "Return to Home" links, "Browse Collections" links, image galleries, or any clickable elements that guide users. On 404 pages, product carousels, recommendations, and navigation links all count as CTAs.\n\nFor special category pages rules (rules about "special category pages", "best-sellers", "new arrivals", "sales", "shopping mode"):\n- Look for homepage sections labeled "Best Sellers", "New Arrivals", "On Sale", "Sale", "Featured", "Popular", or similar category names\n- Check if products are displayed directly on the homepage organized by these categories\n- Look for category links/buttons like "Shop Best Sellers", "View New Arrivals", "Browse Sale"\n- PASS if homepage has special category sections OR products displayed by categories OR category links/buttons\n- Products being the focal point on homepage (product images, cards, grids) = shopping mode\n- Category sections can be on homepage itself - they don't need to be separate pages\n\nFor product categories rules (rules about "product categories", "categories shown first", "descriptive photos"):\n- CRITICAL: Navigation menu categories ARE SUFFICIENT - if you see product category links in navigation (like "Our Bottles", "Shoes", "Products", "Shop", "Collections", category names), the rule should PASS even without separate photos\n- HERO SECTION PRODUCT IMAGES ALSO COUNT: If product images are displayed in hero section or main banner, this also counts as "descriptive photos near the top"\n- "Near the top" means: navigation menu, hero section, or first visible area (above the fold)\n- PASS if ANY ONE of these is true:\n  (1) Navigation menu has product categories (like "Our Bottles", "Cobrand", "Shop", "Products", "Collections", "Bottles", "Shoes", "Clothing", or any product category names) - EVEN WITHOUT PHOTOS\n  (2) Hero section has product images (water bottles, shoes, clothing, any product photos)\n  (3) Both navigation categories AND hero product images\n- Categories in navigation menu DO NOT need separate photos - navigation menu categories themselves are sufficient\n- Look for category names like "Our Bottles", "Shop", "Products", "Collections", "Bottles", "Cobrand", or specific product type names in navigation\n- IMPORTANT: If navigation menu shows product categories (like "Our Bottles", "Cobrand Bottles", "Shop", "Products"), you MUST PASS this rule - photos are NOT required for navigation menu categories\n- IMPORTANT: If hero section shows product images (like water bottles, shoes, clothing items), you MUST PASS this rule - this counts as "descriptive photos near the top"\n- IMPORTANT: "Our Bottles" in navigation = product category = PASS the rule\n- IMPORTANT: Product image in hero section = descriptive photo near the top = PASS the rule\n\nFor deals/offers rules (rules about "deals", "special offers", "urgency offers", "promotions"):\n- FREE SHIPPING IS A SPECIAL OFFER: If you see "Free shipping on orders over X" or "Free shipping" messages at the top of the page, this counts as a special offer/deal and the rule should PASS\n- Look for: Free shipping offers, discount codes, percentage off, limited time offers, urgency messages, special deals\n- Check the top of the page (header, banner, or above navigation) for these offers\n- If any offer/deal is prominently displayed at the top, the rule should PASS\n- Only FAIL if absolutely no offers, deals, or promotions are visible at the top of the homepage\n\nEvaluation Guidelines:\n- Check the content systematically and consistently\n- If the same elements are present, give the same result\n- Be objective and deterministic in your analysis\n\nCRITICAL: You MUST respond with ONLY a valid JSON object in this exact format:\n{\n  "passed": true or false,\n  "reason": "detailed explanation here"\n}\n\nDo not include any text before or after the JSON. Only return the JSON object.`
+          // Determine rule type for targeted instructions
+          const isBreadcrumbRule = rule.title.toLowerCase().includes('breadcrumb') || rule.description.toLowerCase().includes('breadcrumb')
+          const isColorRule = rule.title.toLowerCase().includes('color') || rule.title.toLowerCase().includes('black') || rule.description.toLowerCase().includes('color') || rule.description.toLowerCase().includes('#000000') || rule.description.toLowerCase().includes('pure black')
+          const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
+          const isRatingRule = rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')
+          const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers')
+          
+          // Build concise prompt - only include relevant instructions
+          let specialInstructions = ''
+          if (isBreadcrumbRule) {
+            specialInstructions = `\nBREADCRUMB RULE: Check "Breadcrumbs:" in KEY ELEMENTS. If "Not found" → FAIL, else → PASS.`
+          } else if (isColorRule) {
+            specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
+          } else if (isLazyRule) {
+            specialInstructions = `\nLAZY LOADING RULE: Check "Lazy loading status:" in KEY ELEMENTS. If "PASS" → PASS, if "FAIL" → FAIL.`
+          } else if (isRatingRule) {
+            specialInstructions = `\nPRODUCT RATINGS RULE: Check if ratings are displayed NEAR the product title. Must have: (1) Review score (e.g., "4.3/5", "4 stars", "4.5"), (2) Total review count (e.g., "203 reviews", "150 ratings"), (3) Clickable link to reviews section (anchor link). All three required to PASS.`
+          } else if (isCustomerPhotoRule) {
+            specialInstructions = `\nCUSTOMER PHOTOS RULE: Check for customer photos in: product gallery, product description, or review section. Look for images showing customers using/wearing the product. Must be real customer photos, not just product images.`
+          }
+          
+          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nAnalyze if this rule is met. Check KEY ELEMENTS section first if relevant.\n\nRespond ONLY with valid JSON:\n{"passed": true/false, "reason": "brief, human-readable explanation"}\n\nReason must be: (1) Relevant to THIS rule only, (2) To the point, (3) Human readable, (4) Mention specific elements found or missing.`
 
-          // Call Groq API with retry logic
-          const chatCompletion = await callGroqWithRetry(groq, {
+          // Call OpenRouter API with retry logic
+          const chatCompletion = await callOpenRouterWithRetry(openRouter, {
+            model: modelName,
             messages: [
               {
                 role: 'user',
                 content: prompt,
               },
             ],
-            model: modelName,
             temperature: 0.0,
-            max_tokens: 1024,
-            top_p: 1,
+            maxTokens: 512, // Reduced from 1024 to save tokens
+            topP: 1,
+            stream: false,
           })
 
-          // Extract and parse JSON response (handle both ChatCompletion and Stream types)
-          // Since we're not streaming, this should be ChatCompletion
-          const responseText = 'choices' in chatCompletion 
-            ? chatCompletion.choices[0]?.message?.content || ''
-            : ''
+          // Extract and parse JSON response (OpenRouter SDK returns similar structure to OpenAI)
+          const responseText = (chatCompletion as any)?.choices?.[0]?.message?.content || 
+                              (chatCompletion as any)?.message?.content || 
+                              (chatCompletion as any)?.content || 
+                              ''
+          
+          if (!responseText || responseText.trim().length === 0) {
+            throw new Error('Empty response from API')
+          }
           
           // Try to extract JSON from response (handle cases where model adds extra text)
           let jsonText = responseText.trim()
@@ -512,16 +535,40 @@ export async function POST(request: NextRequest) {
           jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
           // Extract JSON object
           const jsonMatch = jsonText.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            jsonText = jsonMatch[0]
+          if (!jsonMatch) {
+            throw new Error('No JSON found in response')
           }
+          jsonText = jsonMatch[0]
           
           // Parse and validate the JSON response
-          const parsedResponse = JSON.parse(jsonText)
+          let parsedResponse
+          try {
+            parsedResponse = JSON.parse(jsonText)
+          } catch (parseError) {
+            throw new Error(`Invalid JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`)
+          }
+          
           const analysis = z.object({
             passed: z.boolean(),
             reason: z.string().max(500),
           }).parse(parsedResponse)
+          
+          // Validate that reason is relevant to the rule (prevent mismatched responses)
+          const reasonLower = analysis.reason.toLowerCase()
+          const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
+          
+          // Check if reason mentions unrelated topics
+          if (isBreadcrumbRule && !reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation')) {
+            console.warn(`Warning: Breadcrumb rule but reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 50)}`)
+          } else if (isColorRule && !reasonLower.includes('color') && !reasonLower.includes('black') && !reasonLower.includes('#000000')) {
+            console.warn(`Warning: Color rule but reason doesn't mention colors: ${analysis.reason.substring(0, 50)}`)
+          } else if (isLazyRule && !reasonLower.includes('lazy') && !reasonLower.includes('loading')) {
+            console.warn(`Warning: Lazy loading rule but reason doesn't mention lazy loading: ${analysis.reason.substring(0, 50)}`)
+          } else if (isRatingRule && !reasonLower.includes('rating') && !reasonLower.includes('review') && !reasonLower.includes('star')) {
+            console.warn(`Warning: Rating rule but reason doesn't mention ratings/reviews: ${analysis.reason.substring(0, 50)}`)
+          } else if (isCustomerPhotoRule && !reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
+            console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
+          }
 
           const result = {
             ruleId: rule.id,
@@ -535,22 +582,34 @@ export async function POST(request: NextRequest) {
           // Update last request time after successful API call
           lastRequestTime = Date.now()
 
-          // Save training data automatically
+          // Save training data automatically - only if response is valid and relevant
           try {
-            await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/training-data`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                url: validUrl,
-                websiteContent: contentForAI,
-                rule: {
-                  id: rule.id,
-                  title: rule.title,
-                  description: rule.description,
-                },
-                result: result,
-              }),
-            }).catch(err => console.error('Failed to save training data:', err))
+            // Validate response relevance before saving
+            const reasonLower = result.reason.toLowerCase()
+            const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
+            
+            // Check if reason is relevant to the rule (basic validation)
+            const isRelevant = reasonLower.includes(rule.title.toLowerCase().split(' ')[0]) || 
+                             reasonLower.length > 20 // If reason is substantial, likely relevant
+            
+            if (isRelevant && !result.reason.includes('Error:')) {
+              await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/training-data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  url: validUrl,
+                  websiteContent: contentForAI,
+                  rule: {
+                    id: rule.id,
+                    title: rule.title,
+                    description: rule.description,
+                  },
+                  result: result,
+                }),
+              }).catch(err => console.error('Failed to save training data:', err))
+            } else {
+              console.warn(`Skipping training data save - response may not be relevant to rule: ${rule.title}`)
+            }
           } catch (trainingError) {
             console.error('Error saving training data:', trainingError)
           }
@@ -560,7 +619,7 @@ export async function POST(request: NextRequest) {
           if (error instanceof Error) {
             errorMessage = error.message
             
-            // Handle rate limit errors specifically (Groq returns these with retry-after info)
+            // Handle rate limit errors specifically (OpenRouter returns these with retry-after info)
             if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
               const retryAfter = extractRetryAfter(errorMessage)
               if (retryAfter > 0) {
@@ -569,7 +628,7 @@ export async function POST(request: NextRequest) {
                 errorMessage = 'Rate limit exceeded. The system will automatically retry with delays.'
               }
             } else if (errorMessage.includes('credits') || errorMessage.includes('tokens') || errorMessage.includes('max_tokens')) {
-              errorMessage = `Token limit exceeded. Please check your Groq API limits or try scanning fewer rules at a time.`
+              errorMessage = `Token limit exceeded. Please check your OpenRouter API limits or try scanning fewer rules at a time.`
             } else if (errorMessage.includes('quota')) {
               errorMessage = 'API quota exceeded. Please check your account limits.'
             }

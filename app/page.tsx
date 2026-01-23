@@ -145,7 +145,7 @@ export default function Home() {
   }
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
-    const BATCH_SIZE = 2
+    const BATCH_SIZE = 5
     const batches: BatchData[] = []
     const timestamp = Date.now()
     
