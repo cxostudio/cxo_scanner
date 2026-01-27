@@ -474,9 +474,12 @@ export async function POST(request: NextRequest) {
             await sleep(waitTime)
           }
         }
+        
+        // Using OpenRouter with Gemini model
+        // Available Gemini models on OpenRouter: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, google/gemini-flash-1.5-8b
+        const modelName = 'google/gemini-2.5-flash-lite' // Latest Gemini Flash model
+        
         try {
-          // Using OpenRouter with preview/search model
-          const modelName = 'openai/gpt-4o-mini-search-preview'
           
           // Reduce content for token savings - OpenRouter model optimized
           const contentForAI = websiteContent.substring(0, 2000) // Reduced from 3000
@@ -487,6 +490,9 @@ export async function POST(request: NextRequest) {
           const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
           const isRatingRule = rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers')
+          const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
+          const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
+          const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -495,14 +501,22 @@ export async function POST(request: NextRequest) {
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isLazyRule) {
-            specialInstructions = `\nLAZY LOADING RULE: Check "Lazy loading status:" in KEY ELEMENTS. If "PASS" → PASS, if "FAIL" → FAIL.`
+            specialInstructions = `\nLAZY LOADING RULE - DETAILED CHECK:\nCheck "Lazy loading status:" and "Images without lazy loading:" in KEY ELEMENTS.\n\nIf FAILED: You MUST specify:\n1. WHICH images/videos are missing lazy loading (use image file names or descriptions from KEY ELEMENTS)\n2. WHERE these images/videos are located on the page (e.g., "product gallery section", "hero section", "product images area", "main product image", "thumbnail gallery", "description section")\n3. WHY it's a problem (e.g., "should have loading='lazy' attribute to improve page load time")\n\nIMPORTANT: \n- Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166, £39.00) in the failure reason\n- Only mention image/video file names, descriptions, or locations\n- Be specific about WHERE on the page these images are located\n\nExample: "Images without lazy loading: The main product image for 'Rainbow Dust - Starter Kit' (found in product gallery section) is missing the loading='lazy' attribute. Additionally, images in the 'POPULAR PRODUCTS' section also lack lazy loading. These should be lazy-loaded to improve initial page load time."\n\nIf no images/videos found: "No images or videos found on the page to evaluate for lazy loading."\n\nBe SPECIFIC about which elements are missing lazy loading and WHERE they are located, but DO NOT include prices or currency.`
           } else if (isRatingRule) {
-            specialInstructions = `\nPRODUCT RATINGS RULE: Check if ratings are displayed NEAR the product title. Must have: (1) Review score (e.g., "4.3/5", "4 stars", "4.5"), (2) Total review count (e.g., "203 reviews", "150 ratings"), (3) Clickable link to reviews section (anchor link). All three required to PASS.`
+            specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
           } else if (isCustomerPhotoRule) {
-            specialInstructions = `\nCUSTOMER PHOTOS RULE: Check for customer photos in: product gallery, product description, or review section. Look for images showing customers using/wearing the product. Must be real customer photos, not just product images.`
+            specialInstructions = `\nCUSTOMER PHOTOS RULE - STRICT CHECK:\nCheck for REAL customer photos (not product images) in: product gallery, description, or review section.\nMust show customers USING/WEARING the product in real life.\nProduct-only images do NOT count. Stock photos do NOT count.\nIf no customer photos found → FAIL.`
+          } else if (isStickyCartRule) {
+            specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`
+          } else if (isProductTitleRule) {
+            specialInstructions = `\nPRODUCT TITLE RULE - DETAILED CHECK:\nThe PRODUCT TITLE itself (not the description section) must be descriptive, specific, and include key attributes.\n\nCRITICAL: This rule checks the TITLE only. A product description section existing on the page does NOT make a generic title acceptable. The title must be descriptive on its own.\n\nTitle should include: brand, size, color, key characteristics, or specific benefits. Should be under 65 characters for SEO.\n\nIf FAILED: You MUST specify:\n1. WHAT the current title is (quote it exactly)\n2. WHAT is missing from the TITLE (e.g., size, color, brand, key characteristics, specific benefits)\n3. WHY it's a problem (e.g., "too generic", "lacks SEO keywords", "doesn't describe product clearly on its own")\n4. WHERE the title is located (e.g., "product page header", "product title section")\n5. NOTE if description exists but explain that title should still be descriptive independently\n\nIf PASSED: Title must be descriptive and clear on its own, even if description section also exists.\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' located in the product page header is too generic. While a product description section exists with benefits, the title itself lacks key attributes like size (e.g., '50g', '100ml'), flavor/variant details, or specific benefits. The title should be descriptive on its own for SEO and clarity, regardless of description content."\n\nExample PASS: "The product title 'Spacegoods Rainbow Dust - Coffee Flavor Starter Kit (50g)' is descriptive and clear. It includes brand name, product name, flavor variant, and size, making it SEO-friendly and informative."`
+          } else if (isBenefitsNearTitleRule) {
+            specialInstructions = `\nBENEFITS NEAR PRODUCT TITLE RULE - DETAILED CHECK:\nA short list of 2-3 key benefits MUST be displayed NEAR the product title (below or beside it, within the same section/area).\n\nREQUIREMENTS:\n1. Benefits must be NEAR product title (same section/area, not far below or in separate sections)\n2. Must have 2-3 benefits (not just 1, not more than 3)\n3. Benefits should be specific, impactful, and aligned with key selling points\n4. Benefits should stand out visually (bold, contrasting fonts, or clear formatting)\n5. Benefits should be concise and easy to scan\n\nIf PASSED: You MUST specify:\n- WHERE the benefits are located (e.g., "directly below product title", "beside product title in same section")\n- WHAT benefits are shown (list 2-3 benefits)\n- WHY it passes (e.g., "benefits are clearly visible near title and communicate value effectively")\n\nExample PASS: "Key benefits are displayed directly below the product title 'Rainbow Dust - Starter Kit' in the product header section: (1) 'Boost productivity with focus & energy without jitters', (2) 'Reduce anxiety & distraction, flow state all day', (3) '7-in-1 blend of coffee + potent mushrooms & adaptogens'. These benefits are clearly visible, specific, and help users quickly understand the product value."\n\nIf FAILED: You MUST specify:\n- WHERE the product title is located\n- WHERE benefits are located (if they exist elsewhere on the page)\n- WHAT is missing (e.g., "no benefits near title", "only 1 benefit shown", "benefits are too far from title in separate section", "benefits are not specific/impactful")\n- WHY it fails (e.g., "benefits are in description section far below title, not near title", "only generic benefits shown", "benefits don't stand out visually")\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' is located in the product header section, but there are no key benefits displayed near it. While product benefits exist in the description section further down the page (e.g., 'Boost productivity', 'Reduce anxiety'), these are not near the product title as required. Benefits should be placed directly below or beside the product title in the same section to quickly communicate value and capture attention."`
+          } else if (isColorRule) {
+            specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
           }
           
-          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nAnalyze if this rule is met. Check KEY ELEMENTS section first if relevant.\n\nRespond ONLY with valid JSON:\n{"passed": true/false, "reason": "brief, human-readable explanation"}\n\nReason must be: (1) Relevant to THIS rule only, (2) To the point, (3) Human readable, (4) Mention specific elements found or missing.`
+          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nCRITICAL: Analyze ACCURATELY. Check ALL requirements. Do NOT assume.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n\nIf PASSED: List specific elements found that meet the rule with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to this rule.`
 
           // Call OpenRouter API with retry logic
           const chatCompletion = await callOpenRouterWithRetry(openRouter, {
@@ -519,55 +533,176 @@ export async function POST(request: NextRequest) {
             stream: false,
           })
 
-          // Extract and parse JSON response (OpenRouter SDK returns similar structure to OpenAI)
-          const responseText = (chatCompletion as any)?.choices?.[0]?.message?.content || 
-                              (chatCompletion as any)?.message?.content || 
-                              (chatCompletion as any)?.content || 
-                              ''
+          // Extract and parse JSON response - Gemini compatible
+          // Gemini may return different structure, so check all possible paths
+          let responseText = ''
+          
+          // Try different response structures (Gemini/OpenRouter compatibility)
+          if ((chatCompletion as any)?.choices?.[0]?.message?.content) {
+            responseText = (chatCompletion as any).choices[0].message.content
+          } else if ((chatCompletion as any)?.message?.content) {
+            responseText = (chatCompletion as any).message.content
+          } else if ((chatCompletion as any)?.content) {
+            responseText = (chatCompletion as any).content
+          } else if ((chatCompletion as any)?.text) {
+            responseText = (chatCompletion as any).text
+          } else if (typeof chatCompletion === 'string') {
+            responseText = chatCompletion
+          } else {
+            // Log full response for debugging
+            console.error('Unexpected response structure:', JSON.stringify(chatCompletion).substring(0, 500))
+            throw new Error('Unexpected response structure from API')
+          }
           
           if (!responseText || responseText.trim().length === 0) {
-            throw new Error('Empty response from API')
+            throw new Error('Empty response from API - no content received')
           }
           
-          // Try to extract JSON from response (handle cases where model adds extra text)
+          // Clean and extract JSON - multiple methods for Gemini compatibility
           let jsonText = responseText.trim()
-          // Remove markdown code blocks if present
-          jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
-          // Extract JSON object
-          const jsonMatch = jsonText.match(/\{[\s\S]*\}/)
-          if (!jsonMatch) {
-            throw new Error('No JSON found in response')
+          
+          // Method 1: Remove markdown code blocks (common in Gemini)
+          jsonText = jsonText.replace(/```json\n?/gi, '').replace(/```\n?/g, '').replace(/```jsonl\n?/gi, '')
+          
+          // Method 2: Remove any text before first {
+          const firstBrace = jsonText.indexOf('{')
+          if (firstBrace > 0) {
+            jsonText = jsonText.substring(firstBrace)
           }
-          jsonText = jsonMatch[0]
+          
+          // Method 3: Remove any text after last }
+          const lastBrace = jsonText.lastIndexOf('}')
+          if (lastBrace > 0 && lastBrace < jsonText.length - 1) {
+            jsonText = jsonText.substring(0, lastBrace + 1)
+          }
+          
+          // Method 4: Try to find JSON object
+          let jsonMatch = jsonText.match(/\{[\s\S]*\}/)
+          
+          // Method 5: If no match, try to construct from text patterns (Gemini fallback)
+          if (!jsonMatch) {
+            // Try to find passed/reason pattern (Gemini sometimes returns text format)
+            const passedMatch = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)
+            const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']{1,400})["']/i) || 
+                               jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]{1,400})"/i)
+            
+            if (passedMatch && reasonMatch) {
+              // Escape quotes in reason and limit to 400 chars
+              const escapedReason = reasonMatch[1].replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 400)
+              jsonText = `{"passed": ${passedMatch[1]}, "reason": "${escapedReason}"}`
+            } else {
+              // Last resort: try to find any JSON-like structure
+              const hasPassed = jsonText.toLowerCase().includes('"passed":') || jsonText.toLowerCase().includes("'passed':") || jsonText.toLowerCase().includes('passed:')
+              const hasReason = jsonText.toLowerCase().includes('"reason":') || jsonText.toLowerCase().includes("'reason':") || jsonText.toLowerCase().includes('reason:')
+              
+              if (!hasPassed || !hasReason) {
+                // Log the actual response for debugging
+                console.error('Failed to parse JSON. Response was:', responseText.substring(0, 300))
+                throw new Error(`No valid JSON found in response. Response preview: ${responseText.substring(0, 150)}...`)
+              }
+              
+              // Try one more time with cleaned text
+              jsonMatch = jsonText.match(/\{[\s\S]*\}/)
+              if (!jsonMatch) {
+                throw new Error(`Could not extract JSON. Response: ${responseText.substring(0, 200)}`)
+              }
+            }
+          } else {
+            jsonText = jsonMatch[0]
+          }
           
           // Parse and validate the JSON response
           let parsedResponse
           try {
             parsedResponse = JSON.parse(jsonText)
           } catch (parseError) {
-            throw new Error(`Invalid JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`)
+            // Try to fix common JSON issues (especially for Gemini)
+            try {
+              // Fix single quotes to double quotes
+              jsonText = jsonText.replace(/'/g, '"')
+              // Fix trailing commas
+              jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+              // Fix unescaped newlines in strings
+              jsonText = jsonText.replace(/\n/g, ' ').replace(/\r/g, ' ')
+              parsedResponse = JSON.parse(jsonText)
+            } catch (secondError) {
+              // Try one more time - extract just the essential parts
+              try {
+                const passed = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)?.[1] || 'false'
+                const reason = (jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']{1,400})["']/i)?.[1] || 
+                               jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]{1,400})"/i)?.[1] || 
+                               'Unable to parse response').replace(/\n/g, ' ').substring(0, 400)
+                parsedResponse = { passed: passed === 'true', reason: reason }
+              } catch (thirdError) {
+                console.error('JSON parse error. Original response:', responseText.substring(0, 300))
+                throw new Error(`Invalid JSON format: ${parseError instanceof Error ? parseError.message : 'Unknown error'}. Response preview: ${responseText.substring(0, 150)}`)
+              }
+            }
           }
           
+          // Validate and parse response with strict length limit
           const analysis = z.object({
             passed: z.boolean(),
-            reason: z.string().max(500),
+            reason: z.string().max(400), // Reduced from 500 to 400 for safety
           }).parse(parsedResponse)
+          
+          // Ensure reason is within limit (truncate if needed)
+          if (analysis.reason.length > 400) {
+            analysis.reason = analysis.reason.substring(0, 397) + '...'
+          }
           
           // Validate that reason is relevant to the rule (prevent mismatched responses)
           const reasonLower = analysis.reason.toLowerCase()
           const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
           
-          // Check if reason mentions unrelated topics
-          if (isBreadcrumbRule && !reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation')) {
+          // Strict validation - check if reason matches rule requirements
+          let isRelevant = true
+          
+          if (isRatingRule) {
+            // Rating rule must mention rating/review/star AND check all requirements
+            const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
+            const mentionsNearTitle = reasonLower.includes('near') || reasonLower.includes('title') || reasonLower.includes('close')
+            const mentionsScore = reasonLower.includes('score') || reasonLower.includes('star') || reasonLower.includes('/5') || reasonLower.includes('out of')
+            const mentionsCount = reasonLower.includes('review') || reasonLower.includes('rating') || reasonLower.includes('people')
+            
+            if (!hasRatingMention) {
+              console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+            
+            // If passed=true but missing requirements, it's wrong
+            if (analysis.passed && (!mentionsScore || !mentionsCount || !mentionsNearTitle)) {
+              console.warn(`Warning: Rating rule passed but missing requirements. Score: ${mentionsScore}, Count: ${mentionsCount}, Near title: ${mentionsNearTitle}`)
+              // Force re-evaluation - mark as failed if requirements not met
+              if (!mentionsScore || !mentionsCount) {
+                analysis.passed = false
+                analysis.reason = `Rating rule failed: Missing required elements. ${analysis.reason}`
+              }
+            }
+          } else if (isColorRule) {
+            // Color rule must mention color/black and verify actual usage
+            if (!reasonLower.includes('color') && !reasonLower.includes('black') && !reasonLower.includes('#000000')) {
+              console.warn(`Warning: Color rule but reason doesn't mention colors: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+            // Check if black is actually mentioned and matches
+            if (reasonLower.includes('black') && !reasonLower.includes('#000000') && !reasonLower.includes('rgb(0,0,0)') && !reasonLower.includes('pure black')) {
+              console.warn(`Warning: Color rule mentions black but not specific color code`)
+            }
+          } else if (isBreadcrumbRule && !reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation')) {
             console.warn(`Warning: Breadcrumb rule but reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 50)}`)
-          } else if (isColorRule && !reasonLower.includes('color') && !reasonLower.includes('black') && !reasonLower.includes('#000000')) {
-            console.warn(`Warning: Color rule but reason doesn't mention colors: ${analysis.reason.substring(0, 50)}`)
+            isRelevant = false
           } else if (isLazyRule && !reasonLower.includes('lazy') && !reasonLower.includes('loading')) {
             console.warn(`Warning: Lazy loading rule but reason doesn't mention lazy loading: ${analysis.reason.substring(0, 50)}`)
-          } else if (isRatingRule && !reasonLower.includes('rating') && !reasonLower.includes('review') && !reasonLower.includes('star')) {
-            console.warn(`Warning: Rating rule but reason doesn't mention ratings/reviews: ${analysis.reason.substring(0, 50)}`)
+            isRelevant = false
           } else if (isCustomerPhotoRule && !reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
             console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
+            isRelevant = false
+          }
+          
+          // If reason is not relevant, mark as error
+          if (!isRelevant) {
+            analysis.reason = `Invalid response: ${analysis.reason}. This response does not match the rule: ${rule.title}`
           }
 
           const result = {
@@ -619,8 +754,12 @@ export async function POST(request: NextRequest) {
           if (error instanceof Error) {
             errorMessage = error.message
             
+            // Handle 404 errors (model not found)
+            if (errorMessage.includes('404') || errorMessage.includes('No endpoints found') || errorMessage.includes('not found')) {
+              errorMessage = `Model not found. The model '${modelName}' is not available on OpenRouter. Please try using: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, or google/gemini-flash-1.5-8b`
+            } 
             // Handle rate limit errors specifically (OpenRouter returns these with retry-after info)
-            if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
+            else if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
               const retryAfter = extractRetryAfter(errorMessage)
               if (retryAfter > 0) {
                 errorMessage = `Rate limit exceeded. Please wait ${Math.ceil(retryAfter / 1000)} seconds and try again. The system will automatically retry.`
