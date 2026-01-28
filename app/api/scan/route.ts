@@ -43,50 +43,13 @@ const ScanRequestSchema = z.object({
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-// Helper function to extract retry-after time from error message
+// Helper function to extract retry-after time from error message (for error messages only)
 const extractRetryAfter = (errorMessage: string): number => {
   const match = errorMessage.match(/try again in ([\d.]+)s/i)
   if (match) {
     return Math.ceil(parseFloat(match[1]) * 1000) // Convert to milliseconds and round up
   }
   return 0
-}
-
-// Retry function with exponential backoff for rate limit errors
-async function callOpenRouterWithRetry(
-  openRouter: OpenRouter,
-  params: Parameters<typeof openRouter.chat.send>[0],
-  maxRetries: number = 5
-): Promise<Awaited<ReturnType<typeof openRouter.chat.send>>> {
-  let lastError: Error | null = null
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await openRouter.chat.send(params) as Awaited<ReturnType<typeof openRouter.chat.send>>
-    } catch (error: any) {
-      lastError = error
-      const errorMessage = error?.message || ''
-      
-      // Check if it's a rate limit error
-      if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
-        const retryAfter = extractRetryAfter(errorMessage)
-        const waitTime = retryAfter > 0 
-          ? retryAfter 
-          : Math.min(1000 * Math.pow(2, attempt), 30000) // Exponential backoff, max 30s
-        
-        if (attempt < maxRetries - 1) {
-          console.log(`Rate limit hit, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`)
-          await sleep(waitTime)
-          continue
-        }
-      }
-      
-      // For non-rate-limit errors or final attempt, throw the error
-      throw error
-    }
-  }
-  
-  throw lastError || new Error('Max retries exceeded')
 }
 
 export async function POST(request: NextRequest) {
@@ -438,10 +401,81 @@ export async function POST(request: NextRequest) {
         const text = (parent as HTMLElement).innerText || parent.textContent || ''
         return text.substring(0, 500)
       })
+ // preselect
+ const selectedVariant = await page.evaluate(() => {
+  // Method 1: Check actual checked input (radio buttons)
+  const checkedInput = document.querySelector(
+    'input[type="radio"]:checked'
+  )
+  if (checkedInput) {
+    const value = (checkedInput as HTMLInputElement).value
+    if (value) return value
+  }
+
+  // Method 2: Check CSS-based visual selection (gradient borders, selected classes)
+  // This handles cases where selection is shown via CSS styling, not checked attribute
+  const cssSelectors = [
+    '.flavour-option.gradient-border-checked',
+    '.variant-option.gradient-border-checked',
+    '.option.gradient-border-checked',
+    '[class*="gradient-border-checked"]',
+    '.flavour-option.selected',
+    '.variant-option.selected',
+    '.option.selected',
+    '[class*="selected"][class*="option"]',
+    '[class*="selected"][class*="variant"]',
+    '[class*="selected"][class*="flavour"]',
+    '[class*="selected"][class*="flavor"]'
+  ]
+  
+  for (const selector of cssSelectors) {
+    const element = document.querySelector(selector)
+    if (element) {
+      // Try data attributes first
+      const dataFlavour = element.getAttribute('data-flavour') || element.getAttribute('data-flavor') || element.getAttribute('data-variant')
+      if (dataFlavour) return dataFlavour
+      
+      // Fallback to text content
+      const text = element.textContent?.trim()
+      if (text && text.length > 0 && text.length < 50) {
+        return text
+      }
+    }
+  }
+
+  // Method 3: Check visually selected elements (elements with distinct borders/backgrounds)
+  // Look for elements in variant/flavor sections that have visual selection indicators
+  const variantSections = document.querySelectorAll('[class*="variant"], [class*="flavour"], [class*="flavor"], [class*="option"]')
+  for (const section of Array.from(variantSections)) {
+    const options = section.querySelectorAll('label, button, [role="button"], .option, [class*="option"]')
+    for (const opt of Array.from(options)) {
+      const styles = window.getComputedStyle(opt)
+      const borderWidth = parseInt(styles.borderWidth) || 0
+      const hasVisibleBorder = borderWidth > 1 // More than 1px border indicates selection
+      const bgColor = styles.backgroundColor
+      const hasGradientBorder = styles.borderImageSource && styles.borderImageSource !== 'none'
+      
+      // Check if element has visual selection indicators
+      if (hasVisibleBorder || hasGradientBorder) {
+        const dataFlavour = opt.getAttribute('data-flavour') || opt.getAttribute('data-flavor') || opt.getAttribute('data-variant')
+        if (dataFlavour) return dataFlavour
+        
+        const text = opt.textContent?.trim()
+        if (text && text.length > 0 && text.length < 50) {
+          return text
+        }
+      }
+    }
+  }
+
+  return null
+})
+      
       
       // Combine visible text and key elements (token-efficient)
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) + 
                       '\n\n--- KEY ELEMENTS ---\n' + keyElements +
+                      `\nSelected Variant: ${selectedVariant || 'None'}` +
                       `\n\n--- QUANTITY DISCOUNT CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\n` +
                       `\n\n--- CTA CONTEXT ---\n${ctaContext}`
 
@@ -500,8 +534,7 @@ export async function POST(request: NextRequest) {
     
     // Token usage tracking for rate limiting
     // OpenRouter rate limits - optimized for 60s Vercel timeout
-    // Reduced delay to fit 5 rules per batch within 60 seconds
-    const MIN_DELAY_BETWEEN_REQUESTS = 10000 // 10 seconds between requests (allows 5 rules in ~50s)
+    const MIN_DELAY_BETWEEN_REQUESTS = 1000 // 1 second between requests
     let lastRequestTime = 0
     
     // Process each batch sequentially
@@ -547,6 +580,11 @@ export async function POST(request: NextRequest) {
           const isShippingRule =
   rule.title.toLowerCase().includes("shipping time") ||
   rule.description.toLowerCase().includes("delivered by")
+          const isVariantRule =
+  rule.title.toLowerCase().includes("variant") ||
+  rule.title.toLowerCase().includes("preselect") ||
+  rule.description.toLowerCase().includes("variant") ||
+  rule.description.toLowerCase().includes("preselect")
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -587,21 +625,54 @@ export async function POST(request: NextRequest) {
           
           Do NOT confuse subscription savings with quantity discounts.
           ` 
-        }if (isShippingRule) {
+        }else if (isShippingRule) {
           specialInstructions = `
         SHIPPING RULE:
         If delivery date is present near CTA → PASS adjacency.
         Only FAIL if BOTH are missing:
         1. Delivery estimate
-        2. Order cutoff time (“Order by XX”)
+        2. Order cutoff time ("Order by XX")
         If cutoff time missing but date present → FAIL with reason: "Order-by time missing."
         `
+        }else if (isVariantRule) {
+          specialInstructions = `
+
+
+
+VARIANT RULE - STRICT CHECK:
+
+Check "Selected Variant:" in KEY ELEMENTS section.
+
+CRITICAL INSTRUCTIONS:
+1. Look for the line "Selected Variant: [value]" in KEY ELEMENTS
+2. If "Selected Variant:" shows a value (like "Coffee", "Small", "Red", etc.) → PASS
+3. If "Selected Variant:" shows "None" → FAIL
+
+IMPORTANT - CSS-BASED SELECTION COUNTS:
+- Variants can be preselected via CSS styling (gradient borders, selected classes) even if radio input doesn't have "checked" attribute
+- Visual selection via CSS (like gradient borders, highlighted backgrounds) IS a valid preselection
+- The "Selected Variant:" value in KEY ELEMENTS already accounts for CSS-based selections
+- If "Selected Variant:" shows any value (not "None"), it means a variant IS preselected → PASS
+
+PASS example: "Selected Variant: Coffee" → PASS with reason: "The variant 'Coffee' is preselected (via CSS styling), which streamlines the purchasing process."
+
+FAIL example: "Selected Variant: None" → FAIL with reason: "No variant is preselected. The most common variant should be preselected to reduce friction and streamline the purchasing process."
+
+CRITICAL RULES:
+- You MUST check the "Selected Variant:" line in KEY ELEMENTS
+- Do NOT assume based on other content or visible text
+- Do NOT check radio inputs directly - use the "Selected Variant:" value which already handles CSS-based selections
+- The rule checks if ANY variant is preselected (via any method: checked attribute OR CSS styling)
+- If you see "Selected Variant: None" → FAIL
+- If you see "Selected Variant: [any value]" → PASS (regardless of how it's selected)
+
+`
         }
           
           const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nCRITICAL: Analyze ACCURATELY. Check ALL requirements. Do NOT assume.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n\nIf PASSED: List specific elements found that meet the rule with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to this rule.`
 
-          // Call OpenRouter API with retry logic
-          const chatCompletion = await callOpenRouterWithRetry(openRouter, {
+          // Call OpenRouter API directly
+          const chatCompletion = await openRouter.chat.send({
             model: modelName,
             messages: [
               {
@@ -780,6 +851,17 @@ export async function POST(request: NextRequest) {
           } else if (isCustomerPhotoRule && !reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
             console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
+          } else if (isVariantRule) {
+            // Variant rule must mention variant/preselect/selected
+            const hasVariantMention = reasonLower.includes('variant') || reasonLower.includes('preselect') || reasonLower.includes('selected') || reasonLower.includes('default')
+            if (!hasVariantMention) {
+              console.warn(`Warning: Variant rule but reason doesn't mention variant/preselect: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+            // Check if response mentions "Selected Variant:" check
+            if (!reasonLower.includes('selected variant') && !reasonLower.includes('preselected')) {
+              console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
+            }
           }
           
           // If reason is not relevant, mark as error
@@ -869,6 +951,11 @@ export async function POST(request: NextRequest) {
       
       // Log batch completion
       console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${rules.length}`)
+      
+      // Wait 1 second between batches (except after last batch)
+      if (batchIndex < batches.length - 1) {
+        await sleep(1000)
+      }
     }
 
     return NextResponse.json({ results })
