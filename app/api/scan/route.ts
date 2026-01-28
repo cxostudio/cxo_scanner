@@ -396,10 +396,57 @@ export async function POST(request: NextRequest) {
         
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}`
       })
+
+      // Get quantity discount context for quantity discounts rule
+      const quantityDiscountContext = await page.evaluate(() => {
+        const bodyText = document.body.innerText.toLowerCase()
+      
+        // Common bulk discount patterns
+        const patterns = [
+          "buy 2",
+          "buy 3",
+          "buy more save",
+          "quantity discount",
+          "bulk discount",
+          "volume discount",
+          "save when you buy",
+          "x for",
+          "packs of",
+          "bundle"
+        ]
+      
+        const found = patterns.filter(p => bodyText.includes(p))
+      
+        return {
+          foundPatterns: found,
+          hasBulkDiscount: found.length > 0,
+          preview: bodyText.substring(0, 800)
+        }
+      })
+      
+      // Get CTA context for shipping rules
+      const ctaContext = await page.evaluate(() => {
+        const cta = Array.from(document.querySelectorAll("button, a"))
+          .find(el =>
+            el.textContent?.toLowerCase().includes("add to bag") ||
+            el.textContent?.toLowerCase().includes("add to cart") ||
+            el.textContent?.toLowerCase().includes("buy now")
+          )
+        if (!cta) return "CTA not found"
+        const parent = cta.closest("form, div, section")
+        if (!parent) return "CTA parent container not found"
+        const text = (parent as HTMLElement).innerText || parent.textContent || ''
+        return text.substring(0, 500)
+      })
       
       // Combine visible text and key elements (token-efficient)
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) + 
-                      '\n\n--- KEY ELEMENTS ---\n' + keyElements
+                      '\n\n--- KEY ELEMENTS ---\n' + keyElements +
+                      `\n\n--- QUANTITY DISCOUNT CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\n` +
+                      `\n\n--- CTA CONTEXT ---\n${ctaContext}`
+
+                      
+
       
       // Close browser
       await browser.close()
@@ -493,6 +540,13 @@ export async function POST(request: NextRequest) {
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
+          const isQuantityDiscountRule =
+  rule.title.toLowerCase().includes("quantity") ||
+  rule.title.toLowerCase().includes("bulk") ||
+  rule.description.toLowerCase().includes("bulk pricing")
+          const isShippingRule =
+  rule.title.toLowerCase().includes("shipping time") ||
+  rule.description.toLowerCase().includes("delivered by")
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -514,7 +568,35 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nBENEFITS NEAR PRODUCT TITLE RULE - DETAILED CHECK:\nA short list of 2-3 key benefits MUST be displayed NEAR the product title (below or beside it, within the same section/area).\n\nREQUIREMENTS:\n1. Benefits must be NEAR product title (same section/area, not far below or in separate sections)\n2. Must have 2-3 benefits (not just 1, not more than 3)\n3. Benefits should be specific, impactful, and aligned with key selling points\n4. Benefits should stand out visually (bold, contrasting fonts, or clear formatting)\n5. Benefits should be concise and easy to scan\n\nIf PASSED: You MUST specify:\n- WHERE the benefits are located (e.g., "directly below product title", "beside product title in same section")\n- WHAT benefits are shown (list 2-3 benefits)\n- WHY it passes (e.g., "benefits are clearly visible near title and communicate value effectively")\n\nExample PASS: "Key benefits are displayed directly below the product title 'Rainbow Dust - Starter Kit' in the product header section: (1) 'Boost productivity with focus & energy without jitters', (2) 'Reduce anxiety & distraction, flow state all day', (3) '7-in-1 blend of coffee + potent mushrooms & adaptogens'. These benefits are clearly visible, specific, and help users quickly understand the product value."\n\nIf FAILED: You MUST specify:\n- WHERE the product title is located\n- WHERE benefits are located (if they exist elsewhere on the page)\n- WHAT is missing (e.g., "no benefits near title", "only 1 benefit shown", "benefits are too far from title in separate section", "benefits are not specific/impactful")\n- WHY it fails (e.g., "benefits are in description section far below title, not near title", "only generic benefits shown", "benefits don't stand out visually")\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' is located in the product header section, but there are no key benefits displayed near it. While product benefits exist in the description section further down the page (e.g., 'Boost productivity', 'Reduce anxiety'), these are not near the product title as required. Benefits should be placed directly below or beside the product title in the same section to quickly communicate value and capture attention."`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
-          }
+          }else if (isQuantityDiscountRule) {
+            specialInstructions = `
+          QUANTITY DISCOUNT RULE (STRICT):
+          
+          PASS only if page clearly shows bulk pricing like:
+          - "Buy 2 save 10%"
+          - Quantity pricing table
+          - Bundle discount offers
+          
+          FAIL if:
+          - Only subscription plan discounts exist
+          - Text is vague like "Save more with flexible plan"
+          
+          IMPORTANT:
+          If Bulk Discount Detected = NO → FAIL immediately.
+          If Bulk Discount Detected = YES → PASS with clear reason.
+          
+          Do NOT confuse subscription savings with quantity discounts.
+          ` 
+        }if (isShippingRule) {
+          specialInstructions = `
+        SHIPPING RULE:
+        If delivery date is present near CTA → PASS adjacency.
+        Only FAIL if BOTH are missing:
+        1. Delivery estimate
+        2. Order cutoff time (“Order by XX”)
+        If cutoff time missing but date present → FAIL with reason: "Order-by time missing."
+        `
+        }
           
           const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nCRITICAL: Analyze ACCURATELY. Check ALL requirements. Do NOT assume.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n\nIf PASSED: List specific elements found that meet the rule with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to this rule.`
 
