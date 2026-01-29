@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
       const quantityDiscountContext = await page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase()
       
-        // Common bulk discount patterns
+        // Common discount patterns (bulk, quantity, and regular discounts)
         const patterns = [
           "buy 2",
           "buy 3",
@@ -375,14 +375,31 @@ export async function POST(request: NextRequest) {
           "save when you buy",
           "x for",
           "packs of",
-          "bundle"
+          "bundle",
+          // Regular discount patterns
+          "% off",
+          "percent off",
+          "special price",
+          "bank offer",
+          "flat",
+          "off",
+          "cashback",
+          "discount",
+          "save",
+          "offer"
         ]
       
         const found = patterns.filter(p => bodyText.includes(p))
+        
+        // Also check for discount percentages/amounts in text
+        const hasDiscountPercentage = /(\d+)%\s*off/i.test(bodyText) || /off\s*(\d+)%/i.test(bodyText)
+        const hasDiscountAmount = /flat\s*₹?\s*\d+/i.test(bodyText) || /₹?\s*\d+\s*off/i.test(bodyText)
+        const hasSpecialPrice = bodyText.includes("special price") || bodyText.includes("special price")
+        const hasBankOffer = bodyText.includes("bank offer") || bodyText.includes("bank offer")
       
         return {
           foundPatterns: found,
-          hasBulkDiscount: found.length > 0,
+          hasBulkDiscount: found.length > 0 || hasDiscountPercentage || hasDiscountAmount || hasSpecialPrice || hasBankOffer,
           preview: bodyText.substring(0, 800)
         }
       })
@@ -573,6 +590,7 @@ export async function POST(request: NextRequest) {
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
+          const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
           const isQuantityDiscountRule =
   rule.title.toLowerCase().includes("quantity") ||
   rule.title.toLowerCase().includes("bulk") ||
@@ -608,22 +626,32 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
           }else if (isQuantityDiscountRule) {
             specialInstructions = `
-          QUANTITY DISCOUNT RULE (STRICT):
+          QUANTITY DISCOUNT RULE - CHECK DISCOUNTS:
           
-          PASS only if page clearly shows bulk pricing like:
-          - "Buy 2 save 10%"
-          - Quantity pricing table
-          - Bundle discount offers
+          This rule checks if ANY discounts are shown on the page (quantity discounts, bulk discounts, or regular discounts).
           
-          FAIL if:
-          - Only subscription plan discounts exist
-          - Text is vague like "Save more with flexible plan"
+          PASS if page shows:
+          - Quantity/bulk discounts (e.g., "Buy 2 save 10%", "Buy 3 get 1 free")
+          - Regular discounts (e.g., "77% off", "Special price", "Get extra 35% off")
+          - Bank offers with discounts (e.g., "Flat ₹50 off", "10% off", "5% cashback")
+          - Any discount percentage or amount shown
+          - Bundle offers
+          - Volume discounts
+          
+          FAIL only if:
+          - NO discounts shown anywhere on the page
+          - Only subscription plan discounts exist (not applicable to one-time purchases)
+          - Text is vague like "Save more" without specific discount amount/percentage
           
           IMPORTANT:
-          If Bulk Discount Detected = NO → FAIL immediately.
-          If Bulk Discount Detected = YES → PASS with clear reason.
+          - Check "QUANTITY DISCOUNT CHECK" section in KEY ELEMENTS
+          - If "Bulk Discount Detected: YES" → PASS
+          - If "Bulk Discount Detected: NO" but discounts are visible in content (like "77% off", "Special price", "Bank Offer", etc.) → PASS
+          - Only FAIL if absolutely NO discounts are shown on the page
           
-          Do NOT confuse subscription savings with quantity discounts.
+          Example PASS: "The page shows multiple discounts including '77% off' on the product, 'Special price' offer, and bank offers like 'Flat ₹50 off' and '10% off up to ₹1,500'. These discounts are clearly displayed and help incentivize purchases."
+          
+          Example FAIL: "No discounts are shown on the product page. No percentage off, special pricing, bulk discounts, or promotional offers are visible."
           ` 
         }else if (isShippingRule) {
           specialInstructions = `
@@ -666,6 +694,38 @@ CRITICAL RULES:
 - If you see "Selected Variant: None" → FAIL
 - If you see "Selected Variant: [any value]" → PASS (regardless of how it's selected)
 
+`
+        } else if (isCTAProminenceRule) {
+          specialInstructions = `
+CTA PROMINENCE RULE - STRICT CHECK:
+
+The main CTA (Add to Cart or Buy Now button) MUST be the most prominent element and visible above the fold.
+
+CRITICAL REQUIREMENTS:
+1. "Add to Cart" or "Buy Now" button must be visible immediately (above the fold - no scrolling required)
+2. Button must be clearly visible and prominent (not hidden, not too small)
+3. Button should stand out visually (good contrast, noticeable size)
+
+PASS if:
+- "Add to Cart" or "Buy Now" button is visible at the top of the page (above the fold)
+- Button is immediately visible without scrolling
+- Button is clearly visible and has reasonable size
+- Button is in a prominent position (near product details, not buried at bottom)
+
+FAIL only if:
+- "Add to Cart" or "Buy Now" button requires scrolling to see (below the fold)
+- Button is hidden or not visible
+- Button is too small or has poor contrast
+
+IMPORTANT: 
+- If buttons are at the TOP of the page and visible immediately → PASS
+- Check the visible content and KEY ELEMENTS to see if "Add to Cart" or "Buy Now" buttons are mentioned near the top
+- If buttons are mentioned in the first 1000 characters of visible text or in KEY ELEMENTS near the top → PASS
+- Do NOT fail if buttons are clearly visible at the top of the page
+
+Example PASS: "The 'Add to Cart' and 'Buy Now' buttons are prominently displayed at the top of the product page, immediately visible without scrolling. They are located in the product details section and have clear visual prominence."
+
+Example FAIL: "The 'Add to Cart' button is located below the fold and requires scrolling to be visible. It should be positioned at the top of the page for immediate visibility."
 `
         }
           
