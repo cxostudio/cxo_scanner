@@ -916,6 +916,9 @@ CRITICAL:
           } else if (isCustomerPhotoRule && !reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
             console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
+          } else if (isProductTitleRule && !reasonLower.includes('title') && !reasonLower.includes('product name') && !reasonLower.includes('heading')) {
+            console.warn(`Warning: Product title rule but reason doesn't mention title: ${analysis.reason.substring(0, 50)}`)
+            isRelevant = false
           } else if (isVariantRule) {
             // Variant rule must mention variant/preselect/selected
             const hasVariantMention = reasonLower.includes('variant') || reasonLower.includes('preselect') || reasonLower.includes('selected') || reasonLower.includes('default')
@@ -929,9 +932,10 @@ CRITICAL:
             }
           }
           
-          // If reason is not relevant, mark as error
+          // If reason is not relevant, keep original reason (no prefix)
           if (!isRelevant) {
-            analysis.reason = `Invalid response: ${analysis.reason}. This response does not match the rule: ${rule.title}`
+            // Keep original reason without prefix - just log warning
+            console.warn(`Warning: Response may not be fully relevant to rule ${rule.id}, but keeping original reason`)
           }
 
           const result = {
