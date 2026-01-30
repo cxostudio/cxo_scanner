@@ -76,7 +76,7 @@ export default function ScannerPage() {
       <div className="max-w-[400px] mx-[16px] w-full">
         {/* Logo */}
         <div className="text-center my-[34px]">
-          <img src="/cxo_logo.png" alt="logo" className="mx-auto w-[117.54] h-[19.95] object-cover" />
+          <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px]  object-cover" />
         </div>
 
         {/* Title */}

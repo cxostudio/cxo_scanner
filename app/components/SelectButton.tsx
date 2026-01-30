@@ -18,7 +18,7 @@ export default function SelectButton({
       onClick={() => onClick(value)}
       className={`w-full bg-white rounded-4xl p-[18px] my-[13px] text-center border transition cursor-pointer ${
         isSelected
-          ? 'border-blue-500 border-2'
+          ? 'border-black border-2'
           : 'border-[#E4E4E7]'
       }`}
     >
