@@ -111,17 +111,17 @@ export async function POST(request: NextRequest) {
       })
       
       // Wait a bit more for any delayed JavaScript execution
-      await new Promise(resolve => setTimeout(resolve, 3000)) // Wait 3 seconds for dynamic content
+      await new Promise(resolve => setTimeout(resolve, 2000)) // Reduced to 2 seconds for faster processing
       
       // Scroll to ensure all content is loaded
       await page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight / 2)
       })
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await new Promise(resolve => setTimeout(resolve, 500)) // Reduced to 500ms
       await page.evaluate(() => {
         window.scrollTo(0, 0)
       })
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 300)) // Reduced to 300ms
       
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
@@ -537,9 +537,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check each rule in batches of 5 to manage Vercel 60s timeout
+    // Check each rule in batches to manage Vercel 60s timeout
+    // Optimized: Larger batches, shorter delays for 25 rules
     const results: ScanResult[] = []
-    const BATCH_SIZE = 5
+    const BATCH_SIZE = 8 // Increased from 5 to 8 for faster processing
     
     // Split rules into batches of 5
     const batches: Rule[][] = []
@@ -551,7 +552,7 @@ export async function POST(request: NextRequest) {
     
     // Token usage tracking for rate limiting
     // OpenRouter rate limits - optimized for 60s Vercel timeout
-    const MIN_DELAY_BETWEEN_REQUESTS = 1000 // 1 second between requests
+    const MIN_DELAY_BETWEEN_REQUESTS = 300 // Reduced to 300ms for faster processing
     let lastRequestTime = 0
     
     // Process each batch sequentially
@@ -559,15 +560,14 @@ export async function POST(request: NextRequest) {
       const batch = batches[batchIndex]
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} rules`)
       
-      // Process rules in current batch
+      // Process rules in current batch with minimal delay
       for (const rule of batch) {
-        // Wait if needed to respect rate limits
+        // Wait if needed to respect rate limits (minimal delay for speed)
         const now = Date.now()
         if (lastRequestTime > 0) {
           const timeSinceLastRequest = now - lastRequestTime
           if (timeSinceLastRequest < MIN_DELAY_BETWEEN_REQUESTS) {
             const waitTime = MIN_DELAY_BETWEEN_REQUESTS - timeSinceLastRequest
-            console.log(`Waiting ${waitTime}ms to respect rate limits...`)
             await sleep(waitTime)
           }
         }
@@ -734,7 +734,7 @@ CRITICAL:
 `
         }
           
-          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\nRule: ${rule.title} - ${rule.description}${specialInstructions}\n\nCRITICAL: Analyze ACCURATELY. Check ALL requirements. Do NOT assume.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n\nIf PASSED: List specific elements found that meet the rule with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to this rule, (7) Do NOT include currency or price information unless rule requires it.`
+          const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly
           const chatCompletion = await openRouter.chat.send({
@@ -746,8 +746,8 @@ CRITICAL:
               },
             ],
             temperature: 0.0,
-            maxTokens: 512, // Reduced from 1024 to save tokens
-            topP: 1,
+            maxTokens: 256, // Further reduced to 256 for faster responses
+            topP: 0.95, // More deterministic
             stream: false,
           })
 
@@ -938,12 +938,39 @@ CRITICAL:
             console.warn(`Warning: Response may not be fully relevant to rule ${rule.id}, but keeping original reason`)
           }
 
+          // Additional validation: Check if reason mentions other rules (cross-contamination check)
+          // Use existing reasonLower variable from line 873
+          const currentRuleKeywords = rule.title.toLowerCase().split(' ').filter(w => w.length > 3)
+          const otherRuleKeywords = ['breadcrumb', 'lazy loading', 'rating', 'color', 'variant', 'cta', 'shipping', 'discount', 'testimonial', 'comparison', 'benefits', 'title']
+          const mentionedOtherRules = otherRuleKeywords.filter(keyword => 
+            keyword !== rule.title.toLowerCase() && 
+            !currentRuleKeywords.some(ck => keyword.includes(ck) || ck.includes(keyword)) &&
+            reasonLower.includes(keyword)
+          )
+          
+          if (mentionedOtherRules.length > 0 && !currentRuleKeywords.some(ck => reasonLower.includes(ck))) {
+            console.warn(`Warning: Rule ${rule.id} reason may be for another rule. Mentioned: ${mentionedOtherRules.join(', ')}`)
+            // Don't change the reason, just log - but ensure it's for the right rule
+          }
+
+          // Create result object with explicit rule identification
           const result = {
-            ruleId: rule.id,
-            ruleTitle: rule.title,
+            ruleId: rule.id, // Explicitly use current rule.id
+            ruleTitle: rule.title, // Explicitly use current rule.title
             passed: analysis.passed === true,
             reason: analysis.reason || 'No reason provided',
           }
+          
+          // Final validation: Ensure result matches the rule being processed
+          if (result.ruleId !== rule.id) {
+            console.error(`CRITICAL: Result ruleId (${result.ruleId}) does not match current rule (${rule.id})`)
+            // Force correct ruleId
+            result.ruleId = rule.id
+            result.ruleTitle = rule.title
+          }
+          
+          // Log for debugging rule mixing issues
+          console.log(`[Rule ${rule.id}] Result: passed=${result.passed}, reason preview: ${result.reason.substring(0, 50)}...`)
           
           results.push(result)
           
@@ -1021,9 +1048,9 @@ CRITICAL:
       // Log batch completion
       console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${rules.length}`)
       
-      // Wait 1 second between batches (except after last batch)
+      // Wait 300ms between batches (except after last batch) - minimal delay for speed
       if (batchIndex < batches.length - 1) {
-        await sleep(1000)
+        await sleep(300)
       }
     }
 
