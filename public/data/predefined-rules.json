@@ -112,13 +112,13 @@
   {
     "id": "trust-badges-near-cta",
     "title": "Display trust signals near the CTA",
-    "description": "Security badges and payment logos should be positioned near the Add to Cart or Checkout buttons to reassure users and reduce hesitation."
+    "description": "Security badges and payment logos (SSL, Visa, PayPal, Money-back Guarantee) must be positioned within 50px of the 'Add to Cart' or 'Checkout' buttons. These signals must be visible without scrolling and should use high-quality, muted or monochromatic designs so their visual weight is lower than the main CTA to avoid distraction."
   },
   {
     "id": "quantity-discounts",
     "title": "Offer quantity or bulk discounts",
-    "description": "Quantity discounts should be clearly presented to incentivize higher order values and reduce pricing uncertainty."
-  },
+    "description": "Product pages must display specific financial incentives for purchasing multiple units of the same product or bundles. Valid examples include 'Buy 2 Get 1 Free', tiered pricing (e.g., $10 each for 5+ units), or 'Save 10% when you buy 3'. General single-item discounts, sitewide sales, or 'Free Shipping' do not qualify."
+  },  
   {
     "id": "shipping-time-visibility",
     "title": "Display shipping time near CTA",

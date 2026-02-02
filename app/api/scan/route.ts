@@ -360,9 +360,10 @@ export async function POST(request: NextRequest) {
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}`
       })
 
-      // Get quantity discount context for quantity discounts rule
+      // Get quantity discount and general discount context (merged)
       const quantityDiscountContext = await page.evaluate(() => {
-        const bodyText = document.body.innerText.toLowerCase()
+        const bodyText = document.body.innerText || ''
+        const bodyTextLower = bodyText.toLowerCase()
       
         // Common discount patterns (bulk, quantity, and regular discounts)
         const patterns = [
@@ -389,18 +390,88 @@ export async function POST(request: NextRequest) {
           "offer"
         ]
       
-        const found = patterns.filter(p => bodyText.includes(p))
+        const found = patterns.filter(p => bodyTextLower.includes(p))
         
         // Also check for discount percentages/amounts in text
         const hasDiscountPercentage = /(\d+)%\s*off/i.test(bodyText) || /off\s*(\d+)%/i.test(bodyText)
         const hasDiscountAmount = /flat\s*₹?\s*\d+/i.test(bodyText) || /₹?\s*\d+\s*off/i.test(bodyText)
-        const hasSpecialPrice = bodyText.includes("special price") || bodyText.includes("special price")
-        const hasBankOffer = bodyText.includes("bank offer") || bodyText.includes("bank offer")
+        const hasSpecialPrice = bodyTextLower.includes("special price")
+        const hasBankOffer = bodyTextLower.includes("bank offer")
+        
+        // Step 1: Check for discount percentage (e.g., "20% off", "10% discount")
+        const discountPercentagePatterns = [
+          /(\d+)%\s*off/i,
+          /off\s*(\d+)%/i,
+          /(\d+)%\s*discount/i,
+          /discount\s*of\s*(\d+)%/i,
+          /save\s*(\d+)%/i,
+          /(\d+)%\s*save/i
+        ]
+        
+        let discountPercentage = null
+        for (const pattern of discountPercentagePatterns) {
+          const match = bodyText.match(pattern)
+          if (match) {
+            discountPercentage = match[0]
+            break
+          }
+        }
+        
+        // Step 2: Check for price drop (e.g., "Was $50, Now $40", "Original $100, Now $80")
+        const priceDropPatterns = [
+          /was\s*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
+          /original\s*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
+          /was\s*[₹$€£]?\s*[\d,]+\.?\d*\s*,\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
+          /[₹$€£]?\s*[\d,]+\.?\d*\s*was\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
+          /strike.*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i
+        ]
+        
+        let priceDrop = null
+        for (const pattern of priceDropPatterns) {
+          const match = bodyText.match(pattern)
+          if (match) {
+            priceDrop = match[0]
+            break
+          }
+        }
+        
+        // Step 3: Check for coupon codes (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
+        const couponPatterns = [
+          /use\s+code\s+[A-Z0-9]+/i,
+          /coupon\s+code\s*:?\s*[A-Z0-9]+/i,
+          /promo\s+code\s*:?\s*[A-Z0-9]+/i,
+          /code\s*:?\s*[A-Z0-9]{4,}/i,
+          /apply\s+code\s+[A-Z0-9]+/i
+        ]
+        
+        let couponCode = null
+        for (const pattern of couponPatterns) {
+          const match = bodyText.match(pattern)
+          if (match) {
+            couponCode = match[0]
+            break
+          }
+        }
+        
+        // Step 4: Exclude free shipping alone (unless it's part of a discount)
+        const hasFreeShipping = /free\s+shipping/i.test(bodyTextLower)
+        const hasOnlyFreeShipping = hasFreeShipping && !discountPercentage && !priceDrop && !couponCode && !hasDiscountPercentage && !hasDiscountAmount && !hasSpecialPrice && !hasBankOffer
+        
+        // Determine if discount exists (quantity/bulk OR general discount)
+        const hasBulkDiscount = found.length > 0 || hasDiscountPercentage || hasDiscountAmount || hasSpecialPrice || hasBankOffer
+        const hasGeneralDiscount = !!(discountPercentage || priceDrop || couponCode)
+        const hasAnyDiscount = hasBulkDiscount || (hasGeneralDiscount && !hasOnlyFreeShipping)
       
         return {
           foundPatterns: found,
-          hasBulkDiscount: found.length > 0 || hasDiscountPercentage || hasDiscountAmount || hasSpecialPrice || hasBankOffer,
-          preview: bodyText.substring(0, 800)
+          hasBulkDiscount: hasBulkDiscount,
+          discountPercentage: discountPercentage || 'None',
+          priceDrop: priceDrop || 'None',
+          couponCode: couponCode || 'None',
+          hasFreeShipping: hasFreeShipping,
+          hasOnlyFreeShipping: hasOnlyFreeShipping,
+          hasAnyDiscount: hasAnyDiscount,
+          preview: bodyText.substring(0, 1000)
         }
       })
       
@@ -417,6 +488,128 @@ export async function POST(request: NextRequest) {
         if (!parent) return "CTA parent container not found"
         const text = (parent as HTMLElement).innerText || parent.textContent || ''
         return text.substring(0, 500)
+      })
+
+      // Get trust badges context for trust badges rule
+      const trustBadgesContext = await page.evaluate(() => {
+        // Find CTA button
+        const cta = Array.from(document.querySelectorAll("button, a"))
+          .find(el => {
+            const text = el.textContent?.toLowerCase() || ''
+            return text.includes("add to bag") || 
+                   text.includes("add to cart") || 
+                   text.includes("checkout") ||
+                   text.includes("buy now")
+          })
+        
+        if (!cta) {
+          return {
+            ctaFound: false,
+            trustBadgesNearCTA: [],
+            trustBadgesCount: 0,
+            within50px: false,
+            visibleWithoutScrolling: false,
+            trustBadgesInfo: "CTA not found"
+          }
+        }
+
+        const ctaRect = cta.getBoundingClientRect()
+        const ctaTop = ctaRect.top
+        const ctaBottom = ctaRect.bottom
+        const ctaLeft = ctaRect.left
+        const ctaRight = ctaRect.right
+        const viewportHeight = window.innerHeight
+        
+        // Check if CTA is visible without scrolling
+        const ctaVisibleWithoutScrolling = ctaTop >= 0 && ctaTop < viewportHeight
+
+        // Find trust badges (payment logos, SSL badges, security badges)
+        const trustBadgeSelectors = [
+          'img[alt*="ssl"]',
+          'img[alt*="SSL"]',
+          'img[alt*="secure"]',
+          'img[alt*="Secure"]',
+          'img[alt*="visa"]',
+          'img[alt*="Visa"]',
+          'img[alt*="mastercard"]',
+          'img[alt*="Mastercard"]',
+          'img[alt*="paypal"]',
+          'img[alt*="PayPal"]',
+          'img[alt*="payment"]',
+          'img[alt*="Payment"]',
+          'img[alt*="guarantee"]',
+          'img[alt*="Guarantee"]',
+          'img[alt*="money-back"]',
+          'img[alt*="Money-back"]',
+          '[class*="trust"]',
+          '[class*="badge"]',
+          '[class*="payment"]',
+          '[class*="ssl"]',
+          '[class*="secure"]',
+          '[id*="trust"]',
+          '[id*="badge"]',
+          '[id*="payment"]'
+        ]
+
+        const allTrustBadges: Array<{element: Element, distance: number, visible: boolean, text: string}> = []
+        
+        trustBadgeSelectors.forEach(selector => {
+          try {
+            const elements = document.querySelectorAll(selector)
+            elements.forEach(el => {
+              const rect = el.getBoundingClientRect()
+              const badgeTop = rect.top
+              const badgeBottom = rect.bottom
+              const badgeLeft = rect.left
+              const badgeRight = rect.right
+              
+              // Calculate distance from CTA (using center points)
+              const ctaCenterX = (ctaLeft + ctaRight) / 2
+              const ctaCenterY = (ctaTop + ctaBottom) / 2
+              const badgeCenterX = (badgeLeft + badgeRight) / 2
+              const badgeCenterY = (badgeTop + badgeBottom) / 2
+              
+              const distanceX = Math.abs(ctaCenterX - badgeCenterX)
+              const distanceY = Math.abs(ctaCenterY - badgeCenterY)
+              const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY)
+              
+              // Check if badge is visible without scrolling
+              const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
+              
+              // Get badge text/alt
+              const badgeText = (el instanceof HTMLImageElement ? el.alt : null) || 
+                               (el as HTMLElement).title || 
+                               el.textContent?.trim() || 
+                               'Trust badge'
+              
+              allTrustBadges.push({
+                element: el,
+                distance: distance,
+                visible: badgeVisible,
+                text: badgeText
+              })
+            })
+          } catch (e) {
+            // Ignore selector errors
+          }
+        })
+
+        // Filter badges within 50px of CTA
+        const badgesWithin50px = allTrustBadges.filter(badge => badge.distance <= 50)
+        const badgesVisibleWithoutScrolling = badgesWithin50px.filter(badge => badge.visible && ctaVisibleWithoutScrolling)
+
+        return {
+          ctaFound: true,
+          ctaText: (cta as HTMLElement).textContent?.trim() || 'CTA button',
+          ctaVisibleWithoutScrolling: ctaVisibleWithoutScrolling,
+          trustBadgesNearCTA: badgesWithin50px.map(b => b.text),
+          trustBadgesCount: badgesWithin50px.length,
+          within50px: badgesWithin50px.length > 0,
+          visibleWithoutScrolling: badgesVisibleWithoutScrolling.length > 0 && ctaVisibleWithoutScrolling,
+          trustBadgesInfo: badgesWithin50px.length > 0 
+            ? `Found ${badgesWithin50px.length} trust badge(s) within 50px: ${badgesWithin50px.map(b => b.text).join(', ')}`
+            : 'No trust badges found within 50px of CTA'
+        }
       })
  // preselect
  const selectedVariant = await page.evaluate(() => {
@@ -493,8 +686,9 @@ export async function POST(request: NextRequest) {
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) + 
                       '\n\n--- KEY ELEMENTS ---\n' + keyElements +
                       `\nSelected Variant: ${selectedVariant || 'None'}` +
-                      `\n\n--- QUANTITY DISCOUNT CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\n` +
-                      `\n\n--- CTA CONTEXT ---\n${ctaContext}`
+                      `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
+                      `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
+                      `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Within 50px: ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
                       
 
@@ -603,6 +797,11 @@ export async function POST(request: NextRequest) {
   rule.title.toLowerCase().includes("preselect") ||
   rule.description.toLowerCase().includes("variant") ||
   rule.description.toLowerCase().includes("preselect")
+          const isTrustBadgesRule =
+  rule.id === 'trust-badges-near-cta' ||
+  (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
+  (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
+  (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -626,32 +825,86 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
           }else if (isQuantityDiscountRule) {
             specialInstructions = `
-          QUANTITY DISCOUNT RULE - CHECK DISCOUNTS:
-          
-          This rule checks if ANY discounts are shown on the page (quantity discounts, bulk discounts, or regular discounts).
-          
-          PASS if page shows:
-          - Quantity/bulk discounts (e.g., "Buy 2 save 10%", "Buy 3 get 1 free")
-          - Regular discounts (e.g., "77% off", "Special price", "Get extra 35% off")
-          - Bank offers with discounts (e.g., "Flat ₹50 off", "10% off", "5% cashback")
-          - Any discount percentage or amount shown
-          - Bundle offers
-          - Volume discounts
-          
-          FAIL only if:
-          - NO discounts shown anywhere on the page
-          - Only subscription plan discounts exist (not applicable to one-time purchases)
-          - Text is vague like "Save more" without specific discount amount/percentage
-          
-          IMPORTANT:
-          - Check "QUANTITY DISCOUNT CHECK" section in KEY ELEMENTS
-          - If "Bulk Discount Detected: YES" → PASS
-          - If "Bulk Discount Detected: NO" but discounts are visible in content (like "77% off", "Special price", "Bank Offer", etc.) → PASS
-          - Only FAIL if absolutely NO discounts are shown on the page
-          
-          Example PASS: "The page shows multiple discounts including '77% off' on the product, 'Special price' offer, and bank offers like 'Flat ₹50 off' and '10% off up to ₹1,500'. These discounts are clearly displayed and help incentivize purchases."
-          
-          Example FAIL: "No discounts are shown on the product page. No percentage off, special pricing, bulk discounts, or promotional offers are visible."
+QUANTITY DISCOUNT & PROMOTION RULE - STEP-BY-STEP CHECK:
+
+This rule checks if the product page displays ANY discount or promotional offer (quantity discounts, bulk discounts, OR general product discounts).
+
+STEP 1: Check "QUANTITY DISCOUNT & PROMOTION CHECK" section in KEY ELEMENTS
+- Look for "Any Discount/Promotion Detected: YES" or "Any Discount/Promotion Detected: NO"
+
+STEP 2: If "Any Discount/Promotion Detected: YES", check which type of discount is present:
+
+A. QUANTITY/BULK DISCOUNTS (Check "Bulk/Quantity Discount Detected"):
+   - "Buy 2 Get 1 Free", "Buy 3 save 10%", "Save 10% when you buy 3"
+   - Tiered pricing (e.g., "$10 each for 5+ units")
+   - Volume discounts, bundle offers
+   - If "Bulk/Quantity Discount Detected: YES" → PASS
+
+B. GENERAL DISCOUNTS (Check individual fields):
+   - Discount Percentage: Check if value is NOT "None" (e.g., "20% off", "10% discount")
+   - Price Drop: Check if value is NOT "None" (e.g., "Was $50, Now $40", "Original $100, Now $80")
+   - Coupon Code: Check if value is NOT "None" (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
+   - If ANY of these is NOT "None" → PASS
+
+STEP 3: Exclude free shipping alone
+- If "Has Free Shipping Only: YES" → This means ONLY free shipping exists, NO price discount → FAIL
+- If "Has Free Shipping Only: NO" and discount exists → PASS
+
+STEP 4: Determine result
+- PASS if ANY discount type is present (quantity/bulk discount OR general discount with price reduction)
+- FAIL if NO discount is present OR only free shipping exists without price reduction
+
+EXAMPLES:
+
+Example 1 - PASS (Price Drop):
+Input: "Buy this iPhone for $999, original price $1200."
+QUANTITY DISCOUNT & PROMOTION CHECK shows:
+- Price Drop: "original price $1200" (or similar)
+- Any Discount/Promotion Detected: YES
+Output: {"passed": true, "reason": "Price drop detected: Product shows original price $1200, now $999, indicating a discount."}
+
+Example 2 - FAIL (No Discount):
+Input: "Fresh organic apples at $5 per kg."
+QUANTITY DISCOUNT & PROMOTION CHECK shows:
+- Discount Percentage: None
+- Price Drop: None
+- Coupon Code: None
+- Bulk/Quantity Discount Detected: NO
+- Any Discount/Promotion Detected: NO
+Output: {"passed": false, "reason": "No discount or promotional offer detected. Product shows standard pricing without any discount percentage, price drop, coupon code, or bulk discount."}
+
+Example 3 - PASS (Coupon Code):
+Input: "Get 20% off on all Nike shoes using code NIKE20."
+QUANTITY DISCOUNT & PROMOTION CHECK shows:
+- Discount Percentage: "20% off"
+- Coupon Code: "code NIKE20" (or similar)
+- Any Discount/Promotion Detected: YES
+Output: {"passed": true, "reason": "Discount detected: 20% off discount with coupon code NIKE20 available."}
+
+Example 4 - FAIL (Free Shipping Only):
+Input: "Free shipping on all orders. Product price: $50."
+QUANTITY DISCOUNT & PROMOTION CHECK shows:
+- Has Free Shipping Only: YES
+- Any Discount/Promotion Detected: NO
+Output: {"passed": false, "reason": "No discount on product price detected. Only free shipping is offered, but the product price remains the same without any discount."}
+
+Example 5 - PASS (Quantity Discount):
+Input: "Buy 2 Get 1 Free on all items."
+QUANTITY DISCOUNT & PROMOTION CHECK shows:
+- Bulk/Quantity Discount Detected: YES
+- Any Discount/Promotion Detected: YES
+Output: {"passed": true, "reason": "Quantity discount detected: 'Buy 2 Get 1 Free' offer is displayed, providing financial incentive for purchasing multiple units."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check the "QUANTITY DISCOUNT & PROMOTION CHECK" section in KEY ELEMENTS
+2. Follow the step-by-step process above
+3. If "Any Discount/Promotion Detected: YES" → PASS (unless it's only free shipping)
+4. If "Any Discount/Promotion Detected: NO" → FAIL
+5. If "Has Free Shipping Only: YES" → FAIL (free shipping alone doesn't count as discount)
+6. Be SPECIFIC about which discount type is present (quantity/bulk, percentage, price drop, coupon, etc.)
+7. Quote the exact discount text from the page if available
+8. If PASSED: Mention the specific discount type and where it's located
+9. If FAILED: Explain that no discount or promotional offer is visible on the product page
           ` 
         }else if (isShippingRule) {
           specialInstructions = `
@@ -694,6 +947,95 @@ CRITICAL RULES:
 - If you see "Selected Variant: None" → FAIL
 - If you see "Selected Variant: [any value]" → PASS (regardless of how it's selected)
 
+`
+        } else if (isTrustBadgesRule) {
+          specialInstructions = `
+TRUST BADGES NEAR CTA RULE - STEP-BY-STEP CHECK:
+
+This rule checks if trust signals (security badges, payment logos) are positioned within 50px of the CTA button, visible without scrolling, and have muted/monochromatic design.
+
+STEP 1: Identify CTA
+- Check "TRUST BADGES CHECK" section in KEY ELEMENTS
+- Look for "CTA Found: YES" or "CTA Found: NO"
+- If "CTA Found: NO" → FAIL (cannot check proximity without CTA)
+- Note the "CTA Text" value (e.g., "Add to Cart", "Checkout", "Buy Now")
+
+STEP 2: Check Proximity (50px constraint)
+- Check "Trust Badges Within 50px: YES" or "Trust Badges Within 50px: NO"
+- If "Trust Badges Within 50px: NO" → FAIL
+- Check "Trust Badges Count" - must be > 0
+- Check "Trust Badges List" to see which badges are found (SSL, Visa, PayPal, Money-back Guarantee, etc.)
+
+STEP 3: Check Visibility (without scrolling)
+- Check "CTA Visible Without Scrolling: YES" or "CTA Visible Without Scrolling: NO"
+- Check "Trust Badges Visible Without Scrolling: YES" or "Trust Badges Visible Without Scrolling: NO"
+- If CTA requires scrolling → FAIL (CTA must be visible without scrolling)
+- If trust badges require scrolling → FAIL (badges must be visible without scrolling)
+- BOTH CTA and badges must be visible without scrolling → PASS this step
+
+STEP 4: Check Design (muted/monochromatic, less prominent than CTA)
+- This step requires visual analysis of the page content
+- Trust badges should use muted colors or monochromatic design
+- Badges should have lower visual weight than the main CTA button
+- If badges are too bright, colorful, or distracting → FAIL
+- If badges compete with CTA for attention → FAIL
+- If badges are subtle and don't distract from CTA → PASS this step
+
+DETERMINE RESULT:
+- PASS only if ALL 4 steps pass:
+  1. CTA is found ✓
+  2. Trust badges are within 50px of CTA ✓
+  3. Both CTA and badges are visible without scrolling ✓
+  4. Badges are muted/monochromatic and less prominent than CTA ✓
+- FAIL if ANY step fails
+
+EXAMPLES:
+
+Example 1 - PASS (All requirements met):
+TRUST BADGES CHECK shows:
+- CTA Found: YES
+- CTA Text: "Add to Cart"
+- CTA Visible Without Scrolling: YES
+- Trust Badges Within 50px: YES
+- Trust Badges Count: 3
+- Trust Badges Visible Without Scrolling: YES
+- Trust Badges List: "SSL Secure, Visa, PayPal"
+Output: {"passed": true, "reason": "Trust signals (SSL Secure, Visa, PayPal) are positioned within 50px of the 'Add to Cart' button, visible without scrolling, and use muted design that doesn't distract from the CTA."}
+
+Example 2 - FAIL (No badges within 50px):
+TRUST BADGES CHECK shows:
+- CTA Found: YES
+- CTA Text: "Add to Cart"
+- CTA Visible Without Scrolling: YES
+- Trust Badges Within 50px: NO
+- Trust Badges Count: 0
+Output: {"passed": false, "reason": "No trust signals (SSL, payment logos, security badges) are positioned within 50px of the 'Add to Cart' button. Trust badges must be within 50px of the CTA to reassure users and reduce hesitation."}
+
+Example 3 - FAIL (Badges require scrolling):
+TRUST BADGES CHECK shows:
+- CTA Found: YES
+- CTA Visible Without Scrolling: YES
+- Trust Badges Within 50px: YES
+- Trust Badges Visible Without Scrolling: NO
+Output: {"passed": false, "reason": "Trust badges are within 50px of the CTA but are not visible without scrolling. Both the CTA and trust badges must be visible without scrolling to meet the requirement."}
+
+Example 4 - FAIL (Badges too prominent/distracting):
+TRUST BADGES CHECK shows:
+- CTA Found: YES
+- Trust Badges Within 50px: YES
+- Trust Badges Visible Without Scrolling: YES
+- (Visual analysis: Badges are bright, colorful, and compete with CTA for attention)
+Output: {"passed": false, "reason": "Trust badges are within 50px of the CTA and visible without scrolling, but they use bright, colorful designs that compete with the main CTA for attention. Badges should use muted or monochromatic designs with lower visual weight than the CTA."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check the "TRUST BADGES CHECK" section in KEY ELEMENTS
+2. Follow the step-by-step process above (Identify CTA → Check Proximity → Check Visibility → Check Design)
+3. Be SPECIFIC about which trust badges are found (SSL, Visa, PayPal, Money-back Guarantee, etc.)
+4. If FAILED: Specify which step failed (proximity, visibility, or design)
+5. If PASSED: Confirm all 4 steps passed
+6. Quote exact badge names from "Trust Badges List" if available
+7. Mention the CTA text from "CTA Text" field
+8. For design check, analyze if badges are muted/monochromatic based on content description
 `
         } else if (isCTAProminenceRule) {
           specialInstructions = `
@@ -747,7 +1089,7 @@ CRITICAL:
             ],
             temperature: 0.0,
             maxTokens: 256, // Further reduced to 256 for faster responses
-            topP: 0.95, // More deterministic
+            topP: 1.0,  // More deterministic
             stream: false,
           })
 
@@ -929,6 +1271,19 @@ CRITICAL:
             // Check if response mentions "Selected Variant:" check
             if (!reasonLower.includes('selected variant') && !reasonLower.includes('preselected')) {
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
+            }
+          } else if (isTrustBadgesRule) {
+            // Trust badges rule must mention trust/badge/security/payment/ssl
+            const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') || reasonLower.includes('security') || reasonLower.includes('payment') || reasonLower.includes('ssl') || reasonLower.includes('visa') || reasonLower.includes('paypal') || reasonLower.includes('guarantee')
+            if (!hasTrustMention) {
+              console.warn(`Warning: Trust badges rule but reason doesn't mention trust/badge/security: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+            // Check if response mentions proximity (50px) or CTA
+            const mentionsProximity = reasonLower.includes('50px') || reasonLower.includes('proximity') || reasonLower.includes('near') || reasonLower.includes('within')
+            const mentionsCTA = reasonLower.includes('cta') || reasonLower.includes('add to cart') || reasonLower.includes('checkout') || reasonLower.includes('button')
+            if (!mentionsProximity && !mentionsCTA) {
+              console.warn(`Warning: Trust badges rule response should mention proximity to CTA`)
             }
           }
           
