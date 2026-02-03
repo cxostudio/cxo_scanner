@@ -490,6 +490,103 @@ export async function POST(request: NextRequest) {
         return text.substring(0, 500)
       })
 
+      // Get shipping time context for shipping time visibility rule
+      const shippingTimeContext = await page.evaluate(() => {
+        const ctaSelectors = ["button", "a", "[role='button']", "input[type='submit']"]
+        let ctaElement: HTMLElement | null = null
+        let ctaText = "N/A"
+        let ctaRect: DOMRect | null = null
+        const viewportHeight = window.innerHeight
+
+        // Find CTA button
+        for (const selector of ctaSelectors) {
+          const potentialCtas = Array.from(document.querySelectorAll(selector)) as HTMLElement[]
+          const foundCTA = potentialCtas.find(el => {
+            const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').toLowerCase()
+            return text.includes("add to cart") || text.includes("add to bag") || text.includes("buy now") || text.includes("checkout")
+          })
+          if (foundCTA) {
+            ctaElement = foundCTA
+            ctaText = (ctaElement.textContent || ctaElement.getAttribute('aria-label') || ctaElement.getAttribute('value') || '').trim()
+            ctaRect = ctaElement.getBoundingClientRect()
+            break
+          }
+        }
+
+        const ctaFound = !!ctaElement
+        const ctaVisibleWithoutScrolling = ctaRect ? (ctaRect.top >= 0 && ctaRect.bottom <= viewportHeight) : false
+
+        // Find shipping time information near CTA
+        let shippingInfoNearCTA = ""
+        let hasCountdown = false
+        let hasDeliveryDate = false
+        let shippingText = ""
+
+        if (ctaRect && ctaElement) {
+          // Get parent container of CTA
+          const parent = ctaElement.closest("form, div, section, [class*='cart'], [class*='checkout'], [class*='product']")
+          if (parent) {
+            const parentText = (parent as HTMLElement).innerText || parent.textContent || ''
+            
+            // Check for countdown/cutoff time patterns
+            const countdownPatterns = [
+              /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
+              /order\s+by\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
+              /order\s+before\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
+              /cutoff\s+time/i,
+              /order\s+in\s+the\s+next\s+[\d\s]+(?:hours?|hrs?)/i
+            ]
+            
+            // Check for delivery date patterns
+            const deliveryDatePatterns = [
+              /get\s+it\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+              /delivered\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+              /arrives\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+              /get\s+it\s+on\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+              /delivery\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+              /get\s+it\s+by\s+[A-Za-z]+\s+\d+/i,
+              /delivered\s+by\s+[A-Za-z]+\s+\d+/i
+            ]
+
+            // Check for countdown
+            for (const pattern of countdownPatterns) {
+              if (pattern.test(parentText)) {
+                hasCountdown = true
+                const match = parentText.match(pattern)
+                if (match) shippingText += match[0] + " "
+                break
+              }
+            }
+
+            // Check for delivery date
+            for (const pattern of deliveryDatePatterns) {
+              if (pattern.test(parentText)) {
+                hasDeliveryDate = true
+                const match = parentText.match(pattern)
+                if (match) shippingText += match[0] + " "
+                break
+              }
+            }
+
+            // Extract shipping info from parent container (first 300 chars)
+            if (parentText) {
+              shippingInfoNearCTA = parentText.substring(0, 300)
+            }
+          }
+        }
+
+        return {
+          ctaFound,
+          ctaText,
+          ctaVisibleWithoutScrolling,
+          shippingInfoNearCTA: shippingInfoNearCTA || "N/A",
+          hasCountdown,
+          hasDeliveryDate,
+          shippingText: shippingText.trim() || "None",
+          allRequirementsMet: hasCountdown && hasDeliveryDate
+        }
+      })
+
       // Get trust badges context for trust badges rule
       const trustBadgesContext = await page.evaluate(() => {
         // Find CTA button
@@ -688,6 +785,7 @@ export async function POST(request: NextRequest) {
                       `\nSelected Variant: ${selectedVariant || 'None'}` +
                       `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
                       `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
+                      `\n\n--- SHIPPING TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nShipping Info Near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time: ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date: ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nShipping Text Found: ${shippingTimeContext.shippingText}\nAll Requirements Met: ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
                       `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Within 50px: ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
                       
@@ -908,12 +1006,114 @@ CRITICAL INSTRUCTIONS:
           ` 
         }else if (isShippingRule) {
           specialInstructions = `
-        SHIPPING RULE:
-        If delivery date is present near CTA → PASS adjacency.
-        Only FAIL if BOTH are missing:
-        1. Delivery estimate
-        2. Order cutoff time ("Order by XX")
-        If cutoff time missing but date present → FAIL with reason: "Order-by time missing."
+SHIPPING TIME VISIBILITY RULE - STEP-BY-STEP AUDIT:
+
+You are an expert E-commerce UX Auditor. Your task is to analyze the Product Page based on the rule: 'Display shipping time near CTA'.
+
+Please follow these steps strictly:
+
+STEP 1 (Locate CTA): 
+- Check "SHIPPING TIME CHECK" section in KEY ELEMENTS
+- Look for "CTA Found: YES" or "CTA Found: NO"
+- If "CTA Found: NO" → FAIL (Cannot evaluate without CTA)
+- If "CTA Found: YES", note the "CTA Text" (e.g., "Add to Cart", "Buy Now")
+
+STEP 2 (Check Proximity): 
+- Check "Shipping Info Near CTA" in SHIPPING TIME CHECK section
+- Verify that shipping information is located directly above or below the CTA button
+- Check "CTA Visible Without Scrolling: YES" - CTA must be visible without scrolling
+- If shipping info is NOT near CTA (e.g., in footer, far from button) → FAIL
+
+STEP 3 (Verify Dynamic Logic - Countdown/Cutoff Time): 
+- Check "Has Countdown/Cutoff Time: YES" or "Has Countdown/Cutoff Time: NO"
+- Look for patterns like:
+  * "Order within X hours" (e.g., "Order within 3 hrs 20 mins")
+  * "Order by [Time]" (e.g., "Order by 3 PM")
+  * "Order before [Time]" (e.g., "Order before 5 PM")
+  * "Cutoff time" mentions
+- If "Has Countdown/Cutoff Time: NO" → FAIL (Missing countdown/cutoff time requirement)
+
+STEP 4 (Verify Delivery Date): 
+- Check "Has Delivery Date: YES" or "Has Delivery Date: NO"
+- Look for specific delivery date or range patterns like:
+  * "Get it by [Day], [Month] [Date]" (e.g., "Get it by Thursday, Oct 12th")
+  * "Delivered by [Day], [Month] [Date]" (e.g., "Delivered by Tuesday, Oct 10th")
+  * "Arrives by [Day], [Month] [Date]"
+  * "Get it on [Day], [Month] [Date]"
+- If "Has Delivery Date: NO" → FAIL (Missing specific delivery date requirement)
+
+STEP 5 (Final Verdict): 
+- Check "All Requirements Met: YES" or "All Requirements Met: NO"
+- PASS if ALL of the following are met:
+  1. CTA found and visible without scrolling
+  2. Shipping info is near CTA (directly above or below)
+  3. Countdown/cutoff time is present
+  4. Specific delivery date is present
+- FAIL if ANY requirement is missing
+
+EXAMPLES FOR AI TRAINING:
+
+✅ GOOD EXAMPLE (PASS):
+SHIPPING TIME CHECK shows:
+- CTA Found: YES
+- CTA Text: Add to Cart
+- CTA Visible Without Scrolling: YES
+- Shipping Info Near CTA: "Order within 3 hrs 20 mins, get it by Thursday, Oct 12th."
+- Has Countdown/Cutoff Time: YES
+- Has Delivery Date: YES
+- Shipping Text Found: "Order within 3 hrs 20 mins get it by Thursday, Oct 12th"
+- All Requirements Met: YES
+
+Reason: "Dynamic delivery estimate is displayed near the 'Add to Cart' button. The message 'Order within 3 hrs 20 mins, get it by Thursday, Oct 12th' includes both a countdown (3 hrs 20 mins) and a specific delivery date (Thursday, Oct 12th), positioned directly below the CTA button. This reduces purchase friction by managing expectations upfront."
+
+❌ BAD EXAMPLE (FAIL - Missing Countdown):
+SHIPPING TIME CHECK shows:
+- CTA Found: YES
+- CTA Text: Buy Now
+- CTA Visible Without Scrolling: YES
+- Shipping Info Near CTA: "Fast shipping available. Get it by Thursday."
+- Has Countdown/Cutoff Time: NO
+- Has Delivery Date: YES
+- Shipping Text Found: "Get it by Thursday"
+- All Requirements Met: NO
+
+Reason: "Shipping information 'Get it by Thursday' is displayed near the 'Buy Now' button and includes a delivery date, but it is missing the countdown or specific cutoff time requirement (e.g., 'Order within X hours' or 'Order by X PM'). The rule requires both a countdown/cutoff time AND a delivery date to be present."
+
+❌ BAD EXAMPLE (FAIL - Missing Delivery Date):
+SHIPPING TIME CHECK shows:
+- CTA Found: YES
+- CTA Text: Add to Cart
+- CTA Visible Without Scrolling: YES
+- Shipping Info Near CTA: "Order within 2 hours for fast delivery."
+- Has Countdown/Cutoff Time: YES
+- Has Delivery Date: NO
+- Shipping Text Found: "Order within 2 hours"
+- All Requirements Met: NO
+
+Reason: "Shipping information 'Order within 2 hours for fast delivery' is displayed near the 'Add to Cart' button and includes a countdown (2 hours), but it is missing the specific delivery date requirement (e.g., 'Get it by Tuesday, Oct 12th'). The rule requires both a countdown/cutoff time AND a specific delivery date to be present."
+
+❌ BAD EXAMPLE (FAIL - Not Near CTA):
+SHIPPING TIME CHECK shows:
+- CTA Found: YES
+- CTA Text: Add to Cart
+- CTA Visible Without Scrolling: YES
+- Shipping Info Near CTA: "Fast shipping available nationwide" (but this is in footer, not near CTA)
+- Has Countdown/Cutoff Time: NO
+- Has Delivery Date: NO
+- Shipping Text Found: None
+- All Requirements Met: NO
+
+Reason: "Shipping information 'Fast shipping available nationwide' exists on the page but is located in the footer, far from the 'Add to Cart' button. The rule requires shipping time information to be placed in immediate proximity (directly above or below) the primary CTA. Additionally, the message lacks both a countdown/cutoff time and a specific delivery date."
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check the "SHIPPING TIME CHECK" section in KEY ELEMENTS
+2. Follow the 5-step process above precisely
+3. Check BOTH countdown/cutoff time AND delivery date - BOTH are required
+4. Verify proximity - shipping info must be directly above or below CTA
+5. If ANY requirement is missing → FAIL
+6. Be SPECIFIC about which requirement is missing in your reason
+7. Quote the exact shipping text from "Shipping Text Found" if available
+8. Do NOT mention currency symbols, prices, or amounts in the reason
         `
         }else if (isVariantRule) {
           specialInstructions = `

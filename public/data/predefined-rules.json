@@ -122,6 +122,7 @@
   {
     "id": "shipping-time-visibility",
     "title": "Display shipping time near CTA",
-    "description": "Estimated delivery times should be clearly displayed near the CTA using messages like \"Order by X, get it by Y\" to reduce uncertainty and prevent abandonment."
+    "description": "Ensure a dynamic delivery estimate (e.g., 'Order within X hours, get it by Y date') is placed in immediate proximity to the primary CTA. CRITERIA: 1. Must be located directly above or below the Add to Cart/Buy Now button. 2. Must include a countdown or specific cutoff time (e.g., 'Order within 2 hours', 'Order by 3 PM'). 3. Must provide a specific delivery date or range (e.g., 'Get it by Tuesday, Oct 12th', 'Delivered by Thursday'). IMPACT: High - This reduces purchase friction and prevents cart abandonment by managing expectations upfront."
   }
+  
 ]
