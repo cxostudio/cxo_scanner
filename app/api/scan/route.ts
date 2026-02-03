@@ -883,6 +883,7 @@ export async function POST(request: NextRequest) {
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
+          const isFreeShippingThresholdRule = rule.id === 'free-shipping-threshold' || (rule.title.toLowerCase().includes('free shipping') && rule.title.toLowerCase().includes('threshold'))
           const isQuantityDiscountRule =
   rule.title.toLowerCase().includes("quantity") ||
   rule.title.toLowerCase().includes("bulk") ||
@@ -900,6 +901,7 @@ export async function POST(request: NextRequest) {
   (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
   (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
   (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
+          const isProductComparisonRule = rule.id === 'product-comparison' || (rule.title.toLowerCase().includes('comparison') && rule.title.toLowerCase().includes('product'))
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -1117,36 +1119,106 @@ CRITICAL INSTRUCTIONS:
         `
         }else if (isVariantRule) {
           specialInstructions = `
+VARIANT PRESELECTION RULE - STEP-BY-STEP AUDIT:
 
+You are a UX Audit Specialist. Your task is to check if a product page follows the "Variant Preselection" rule.
 
+Rule Definition: The most common variant (size, color, etc.) must be preselected by default when the page loads to reduce user friction.
 
-VARIANT RULE - STRICT CHECK:
+STEP 1 (Initial Load Check - Is Variant Selected?):
+- Check "Selected Variant:" in KEY ELEMENTS section
+- Look for the line "Selected Variant: [value]" in KEY ELEMENTS
+- If "Selected Variant:" shows a value (like "Coffee", "Small", "Red", "Medium", etc.) → Variant IS preselected
+- If "Selected Variant:" shows "None" → No variant preselected → FAIL this step
+- IMPORTANT: Variants can be preselected via CSS styling (gradient borders, selected classes) even if radio input doesn't have "checked" attribute
+- Visual selection via CSS (like gradient borders, highlighted backgrounds) IS a valid preselection
+- The "Selected Variant:" value already accounts for CSS-based selections
 
-Check "Selected Variant:" in KEY ELEMENTS section.
+STEP 2 (Friction Analysis - Can User Add to Cart Immediately?):
+- Check if user has to click a variant before they can click "Add to Cart"
+- Look for disabled "Add to Cart" buttons or "Select a Size/Color" messages
+- If "Add to Cart" button is disabled until variant is selected → FAIL (increases friction)
+- If user can click "Add to Cart" immediately without selecting variant → PASS this step
+- If dropdown shows "Select a Size" or similar placeholder → FAIL (no preselection)
+- If variant is preselected and "Add to Cart" is enabled → PASS this step
+
+STEP 3 (Visual Clarity - Is Selected Variant Clearly Highlighted?):
+- Check if the selected variant is clearly different from unselected ones
+- Look for visual indicators:
+  * Bold border around selected variant
+  * Darker color or different background
+  * Selected state styling (highlighted, active class)
+  * Clear visual distinction from other options
+- If all variant options look the same on page load → FAIL (no visual clarity)
+- If selected variant has clear visual distinction → PASS this step
+- If variant is preselected but not visually clear → Partial PASS (preselected but needs better visual clarity)
+
+STEP 4 (Final Verdict):
+- PASS if ALL 3 steps pass:
+  1. Variant is preselected on initial load ✓
+  2. User can add to cart immediately (no friction) ✓
+  3. Selected variant is clearly highlighted visually ✓
+- FAIL if Step 1 or Step 2 fails (no preselection or friction exists)
+- Partial PASS if Step 1 and 2 pass but Step 3 fails (preselected but not visually clear)
+
+EXAMPLES FOR AI TRAINING:
+
+✅ Example 1 - PASS (Good - T-shirt with Size M Preselected):
+Analysis:
+- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: M" (Medium size is preselected)
+- STEP 2: "Add to Cart" button is enabled immediately, user can click without selecting size first
+- STEP 3: Size M has a blue border around it, clearly different from other sizes (S, L, XL)
+- STEP 4: All requirements met
+
+Output: {"passed": true, "reason": "The variant 'M' (Medium size) is preselected by default when the page loads. The selected variant has a blue border, making it clearly distinguishable from other options. Users can click 'Add to Cart' immediately without selecting a variant first, reducing friction."}
+
+❌ Example 2 - FAIL (Bad - Shoe Page with Dropdown):
+Analysis:
+- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None" (no variant preselected)
+- STEP 2: Dropdown shows "Select a Size" placeholder, "Add to Cart" button is disabled until user picks a size
+- STEP 3: No variant is selected, so visual clarity check is not applicable
+- STEP 4: Preselection requirement failed
+
+Output: {"passed": false, "reason": "No variant is preselected on page load. The size dropdown shows 'Select a Size' placeholder and the 'Add to Cart' button is disabled until the user selects a size. This increases friction and requires an extra click before purchase. The most common variant should be preselected by default."}
+
+❌ Example 3 - FAIL (Bad - All Color Circles Look the Same):
+Analysis:
+- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None" (no variant preselected)
+- STEP 2: "Add to Cart" button is enabled but no color is selected, user must click a color first
+- STEP 3: All color circles look identical on page load, no visual indication of which is selected (none are selected)
+- STEP 4: Preselection and visual clarity requirements failed
+
+Output: {"passed": false, "reason": "No variant is preselected on page load. All color options look identical with no visual distinction, and users cannot determine which color is active. The 'Add to Cart' button is enabled but users must select a color first, increasing friction. The most common color should be preselected and clearly highlighted."}
+
+✅ Example 4 - PASS (Good - Coffee Flavor Preselected with CSS):
+Analysis:
+- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: Coffee" (preselected via CSS styling)
+- STEP 2: "Add to Cart" button is enabled immediately, user can add to cart without selecting flavor
+- STEP 3: Coffee flavor option has a gradient border and darker background, clearly different from other flavors
+- STEP 4: All requirements met
+
+Output: {"passed": true, "reason": "The variant 'Coffee' is preselected by default (via CSS styling with gradient border). The selected variant is clearly highlighted with a darker background and gradient border, making it visually distinct from other flavor options. Users can click 'Add to Cart' immediately, reducing friction."}
+
+❌ Example 5 - FAIL (Bad - Add to Cart Disabled):
+Analysis:
+- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None"
+- STEP 2: "Add to Cart" button is disabled/grayed out with message "Please select a size first"
+- STEP 3: No variant is selected, so visual clarity is not applicable
+- STEP 4: Preselection requirement failed
+
+Output: {"passed": false, "reason": "No variant is preselected on page load. The 'Add to Cart' button is disabled with a 'Please select a size first' message, requiring users to make an additional selection before purchase. This increases friction. The most common variant should be preselected to allow immediate purchase."}
 
 CRITICAL INSTRUCTIONS:
-1. Look for the line "Selected Variant: [value]" in KEY ELEMENTS
-2. If "Selected Variant:" shows a value (like "Coffee", "Small", "Red", etc.) → PASS
-3. If "Selected Variant:" shows "None" → FAIL
-
-IMPORTANT - CSS-BASED SELECTION COUNTS:
-- Variants can be preselected via CSS styling (gradient borders, selected classes) even if radio input doesn't have "checked" attribute
-- Visual selection via CSS (like gradient borders, highlighted backgrounds) IS a valid preselection
-- The "Selected Variant:" value in KEY ELEMENTS already accounts for CSS-based selections
-- If "Selected Variant:" shows any value (not "None"), it means a variant IS preselected → PASS
-
-PASS example: "Selected Variant: Coffee" → PASS with reason: "The variant 'Coffee' is preselected (via CSS styling), which streamlines the purchasing process."
-
-FAIL example: "Selected Variant: None" → FAIL with reason: "No variant is preselected. The most common variant should be preselected to reduce friction and streamline the purchasing process."
-
-CRITICAL RULES:
-- You MUST check the "Selected Variant:" line in KEY ELEMENTS
-- Do NOT assume based on other content or visible text
-- Do NOT check radio inputs directly - use the "Selected Variant:" value which already handles CSS-based selections
-- The rule checks if ANY variant is preselected (via any method: checked attribute OR CSS styling)
-- If you see "Selected Variant: None" → FAIL
-- If you see "Selected Variant: [any value]" → PASS (regardless of how it's selected)
-
+1. You MUST check "Selected Variant:" in KEY ELEMENTS section FIRST
+2. If "Selected Variant: None" → FAIL (no preselection)
+3. If "Selected Variant: [any value]" → Variant IS preselected, proceed to check friction and visual clarity
+4. CSS-based selection (gradient borders, selected classes) COUNTS as valid preselection
+5. Check if "Add to Cart" is enabled immediately or requires variant selection first
+6. Verify visual clarity - selected variant must be clearly different from others
+7. If PASSED: Mention the preselected variant name and how it's visually highlighted
+8. If FAILED: Explain what's missing (no preselection, disabled button, or lack of visual clarity)
+9. Be SPECIFIC about which variant is preselected (if any) and how it's displayed
+10. Do NOT mention currency symbols, prices, or amounts in the reason
 `
         } else if (isTrustBadgesRule) {
           specialInstructions = `
@@ -1239,40 +1311,344 @@ CRITICAL INSTRUCTIONS:
 `
         } else if (isCTAProminenceRule) {
           specialInstructions = `
-CTA PROMINENCE RULE - STRICT CHECK:
+CTA PROMINENCE RULE - STEP-BY-STEP AUDIT:
 
-The main CTA (Add to Cart or Buy Now button) MUST be the most prominent element and visible above the fold.
+Task: Audit the "CTA Prominence" of this product page.
 
-CRITICAL REQUIREMENTS:
-1. "Add to Cart" or "Buy Now" button must be visible immediately (above the fold - no scrolling required)
-2. Button must be clearly visible and prominent (not hidden, not too small)
-3. Button should stand out visually (good contrast, noticeable size)
+You are an expert E-commerce UX Auditor. Follow these steps strictly:
 
-PASS if:
-- "Add to Cart" or "Buy Now" button is visible at the top of the page (above the fold)
-- Button is immediately visible without scrolling
-- Button is clearly visible and has reasonable size
-- Button is in a prominent position (near product details, not buried at bottom)
+STEP 1 (Identify - Find Primary CTA):
+- Look for the primary "Add to Cart" or "Buy Now" button
+- Check "CTA CONTEXT" section in KEY ELEMENTS for CTA information
+- Identify the main call-to-action button (not secondary buttons like "Wishlist" or "Compare")
 
-FAIL only if:
-- "Add to Cart" or "Buy Now" button requires scrolling to see (below the fold)
-- Button is hidden or not visible
-- Button is too small or has poor contrast
+STEP 2 (Check Position - Above the Fold):
+- Verify if the button is "Above the Fold" (visible without scrolling)
+- Check if button is immediately visible when page loads
+- If button requires scrolling to see → FAIL (must be above the fold)
+- If button is visible at the top of the page without scrolling → PASS this step
 
-IMPORTANT: 
-- If buttons are at the TOP of the page and visible immediately → PASS
-- Check the visible content and KEY ELEMENTS to see if "Add to Cart" or "Buy Now" buttons are mentioned near the top
-- If buttons are mentioned in the first 1000 characters of visible text or in KEY ELEMENTS near the top → PASS
-- Do NOT fail if buttons are clearly visible at the top of the page
+STEP 3 (Analyze Contrast - Color Stands Out):
+- Check if the button color stands out clearly from the page background
+- Good examples: Solid electric blue button on white background, bright green on white, high-contrast colors
+- Bad examples: Ghost button (transparent with thin border), light gray on white, low-contrast colors
+- Button should have high visual contrast against background
+- If button blends into background → FAIL
+- If button has clear, high-contrast color → PASS this step
 
-Example PASS: "The 'Add to Cart' and 'Buy Now' buttons are prominently displayed at the top of the product page, immediately visible without scrolling. They are located in the product details section and have clear visual prominence."
+STEP 4 (Check Size - Largest Clickable Element):
+- Verify if the button is the largest, most clickable element in the product section
+- Compare button size with other buttons (Wishlist, Compare, etc.)
+- Button should be larger than secondary buttons
+- Button should be easily clickable (not too small)
+- If button is smaller than other elements or too small → FAIL
+- If button is the largest clickable element → PASS this step
 
-Example FAIL: "The 'Add to Cart' button is located below the fold and requires scrolling to be visible. It should be positioned at the top of the page for immediate visibility."
+STEP 5 (Final Verdict):
+- PASS if ALL 4 steps pass:
+  1. Primary CTA identified ✓
+  2. Above the fold (visible without scrolling) ✓
+  3. High-contrast color (stands out from background) ✓
+  4. Largest clickable element (bigger than secondary buttons) ✓
+- FAIL if ANY step fails
 
-CRITICAL: 
-- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) in the reason
-- Only mention the button text like "Add to Cart" or "Buy Now" without any price information
-- Focus on button visibility, position, and prominence - NOT on pricing
+EXAMPLES FOR AI TRAINING:
+
+✅ Example 1 - PASS (Good - Solid Electric Blue Button):
+Analysis:
+- STEP 1: Found primary "Add to Cart" button
+- STEP 2: Button is above the fold, visible immediately without scrolling
+- STEP 3: Button uses solid electric blue color on white background - high contrast, clearly stands out
+- STEP 4: Button is the largest clickable element in product section, bigger than "Wishlist" and "Compare" buttons
+- STEP 5: All requirements met
+
+Output: {"passed": true, "reason": "The 'Add to Cart' button is prominently displayed above the fold with a solid electric blue color on white background, providing high contrast. It is the largest clickable element in the product section and is immediately visible without scrolling, meeting all prominence requirements."}
+
+❌ Example 2 - FAIL (Bad - Ghost Button):
+Analysis:
+- STEP 1: Found primary "Add to Cart" button
+- STEP 2: Button is above the fold, visible without scrolling
+- STEP 3: Button is a ghost button (transparent with thin border) that blends into the white background - low contrast
+- STEP 4: Button size is reasonable but lacks visual prominence due to low contrast
+- STEP 5: Contrast requirement failed
+
+Output: {"passed": false, "reason": "The 'Add to Cart' button is above the fold but uses a ghost button design (transparent with thin border) that blends into the white background. The low contrast makes it less prominent than required. The button should use a solid, high-contrast color to stand out clearly."}
+
+❌ Example 3 - FAIL (Bad - Below the Fold):
+Analysis:
+- STEP 1: Found primary "Add to Cart" button
+- STEP 2: Button requires scrolling to be visible - located below the fold
+- STEP 3: Button has good contrast (green on white)
+- STEP 4: Button is large and prominent
+- STEP 5: Position requirement failed
+
+Output: {"passed": false, "reason": "The 'Add to Cart' button requires scrolling to be visible and is located below the fold. While it has good contrast and size, it must be positioned above the fold (visible without scrolling) to meet the prominence requirement."}
+
+✅ Example 4 - PASS (Good - High Contrast, Large Size):
+Analysis:
+- STEP 1: Found primary "Buy Now" button
+- STEP 2: Button is above the fold, immediately visible
+- STEP 3: Button uses bright orange color on dark background - excellent contrast
+- STEP 4: Button is significantly larger than other buttons in the section
+- STEP 5: All requirements met
+
+Output: {"passed": true, "reason": "The 'Buy Now' button is prominently displayed above the fold with a bright orange color on dark background, providing excellent contrast. It is the largest clickable element in the product section and is immediately visible, meeting all prominence requirements."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check ALL 4 steps: Identify → Position → Contrast → Size
+2. Above the fold means visible WITHOUT scrolling
+3. High contrast means button color clearly stands out from background
+4. Largest element means bigger than secondary buttons in the same section
+5. Ghost buttons (transparent with borders) typically FAIL contrast check
+6. Solid, bright colors on contrasting backgrounds typically PASS
+7. If PASSED: Mention position (above fold), contrast (color description), and size
+8. If FAILED: Specify which step failed (position, contrast, or size) and why
+9. Do NOT mention currency symbols, prices, or amounts in the reason
+10. Focus on visual prominence: position, contrast, and size
+`
+        } else if (isFreeShippingThresholdRule) {
+          specialInstructions = `
+FREE SHIPPING THRESHOLD RULE - STEP-BY-STEP AUDIT:
+
+Task: Audit the "Free Shipping Threshold" visibility on this product page.
+
+You are an expert E-commerce UX Auditor. Follow these steps strictly:
+
+STEP 1 (Locate - Find CTA Button):
+- Identify the main "Add to Cart" button
+- Check "CTA CONTEXT" section in KEY ELEMENTS for CTA location
+- Note the button's position on the page
+
+STEP 2 (Verify Proximity - Within 50-100 pixels):
+- Look at the area immediately surrounding the main "Add to Cart" button
+- Check if free shipping message is within 50-100 pixels of the button
+- Check if message is directly above or below the button
+- Check "CTA CONTEXT" section for shipping information near CTA
+- If shipping info is in header banner or footer (far from button) → FAIL
+- If shipping info is within 50-100px of button → PASS this step
+
+STEP 3 (Check Language - Threshold Language):
+- Verify if the message uses "Threshold Language"
+- Look for phrases like:
+  * "Add $X more for Free Shipping"
+  * "Free shipping over $50"
+  * "You are $X away from FREE shipping"
+  * "Spend $X more to get free shipping"
+- Generic messages like "Free shipping available" or "Free shipping on all orders" do NOT count
+- Must include specific threshold amount or "add X more" language
+- If threshold language is present → PASS this step
+- If only generic shipping info → FAIL
+
+STEP 4 (Visual Check - Clear and Readable):
+- Verify if the text is clear and easy to read
+- Check if text is not more distracting than the main CTA
+- Text should be visible but not compete with CTA for attention
+- Text should be readable (good font size, contrast)
+- If text is too small or hard to read → FAIL
+- If text is clear and readable without distracting from CTA → PASS this step
+
+STEP 5 (Final Verdict):
+- PASS if ALL 4 steps pass:
+  1. CTA button located ✓
+  2. Free shipping message within 50-100px of CTA ✓
+  3. Threshold language used (e.g., "Add $X more") ✓
+  4. Text is clear and readable without distracting from CTA ✓
+- FAIL if ANY step fails
+
+EXAMPLES FOR AI TRAINING:
+
+✅ Example 1 - PASS (Good - Threshold Language Near CTA):
+Analysis:
+- STEP 1: Found "Add to Cart" button in product section
+- STEP 2: Free shipping message "You are $12 away from FREE shipping" is placed directly above the Add to Cart button, within 50-100px
+- STEP 3: Message uses threshold language ("$12 away from FREE shipping") - specific amount mentioned
+- STEP 4: Text is clear, readable, and doesn't distract from the main CTA
+- STEP 5: All requirements met
+
+Output: {"passed": true, "reason": "Free shipping threshold message 'You are $12 away from FREE shipping' is displayed directly above the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount and is clear and readable without distracting from the main CTA."}
+
+❌ Example 2 - FAIL (Bad - Only in Header Banner):
+Analysis:
+- STEP 1: Found "Add to Cart" button in product section
+- STEP 2: Free shipping information "Free shipping on orders over $50" is only mentioned in the header banner at the top of the page, far from the CTA button
+- STEP 3: Message uses threshold language but location is wrong
+- STEP 4: Text is readable but not near CTA
+- STEP 5: Proximity requirement failed
+
+Output: {"passed": false, "reason": "Free shipping information 'Free shipping on orders over $50' is only mentioned in the header banner at the top of the page, far from the 'Add to Cart' button. The message must be located within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and increase Average Order Value."}
+
+❌ Example 3 - FAIL (Bad - Generic Language):
+Analysis:
+- STEP 1: Found "Add to Cart" button
+- STEP 2: Shipping message "Free shipping available" is near the button, within 50-100px
+- STEP 3: Message does NOT use threshold language - it's generic ("Free shipping available" instead of "Add $X more for Free Shipping")
+- STEP 4: Text is readable
+- STEP 5: Language requirement failed
+
+Output: {"passed": false, "reason": "Shipping message 'Free shipping available' is located near the 'Add to Cart' button but does not use threshold language. The message should use persuasive language like 'Add $X more for Free Shipping' or 'You are $X away from FREE shipping' with a specific amount to encourage higher order values."}
+
+✅ Example 4 - PASS (Good - Below CTA with Threshold):
+Analysis:
+- STEP 1: Found "Add to Cart" button
+- STEP 2: Free shipping message "Spend $25 more to get free shipping" is placed directly below the Add to Cart button, within 50-100px
+- STEP 3: Message uses threshold language ("Spend $25 more") with specific amount
+- STEP 4: Text is clear, readable, and appropriately sized
+- STEP 5: All requirements met
+
+Output: {"passed": true, "reason": "Free shipping threshold message 'Spend $25 more to get free shipping' is displayed directly below the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount ($25) and is clear and readable, effectively encouraging higher order values."}
+
+❌ Example 4 - FAIL (Bad - Too Far from CTA):
+Analysis:
+- STEP 1: Found "Add to Cart" button in product section
+- STEP 2: Free shipping message "Free shipping over $50" is in the page footer, more than 100px away from the CTA button
+- STEP 3: Message uses threshold language
+- STEP 4: Text is readable but location is wrong
+- STEP 5: Proximity requirement failed
+
+Output: {"passed": false, "reason": "Free shipping message 'Free shipping over $50' is located in the page footer, more than 100px away from the 'Add to Cart' button. The message must be within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and effectively increase Average Order Value."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check ALL 4 steps: Locate CTA → Verify Proximity → Check Language → Visual Check
+2. Proximity means within 50-100 pixels, directly above or below the CTA button
+3. Threshold language means specific phrases like "Add $X more" or "Free shipping over $X"
+4. Generic messages like "Free shipping available" do NOT count as threshold language
+5. Message must be in immediate eye-path of CTA, not in header banners or footers
+6. If PASSED: Mention proximity (within 50-100px), threshold language used, and location
+7. If FAILED: Specify which step failed (proximity, language, or visibility) and suggest exact text to use
+8. Do NOT mention currency symbols in the reason unless necessary for clarity
+9. Focus on proximity, language, and visibility requirements
+10. Suggest specific threshold language if missing (e.g., "Add $X more for Free Shipping")
+`
+        } else if (isProductComparisonRule) {
+          specialInstructions = `
+PRODUCT COMPARISON RULE - STEP-BY-STEP AUDIT:
+
+Act as a conversion-rate optimization expert. Apply the product-comparison rule to the provided product. You must check the rule line-by-line. Your goal is to verify if the product page shows why the primary product is the best choice while being honest about alternatives.
+
+STEP 1 (Identify Alternatives - 2-3 Similar Products):
+- Look for a comparison section on the product page
+- Check if 2-3 similar alternatives are identified and compared
+- Look for competitor names, alternative products, or comparison tables
+- If no alternatives mentioned → FAIL (must compare with 2-3 alternatives)
+- If 2-3 alternatives are identified → PASS this step
+
+STEP 2 (Select Attributes - 4+ Technical/Functional Attributes):
+- Check what attributes are being compared
+- Look for technical attributes (RAM, Battery, Storage, Speed, etc.)
+- Look for functional attributes (Features, Price, Quality, Warranty, etc.)
+- Must compare at least 4+ attributes (not just 1-2)
+- If less than 4 attributes compared → FAIL
+- If 4+ attributes compared → PASS this step
+
+STEP 3 (Create Scannable Table Format):
+- Check if comparison is presented in a table format
+- Look for structured comparison (table, grid, or organized layout)
+- Table should be easy to scan and compare attributes side-by-side
+- If comparison is just text paragraphs → FAIL (not scannable)
+- If comparison is in table/grid format → PASS this step
+
+STEP 4 (Highlight Winner/Unique Value):
+- Check if the primary product's advantages are explicitly highlighted
+- Look for "Winner" indicators, "Best Choice" labels, or unique value propositions
+- Check if the primary product's unique features are emphasized
+- If no winner/unique value highlighted → FAIL
+- If winner/unique value is clearly highlighted → PASS this step
+
+STEP 5 (Verify Decision Fatigue Reduction):
+- Check if comparison is objective yet persuasive
+- Verify that comparison reduces decision fatigue (makes choice easier)
+- Check if comparison is honest about alternatives (not just bashing competitors)
+- If comparison is too biased or confusing → FAIL
+- If comparison is objective, clear, and helps decision-making → PASS this step
+
+STEP 6 (Final Verdict):
+- PASS if ALL 5 steps pass:
+  1. 2-3 alternatives identified ✓
+  2. 4+ attributes compared ✓
+  3. Scannable table format ✓
+  4. Winner/unique value highlighted ✓
+  5. Reduces decision fatigue ✓
+- FAIL if ANY step fails
+
+EXAMPLES FOR AI TRAINING:
+
+✅ Example 1 - PASS (Tech Product - Titan Laptop):
+Analysis:
+- STEP 1: Comparison section identifies 2 alternatives: "FruitBook" and "Dell-X"
+- STEP 2: Compares 4+ attributes: RAM (16GB vs 8GB vs 12GB), Battery (12hrs vs 8hrs vs 10hrs), Price, and Repairability Score
+- STEP 3: Comparison presented in scannable table format with columns for each product
+- STEP 4: Titan's "Repairability Score" is explicitly highlighted as unique value (10/10 vs 3/10 vs 5/10)
+- STEP 5: Comparison is objective, shows Titan wins on repairability while being honest about price differences
+- STEP 6: All requirements met
+
+Output: {"passed": true, "reason": "Product comparison section includes 2 alternatives (FruitBook, Dell-X) with 4+ attributes compared (RAM, Battery, Price, Repairability Score) in a scannable table format. Titan's unique 'Repairability Score' (10/10) is explicitly highlighted as the winner, and the comparison is objective yet persuasive, reducing decision fatigue."}
+
+❌ Example 2 - FAIL (Missing Alternatives):
+Analysis:
+- STEP 1: No comparison section found, or only mentions generic "other products" without specific alternatives
+- STEP 2: Cannot verify attributes (no comparison exists)
+- STEP 3: No table format (no comparison section)
+- STEP 4: No winner highlighted (no comparison)
+- STEP 5: No decision fatigue reduction (no comparison)
+- STEP 6: Step 1 failed
+
+Output: {"passed": false, "reason": "No product comparison section found on the page. The page must include a comparison with 2-3 specific alternatives, compare 4+ attributes in a scannable table format, and highlight the primary product's unique value to reduce decision fatigue."}
+
+✅ Example 3 - PASS (Household Item - PureFlow Water Filter):
+Analysis:
+- STEP 1: Comparison section identifies alternatives: "Generic Pitchers" and "Brand X Filters"
+- STEP 2: Compares 4+ attributes: Filtration Layers (5 vs 2 vs 3), Filter Life (6 months vs 1 month vs 3 months), Price, and Cost-per-gallon
+- STEP 3: Comparison in scannable table format
+- STEP 4: Unique value highlighted: "While our price is higher, the cost-per-gallon is 50% lower" - explicitly shows value proposition
+- STEP 5: Comparison is honest (admits higher price) yet persuasive (shows better value), reduces decision fatigue
+- STEP 6: All requirements met
+
+Output: {"passed": true, "reason": "Product comparison section compares PureFlow with 2 alternatives (Generic Pitchers, Brand X Filters) across 4+ attributes (Filtration Layers, Filter Life, Price, Cost-per-gallon) in a scannable table. The unique value is highlighted: 'cost-per-gallon is 50% lower' despite higher initial price, and the comparison is objective yet persuasive."}
+
+❌ Example 4 - FAIL (Insufficient Attributes):
+Analysis:
+- STEP 1: Comparison section identifies 2 alternatives
+- STEP 2: Only compares 2 attributes (Price and Brand) - less than required 4+ attributes
+- STEP 3: Table format exists
+- STEP 4: Winner is highlighted
+- STEP 5: Comparison is clear but insufficient
+- STEP 6: Step 2 failed
+
+Output: {"passed": false, "reason": "Product comparison section exists with 2 alternatives but only compares 2 attributes (Price and Brand). The comparison must include at least 4+ technical or functional attributes (e.g., features, specifications, quality, warranty) to provide meaningful comparison and reduce decision fatigue."}
+
+✅ Example 5 - PASS (Subscription Service - FitFlex App):
+Analysis:
+- STEP 1: Comparison section identifies 2 alternatives: "Free YouTube Videos" and "Gym Memberships"
+- STEP 2: Compares 4+ attributes: Live Coaching (Yes vs No vs Limited), Device Sync (Yes vs No vs No), Price, and Personalized AI Trainer (Yes vs No vs No)
+- STEP 3: Comparison in scannable table format
+- STEP 4: Unique value explicitly highlighted: "Personalized AI Trainer feature that others lack" - clearly shows what makes FitFlex different
+- STEP 5: Comparison is objective (acknowledges free alternatives exist) yet persuasive (shows unique value), helps users make informed decision
+- STEP 6: All requirements met
+
+Output: {"passed": true, "reason": "Product comparison section compares FitFlex App with 2 alternatives (Free YouTube Videos, Gym Memberships) across 4+ attributes (Live Coaching, Device Sync, Price, Personalized AI Trainer) in a scannable table format. The unique 'Personalized AI Trainer' feature is explicitly highlighted as what others lack, and the comparison is objective yet persuasive."}
+
+❌ Example 6 - FAIL (No Table Format):
+Analysis:
+- STEP 1: Comparison section identifies 2 alternatives
+- STEP 2: Compares 4+ attributes
+- STEP 3: Comparison is in paragraph text format, not a scannable table - hard to compare side-by-side
+- STEP 4: Winner is mentioned but not clearly highlighted
+- STEP 5: Comparison is confusing due to format
+- STEP 6: Step 3 failed
+
+Output: {"passed": false, "reason": "Product comparison section exists with alternatives and attributes, but the comparison is presented in paragraph text format rather than a scannable table. The comparison must use a table or grid format to allow easy side-by-side comparison of attributes, making it easier for users to scan and reduce decision fatigue."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check ALL 5 steps: Identify Alternatives → Select Attributes → Table Format → Highlight Winner → Decision Fatigue
+2. Must have 2-3 specific alternatives (not generic "other products")
+3. Must compare 4+ attributes (technical or functional)
+4. Must use scannable table/grid format (not just paragraphs)
+5. Must explicitly highlight winner/unique value for primary product
+6. Comparison must be objective yet persuasive (honest but shows why primary product is best)
+7. If PASSED: Mention number of alternatives, attributes compared, format, and unique value highlighted
+8. If FAILED: Specify which step failed and what's missing (alternatives, attributes, table format, winner highlight, or clarity)
+9. Do NOT mention currency symbols, prices, or amounts unless necessary for the comparison context
+10. Focus on completeness: alternatives, attributes, format, highlighting, and decision-making clarity
 `
         }
           

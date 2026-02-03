@@ -82,8 +82,8 @@
   {
     "id": "product-comparison",
     "title": "Include a product comparison section",
-    "description": "A comparison section should highlight how the product compares to alternatives, reducing decision fatigue and reinforcing value."
-  },
+    "description": "The product page must include a comparison section that compares the primary product with 2-3 similar alternatives. The comparison must: 1. Identify 2-3 similar alternatives. 2. Compare 4+ technical or functional attributes (e.g., RAM, Battery, Price, Features). 3. Use a scannable table format. 4. Explicitly highlight the 'Winner' or 'Unique Value' for the primary product. 5. Be objective yet persuasive to reduce decision fatigue. The comparison should show why the primary product is the best choice while being honest about alternatives."
+  },  
   {
     "id": "ugc-customer-photos",
     "title": "Show customer photos using the product",
@@ -97,18 +97,18 @@
   {
     "id": "variant-preselection",
     "title": "Preselect the most common variant",
-    "description": "The most commonly chosen size or color should be preselected to reduce friction and speed up the purchasing process."
-  },
-  {
-    "id": "cta-prominence",
-    "title": "Make the main CTA the most prominent element",
-    "description": "The primary CTA (Add to Cart or Buy Now) should stand out visually, be placed above the fold, and contrast clearly with the background."
-  },
-  {
-    "id": "free-shipping-threshold",
-    "title": "Highlight free shipping threshold near CTA",
-    "description": "If applicable, the free shipping threshold should be clearly displayed near the main CTA to encourage higher order values."
-  },
+    "description": "Ensure the most popular size, color, or configuration is selected by default when the page loads. The preselected variant must be clearly highlighted visually (e.g., bold border, darker color, selected state) and allow users to click 'Add to Cart' immediately without selecting a variant first. If 'Add to Cart' button is disabled until a variant is selected, or all variant options look the same on page load, the rule fails."
+  },  
+    {
+      "id": "cta-prominence",
+      "title": "Make the main CTA the most prominent element",
+      "description": "The primary CTA (Add to Cart/Buy Now) must be the visual focal point. It must be placed 'above the fold' (visible without scrolling), use a high-contrast color against the background (e.g., solid electric blue on white), be larger than secondary buttons, and use clear action-oriented text. Ghost buttons (transparent with thin borders) that blend into the background do NOT meet this requirement."
+    },
+    {
+      "id": "free-shipping-threshold",
+      "title": "Highlight free shipping threshold near CTA",
+      "description": "Display the free shipping incentive in the immediate eye-path of the CTA. It must be located within 50-100 pixels of the main 'Add to Cart' button (directly above or below), use persuasive threshold language like 'Add $X more for Free Shipping' or 'Free shipping over $50', and be clear and readable without being more distracting than the main CTA. Shipping information only in header banners or page footer does NOT meet this requirement."
+    },
   {
     "id": "trust-badges-near-cta",
     "title": "Display trust signals near the CTA",
