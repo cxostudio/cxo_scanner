@@ -52,6 +52,33 @@ const extractRetryAfter = (errorMessage: string): number => {
   return 0
 }
 
+// Helper function to convert image URLs to protocol-relative format (//)
+const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
+  if (!url || url.startsWith('data:') || url.startsWith('//')) {
+    // Already protocol-relative or data URL, return as is
+    return url
+  }
+  
+  try {
+    // If URL is already absolute (starts with http:// or https://)
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      // Extract domain and path, convert to protocol-relative
+      const urlObj = new URL(url)
+      return `//${urlObj.host}${urlObj.pathname}${urlObj.search}${urlObj.hash}`
+    }
+    
+    // If URL is relative, resolve it first
+    const baseUrlObj = new URL(baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`)
+    const resolvedUrl = new URL(url, baseUrlObj.href)
+    // Convert to protocol-relative
+    return `//${resolvedUrl.host}${resolvedUrl.pathname}${resolvedUrl.search}${resolvedUrl.hash}`
+  } catch (error) {
+    // If URL parsing fails, return original
+    console.warn('Failed to convert URL to protocol-relative:', url, error)
+    return url
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -91,6 +118,7 @@ export async function POST(request: NextRequest) {
     // Fetch website content with Puppeteer to detect JavaScript-loaded content
     let websiteContent = ''
     let browser
+    let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     try {
       // Launch headless browser
       browser = await puppeteer.launch({
@@ -288,7 +316,22 @@ export async function POST(request: NextRequest) {
           // Check images
           images.forEach((img, index) => {
             const loadingAttr = img.getAttribute('loading')
-            const src = img.getAttribute('src') || img.getAttribute('data-src') || `image-${index + 1}`
+            let src = img.getAttribute('src') || img.getAttribute('data-src') || `image-${index + 1}`
+            // Convert image URLs to protocol-relative format (//)
+            if (src && !src.startsWith('data:') && !src.startsWith('//')) {
+              try {
+                if (src.startsWith('http://') || src.startsWith('https://')) {
+                  const urlObj = new URL(src)
+                  src = `//${urlObj.host}${urlObj.pathname}${urlObj.search}${urlObj.hash}`
+                } else if (src.startsWith('/')) {
+                  // Relative URL starting with /, make it protocol-relative
+                  const baseUrl = window.location.origin
+                  src = `//${new URL(baseUrl).host}${src}`
+                }
+              } catch (e) {
+                // If conversion fails, keep original
+              }
+            }
             const isAboveFold = img.getBoundingClientRect().top < window.innerHeight
             
             // Above-fold images should NOT have lazy loading
@@ -790,6 +833,61 @@ export async function POST(request: NextRequest) {
 
                       
 
+      // Capture screenshot once for all rules (for AI vision analysis)
+      // Capture before closing browser so page is still available
+      // Support multiple formats: PNG (best quality), JPEG (fallback), WebP (alternative)
+      try {
+        let screenshot: string | Buffer | null = null
+        let imageFormat = 'png'
+        
+        // Try PNG first (best quality, supports transparency, lossless)
+        try {
+          screenshot = await page.screenshot({
+            type: 'png',
+            fullPage: false, // Only capture viewport for faster processing
+            encoding: 'base64',
+          }) as string
+          imageFormat = 'png'
+          console.log('Screenshot captured in PNG format')
+        } catch (pngError) {
+          // Fallback to JPEG if PNG fails (smaller file size, good quality)
+          try {
+            screenshot = await page.screenshot({
+              type: 'jpeg',
+              fullPage: false,
+              encoding: 'base64',
+              quality: 90, // High quality JPEG
+            }) as string
+            imageFormat = 'jpeg'
+            console.log('Screenshot captured in JPEG format (PNG fallback)')
+          } catch (jpegError) {
+            // Final fallback to WebP (modern format, good compression)
+            try {
+              screenshot = await page.screenshot({
+                type: 'webp',
+                fullPage: false,
+                encoding: 'base64',
+                quality: 90, // High quality WebP
+              }) as string
+              imageFormat = 'webp'
+              console.log('Screenshot captured in WebP format (PNG/JPEG fallback)')
+            } catch (webpError) {
+              console.warn('Failed to capture screenshot in PNG, JPEG, and WebP:', webpError)
+              screenshot = null
+            }
+          }
+        }
+        
+        if (screenshot) {
+          screenshotDataUrl = `data:image/${imageFormat};base64,${screenshot}`
+          console.log(`Screenshot ready in ${imageFormat.toUpperCase()} format for AI vision analysis`)
+        } else {
+          screenshotDataUrl = null
+        }
+      } catch (screenshotError) {
+        console.warn('Failed to capture screenshot:', screenshotError)
+        screenshotDataUrl = null
+      }
       
       // Close browser
       await browser.close()
@@ -901,7 +999,6 @@ export async function POST(request: NextRequest) {
   (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
   (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
   (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
-          const isProductComparisonRule = rule.id === 'product-comparison' || (rule.title.toLowerCase().includes('comparison') && rule.title.toLowerCase().includes('product'))
           
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -914,7 +1011,47 @@ export async function POST(request: NextRequest) {
           } else if (isRatingRule) {
             specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
           } else if (isCustomerPhotoRule) {
-            specialInstructions = `\nCUSTOMER PHOTOS RULE - STRICT CHECK:\nCheck for REAL customer photos (not product images) in: product gallery, description, or review section.\nMust show customers USING/WEARING the product in real life.\nProduct-only images do NOT count. Stock photos do NOT count.\nIf no customer photos found → FAIL.`
+            specialInstructions = `
+CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
+
+CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for customer photos.
+
+STEP 1 (Visual Scan - Look at the Screenshot):
+- Examine the entire screenshot image provided
+- Look for images in: product gallery, description section, review section, or user-generated content areas
+- Scan for photos that show the product being USED by real customers
+
+STEP 2 (Identify Customer Photos):
+Look for visual indicators of authentic customer photos:
+- Natural lighting (not studio lighting)
+- Real-world backgrounds (homes, offices, outdoor settings)
+- Non-professional models (regular people, not models)
+- Product in use (being worn, held, or used in real life)
+- User-uploaded style (different angles, casual settings)
+
+STEP 3 (Differentiate from Professional Photos):
+EXCLUDE these (they are NOT customer photos):
+- Studio shots with white/plain backgrounds
+- Professional product photography
+- Branded/model photos
+- Product-only images (no people using it)
+- Stock photos
+
+STEP 4 (Final Verdict):
+- PASS if you find at least ONE (1) authentic customer photo in the screenshot
+- FAIL if you only see professional/studio photos or product-only images
+- FAIL if no images are visible in the screenshot
+
+IMPORTANT:
+- You MUST look at the SCREENSHOT IMAGE provided, not just text content
+- Visual analysis is required - check the actual images in the screenshot
+- If customer photos are present in the screenshot, the rule PASSES
+- Be specific about WHERE in the screenshot you see customer photos (e.g., "review section", "gallery", "user photos section")
+
+Examples:
+✅ PASS: "I can see in the screenshot that there are customer-uploaded photos in the review section showing the product being used in real home settings with natural lighting. These are authentic customer photos, not professional studio shots."
+❌ FAIL: "In the screenshot, I only see professional product images with white backgrounds and studio lighting. No customer photos are visible in the review section or gallery."
+`
           } else if (isStickyCartRule) {
             specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`
           } else if (isProductTitleRule) {
@@ -1519,148 +1656,48 @@ CRITICAL INSTRUCTIONS:
 9. Focus on proximity, language, and visibility requirements
 10. Suggest specific threshold language if missing (e.g., "Add $X more for Free Shipping")
 `
-        } else if (isProductComparisonRule) {
-          specialInstructions = `
-PRODUCT COMPARISON RULE - STEP-BY-STEP AUDIT:
-
-Act as a conversion-rate optimization expert. Apply the product-comparison rule to the provided product. You must check the rule line-by-line. Your goal is to verify if the product page shows why the primary product is the best choice while being honest about alternatives.
-
-STEP 1 (Identify Alternatives - 2-3 Similar Products):
-- Look for a comparison section on the product page
-- Check if 2-3 similar alternatives are identified and compared
-- Look for competitor names, alternative products, or comparison tables
-- If no alternatives mentioned → FAIL (must compare with 2-3 alternatives)
-- If 2-3 alternatives are identified → PASS this step
-
-STEP 2 (Select Attributes - 4+ Technical/Functional Attributes):
-- Check what attributes are being compared
-- Look for technical attributes (RAM, Battery, Storage, Speed, etc.)
-- Look for functional attributes (Features, Price, Quality, Warranty, etc.)
-- Must compare at least 4+ attributes (not just 1-2)
-- If less than 4 attributes compared → FAIL
-- If 4+ attributes compared → PASS this step
-
-STEP 3 (Create Scannable Table Format):
-- Check if comparison is presented in a table format
-- Look for structured comparison (table, grid, or organized layout)
-- Table should be easy to scan and compare attributes side-by-side
-- If comparison is just text paragraphs → FAIL (not scannable)
-- If comparison is in table/grid format → PASS this step
-
-STEP 4 (Highlight Winner/Unique Value):
-- Check if the primary product's advantages are explicitly highlighted
-- Look for "Winner" indicators, "Best Choice" labels, or unique value propositions
-- Check if the primary product's unique features are emphasized
-- If no winner/unique value highlighted → FAIL
-- If winner/unique value is clearly highlighted → PASS this step
-
-STEP 5 (Verify Decision Fatigue Reduction):
-- Check if comparison is objective yet persuasive
-- Verify that comparison reduces decision fatigue (makes choice easier)
-- Check if comparison is honest about alternatives (not just bashing competitors)
-- If comparison is too biased or confusing → FAIL
-- If comparison is objective, clear, and helps decision-making → PASS this step
-
-STEP 6 (Final Verdict):
-- PASS if ALL 5 steps pass:
-  1. 2-3 alternatives identified ✓
-  2. 4+ attributes compared ✓
-  3. Scannable table format ✓
-  4. Winner/unique value highlighted ✓
-  5. Reduces decision fatigue ✓
-- FAIL if ANY step fails
-
-EXAMPLES FOR AI TRAINING:
-
-✅ Example 1 - PASS (Tech Product - Titan Laptop):
-Analysis:
-- STEP 1: Comparison section identifies 2 alternatives: "FruitBook" and "Dell-X"
-- STEP 2: Compares 4+ attributes: RAM (16GB vs 8GB vs 12GB), Battery (12hrs vs 8hrs vs 10hrs), Price, and Repairability Score
-- STEP 3: Comparison presented in scannable table format with columns for each product
-- STEP 4: Titan's "Repairability Score" is explicitly highlighted as unique value (10/10 vs 3/10 vs 5/10)
-- STEP 5: Comparison is objective, shows Titan wins on repairability while being honest about price differences
-- STEP 6: All requirements met
-
-Output: {"passed": true, "reason": "Product comparison section includes 2 alternatives (FruitBook, Dell-X) with 4+ attributes compared (RAM, Battery, Price, Repairability Score) in a scannable table format. Titan's unique 'Repairability Score' (10/10) is explicitly highlighted as the winner, and the comparison is objective yet persuasive, reducing decision fatigue."}
-
-❌ Example 2 - FAIL (Missing Alternatives):
-Analysis:
-- STEP 1: No comparison section found, or only mentions generic "other products" without specific alternatives
-- STEP 2: Cannot verify attributes (no comparison exists)
-- STEP 3: No table format (no comparison section)
-- STEP 4: No winner highlighted (no comparison)
-- STEP 5: No decision fatigue reduction (no comparison)
-- STEP 6: Step 1 failed
-
-Output: {"passed": false, "reason": "No product comparison section found on the page. The page must include a comparison with 2-3 specific alternatives, compare 4+ attributes in a scannable table format, and highlight the primary product's unique value to reduce decision fatigue."}
-
-✅ Example 3 - PASS (Household Item - PureFlow Water Filter):
-Analysis:
-- STEP 1: Comparison section identifies alternatives: "Generic Pitchers" and "Brand X Filters"
-- STEP 2: Compares 4+ attributes: Filtration Layers (5 vs 2 vs 3), Filter Life (6 months vs 1 month vs 3 months), Price, and Cost-per-gallon
-- STEP 3: Comparison in scannable table format
-- STEP 4: Unique value highlighted: "While our price is higher, the cost-per-gallon is 50% lower" - explicitly shows value proposition
-- STEP 5: Comparison is honest (admits higher price) yet persuasive (shows better value), reduces decision fatigue
-- STEP 6: All requirements met
-
-Output: {"passed": true, "reason": "Product comparison section compares PureFlow with 2 alternatives (Generic Pitchers, Brand X Filters) across 4+ attributes (Filtration Layers, Filter Life, Price, Cost-per-gallon) in a scannable table. The unique value is highlighted: 'cost-per-gallon is 50% lower' despite higher initial price, and the comparison is objective yet persuasive."}
-
-❌ Example 4 - FAIL (Insufficient Attributes):
-Analysis:
-- STEP 1: Comparison section identifies 2 alternatives
-- STEP 2: Only compares 2 attributes (Price and Brand) - less than required 4+ attributes
-- STEP 3: Table format exists
-- STEP 4: Winner is highlighted
-- STEP 5: Comparison is clear but insufficient
-- STEP 6: Step 2 failed
-
-Output: {"passed": false, "reason": "Product comparison section exists with 2 alternatives but only compares 2 attributes (Price and Brand). The comparison must include at least 4+ technical or functional attributes (e.g., features, specifications, quality, warranty) to provide meaningful comparison and reduce decision fatigue."}
-
-✅ Example 5 - PASS (Subscription Service - FitFlex App):
-Analysis:
-- STEP 1: Comparison section identifies 2 alternatives: "Free YouTube Videos" and "Gym Memberships"
-- STEP 2: Compares 4+ attributes: Live Coaching (Yes vs No vs Limited), Device Sync (Yes vs No vs No), Price, and Personalized AI Trainer (Yes vs No vs No)
-- STEP 3: Comparison in scannable table format
-- STEP 4: Unique value explicitly highlighted: "Personalized AI Trainer feature that others lack" - clearly shows what makes FitFlex different
-- STEP 5: Comparison is objective (acknowledges free alternatives exist) yet persuasive (shows unique value), helps users make informed decision
-- STEP 6: All requirements met
-
-Output: {"passed": true, "reason": "Product comparison section compares FitFlex App with 2 alternatives (Free YouTube Videos, Gym Memberships) across 4+ attributes (Live Coaching, Device Sync, Price, Personalized AI Trainer) in a scannable table format. The unique 'Personalized AI Trainer' feature is explicitly highlighted as what others lack, and the comparison is objective yet persuasive."}
-
-❌ Example 6 - FAIL (No Table Format):
-Analysis:
-- STEP 1: Comparison section identifies 2 alternatives
-- STEP 2: Compares 4+ attributes
-- STEP 3: Comparison is in paragraph text format, not a scannable table - hard to compare side-by-side
-- STEP 4: Winner is mentioned but not clearly highlighted
-- STEP 5: Comparison is confusing due to format
-- STEP 6: Step 3 failed
-
-Output: {"passed": false, "reason": "Product comparison section exists with alternatives and attributes, but the comparison is presented in paragraph text format rather than a scannable table. The comparison must use a table or grid format to allow easy side-by-side comparison of attributes, making it easier for users to scan and reduce decision fatigue."}
-
-CRITICAL INSTRUCTIONS:
-1. You MUST check ALL 5 steps: Identify Alternatives → Select Attributes → Table Format → Highlight Winner → Decision Fatigue
-2. Must have 2-3 specific alternatives (not generic "other products")
-3. Must compare 4+ attributes (technical or functional)
-4. Must use scannable table/grid format (not just paragraphs)
-5. Must explicitly highlight winner/unique value for primary product
-6. Comparison must be objective yet persuasive (honest but shows why primary product is best)
-7. If PASSED: Mention number of alternatives, attributes compared, format, and unique value highlighted
-8. If FAILED: Specify which step failed and what's missing (alternatives, attributes, table format, winner highlight, or clarity)
-9. Do NOT mention currency symbols, prices, or amounts unless necessary for the comparison context
-10. Focus on completeness: alternatives, attributes, format, highlighting, and decision-making clarity
-`
         }
           
           const prompt = `URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
-          // Call OpenRouter API directly
+          // Call OpenRouter API directly with image support
+          // Build content array with text and optional image
+          // OpenRouter format: content can be string or array of content parts
+          let messageContent: string | any[] = prompt
+          
+          // Add screenshot if available (for AI vision analysis)
+          // Always include screenshot for customer photos rule, and other visual rules
+          if (screenshotDataUrl && (isCustomerPhotoRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
+            // Convert screenshot data URL to protocol-relative format if it's a regular URL
+            // (data URLs stay as is, but if we had HTTP URLs, convert to //)
+            let imageUrl = screenshotDataUrl
+            // If it's not a data URL, convert to protocol-relative
+            if (!screenshotDataUrl.startsWith('data:')) {
+              imageUrl = toProtocolRelativeUrl(screenshotDataUrl, validUrl)
+            }
+            
+            // For multimodal content, use array format
+            messageContent = [
+              {
+                type: 'text',
+                text: prompt,
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageUrl,
+                },
+              },
+            ]
+            console.log(`Including screenshot for ${rule.id} rule (visual analysis required)`)
+          }
+          
           const chatCompletion = await openRouter.chat.send({
             model: modelName,
             messages: [
               {
-                role: 'user',
-                content: prompt,
+                role: 'user' as const, // Explicitly type as const to ensure correct role
+                content: messageContent,
               },
             ],
             temperature: 0.0,
