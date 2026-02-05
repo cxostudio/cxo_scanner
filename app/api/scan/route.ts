@@ -3,6 +3,7 @@ import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
 import puppeteer from 'puppeteer'
 
+
 interface Rule {
   id: string
   title: string
@@ -59,7 +60,7 @@ const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
     // Already protocol-relative or data URL, return as is
     return url
   }
-  
+
   try {
     // If URL is already absolute (starts with http:// or https://)
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -67,7 +68,7 @@ const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
       const urlObj = new URL(url)
       return `//${urlObj.host}${urlObj.pathname}${urlObj.search}${urlObj.hash}`
     }
-    
+
     // If URL is relative, resolve it first
     const baseUrlObj = new URL(baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`)
     const resolvedUrl = new URL(url, baseUrlObj.href)
@@ -83,10 +84,10 @@ const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    
+
     // Validate request body with Zod
     const validationResult = ScanRequestSchema.safeParse(body)
-    
+
     if (!validationResult.success) {
       const errors = validationResult.error.errors.map(err => `${err.path.join('.')}: ${err.message}`).join(', ')
       return NextResponse.json(
@@ -96,11 +97,43 @@ export async function POST(request: NextRequest) {
     }
 
     const { url, rules, captureScreenshot = true } = validationResult.data
-    
+
     // Normalize URL
     let validUrl = url.trim()
     if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
       validUrl = 'https://' + validUrl
+    }
+
+    // Special handling for Amazon product URLs:
+    // Long Amazon URLs with many query params often redirect to lightweight
+    // "Continue shopping" pages that do NOT contain product details or reviews.
+    // To ensure we always hit the real product page (with customer reviews
+    // and videos), normalize to the canonical /dp/<ASIN> URL.
+    try {
+      const parsed = new URL(validUrl)
+      const host = parsed.hostname.toLowerCase()
+      if (host.includes('amazon.')) {
+        let asin: string | null = null
+
+        // Match /dp/ASIN/ or /gp/product/ASIN/
+        const dpMatch = parsed.pathname.match(/\/dp\/([^/]+)/)
+        const gpMatch = parsed.pathname.match(/\/gp\/product\/([^/]+)/)
+
+        if (dpMatch && dpMatch[1]) {
+          asin = dpMatch[1]
+        } else if (gpMatch && gpMatch[1]) {
+          asin = gpMatch[1]
+        }
+
+        if (asin) {
+          // Build clean canonical product URL without extra params
+          const normalized = `${parsed.protocol}//${parsed.host}/dp/${asin}`
+          console.log(`Normalizing Amazon URL for scanning: ${validUrl} → ${normalized}`)
+          validUrl = normalized
+        }
+      }
+    } catch (e) {
+      console.warn('URL normalization failed, continuing with original URL:', e)
     }
 
     // OpenRouter API support
@@ -111,13 +144,17 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
-    
+
     const openRouter = new OpenRouter({
       apiKey: apiKey,
     })
 
     // Fetch website content with Puppeteer to detect JavaScript-loaded content
     let websiteContent = ''
+    // Keep a separate copy of the full visible text (without truncation) so
+    // we can run specialized heuristics (e.g., for review videos) even if
+    // we only send a shortened version to the AI model.
+    let fullVisibleText = ''
     let browser
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
@@ -127,22 +164,22 @@ export async function POST(request: NextRequest) {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       })
-      
+
       const page = await browser.newPage()
-      
+
       // Set viewport and user agent
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-      
+
       // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
       await page.goto(validUrl, {
         waitUntil: 'load', // Faster than networkidle0 - good enough for screenshot
         timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
-      
+
       // Quick wait for initial render
       await new Promise(resolve => setTimeout(resolve, 1000))
-      
+
       // Wait for critical images only (with timeout to avoid Vercel limit)
       console.log('Waiting for images to load...')
       try {
@@ -164,7 +201,7 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.warn('Image loading timeout, proceeding with screenshot')
       }
-      
+
       // Quick scroll to trigger lazy loading (limited for Vercel timeout)
       try {
         const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
@@ -183,14 +220,16 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.warn('Scroll failed, proceeding with screenshot')
       }
-      
+
       console.log('Page loaded, ready for screenshot')
-      
+
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
         return document.body.innerText || document.body.textContent || ''
       })
-      
+      // Store complete visible text for downstream heuristics
+      fullVisibleText = visibleText
+
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
       const keyElements = await page.evaluate(() => {
@@ -203,14 +242,14 @@ export async function POST(request: NextRequest) {
           .sort() // Sort alphabetically for consistency
           .slice(0, 30) // Increased limit and sort first
           .join(' | ')
-        
+
         const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
           .map(h => h.textContent?.trim())
           .filter(text => text && text.length > 0)
           .sort() // Sort alphabetically for consistency
           .slice(0, 15) // Increased limit
           .join(' | ')
-        
+
         // Get breadcrumb information - multiple selectors to catch all breadcrumb formats
         const breadcrumbSelectors = [
           '[class*="breadcrumb"]',
@@ -221,7 +260,7 @@ export async function POST(request: NextRequest) {
           'ol[class*="breadcrumb"]',
           'ul[class*="breadcrumb"]'
         ]
-        
+
         let breadcrumbs = ''
         for (const selector of breadcrumbSelectors) {
           const breadcrumbElements = Array.from(document.querySelectorAll(selector))
@@ -238,12 +277,12 @@ export async function POST(request: NextRequest) {
             if (breadcrumbs) break
           }
         }
-        
+
         // Also check for numbered breadcrumbs (like "1. Home 2. / mens 3. / New Arrivals")
         // Handle both single-line and multi-line formats
         if (!breadcrumbs) {
           const allText = document.body.innerText || ''
-          
+
           // Try multi-line numbered format first (1. Home\n2. / mens\n3. / New Arrivals)
           const multiLinePattern = /(\d+\.\s*[^\n]+\s*\n\s*\d+\.\s*[^\n]+(?:\s*\n\s*\d+\.\s*[^\n]+)*)/i
           const multiLineMatch = allText.match(multiLinePattern)
@@ -262,7 +301,7 @@ export async function POST(request: NextRequest) {
             }
           }
         }
-        
+
         // Additional check: Look for breadcrumb-like patterns in visible text near the top
         if (!breadcrumbs) {
           // Check first 2000 characters of visible text for breadcrumb patterns
@@ -272,7 +311,7 @@ export async function POST(request: NextRequest) {
             /(\d+\.\s*Home\s*[/>]?\s*[^\n]+)/i,
             /(Home\s*[/>]\s*\w+\s*[/>]\s*[^\n]+)/i
           ]
-          
+
           for (const pattern of breadcrumbLikePatterns) {
             const match = topText.match(pattern)
             if (match && match[0].length < 100) { // Reasonable breadcrumb length
@@ -281,7 +320,7 @@ export async function POST(request: NextRequest) {
             }
           }
         }
-        
+
         // Get color information for color rules - check computed styles
         const colorInfo = []
         try {
@@ -290,14 +329,14 @@ export async function POST(request: NextRequest) {
             ...Array.from(document.querySelectorAll('body, h1, h2, h3, p, a, button, [class*="text"], [class*="color"]')).slice(0, 20),
             ...Array.from(document.querySelectorAll('[style*="color"], [style*="background"]')).slice(0, 10)
           ]
-          
+
           const uniqueColors = new Set()
           sampleElements.forEach(el => {
             try {
               const computedStyle = window.getComputedStyle(el)
               const textColor = computedStyle.color
               const bgColor = computedStyle.backgroundColor
-              
+
               // Convert rgb to hex if needed
               const rgbToHex = (rgb: string): string | null => {
                 if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null
@@ -311,43 +350,43 @@ export async function POST(request: NextRequest) {
                   return hex.length === 1 ? '0' + hex : hex
                 }).join('')
               }
-              
+
               const textHex = rgbToHex(textColor)
               const bgHex = rgbToHex(bgColor)
-              
+
               if (textHex) uniqueColors.add(`text:${textHex}`)
               if (bgHex) uniqueColors.add(`bg:${bgHex}`)
             } catch (e) {
               // Ignore errors
             }
           })
-          
+
           // Check for pure black (#000000 or rgb(0,0,0))
           const colorArray = Array.from(uniqueColors) as string[]
-          const hasPureBlack = colorArray.some((c: string) => 
+          const hasPureBlack = colorArray.some((c: string) =>
             c.includes('#000000') || c.includes('rgb(0, 0, 0)') || c.includes('rgb(0,0,0)')
           )
-          
+
           const colorList = Array.from(uniqueColors).slice(0, 15).join(', ')
           colorInfo.push(`Colors found: ${colorList || 'No colors detected'}`)
           colorInfo.push(`Pure black (#000000) detected: ${hasPureBlack ? 'YES' : 'NO'}`)
         } catch (e) {
           colorInfo.push('Color detection: Unable to extract')
         }
-        
+
         // Get lazy loading information for images and videos
         const lazyLoadingInfo = []
         try {
           const images = Array.from(document.querySelectorAll('img'))
           const videos = Array.from(document.querySelectorAll('video'))
-          
+
           let imagesWithLazy = 0
           let imagesWithoutLazy = 0
           let videosWithLazy = 0
           let videosWithoutLazy = 0
           const imagesWithoutLazyList: string[] = []
           const videosWithoutLazyList: string[] = []
-          
+
           // Check images
           images.forEach((img, index) => {
             const loadingAttr = img.getAttribute('loading')
@@ -368,13 +407,13 @@ export async function POST(request: NextRequest) {
               }
             }
             const isAboveFold = img.getBoundingClientRect().top < window.innerHeight
-            
+
             // Above-fold images should NOT have lazy loading
             if (isAboveFold) {
               // Above-fold images are fine without lazy
               return
             }
-            
+
             // Below-fold images should have lazy loading
             if (loadingAttr === 'lazy' || img.hasAttribute('data-lazy') || img.classList.contains('lazy')) {
               imagesWithLazy++
@@ -386,18 +425,18 @@ export async function POST(request: NextRequest) {
               }
             }
           })
-          
+
           // Check videos
           videos.forEach((video, index) => {
             const loadingAttr = video.getAttribute('loading')
             const src = video.getAttribute('src') || video.querySelector('source')?.getAttribute('src') || `video-${index + 1}`
             const isAboveFold = video.getBoundingClientRect().top < window.innerHeight
-            
+
             // Above-fold videos should NOT have lazy loading
             if (isAboveFold) {
               return
             }
-            
+
             // Below-fold videos should have lazy loading
             if (loadingAttr === 'lazy' || video.hasAttribute('data-lazy') || video.classList.contains('lazy')) {
               videosWithLazy++
@@ -409,22 +448,22 @@ export async function POST(request: NextRequest) {
               }
             }
           })
-          
+
           const totalBelowFoldImages = imagesWithLazy + imagesWithoutLazy
           const totalBelowFoldVideos = videosWithLazy + videosWithoutLazy
-          
+
           if (totalBelowFoldImages > 0 || totalBelowFoldVideos > 0) {
             lazyLoadingInfo.push(`Images (below-fold): ${imagesWithLazy} with lazy, ${imagesWithoutLazy} without lazy`)
             lazyLoadingInfo.push(`Videos (below-fold): ${videosWithLazy} with lazy, ${videosWithoutLazy} without lazy`)
-            
+
             if (imagesWithoutLazy > 0) {
               lazyLoadingInfo.push(`Images without lazy loading: ${imagesWithoutLazyList.join(', ')}${imagesWithoutLazy > 5 ? ` (+${imagesWithoutLazy - 5} more)` : ''}`)
             }
-            
+
             if (videosWithoutLazy > 0) {
               lazyLoadingInfo.push(`Videos without lazy loading: ${videosWithoutLazyList.join(', ')}${videosWithoutLazy > 5 ? ` (+${videosWithoutLazy - 5} more)` : ''}`)
             }
-            
+
             // Overall status
             const allHaveLazy = imagesWithoutLazy === 0 && videosWithoutLazy === 0
             lazyLoadingInfo.push(`Lazy loading status: ${allHaveLazy ? 'PASS - All below-fold images/videos have lazy loading' : 'FAIL - Some below-fold images/videos missing lazy loading'}`)
@@ -434,7 +473,7 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           lazyLoadingInfo.push('Lazy loading detection: Unable to extract')
         }
-        
+
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}`
       })
 
@@ -442,7 +481,7 @@ export async function POST(request: NextRequest) {
       const quantityDiscountContext = await page.evaluate(() => {
         const bodyText = document.body.innerText || ''
         const bodyTextLower = bodyText.toLowerCase()
-      
+
         // Common discount patterns (bulk, quantity, and regular discounts)
         const patterns = [
           "buy 2",
@@ -467,15 +506,15 @@ export async function POST(request: NextRequest) {
           "save",
           "offer"
         ]
-      
+
         const found = patterns.filter(p => bodyTextLower.includes(p))
-        
+
         // Also check for discount percentages/amounts in text
         const hasDiscountPercentage = /(\d+)%\s*off/i.test(bodyText) || /off\s*(\d+)%/i.test(bodyText)
         const hasDiscountAmount = /flat\s*₹?\s*\d+/i.test(bodyText) || /₹?\s*\d+\s*off/i.test(bodyText)
         const hasSpecialPrice = bodyTextLower.includes("special price")
         const hasBankOffer = bodyTextLower.includes("bank offer")
-        
+
         // Step 1: Check for discount percentage (e.g., "20% off", "10% discount")
         const discountPercentagePatterns = [
           /(\d+)%\s*off/i,
@@ -485,7 +524,7 @@ export async function POST(request: NextRequest) {
           /save\s*(\d+)%/i,
           /(\d+)%\s*save/i
         ]
-        
+
         let discountPercentage = null
         for (const pattern of discountPercentagePatterns) {
           const match = bodyText.match(pattern)
@@ -494,7 +533,7 @@ export async function POST(request: NextRequest) {
             break
           }
         }
-        
+
         // Step 2: Check for price drop (e.g., "Was $50, Now $40", "Original $100, Now $80")
         const priceDropPatterns = [
           /was\s*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
@@ -503,7 +542,7 @@ export async function POST(request: NextRequest) {
           /[₹$€£]?\s*[\d,]+\.?\d*\s*was\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
           /strike.*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i
         ]
-        
+
         let priceDrop = null
         for (const pattern of priceDropPatterns) {
           const match = bodyText.match(pattern)
@@ -512,7 +551,7 @@ export async function POST(request: NextRequest) {
             break
           }
         }
-        
+
         // Step 3: Check for coupon codes (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
         const couponPatterns = [
           /use\s+code\s+[A-Z0-9]+/i,
@@ -521,7 +560,7 @@ export async function POST(request: NextRequest) {
           /code\s*:?\s*[A-Z0-9]{4,}/i,
           /apply\s+code\s+[A-Z0-9]+/i
         ]
-        
+
         let couponCode = null
         for (const pattern of couponPatterns) {
           const match = bodyText.match(pattern)
@@ -530,16 +569,16 @@ export async function POST(request: NextRequest) {
             break
           }
         }
-        
+
         // Step 4: Exclude free shipping alone (unless it's part of a discount)
         const hasFreeShipping = /free\s+shipping/i.test(bodyTextLower)
         const hasOnlyFreeShipping = hasFreeShipping && !discountPercentage && !priceDrop && !couponCode && !hasDiscountPercentage && !hasDiscountAmount && !hasSpecialPrice && !hasBankOffer
-        
+
         // Determine if discount exists (quantity/bulk OR general discount)
         const hasBulkDiscount = found.length > 0 || hasDiscountPercentage || hasDiscountAmount || hasSpecialPrice || hasBankOffer
         const hasGeneralDiscount = !!(discountPercentage || priceDrop || couponCode)
         const hasAnyDiscount = hasBulkDiscount || (hasGeneralDiscount && !hasOnlyFreeShipping)
-      
+
         return {
           foundPatterns: found,
           hasBulkDiscount: hasBulkDiscount,
@@ -552,7 +591,7 @@ export async function POST(request: NextRequest) {
           preview: bodyText.substring(0, 1000)
         }
       })
-      
+
       // Get CTA context for shipping rules
       const ctaContext = await page.evaluate(() => {
         const cta = Array.from(document.querySelectorAll("button, a"))
@@ -605,7 +644,7 @@ export async function POST(request: NextRequest) {
           const parent = ctaElement.closest("form, div, section, [class*='cart'], [class*='checkout'], [class*='product']")
           if (parent) {
             const parentText = (parent as HTMLElement).innerText || parent.textContent || ''
-            
+
             // Check for countdown/cutoff time patterns
             const countdownPatterns = [
               /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
@@ -614,7 +653,7 @@ export async function POST(request: NextRequest) {
               /cutoff\s+time/i,
               /order\s+in\s+the\s+next\s+[\d\s]+(?:hours?|hrs?)/i
             ]
-            
+
             // Check for delivery date patterns
             const deliveryDatePatterns = [
               /get\s+it\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
@@ -671,12 +710,12 @@ export async function POST(request: NextRequest) {
         const cta = Array.from(document.querySelectorAll("button, a"))
           .find(el => {
             const text = el.textContent?.toLowerCase() || ''
-            return text.includes("add to bag") || 
-                   text.includes("add to cart") || 
-                   text.includes("checkout") ||
-                   text.includes("buy now")
+            return text.includes("add to bag") ||
+              text.includes("add to cart") ||
+              text.includes("checkout") ||
+              text.includes("buy now")
           })
-        
+
         if (!cta) {
           return {
             ctaFound: false,
@@ -694,7 +733,7 @@ export async function POST(request: NextRequest) {
         const ctaLeft = ctaRect.left
         const ctaRight = ctaRect.right
         const viewportHeight = window.innerHeight
-        
+
         // Check if CTA is visible without scrolling
         const ctaVisibleWithoutScrolling = ctaTop >= 0 && ctaTop < viewportHeight
 
@@ -726,8 +765,8 @@ export async function POST(request: NextRequest) {
           '[id*="payment"]'
         ]
 
-        const allTrustBadges: Array<{element: Element, distance: number, visible: boolean, text: string}> = []
-        
+        const allTrustBadges: Array<{ element: Element, distance: number, visible: boolean, text: string }> = []
+
         trustBadgeSelectors.forEach(selector => {
           try {
             const elements = document.querySelectorAll(selector)
@@ -737,26 +776,26 @@ export async function POST(request: NextRequest) {
               const badgeBottom = rect.bottom
               const badgeLeft = rect.left
               const badgeRight = rect.right
-              
+
               // Calculate distance from CTA (using center points)
               const ctaCenterX = (ctaLeft + ctaRight) / 2
               const ctaCenterY = (ctaTop + ctaBottom) / 2
               const badgeCenterX = (badgeLeft + badgeRight) / 2
               const badgeCenterY = (badgeTop + badgeBottom) / 2
-              
+
               const distanceX = Math.abs(ctaCenterX - badgeCenterX)
               const distanceY = Math.abs(ctaCenterY - badgeCenterY)
               const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY)
-              
+
               // Check if badge is visible without scrolling
               const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
-              
+
               // Get badge text/alt
-              const badgeText = (el instanceof HTMLImageElement ? el.alt : null) || 
-                               (el as HTMLElement).title || 
-                               el.textContent?.trim() || 
-                               'Trust badge'
-              
+              const badgeText = (el instanceof HTMLImageElement ? el.alt : null) ||
+                (el as HTMLElement).title ||
+                el.textContent?.trim() ||
+                'Trust badge'
+
               allTrustBadges.push({
                 element: el,
                 distance: distance,
@@ -781,92 +820,92 @@ export async function POST(request: NextRequest) {
           trustBadgesCount: badgesWithin50px.length,
           within50px: badgesWithin50px.length > 0,
           visibleWithoutScrolling: badgesVisibleWithoutScrolling.length > 0 && ctaVisibleWithoutScrolling,
-          trustBadgesInfo: badgesWithin50px.length > 0 
+          trustBadgesInfo: badgesWithin50px.length > 0
             ? `Found ${badgesWithin50px.length} trust badge(s) within 50px: ${badgesWithin50px.map(b => b.text).join(', ')}`
             : 'No trust badges found within 50px of CTA'
         }
       })
- // preselect
- const selectedVariant = await page.evaluate(() => {
-  // Method 1: Check actual checked input (radio buttons)
-  const checkedInput = document.querySelector(
-    'input[type="radio"]:checked'
-  )
-  if (checkedInput) {
-    const value = (checkedInput as HTMLInputElement).value
-    if (value) return value
-  }
-
-  // Method 2: Check CSS-based visual selection (gradient borders, selected classes)
-  // This handles cases where selection is shown via CSS styling, not checked attribute
-  const cssSelectors = [
-    '.flavour-option.gradient-border-checked',
-    '.variant-option.gradient-border-checked',
-    '.option.gradient-border-checked',
-    '[class*="gradient-border-checked"]',
-    '.flavour-option.selected',
-    '.variant-option.selected',
-    '.option.selected',
-    '[class*="selected"][class*="option"]',
-    '[class*="selected"][class*="variant"]',
-    '[class*="selected"][class*="flavour"]',
-    '[class*="selected"][class*="flavor"]'
-  ]
-  
-  for (const selector of cssSelectors) {
-    const element = document.querySelector(selector)
-    if (element) {
-      // Try data attributes first
-      const dataFlavour = element.getAttribute('data-flavour') || element.getAttribute('data-flavor') || element.getAttribute('data-variant')
-      if (dataFlavour) return dataFlavour
-      
-      // Fallback to text content
-      const text = element.textContent?.trim()
-      if (text && text.length > 0 && text.length < 50) {
-        return text
-      }
-    }
-  }
-
-  // Method 3: Check visually selected elements (elements with distinct borders/backgrounds)
-  // Look for elements in variant/flavor sections that have visual selection indicators
-  const variantSections = document.querySelectorAll('[class*="variant"], [class*="flavour"], [class*="flavor"], [class*="option"]')
-  for (const section of Array.from(variantSections)) {
-    const options = section.querySelectorAll('label, button, [role="button"], .option, [class*="option"]')
-    for (const opt of Array.from(options)) {
-      const styles = window.getComputedStyle(opt)
-      const borderWidth = parseInt(styles.borderWidth) || 0
-      const hasVisibleBorder = borderWidth > 1 // More than 1px border indicates selection
-      const bgColor = styles.backgroundColor
-      const hasGradientBorder = styles.borderImageSource && styles.borderImageSource !== 'none'
-      
-      // Check if element has visual selection indicators
-      if (hasVisibleBorder || hasGradientBorder) {
-        const dataFlavour = opt.getAttribute('data-flavour') || opt.getAttribute('data-flavor') || opt.getAttribute('data-variant')
-        if (dataFlavour) return dataFlavour
-        
-        const text = opt.textContent?.trim()
-        if (text && text.length > 0 && text.length < 50) {
-          return text
+      // preselect
+      const selectedVariant = await page.evaluate(() => {
+        // Method 1: Check actual checked input (radio buttons)
+        const checkedInput = document.querySelector(
+          'input[type="radio"]:checked'
+        )
+        if (checkedInput) {
+          const value = (checkedInput as HTMLInputElement).value
+          if (value) return value
         }
-      }
-    }
-  }
 
-  return null
-})
-      
-      
+        // Method 2: Check CSS-based visual selection (gradient borders, selected classes)
+        // This handles cases where selection is shown via CSS styling, not checked attribute
+        const cssSelectors = [
+          '.flavour-option.gradient-border-checked',
+          '.variant-option.gradient-border-checked',
+          '.option.gradient-border-checked',
+          '[class*="gradient-border-checked"]',
+          '.flavour-option.selected',
+          '.variant-option.selected',
+          '.option.selected',
+          '[class*="selected"][class*="option"]',
+          '[class*="selected"][class*="variant"]',
+          '[class*="selected"][class*="flavour"]',
+          '[class*="selected"][class*="flavor"]'
+        ]
+
+        for (const selector of cssSelectors) {
+          const element = document.querySelector(selector)
+          if (element) {
+            // Try data attributes first
+            const dataFlavour = element.getAttribute('data-flavour') || element.getAttribute('data-flavor') || element.getAttribute('data-variant')
+            if (dataFlavour) return dataFlavour
+
+            // Fallback to text content
+            const text = element.textContent?.trim()
+            if (text && text.length > 0 && text.length < 50) {
+              return text
+            }
+          }
+        }
+
+        // Method 3: Check visually selected elements (elements with distinct borders/backgrounds)
+        // Look for elements in variant/flavor sections that have visual selection indicators
+        const variantSections = document.querySelectorAll('[class*="variant"], [class*="flavour"], [class*="flavor"], [class*="option"]')
+        for (const section of Array.from(variantSections)) {
+          const options = section.querySelectorAll('label, button, [role="button"], .option, [class*="option"]')
+          for (const opt of Array.from(options)) {
+            const styles = window.getComputedStyle(opt)
+            const borderWidth = parseInt(styles.borderWidth) || 0
+            const hasVisibleBorder = borderWidth > 1 // More than 1px border indicates selection
+            const bgColor = styles.backgroundColor
+            const hasGradientBorder = styles.borderImageSource && styles.borderImageSource !== 'none'
+
+            // Check if element has visual selection indicators
+            if (hasVisibleBorder || hasGradientBorder) {
+              const dataFlavour = opt.getAttribute('data-flavour') || opt.getAttribute('data-flavor') || opt.getAttribute('data-variant')
+              if (dataFlavour) return dataFlavour
+
+              const text = opt.textContent?.trim()
+              if (text && text.length > 0 && text.length < 50) {
+                return text
+              }
+            }
+          }
+        }
+
+        return null
+      })
+
+
       // Combine visible text and key elements (token-efficient)
-      websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) + 
-                      '\n\n--- KEY ELEMENTS ---\n' + keyElements +
-                      `\nSelected Variant: ${selectedVariant || 'None'}` +
-                      `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
-                      `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
-                      `\n\n--- SHIPPING TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nShipping Info Near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time: ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date: ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nShipping Text Found: ${shippingTimeContext.shippingText}\nAll Requirements Met: ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
-                      `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Within 50px: ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
+      websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
+        '\n\n--- KEY ELEMENTS ---\n' + keyElements +
+        `\nSelected Variant: ${selectedVariant || 'None'}` +
+        `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
+        `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
+        `\n\n--- SHIPPING TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nShipping Info Near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time: ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date: ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nShipping Text Found: ${shippingTimeContext.shippingText}\nAll Requirements Met: ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
+        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Within 50px: ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
-                      
+
 
       // Capture screenshot once for all rules (for AI vision analysis)
       // Only capture if captureScreenshot flag is true (to avoid redundant screenshots in subsequent batches)
@@ -897,10 +936,10 @@ export async function POST(request: NextRequest) {
         console.log('Skipping screenshot capture (not needed for this batch)')
         screenshotDataUrl = null
       }
-      
+
       // Close browser
       await browser.close()
-      
+
       // Final limit to ensure we stay under token budget
       if (websiteContent.length > 6000) {
         websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
@@ -914,7 +953,7 @@ export async function POST(request: NextRequest) {
           // Ignore close errors
         }
       }
-      
+
       // Fallback to simple fetch if Puppeteer fails
       try {
         const response = await fetch(validUrl, {
@@ -923,7 +962,7 @@ export async function POST(request: NextRequest) {
           },
         })
         websiteContent = await response.text()
-        
+
         // Limit content for fallback fetch too
         if (websiteContent.length > 6000) {
           websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
@@ -940,25 +979,25 @@ export async function POST(request: NextRequest) {
     // Optimized: Larger batches, shorter delays for 25 rules
     const results: ScanResult[] = []
     const BATCH_SIZE = 8 // Increased from 5 to 8 for faster processing
-    
+
     // Split rules into batches of 5
     const batches: Rule[][] = []
     for (let i = 0; i < rules.length; i += BATCH_SIZE) {
       batches.push(rules.slice(i, i + BATCH_SIZE))
     }
-    
+
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
-    
+
     // Token usage tracking for rate limiting
     // OpenRouter rate limits - optimized for 60s Vercel timeout
     const MIN_DELAY_BETWEEN_REQUESTS = 300 // Reduced to 300ms for faster processing
     let lastRequestTime = 0
-    
+
     // Process each batch sequentially
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex]
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} rules`)
-      
+
       // Process rules in current batch with minimal delay
       for (const rule of batch) {
         // Wait if needed to respect rate limits (minimal delay for speed)
@@ -970,46 +1009,59 @@ export async function POST(request: NextRequest) {
             await sleep(waitTime)
           }
         }
-        
+
         // Using OpenRouter with Gemini model
         // Available Gemini models on OpenRouter: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, google/gemini-flash-1.5-8b
         const modelName = 'google/gemini-2.5-flash-lite' // Latest Gemini Flash model
-        
+
         try {
-          
+
           // Reduce content for token savings - OpenRouter model optimized
           const contentForAI = websiteContent.substring(0, 2000) // Reduced from 3000
-          
+
           // Determine rule type for targeted instructions
           const isBreadcrumbRule = rule.title.toLowerCase().includes('breadcrumb') || rule.description.toLowerCase().includes('breadcrumb')
           const isColorRule = rule.title.toLowerCase().includes('color') || rule.title.toLowerCase().includes('black') || rule.description.toLowerCase().includes('color') || rule.description.toLowerCase().includes('#000000') || rule.description.toLowerCase().includes('pure black')
+          const isVideoTestimonialRule =
+            rule.title.toLowerCase().includes('video') &&
+            (
+              rule.title.toLowerCase().includes('testimonial') ||
+              rule.title.toLowerCase().includes('review') ||
+              rule.title.toLowerCase().includes('customer')
+            ) ||
+            rule.description.toLowerCase().includes('video testimonial') ||
+            rule.description.toLowerCase().includes('customer video') ||
+            rule.description.toLowerCase().includes('video review') ||
+            rule.description.toLowerCase().includes('real customer video');
+
+
           const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
-          const isVideoTestimonialRule = rule.id === 'video-testimonials' || rule.title.toLowerCase().includes('video testimonial') || rule.description.toLowerCase().includes('video testimonial')
+
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
           const isFreeShippingThresholdRule = rule.id === 'free-shipping-threshold' || (rule.title.toLowerCase().includes('free shipping') && rule.title.toLowerCase().includes('threshold'))
           const isQuantityDiscountRule =
-  rule.title.toLowerCase().includes("quantity") ||
-  rule.title.toLowerCase().includes("bulk") ||
-  rule.description.toLowerCase().includes("bulk pricing")
+            rule.title.toLowerCase().includes("quantity") ||
+            rule.title.toLowerCase().includes("bulk") ||
+            rule.description.toLowerCase().includes("bulk pricing")
           const isShippingRule =
-  rule.title.toLowerCase().includes("shipping time") ||
-  rule.description.toLowerCase().includes("delivered by")
+            rule.title.toLowerCase().includes("shipping time") ||
+            rule.description.toLowerCase().includes("delivered by")
           const isVariantRule =
-  rule.title.toLowerCase().includes("variant") ||
-  rule.title.toLowerCase().includes("preselect") ||
-  rule.description.toLowerCase().includes("variant") ||
-  rule.description.toLowerCase().includes("preselect")
+            rule.title.toLowerCase().includes("variant") ||
+            rule.title.toLowerCase().includes("preselect") ||
+            rule.description.toLowerCase().includes("variant") ||
+            rule.description.toLowerCase().includes("preselect")
           const isTrustBadgesRule =
-  rule.id === 'trust-badges-near-cta' ||
-  (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
-  (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
-  (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
-          
+            rule.id === 'trust-badges-near-cta' ||
+            (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
+            (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
+            (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
+
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
           if (isBreadcrumbRule) {
@@ -1018,7 +1070,53 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isLazyRule) {
             specialInstructions = `\nLAZY LOADING RULE - DETAILED CHECK:\nCheck "Lazy loading status:" and "Images without lazy loading:" in KEY ELEMENTS.\n\nIf FAILED: You MUST specify:\n1. WHICH images/videos are missing lazy loading (use image file names or descriptions from KEY ELEMENTS)\n2. WHERE these images/videos are located on the page (e.g., "product gallery section", "hero section", "product images area", "main product image", "thumbnail gallery", "description section")\n3. WHY it's a problem (e.g., "should have loading='lazy' attribute to improve page load time")\n\nIMPORTANT: \n- Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166, £39.00) in the failure reason\n- Only mention image/video file names, descriptions, or locations\n- Be specific about WHERE on the page these images are located\n\nExample: "Images without lazy loading: The main product image for 'Rainbow Dust - Starter Kit' (found in product gallery section) is missing the loading='lazy' attribute. Additionally, images in the 'POPULAR PRODUCTS' section also lack lazy loading. These should be lazy-loaded to improve initial page load time."\n\nIf no images/videos found: "No images or videos found on the page to evaluate for lazy loading."\n\nBe SPECIFIC about which elements are missing lazy loading and WHERE they are located, but DO NOT include prices or currency.`
-          } else if (isRatingRule) {
+          }
+
+          else if (isVideoTestimonialRule) {
+            specialInstructions = `
+VIDEO TESTIMONIALS RULE - DETAILED CHECK:
+
+Check KEY ELEMENTS for:
+- Video testimonials section
+- Embedded videos (YouTube, Vimeo, self-hosted)
+- Customer review videos
+- Customer face + voice presence
+- Placement (homepage / product page)
+
+If FAILED: You MUST specify:
+1. WHETHER any video testimonials are present or not
+2. WHERE video testimonials are missing (e.g., "homepage", "product page", "below product description", "reviews section")
+3. WHAT is missing:
+   - No video testimonials at all
+   - Only text testimonials present
+   - Videos exist but are promotional, not customer testimonials
+4. WHY it's a problem (e.g., "video testimonials build trust and improve conversions")
+
+If PASSED: You MUST specify:
+1. WHERE the video testimonials are located on the page
+2. WHAT makes them valid (real customer, face visible, product mentioned)
+3. TYPE of video (YouTube embed, self-hosted, Vimeo)
+
+IMPORTANT:
+- Do NOT mention prices, currency symbols, or amounts
+- Do NOT assume customers are actors unless clearly promotional
+- Only evaluate visible content on the page
+- Be specific about WHERE on the page the video testimonials appear or are missing
+
+Example FAILURE:
+"No video testimonials were found on the homepage or product page. The website only includes text-based customer reviews below the product description. Adding real customer video testimonials would increase trust and engagement."
+
+Example SUCCESS:
+"A video testimonial section is present below the product description. Embedded YouTube videos feature real customers speaking about their experience with the product, making the testimonials authentic and trust-building."
+
+If no videos found at all:
+"No video testimonials or embedded customer videos were found on the page."
+
+Be SPECIFIC, factual, and based only on visible page content.
+`
+          }
+
+          else if (isRatingRule) {
             specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
@@ -1241,7 +1339,7 @@ IMPORTANT REMINDER:
             specialInstructions = `\nBENEFITS NEAR PRODUCT TITLE RULE - DETAILED CHECK:\nA short list of 2-3 key benefits MUST be displayed NEAR the product title (below or beside it, within the same section/area).\n\nREQUIREMENTS:\n1. Benefits must be NEAR product title (same section/area, not far below or in separate sections)\n2. Must have 2-3 benefits (not just 1, not more than 3)\n3. Benefits should be specific, impactful, and aligned with key selling points\n4. Benefits should stand out visually (bold, contrasting fonts, or clear formatting)\n5. Benefits should be concise and easy to scan\n\nIf PASSED: You MUST specify:\n- WHERE the benefits are located (e.g., "directly below product title", "beside product title in same section")\n- WHAT benefits are shown (list 2-3 benefits)\n- WHY it passes (e.g., "benefits are clearly visible near title and communicate value effectively")\n\nExample PASS: "Key benefits are displayed directly below the product title 'Rainbow Dust - Starter Kit' in the product header section: (1) 'Boost productivity with focus & energy without jitters', (2) 'Reduce anxiety & distraction, flow state all day', (3) '7-in-1 blend of coffee + potent mushrooms & adaptogens'. These benefits are clearly visible, specific, and help users quickly understand the product value."\n\nIf FAILED: You MUST specify:\n- WHERE the product title is located\n- WHERE benefits are located (if they exist elsewhere on the page)\n- WHAT is missing (e.g., "no benefits near title", "only 1 benefit shown", "benefits are too far from title in separate section", "benefits are not specific/impactful")\n- WHY it fails (e.g., "benefits are in description section far below title, not near title", "only generic benefits shown", "benefits don't stand out visually")\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' is located in the product header section, but there are no key benefits displayed near it. While product benefits exist in the description section further down the page (e.g., 'Boost productivity', 'Reduce anxiety'), these are not near the product title as required. Benefits should be placed directly below or beside the product title in the same section to quickly communicate value and capture attention."`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
-          }else if (isQuantityDiscountRule) {
+          } else if (isQuantityDiscountRule) {
             specialInstructions = `
 QUANTITY DISCOUNT & PROMOTION RULE - STEP-BY-STEP CHECK:
 
@@ -1323,9 +1421,9 @@ CRITICAL INSTRUCTIONS:
 7. Quote the exact discount text from the page if available
 8. If PASSED: Mention the specific discount type and where it's located
 9. If FAILED: Explain that no discount or promotional offer is visible on the product page
-          ` 
-        }else if (isShippingRule) {
-          specialInstructions = `
+          `
+          } else if (isShippingRule) {
+            specialInstructions = `
 SHIPPING TIME VISIBILITY RULE - STEP-BY-STEP AUDIT:
 
 You are an expert E-commerce UX Auditor. Your task is to analyze the Product Page based on the rule: 'Display shipping time near CTA'.
@@ -1435,8 +1533,8 @@ CRITICAL INSTRUCTIONS:
 7. Quote the exact shipping text from "Shipping Text Found" if available
 8. Do NOT mention currency symbols, prices, or amounts in the reason
         `
-        }else if (isVariantRule) {
-          specialInstructions = `
+          } else if (isVariantRule) {
+            specialInstructions = `
 VARIANT PRESELECTION RULE - STEP-BY-STEP AUDIT:
 
 You are a UX Audit Specialist. Your task is to check if a product page follows the "Variant Preselection" rule.
@@ -1538,8 +1636,8 @@ CRITICAL INSTRUCTIONS:
 9. Be SPECIFIC about which variant is preselected (if any) and how it's displayed
 10. Do NOT mention currency symbols, prices, or amounts in the reason
 `
-        } else if (isTrustBadgesRule) {
-          specialInstructions = `
+          } else if (isTrustBadgesRule) {
+            specialInstructions = `
 TRUST BADGES NEAR CTA RULE - STEP-BY-STEP CHECK:
 
 This rule checks if trust signals (security badges, payment logos) are positioned within 50px of the CTA button, visible without scrolling, and have muted/monochromatic design.
@@ -1627,8 +1725,8 @@ CRITICAL INSTRUCTIONS:
 7. Mention the CTA text from "CTA Text" field
 8. For design check, analyze if badges are muted/monochromatic based on content description
 `
-        } else if (isCTAProminenceRule) {
-          specialInstructions = `
+          } else if (isCTAProminenceRule) {
+            specialInstructions = `
 CTA PROMINENCE RULE - STEP-BY-STEP AUDIT:
 
 Task: Audit the "CTA Prominence" of this product page.
@@ -1724,8 +1822,8 @@ CRITICAL INSTRUCTIONS:
 9. Do NOT mention currency symbols, prices, or amounts in the reason
 10. Focus on visual prominence: position, contrast, and size
 `
-        } else if (isFreeShippingThresholdRule) {
-          specialInstructions = `
+          } else if (isFreeShippingThresholdRule) {
+            specialInstructions = `
 FREE SHIPPING THRESHOLD RULE - STEP-BY-STEP AUDIT:
 
 Task: Audit the "Free Shipping Threshold" visibility on this product page.
@@ -1837,31 +1935,32 @@ CRITICAL INSTRUCTIONS:
 9. Focus on proximity, language, and visibility requirements
 10. Suggest specific threshold language if missing (e.g., "Add $X more for Free Shipping")
 `
-        }
-          
+          }
+
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Reviews with images" or "Customer photos"\n- Image galleries in review sections\n- Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections (like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS (always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          
+
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n- Video players with play buttons (▶️) in review sections\n- Any videos displayed in review sections\n\nCRITICAL: You MUST ACTUALLY SEE videos with play buttons (▶️) in the screenshot.\n- If you see videos with play buttons (▶️) in review sections → PASS\n- If you DO NOT see any videos or play buttons (▶️) in the screenshot → FAIL\n- Do NOT assume videos exist - you must visually confirm them in the screenshot\n\nReview section videos with play buttons (▶️) = VIDEO TESTIMONIALS (always pass).\nNo videos or play buttons (▶️) visible = FAIL (do not pass).\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          
+
           const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their EXACT locations and section names (e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly with image support
           // Build content array with text and optional image
           // OpenRouter format: content can be string or array of content parts
           let messageContent: string | any[] = prompt
-          
+          console.log(messageContent, "messageContent")
           // Add screenshot if available (for AI vision analysis)
           // Always include screenshot for customer photos rule, video testimonials rule, and other visual rules
           if (screenshotDataUrl && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
             // Convert screenshot data URL to protocol-relative format if it's a regular URL
             // (data URLs stay as is, but if we had HTTP URLs, convert to //)
             let imageUrl = screenshotDataUrl
+            console.log(imageUrl, "imageUrl");
             // If it's not a data URL, convert to protocol-relative
             if (!screenshotDataUrl.startsWith('data:')) {
               imageUrl = toProtocolRelativeUrl(screenshotDataUrl, validUrl)
             }
-            
+
             // For multimodal content, use array format
             messageContent = [
               {
@@ -1884,25 +1983,29 @@ CRITICAL INSTRUCTIONS:
               console.log(`⚠️ VIDEO TESTIMONIALS RULE: Screenshot included - AI must check for videos in review sections`)
             }
           }
-          
+
+
+
           const chatCompletion = await openRouter.chat.send({
             model: modelName,
             messages: [
               {
-                role: 'user' as const, // Explicitly type as const to ensure correct role
+                role: "user",
                 content: messageContent,
               },
             ],
             temperature: 0.0,
-            maxTokens: 256, // Further reduced to 256 for faster responses
-            topP: 1.0,  // More deterministic
+            maxTokens: 256,
+            topP: 1.0,
             stream: false,
-          })
+          });
+          const responseTextsss =
+            chatCompletion.choices?.[0]?.message?.content?.[0];
+          console.log("AI:", responseTextsss);
 
           // Extract and parse JSON response - Gemini compatible
           // Gemini may return different structure, so check all possible paths
           let responseText = ''
-          
           // Try different response structures (Gemini/OpenRouter compatibility)
           if ((chatCompletion as any)?.choices?.[0]?.message?.content) {
             responseText = (chatCompletion as any).choices[0].message.content
@@ -1919,40 +2022,40 @@ CRITICAL INSTRUCTIONS:
             console.error('Unexpected response structure:', JSON.stringify(chatCompletion).substring(0, 500))
             throw new Error('Unexpected response structure from API')
           }
-          
+
           if (!responseText || responseText.trim().length === 0) {
             throw new Error('Empty response from API - no content received')
           }
-          
+
           // Clean and extract JSON - multiple methods for Gemini compatibility
           let jsonText = responseText.trim()
-          
+
           // Method 1: Remove markdown code blocks (common in Gemini)
           jsonText = jsonText.replace(/```json\n?/gi, '').replace(/```\n?/g, '').replace(/```jsonl\n?/gi, '')
-          
+
           // Method 2: Remove any text before first {
           const firstBrace = jsonText.indexOf('{')
           if (firstBrace > 0) {
             jsonText = jsonText.substring(firstBrace)
           }
-          
+
           // Method 3: Remove any text after last }
           const lastBrace = jsonText.lastIndexOf('}')
           if (lastBrace > 0 && lastBrace < jsonText.length - 1) {
             jsonText = jsonText.substring(0, lastBrace + 1)
           }
-          
+
           // Method 4: Try to find JSON object
           let jsonMatch = jsonText.match(/\{[\s\S]*\}/)
-          
+
           // Method 5: If no match, try to construct from text patterns (Gemini fallback)
           if (!jsonMatch) {
             // Try to find passed/reason pattern (Gemini sometimes returns text format)
             const passedMatch = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)
             // Allow longer matches and truncate after extraction
-            const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i) || 
-                               jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)
-            
+            const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i) ||
+              jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)
+
             if (passedMatch && reasonMatch) {
               // Escape quotes in reason and limit to 400 chars (truncate to 397 + '...')
               const rawReason = reasonMatch[1].replace(/"/g, '\\"').replace(/\n/g, ' ')
@@ -1962,13 +2065,13 @@ CRITICAL INSTRUCTIONS:
               // Last resort: try to find any JSON-like structure
               const hasPassed = jsonText.toLowerCase().includes('"passed":') || jsonText.toLowerCase().includes("'passed':") || jsonText.toLowerCase().includes('passed:')
               const hasReason = jsonText.toLowerCase().includes('"reason":') || jsonText.toLowerCase().includes("'reason':") || jsonText.toLowerCase().includes('reason:')
-              
+
               if (!hasPassed || !hasReason) {
                 // Log the actual response for debugging
                 console.error('Failed to parse JSON. Response was:', responseText.substring(0, 300))
                 throw new Error(`No valid JSON found in response. Response preview: ${responseText.substring(0, 150)}...`)
               }
-              
+
               // Try one more time with cleaned text
               jsonMatch = jsonText.match(/\{[\s\S]*\}/)
               if (!jsonMatch) {
@@ -1978,7 +2081,6 @@ CRITICAL INSTRUCTIONS:
           } else {
             jsonText = jsonMatch[0]
           }
-          
           // Parse and validate the JSON response
           let parsedResponse
           try {
@@ -1998,9 +2100,9 @@ CRITICAL INSTRUCTIONS:
               try {
                 const passed = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)?.[1] || 'false'
                 // Extract reason - allow longer matches and truncate after extraction
-                const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i)?.[1] || 
-                                   jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)?.[1] || 
-                                   'Unable to parse response'
+                const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i)?.[1] ||
+                  jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)?.[1] ||
+                  'Unable to parse response'
                 const reason = reasonMatch.replace(/\n/g, ' ').substring(0, 397) + (reasonMatch.length > 397 ? '...' : '')
                 parsedResponse = { passed: passed === 'true', reason: reason }
               } catch (thirdError) {
@@ -2009,44 +2111,44 @@ CRITICAL INSTRUCTIONS:
               }
             }
           }
-          
+
           // Truncate reason BEFORE validation to prevent Zod errors
           if (parsedResponse.reason && typeof parsedResponse.reason === 'string') {
             if (parsedResponse.reason.length > 400) {
               parsedResponse.reason = parsedResponse.reason.substring(0, 397) + '...'
             }
           }
-          
+
           // Validate and parse response with strict length limit
           const analysis = z.object({
             passed: z.boolean(),
             reason: z.string().max(400), // Reduced from 500 to 400 for safety
           }).parse(parsedResponse)
-          
+
           // Ensure reason is within limit (double-check, should already be truncated)
           if (analysis.reason.length > 400) {
             analysis.reason = analysis.reason.substring(0, 397) + '...'
           }
-          
+
           // Validate that reason is relevant to the rule (prevent mismatched responses)
           const reasonLower = analysis.reason.toLowerCase()
           const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
-          
+
           // Strict validation - check if reason matches rule requirements
           let isRelevant = true
-          
+
           if (isRatingRule) {
             // Rating rule must mention rating/review/star AND check all requirements
             const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
             const mentionsNearTitle = reasonLower.includes('near') || reasonLower.includes('title') || reasonLower.includes('close')
             const mentionsScore = reasonLower.includes('score') || reasonLower.includes('star') || reasonLower.includes('/5') || reasonLower.includes('out of')
             const mentionsCount = reasonLower.includes('review') || reasonLower.includes('rating') || reasonLower.includes('people')
-            
+
             if (!hasRatingMention) {
               console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
             }
-            
+
             // If passed=true but missing requirements, it's wrong
             if (analysis.passed && (!mentionsScore || !mentionsCount || !mentionsNearTitle)) {
               console.warn(`Warning: Rating rule passed but missing requirements. Score: ${mentionsScore}, Count: ${mentionsCount}, Near title: ${mentionsNearTitle}`)
@@ -2075,33 +2177,51 @@ CRITICAL INSTRUCTIONS:
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
             // Only pass if AI explicitly says videos ARE present (not just mentions "video" in general)
-            const hasNegativeIndicators = reasonLower.includes('no video') || 
-                                        reasonLower.includes('not found') || 
-                                        reasonLower.includes('no videos') ||
-                                        reasonLower.includes('missing') ||
-                                        reasonLower.includes('not visible') ||
-                                        reasonLower.includes('not displayed') ||
-                                        reasonLower.includes('not see') ||
-                                        reasonLower.includes('cannot see') ||
-                                        reasonLower.includes('do not see') ||
-                                        (reasonLower.includes('only') && reasonLower.includes('text') && reasonLower.includes('review'))
-            
+            // Use full captured website text (without truncation) when available,
+            // not just the shortened snippet sent to the AI model. This helps detect
+            // review videos that often appear further down the page.
+            const websiteTextLower = (fullVisibleText || websiteContent).toLowerCase()
+            const hasNegativeIndicators = reasonLower.includes('no video') ||
+              reasonLower.includes('not found') ||
+              reasonLower.includes('no videos') ||
+              reasonLower.includes('missing') ||
+              reasonLower.includes('not visible') ||
+              reasonLower.includes('not displayed') ||
+              reasonLower.includes('not see') ||
+              reasonLower.includes('cannot see') ||
+              reasonLower.includes('do not see') ||
+              (reasonLower.includes('only') && reasonLower.includes('text') && reasonLower.includes('review'))
+
             // Check for positive indicators - videos ARE present (more specific checks)
-            const hasPositiveIndicators = 
-                                       (reasonLower.includes('video testimonial') && !hasNegativeIndicators) || 
-                                       (reasonLower.includes('customer video') && !hasNegativeIndicators) || 
-                                       (reasonLower.includes('play button') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('video player') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('videos are') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('videos in') && !hasNegativeIndicators && reasonLower.includes('review')) ||
-                                       (reasonLower.includes('videos displayed') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('videos shown') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('video thumbnail') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('embedded video') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('video') && reasonLower.includes('review') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('not')) ||
-                                       (reasonLower.includes('thumbnail') && reasonLower.includes('play') && !hasNegativeIndicators) ||
-                                       (reasonLower.includes('review') && reasonLower.includes('video') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('only text'))
-            
+            const hasPositiveIndicators =
+              (reasonLower.includes('video testimonial') && !hasNegativeIndicators) ||
+              (reasonLower.includes('customer video') && !hasNegativeIndicators) ||
+              (reasonLower.includes('play button') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video player') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos are') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos in') && !hasNegativeIndicators && reasonLower.includes('review')) ||
+              (reasonLower.includes('videos displayed') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos shown') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video thumbnail') && !hasNegativeIndicators) ||
+              (reasonLower.includes('embedded video') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video') && reasonLower.includes('review') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('not')) ||
+              (reasonLower.includes('thumbnail') && reasonLower.includes('play') && !hasNegativeIndicators) ||
+              (reasonLower.includes('review') && reasonLower.includes('video') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('only text'))
+
+            // Text-based backup: detect clear "customer video" signals in HTML/content
+            const hasCustomerVideoTextSignal =
+              websiteTextLower.includes('customer videos') ||
+              websiteTextLower.includes('customer video reviews') ||
+              websiteTextLower.includes('customer review videos') ||
+              websiteTextLower.includes('video testimonials') ||
+              websiteTextLower.includes('video reviews') ||
+              /customer reviews?.{0,200}video/.test(websiteTextLower) ||
+              /video.{0,200}customer reviews?/.test(websiteTextLower) ||
+              /review.{0,200}video/.test(websiteTextLower) ||
+              /video.{0,200}review/.test(websiteTextLower) ||
+              /"review".{0,200}<video/.test(websiteTextLower) ||
+              /<video.{0,200}"review"/.test(websiteTextLower)
+
             // If negative indicators are present, ensure it's marked as failed
             if (hasNegativeIndicators && analysis.passed) {
               console.log(`Video testimonials rule: Negative indicators found but marked as passed. Forcing FAIL.`)
@@ -2111,7 +2231,15 @@ CRITICAL INSTRUCTIONS:
                 analysis.reason = `No video testimonials are visible in the screenshot. The page does not display customer video testimonials in the review section or anywhere else on the page.`
               }
             }
-            
+
+            // If AI failed the rule but page text clearly mentions customer review videos,
+            // auto-pass to align with how customer photos rule behaves.
+            if (!analysis.passed && hasCustomerVideoTextSignal) {
+              console.log(`Video testimonials rule: customer video signals found in page text (even if model said no videos). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Customer video testimonials are available in the customer reviews section of this page. These customer-uploaded videos fulfill the requirement for video testimonials.`
+            }
+
             // Only auto-pass if positive indicators are present AND no negative indicators
             if (hasPositiveIndicators && !hasNegativeIndicators && !analysis.passed) {
               console.log(`Video testimonials detected in response but marked as failed. Forcing PASS.`)
@@ -2124,7 +2252,7 @@ CRITICAL INSTRUCTIONS:
                 analysis.reason = `Customer video testimonials are displayed in the ${location}. These are customer-uploaded videos showing the product, which fulfills the requirement for video testimonials.`
               }
             }
-            
+
             // Must mention video/testimonial
             if (!reasonLower.includes('video') && !reasonLower.includes('testimonial') && !reasonLower.includes('customer')) {
               console.warn(`Warning: Video testimonial rule but reason doesn't mention videos/testimonials: ${analysis.reason.substring(0, 50)}`)
@@ -2145,21 +2273,21 @@ CRITICAL INSTRUCTIONS:
                 analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
               }
             }
-            
+
             // Check if customer photos are mentioned in response
-            const hasCustomerPhotos = reasonLower.includes('reviews with images') || 
-                                     reasonLower.includes('customer photo') || 
-                                     reasonLower.includes('review section') && reasonLower.includes('image') ||
-                                     reasonLower.includes('customer-uploaded') ||
-                                     reasonLower.includes('customer review image')
-            
+            const hasCustomerPhotos = reasonLower.includes('reviews with images') ||
+              reasonLower.includes('customer photo') ||
+              reasonLower.includes('review section') && reasonLower.includes('image') ||
+              reasonLower.includes('customer-uploaded') ||
+              reasonLower.includes('customer review image')
+
             // If customer photos are detected, MUST PASS
             if (hasCustomerPhotos && !analysis.passed) {
               console.log(`Customer photos detected in response but marked as failed. Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Customer photos are displayed in the 'Reviews with images' section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
             }
-            
+
             // Must mention photos/customers
             if (!reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
               console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
@@ -2193,7 +2321,7 @@ CRITICAL INSTRUCTIONS:
               console.warn(`Warning: Trust badges rule response should mention proximity to CTA`)
             }
           }
-          
+
           // If reason is not relevant, keep original reason (no prefix)
           if (!isRelevant) {
             // Keep original reason without prefix - just log warning
@@ -2204,12 +2332,12 @@ CRITICAL INSTRUCTIONS:
           // Use existing reasonLower variable from line 873
           const currentRuleKeywords = rule.title.toLowerCase().split(' ').filter(w => w.length > 3)
           const otherRuleKeywords = ['breadcrumb', 'lazy loading', 'rating', 'color', 'variant', 'cta', 'shipping', 'discount', 'testimonial', 'comparison', 'benefits', 'title']
-          const mentionedOtherRules = otherRuleKeywords.filter(keyword => 
-            keyword !== rule.title.toLowerCase() && 
+          const mentionedOtherRules = otherRuleKeywords.filter(keyword =>
+            keyword !== rule.title.toLowerCase() &&
             !currentRuleKeywords.some(ck => keyword.includes(ck) || ck.includes(keyword)) &&
             reasonLower.includes(keyword)
           )
-          
+
           // Special check for customer photos rule - must NOT mention rating rule
           if (isCustomerPhotoRule && (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))) {
             console.error(`CRITICAL ERROR: Customer photos rule response mentions rating rule. This is wrong!`)
@@ -2224,7 +2352,7 @@ CRITICAL INSTRUCTIONS:
               analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
             }
           }
-          
+
           if (mentionedOtherRules.length > 0 && !currentRuleKeywords.some(ck => reasonLower.includes(ck))) {
             console.warn(`Warning: Rule ${rule.id} reason may be for another rule. Mentioned: ${mentionedOtherRules.join(', ')}`)
             // Don't change the reason, just log - but ensure it's for the right rule
@@ -2237,7 +2365,7 @@ CRITICAL INSTRUCTIONS:
             passed: analysis.passed === true,
             reason: analysis.reason || 'No reason provided',
           }
-          
+
           // Final validation: Ensure result matches the rule being processed
           if (result.ruleId !== rule.id) {
             console.error(`CRITICAL: Result ruleId (${result.ruleId}) does not match current rule (${rule.id})`)
@@ -2245,12 +2373,12 @@ CRITICAL INSTRUCTIONS:
             result.ruleId = rule.id
             result.ruleTitle = rule.title
           }
-          
+
           // Log for debugging rule mixing issues
           console.log(`[Rule ${rule.id}] Result: passed=${result.passed}, reason preview: ${result.reason.substring(0, 50)}...`)
-          
+
           results.push(result)
-          
+
           // Update last request time after successful API call
           lastRequestTime = Date.now()
 
@@ -2259,11 +2387,11 @@ CRITICAL INSTRUCTIONS:
             // Validate response relevance before saving
             const reasonLower = result.reason.toLowerCase()
             const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
-            
+
             // Check if reason is relevant to the rule (basic validation)
-            const isRelevant = reasonLower.includes(rule.title.toLowerCase().split(' ')[0]) || 
-                             reasonLower.length > 20 // If reason is substantial, likely relevant
-            
+            const isRelevant = reasonLower.includes(rule.title.toLowerCase().split(' ')[0]) ||
+              reasonLower.length > 20 // If reason is substantial, likely relevant
+
             if (isRelevant && !result.reason.includes('Error:')) {
               await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/training-data`, {
                 method: 'POST',
@@ -2287,14 +2415,14 @@ CRITICAL INSTRUCTIONS:
           }
         } catch (error) {
           let errorMessage = 'Unknown error occurred'
-          
+
           if (error instanceof Error) {
             errorMessage = error.message
-            
+
             // Handle 404 errors (model not found)
             if (errorMessage.includes('404') || errorMessage.includes('No endpoints found') || errorMessage.includes('not found')) {
               errorMessage = `Model not found. The model '${modelName}' is not available on OpenRouter. Please try using: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, or google/gemini-flash-1.5-8b`
-            } 
+            }
             // Handle rate limit errors specifically (OpenRouter returns these with retry-after info)
             else if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
               const retryAfter = extractRetryAfter(errorMessage)
@@ -2309,22 +2437,22 @@ CRITICAL INSTRUCTIONS:
               errorMessage = 'API quota exceeded. Please check your account limits.'
             }
           }
-          
+
           results.push({
             ruleId: rule.id,
             ruleTitle: rule.title,
             passed: false,
             reason: `Error: ${errorMessage}`,
           })
-          
+
           // Update last request time even on error to prevent rapid retries
           lastRequestTime = Date.now()
         }
       }
-      
+
       // Log batch completion
       console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${rules.length}`)
-      
+
       // Wait 300ms between batches (except after last batch) - minimal delay for speed
       if (batchIndex < batches.length - 1) {
         await sleep(300)
