@@ -55,7 +55,7 @@ export default function ScannerPage() {
   }
 
 
-  const toggleRule = (ruleId: string) => {
+  const toggleRule = (ruleId: string) => {``
     setExpandedRules(prev => {
       const newSet = new Set(prev)
       if (newSet.has(ruleId)) {
