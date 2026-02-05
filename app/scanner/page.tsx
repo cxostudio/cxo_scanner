@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { usePathname } from "next/navigation";
 import { Check, X, ChevronDown, AlertCircle } from 'lucide-react';
 import { z } from 'zod'
+import { motion } from 'framer-motion'
 
 interface ScanResult {
   ruleId: string
@@ -47,6 +48,10 @@ export default function ScannerPage() {
         setResults(null)
       }
     }
+    
+    // Try to load screenshot from last batch (stored in state during scan)
+    // Note: Screenshot is not in localStorage due to size, but we can try to get it from session
+    // For now, we'll show placeholder if no screenshot available
   }
 
 
@@ -84,9 +89,15 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Phone */}
+        {/* iPhone Image */}
         <div className="flex justify-center mb-6">
-          <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5 }}
+          >
+            <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
+          </motion.div>
         </div>
 
         {results && (

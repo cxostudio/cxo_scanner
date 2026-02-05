@@ -247,13 +247,17 @@ export default function Home() {
         allResults.push(...newResults)
         
         // Store screenshot from every batch to show what AI is seeing
-        // Note: Not storing in localStorage due to size limits, keeping only in state
+        // Store in both state and sessionStorage for results page
         if (data.screenshot) {
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
-          // Don't store in localStorage - screenshots are too large and cause quota errors
-          // localStorage.setItem('websiteScreenshot', data.screenshot)
-          console.log(`Screenshot updated from batch ${i + 1}`)
+          // Store in sessionStorage for results page (not localStorage due to size limits)
+          try {
+            sessionStorage.setItem('lastScreenshot', data.screenshot)
+            console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
+          } catch (e) {
+            console.warn('Could not store screenshot in sessionStorage:', e)
+          }
         }
         
         const remainingBatches = batches.slice(i + 1)
@@ -307,6 +311,15 @@ export default function Home() {
         
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
         localStorage.setItem('scanUrl', websiteUrl)
+        // Store screenshot URL for results page (if available)
+        if (websiteScreenshot) {
+          // Store as data URL in sessionStorage instead of localStorage (smaller size limit)
+          try {
+            sessionStorage.setItem('lastScreenshot', websiteScreenshot)
+          } catch (e) {
+            console.warn('Could not store screenshot in sessionStorage:', e)
+          }
+        }
         localStorage.removeItem('scanBatches')
       } else {
         localStorage.setItem('scanResults', JSON.stringify(allResults))
@@ -569,20 +582,80 @@ export default function Home() {
         {websiteScreenshot ? (
           <>
             {progress && (
-              <div className="mb-2 text-sm text-gray-600 font-semibold">
-                Batch {currentBatchNumber} of {progress.total} - Screenshot View
-              </div>
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 text-sm text-gray-600 font-semibold"
+              >
+              </motion.div>
             )}
-            <div className="relative w-[428px] max-h-[600px] border-4 border-gray-300 rounded-lg overflow-y-auto shadow-lg bg-white">
-              <img 
-                src={websiteScreenshot} 
-                alt={`Website being scanned - Batch ${currentBatchNumber} - Full page view`} 
-                className="w-full h-auto object-contain" 
-              />
-            </div>
+            {/* iPhone Frame with Screenshot */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              className="relative w-[375px] h-[812px] mx-auto scale-90 md:scale-100"
+              style={{ maxHeight: '90vh' }}
+            >
+              {/* iPhone Frame */}
+              <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
+                {/* Notch */}
+                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-gray-900 rounded-b-[20px] z-10"></div>
+                
+                {/* Screen Area */}
+                <div className="absolute top-[8px] left-[8px] right-[8px] bottom-[8px] bg-black rounded-[2.5rem] overflow-hidden">
+                  {/* Status Bar */}
+                  <div className="absolute top-0 left-0 right-0 h-[44px] bg-black z-20 flex items-center justify-between px-6 pt-2">
+                    <div className="text-white text-xs font-semibold">9:41</div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-4 h-2 border border-white rounded-sm">
+                        <div className="w-3 h-1.5 bg-white rounded-sm m-0.5"></div>
+                      </div>
+                      <div className="w-5 h-3 border border-white rounded-sm">
+                        <div className="w-4 h-2 bg-white rounded-sm m-0.5"></div>
+                      </div>
+                      <div className="w-6 h-3 border border-white rounded-sm">
+                        <div className="w-5 h-2 bg-white rounded-sm m-0.5"></div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Screenshot Content */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.5 }}
+                    className="absolute top-[44px] left-0 right-0 bottom-0 overflow-y-auto bg-white iphone-scrollbar"
+                    style={{ 
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'rgba(0, 0, 0, 0.2) transparent'
+                    }}
+                  >
+                    <img 
+                      src={websiteScreenshot} 
+                      alt={`Website being scanned - Batch ${currentBatchNumber} - Full page view`} 
+                      className="w-full h-auto object-contain" 
+                    />
+                  </motion.div>
+                  
+                  {/* Home Indicator */}
+                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full"></div>
+                </div>
+                
+                {/* Side Buttons (Volume, Power) */}
+                <div className="absolute left-0 top-[120px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
+                <div className="absolute left-0 top-[170px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
+                <div className="absolute right-0 top-[140px] w-[3px] h-[60px] bg-gray-800 rounded-l-sm"></div>
+              </div>
+            </motion.div>
           </>
         ) : (
-          <img src="/IPhone.png" className="w-[428px] h-[321px] object-cover" />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5 }}
+          >
+        </motion.div>
         )}
       </div>
 
