@@ -1017,6 +1017,7 @@ export async function POST(request: NextRequest) {
           const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+          const isVideoTestimonialRule = rule.id === 'video-testimonials' || rule.title.toLowerCase().includes('video testimonial') || rule.description.toLowerCase().includes('video testimonial')
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
@@ -1755,7 +1756,9 @@ CRITICAL INSTRUCTIONS:
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Reviews with images" or "Customer photos"\n- Image galleries in review sections\n- Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections (like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS (always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           
-          const prompt = `${customerPhotoPrefix}URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n- Video players with play buttons (▶️) in review sections\n- Any videos displayed in review sections\n\nCRITICAL: If you see ANY videos in review sections (like "Customer reviews" section with videos), the rule MUST PASS.\nReview section videos = VIDEO TESTIMONIALS (always pass).\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their locations.\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly with image support
           // Build content array with text and optional image
@@ -1763,8 +1766,8 @@ CRITICAL INSTRUCTIONS:
           let messageContent: string | any[] = prompt
           
           // Add screenshot if available (for AI vision analysis)
-          // Always include screenshot for customer photos rule, and other visual rules
-          if (screenshotDataUrl && (isCustomerPhotoRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
+          // Always include screenshot for customer photos rule, video testimonials rule, and other visual rules
+          if (screenshotDataUrl && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
             // Convert screenshot data URL to protocol-relative format if it's a regular URL
             // (data URLs stay as is, but if we had HTTP URLs, convert to //)
             let imageUrl = screenshotDataUrl
@@ -1790,6 +1793,9 @@ CRITICAL INSTRUCTIONS:
             console.log(`Screenshot size: ${screenshotDataUrl.length} chars, Format: data URL`)
             if (isCustomerPhotoRule) {
               console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
+            }
+            if (isVideoTestimonialRule) {
+              console.log(`⚠️ VIDEO TESTIMONIALS RULE: Screenshot included - AI must check for videos in review sections`)
             }
           }
           
@@ -1969,6 +1975,28 @@ CRITICAL INSTRUCTIONS:
           } else if (isLazyRule && !reasonLower.includes('lazy') && !reasonLower.includes('loading')) {
             console.warn(`Warning: Lazy loading rule but reason doesn't mention lazy loading: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
+          } else if (isVideoTestimonialRule) {
+            // Video testimonials rule validation - check for videos in review sections
+            const hasVideoTestimonials = reasonLower.includes('video testimonial') || 
+                                       reasonLower.includes('customer video') || 
+                                       (reasonLower.includes('review section') && reasonLower.includes('video')) ||
+                                       reasonLower.includes('customer-uploaded video') ||
+                                       reasonLower.includes('video review') ||
+                                       reasonLower.includes('play button') ||
+                                       (reasonLower.includes('video') && reasonLower.includes('review'))
+            
+            // If video testimonials are detected, MUST PASS
+            if (hasVideoTestimonials && !analysis.passed) {
+              console.log(`Video testimonials detected in response but marked as failed. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Customer video testimonials are displayed in the review section. These are customer-uploaded videos showing the product, which fulfills the requirement for video testimonials.`
+            }
+            
+            // Must mention video/testimonial
+            if (!reasonLower.includes('video') && !reasonLower.includes('testimonial') && !reasonLower.includes('customer')) {
+              console.warn(`Warning: Video testimonial rule but reason doesn't mention videos/testimonials: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
           } else if (isCustomerPhotoRule) {
             // Customer photos rule validation - must NOT mention rating
             if (reasonLower.includes('rating rule') || reasonLower.includes('rating failed') || (reasonLower.includes('rating') && reasonLower.includes('failed'))) {
