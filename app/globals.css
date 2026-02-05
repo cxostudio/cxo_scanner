@@ -53,3 +53,21 @@
     opacity: 1;
   }
 }
+
+/* Custom scrollbar for iPhone frame */
+.iphone-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.iphone-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.iphone-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+}
+
+.iphone-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
