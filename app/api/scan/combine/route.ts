@@ -34,14 +34,25 @@ export async function POST(request: NextRequest) {
 
     const { results } = validationResult.data
     
-    // Simply return the combined results
+    // Remove duplicates based on ruleId (keep first occurrence)
+    const seenRuleIds = new Set<string>()
+    const uniqueResults = results.filter(result => {
+      if (seenRuleIds.has(result.ruleId)) {
+        console.warn(`Duplicate result found for ruleId: ${result.ruleId}, removing duplicate`)
+        return false
+      }
+      seenRuleIds.add(result.ruleId)
+      return true
+    })
+    
+    // Simply return the combined results (deduplicated)
     // This endpoint exists to fix Vercel 60-second timeout by ensuring
     // all batch results are combined in a final request
     return NextResponse.json({
-      results: results,
-      total: results.length,
-      passed: results.filter(r => r.passed).length,
-      failed: results.filter(r => !r.passed).length,
+      results: uniqueResults,
+      total: uniqueResults.length,
+      passed: uniqueResults.filter(r => r.passed).length,
+      failed: uniqueResults.filter(r => !r.passed).length,
     })
   } catch (error) {
     console.error('Combine error:', error)

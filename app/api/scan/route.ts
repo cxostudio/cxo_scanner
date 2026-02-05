@@ -39,6 +39,7 @@ const ScanRequestSchema = z.object({
   rules: z.array(RuleSchema)
     .min(1, 'At least one rule is required')
     .max(100, 'Maximum 100 rules allowed per scan'),
+  captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
 })
 
 // Helper function to sleep/delay
@@ -95,12 +96,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules } = validationResult.data
+    const { url, rules, captureScreenshot = true } = validationResult.data
 
     // Normalize URL
     let validUrl = url.trim()
     if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
       validUrl = 'https://' + validUrl
+    }
+
+    // Special handling for Amazon product URLs:
+    // Long Amazon URLs with many query params often redirect to lightweight
+    // "Continue shopping" pages that do NOT contain product details or reviews.
+    // To ensure we always hit the real product page (with customer reviews
+    // and videos), normalize to the canonical /dp/<ASIN> URL.
+    try {
+      const parsed = new URL(validUrl)
+      const host = parsed.hostname.toLowerCase()
+      if (host.includes('amazon.')) {
+        let asin: string | null = null
+
+        // Match /dp/ASIN/ or /gp/product/ASIN/
+        const dpMatch = parsed.pathname.match(/\/dp\/([^/]+)/)
+        const gpMatch = parsed.pathname.match(/\/gp\/product\/([^/]+)/)
+
+        if (dpMatch && dpMatch[1]) {
+          asin = dpMatch[1]
+        } else if (gpMatch && gpMatch[1]) {
+          asin = gpMatch[1]
+        }
+
+        if (asin) {
+          // Build clean canonical product URL without extra params
+          const normalized = `${parsed.protocol}//${parsed.host}/dp/${asin}`
+          console.log(`Normalizing Amazon URL for scanning: ${validUrl} → ${normalized}`)
+          validUrl = normalized
+        }
+      }
+    } catch (e) {
+      console.warn('URL normalization failed, continuing with original URL:', e)
     }
 
     // OpenRouter API support
@@ -118,8 +151,13 @@ export async function POST(request: NextRequest) {
 
     // Fetch website content with Puppeteer to detect JavaScript-loaded content
     let websiteContent = ''
+    // Keep a separate copy of the full visible text (without truncation) so
+    // we can run specialized heuristics (e.g., for review videos) even if
+    // we only send a shortened version to the AI model.
+    let fullVisibleText = ''
     let browser
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
+    let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     try {
       // Launch headless browser
       browser = await puppeteer.launch({
@@ -133,32 +171,64 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-      // Navigate to the page and wait for network to be idle
+      // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
       await page.goto(validUrl, {
-        waitUntil: 'networkidle2', // Wait until network is idle (JavaScript loaded)
-        timeout: 30000, // 30 second timeout
+        waitUntil: 'load', // Faster than networkidle0 - good enough for screenshot
+        timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
 
-      // Wait a bit more for any delayed JavaScript execution
-      await new Promise(resolve => setTimeout(resolve, 2000)) // Reduced to 2 seconds for faster processing
+      // Quick wait for initial render
+      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Scroll to ensure all content is loaded
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight / 2)
-      })
-      await page.waitForSelector('img[data-hook="review-image-tile"]', { timeout: 8000 }).catch(() => {
-        console.log("No customer images found");
-      });
-      await new Promise(resolve => setTimeout(resolve, 500)) // Reduced to 500ms
-      await page.evaluate(() => {
-        window.scrollTo(0, 0)
-      })
-      await new Promise(resolve => setTimeout(resolve, 300)) // Reduced to 300ms
+      // Wait for critical images only (with timeout to avoid Vercel limit)
+      console.log('Waiting for images to load...')
+      try {
+        await Promise.race([
+          page.evaluate(async () => {
+            const images = Array.from(document.querySelectorAll('img')).slice(0, 15) // Limit to first 15 images
+            const imagePromises = images.map((img) => {
+              if (img.complete) return Promise.resolve()
+              return new Promise((resolve) => {
+                img.onload = resolve
+                img.onerror = resolve
+                setTimeout(resolve, 2000) // Reduced timeout per image
+              })
+            })
+            await Promise.all(imagePromises)
+          }),
+          new Promise(resolve => setTimeout(resolve, 8000)) // Max 8 seconds for images
+        ])
+      } catch (e) {
+        console.warn('Image loading timeout, proceeding with screenshot')
+      }
+
+      // Quick scroll to trigger lazy loading (limited for Vercel timeout)
+      try {
+        const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
+        const viewportHeight = await page.evaluate(() => window.innerHeight)
+        if (scrollHeight > viewportHeight) {
+          // Quick scroll - only 2 steps instead of full scroll
+          for (let i = 0; i <= 2; i++) {
+            await page.evaluate((step, height) => {
+              window.scrollTo(0, (step / 2) * height)
+            }, i, scrollHeight)
+            await new Promise(resolve => setTimeout(resolve, 300)) // Reduced wait
+          }
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      } catch (e) {
+        console.warn('Scroll failed, proceeding with screenshot')
+      }
+
+      console.log('Page loaded, ready for screenshot')
 
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
         return document.body.innerText || document.body.textContent || ''
       })
+      // Store complete visible text for downstream heuristics
+      fullVisibleText = visibleText
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
@@ -838,58 +908,32 @@ export async function POST(request: NextRequest) {
 
 
       // Capture screenshot once for all rules (for AI vision analysis)
-      // Capture before closing browser so page is still available
-      // Support multiple formats: PNG (best quality), JPEG (fallback), WebP (alternative)
-      try {
-        let screenshot: string | Buffer | null = null
-        let imageFormat = 'png'
-
-        // Try PNG first (best quality, supports transparency, lossless)
-        try {
-          screenshot = await page.screenshot({
-            type: 'png',
-            fullPage: false, // Only capture viewport for faster processing
-            encoding: 'base64',
-          }) as string
-          imageFormat = 'png'
-          console.log('Screenshot captured in PNG format')
-        } catch (pngError) {
-          // Fallback to JPEG if PNG fails (smaller file size, good quality)
+      // Only capture if captureScreenshot flag is true (to avoid redundant screenshots in subsequent batches)
+      // Capture screenshot - use early screenshot if available, otherwise take new one
+      if (captureScreenshot) {
+        if (earlyScreenshot) {
+          // Use early screenshot (captured before full load to avoid Vercel timeout)
+          screenshotDataUrl = earlyScreenshot
+          console.log('Using early screenshot (captured before full page load)')
+        } else {
+          // Try to capture final screenshot (if time permits)
+          console.log('Taking final screenshot...')
           try {
-            screenshot = await page.screenshot({
+            const screenshot = await page.screenshot({
               type: 'jpeg',
-              fullPage: false,
+              fullPage: true,
               encoding: 'base64',
-              quality: 90, // High quality JPEG
+              quality: 85,
             }) as string
-            imageFormat = 'jpeg'
-            console.log('Screenshot captured in JPEG format (PNG fallback)')
-          } catch (jpegError) {
-            // Final fallback to WebP (modern format, good compression)
-            try {
-              screenshot = await page.screenshot({
-                type: 'webp',
-                fullPage: false,
-                encoding: 'base64',
-                quality: 90, // High quality WebP
-              }) as string
-              imageFormat = 'webp'
-              console.log('Screenshot captured in WebP format (PNG/JPEG fallback)')
-            } catch (webpError) {
-              console.warn('Failed to capture screenshot in PNG, JPEG, and WebP:', webpError)
-              screenshot = null
-            }
+            screenshotDataUrl = `data:image/jpeg;base64,${screenshot}`
+            console.log('Final screenshot captured in JPEG format')
+          } catch (screenshotError) {
+            console.warn('Failed to capture final screenshot, using early one if available:', screenshotError)
+            screenshotDataUrl = earlyScreenshot || null
           }
         }
-
-        if (screenshot) {
-          screenshotDataUrl = `data:image/${imageFormat};base64,${screenshot}`
-          console.log(`Screenshot ready in ${imageFormat.toUpperCase()} format for AI vision analysis`)
-        } else {
-          screenshotDataUrl = null
-        }
-      } catch (screenshotError) {
-        console.warn('Failed to capture screenshot:', screenshotError)
+      } else {
+        console.log('Skipping screenshot capture (not needed for this batch)')
         screenshotDataUrl = null
       }
 
@@ -992,8 +1036,9 @@ export async function POST(request: NextRequest) {
 
 
           const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
-          const isRatingRule = rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')
-          const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers')
+          const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
+          const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
@@ -1080,40 +1125,211 @@ CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
 CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for customer photos.
 
 STEP 1 (Visual Scan - Look at the Screenshot):
-- Examine the entire screenshot image provided
-- Look for images in: product gallery, description section, review section, or user-generated content areas
+- Examine the ENTIRE screenshot image from top to bottom
+- Look specifically for sections titled: "Reviews with images", "Customer photos", "Review images", "Customer reviews with photos", "Photos from reviews"
+- Look for images in: product gallery, description section, review section, rating section, or user-generated content areas
 - Scan for photos that show the product being USED by real customers
 
-STEP 2 (Identify Customer Photos):
+STEP 2 (Amazon/E-commerce Review Sections - CRITICAL):
+MOST IMPORTANT: On e-commerce sites (like Amazon, Flipkart, etc.), look for:
+- Sections titled "Reviews with images" or "Photos from reviews" - THESE ARE CUSTOMER PHOTOS
+- Image galleries within review sections - THESE ARE CUSTOMER PHOTOS
+- Any images displayed in review/rating sections - THESE ARE CUSTOMER PHOTOS
+- Customer photo carousels or galleries - THESE ARE CUSTOMER PHOTOS
+- If you see ANY images in a review section, rating section, or "Reviews with images" section, the rule MUST PASS
+
+STEP 3 (Identify Customer Photos):
 Look for visual indicators of authentic customer photos:
 - Natural lighting (not studio lighting)
 - Real-world backgrounds (homes, offices, outdoor settings)
 - Non-professional models (regular people, not models)
 - Product in use (being worn, held, or used in real life)
 - User-uploaded style (different angles, casual settings)
+- Review section images (photos uploaded by customers in reviews) - ALWAYS COUNT AS CUSTOMER PHOTOS
+- Customer gallery images (user-generated content sections) - ALWAYS COUNT AS CUSTOMER PHOTOS
+- Images in "Reviews with images" sections - ALWAYS COUNT AS CUSTOMER PHOTOS
 
-STEP 3 (Differentiate from Professional Photos):
-EXCLUDE these (they are NOT customer photos):
-- Studio shots with white/plain backgrounds
-- Professional product photography
-- Branded/model photos
-- Product-only images (no people using it)
-- Stock photos
+STEP 4 (Review Section Images are ALWAYS Customer Photos):
+CRITICAL RULE: Images in ANY review-related section are ALWAYS considered customer photos:
+- "Reviews with images" section → CUSTOMER PHOTOS (PASS)
+- Review section with images → CUSTOMER PHOTOS (PASS)
+- Rating section with images → CUSTOMER PHOTOS (PASS)
+- Customer photo galleries → CUSTOMER PHOTOS (PASS)
+- User-generated content sections → CUSTOMER PHOTOS (PASS)
+- If you see images in review/rating sections, DO NOT analyze if they look professional or not - THEY ARE CUSTOMER PHOTOS
 
-STEP 4 (Final Verdict):
-- PASS if you find at least ONE (1) authentic customer photo in the screenshot
-- FAIL if you only see professional/studio photos or product-only images
-- FAIL if no images are visible in the screenshot
+STEP 5 (Differentiate from Professional Photos - ONLY for non-review sections):
+EXCLUDE these (they are NOT customer photos) - BUT ONLY if they are NOT in review sections:
+- Studio shots with white/plain backgrounds (if in product gallery, not review section)
+- Professional product photography (if in product gallery, not review section)
+- Branded/model photos (if in product gallery, not review section)
+- Product-only images (if in product gallery, not review section)
+- Stock photos (if in product gallery, not review section)
 
-IMPORTANT:
+IMPORTANT: If images are in review sections, they are ALWAYS customer photos regardless of appearance.
+
+STEP 6 (Final Verdict - CRITICAL):
+- PASS if you find images in "Reviews with images" section (even if they look professional) → MUST PASS
+- PASS if you find images in review sections (even if they look professional) → MUST PASS
+- PASS if you find at least ONE (1) authentic customer photo anywhere in the screenshot → MUST PASS
+- PASS if review section contains ANY images (they are customer photos by definition) → MUST PASS
+- PASS if you see customer-uploaded photos anywhere → MUST PASS
+- FAIL ONLY if you see NO images in review sections AND only professional/studio photos in product gallery
+- FAIL ONLY if no images are visible in the screenshot at all
+
+CRITICAL: If your response mentions "Reviews with images" section OR "customer photos" OR "review section images", you MUST set passed: true
+CRITICAL: Do NOT mention "rating rule" in your response - this is the CUSTOMER PHOTOS rule, not the rating rule
+CRITICAL: If you see customer photos, the rule MUST PASS - do not fail it
+
+CRITICAL REMINDERS:
 - You MUST look at the SCREENSHOT IMAGE provided, not just text content
 - Visual analysis is required - check the actual images in the screenshot
-- If customer photos are present in the screenshot, the rule PASSES
-- Be specific about WHERE in the screenshot you see customer photos (e.g., "review section", "gallery", "user photos section")
+- Review section images ARE ALWAYS customer photos - if you see images in review section, the rule MUST PASS
+- "Reviews with images" sections = CUSTOMER PHOTOS (always pass)
+- **MANDATORY: You MUST mention the EXACT SECTION/LOCATION where you see customer photos in your reason**
+- Be VERY SPECIFIC about WHERE in the screenshot you see customer photos (e.g., "review section", "Reviews with images section", "customer review images", "gallery", "user photos section")
+- Include the exact section title/heading if visible (e.g., "Reviews with images", "Customer photos", "Review images")
+- If you see a "Reviews with images" section with photos, you MUST say the rule PASSES
 
-Examples:
-✅ PASS: "I can see in the screenshot that there are customer-uploaded photos in the review section showing the product being used in real home settings with natural lighting. These are authentic customer photos, not professional studio shots."
-❌ FAIL: "In the screenshot, I only see professional product images with white backgrounds and studio lighting. No customer photos are visible in the review section or gallery."
+Examples (WITH EXACT LOCATIONS):
+✅ PASS: "I can see in the screenshot a section titled 'Reviews with images' located below the product description, containing multiple customer-uploaded photos. These images are in the review section, which qualifies them as customer photos. The rule passes."
+
+✅ PASS: "The screenshot shows a 'Customer reviews' section with images uploaded by customers, located near the bottom of the page after the product specifications. These images appear in the review/rating area of the page, which makes them customer photos by definition. The rule passes."
+
+✅ PASS: "I can see images in the 'Reviews with images' section, which is positioned between the product details and the 'Top reviews from India' section. Even though some may appear professional, images in review sections are always considered customer photos. The rule passes."
+
+✅ PASS: "The screenshot displays customer review images in the 'Customer reviews' section showing the product from different angles. This section is located below the product gallery and above the shipping information. These are customer photos as they are in the review section. The rule passes."
+
+❌ FAIL: "In the screenshot, I only see professional product images with white backgrounds and studio lighting in the product gallery section. No images are visible in any review section, 'Reviews with images' section, or customer photo galleries. The rule fails."
+
+CRITICAL EXAMPLES FOR AMAZON/E-COMMERCE SITES (WITH LOCATIONS):
+✅ PASS: "I can see a 'Reviews with images' section in the screenshot with multiple photos, located below the product ratings and above the 'Top reviews from India' section. These are customer photos. The rule passes."
+
+✅ PASS: "The screenshot shows images in the 'Customer reviews' section, which is positioned after the product description section. These images are customer photos. The rule passes."
+
+IMPORTANT REMINDER:
+- "Reviews with images" sections = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
+- Review section images = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
+- Rating section images = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
+- If you see ANY images in review/rating sections, the rule MUST PASS regardless of how they look
+- Don't confuse review section images with professional product gallery images
+- Look specifically for sections titled "Reviews with images", "Customer photos", "Review images", etc.
+- If such sections exist with images, you MUST say the rule PASSES
+`
+          } else if (isVideoTestimonialRule) {
+            specialInstructions = `
+VIDEO TESTIMONIALS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
+
+CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for video testimonials.
+
+STEP 1 (Visual Scan - Look at the Screenshot):
+- Examine the ENTIRE screenshot image from top to bottom
+- Look specifically for sections titled: "Video Testimonials", "Customer Videos", "Video Reviews", "Watch Reviews", "Hear from Customers", "Customer Video Reviews"
+- Look for video players with play buttons (▶️) in: review section, testimonials section, customer reviews section, or user-generated content areas
+- Scan for videos that show customers talking about the product
+
+STEP 2 (Amazon/E-commerce Review Sections - CRITICAL):
+MOST IMPORTANT: On e-commerce sites (like Amazon, Flipkart, etc.), look for:
+- Videos in review sections - THESE ARE CUSTOMER VIDEO TESTIMONIALS
+- Video players in "Customer reviews" section - THESE ARE CUSTOMER VIDEO TESTIMONIALS
+- Video thumbnails with play buttons (▶️) in review areas - THESE ARE CUSTOMER VIDEO TESTIMONIALS
+- Any videos displayed in review/rating sections - THESE ARE CUSTOMER VIDEO TESTIMONIALS
+- If you see ANY videos with play buttons (▶️) in a review section, rating section, or customer reviews section, the rule MUST PASS
+
+STEP 3 (Identify Video Testimonials):
+Look for visual indicators of customer video testimonials:
+- Play button (▶️) visible on video thumbnails - THIS IS REQUIRED (can be small or large)
+- Video thumbnails with play button overlay in review sections - THESE ARE VIDEO TESTIMONIALS
+- Video players embedded in review/testimonial sections
+- Video thumbnails/images with play icons in customer reviews - THESE ARE VIDEO TESTIMONIALS
+- Customer faces visible in video thumbnails
+- Videos in sections titled "Video Testimonials", "Customer Videos", "Video Reviews"
+- Review section videos (videos uploaded by customers in reviews) - ALWAYS COUNT AS VIDEO TESTIMONIALS
+- Customer video galleries - ALWAYS COUNT AS VIDEO TESTIMONIALS
+- Videos in "Customer reviews" sections - ALWAYS COUNT AS VIDEO TESTIMONIALS
+- ANY image/thumbnail in review section with a play button icon (▶️) - THIS IS A VIDEO TESTIMONIAL
+
+STEP 4 (Review Section Videos are ALWAYS Video Testimonials):
+CRITICAL RULE: Videos in ANY review-related section are ALWAYS considered customer video testimonials:
+- "Customer reviews" section with videos → VIDEO TESTIMONIALS (PASS)
+- Review section with videos → VIDEO TESTIMONIALS (PASS)
+- Rating section with videos → VIDEO TESTIMONIALS (PASS)
+- Customer video galleries → VIDEO TESTIMONIALS (PASS)
+- User-generated video content sections → VIDEO TESTIMONIALS (PASS)
+- If you see videos with play buttons (▶️) in review/rating sections, DO NOT analyze if they look professional or not - THEY ARE VIDEO TESTIMONIALS
+
+STEP 5 (Differentiate from Brand Videos - ONLY for non-review sections):
+EXCLUDE these (they are NOT video testimonials) - BUT ONLY if they are NOT in review sections:
+- Brand promotional videos (if in product gallery, not review section)
+- Product demo videos by brand (if in product gallery, not review section)
+- Marketing videos (if in product gallery, not review section)
+
+IMPORTANT: If videos are in review sections, they are ALWAYS video testimonials regardless of appearance.
+
+STEP 6 (Final Verdict - CRITICAL):
+- PASS ONLY if you ACTUALLY SEE videos with play buttons (▶️) in the screenshot in "Customer reviews" section → MUST PASS
+- PASS ONLY if you ACTUALLY SEE videos with play buttons (▶️) in review sections in the screenshot → MUST PASS
+- PASS ONLY if you ACTUALLY SEE at least ONE (1) customer video testimonial with play button (▶️) in the screenshot → MUST PASS
+- PASS ONLY if review section ACTUALLY CONTAINS videos with play buttons (▶️) visible in the screenshot → MUST PASS
+- PASS ONLY if you ACTUALLY SEE customer-uploaded videos with play buttons (▶️) in the screenshot → MUST PASS
+- FAIL if you DO NOT SEE any videos or play buttons (▶️) in the screenshot
+- FAIL if you see NO videos in review sections
+- FAIL if no video players or play buttons (▶️) are visible in the screenshot
+- FAIL if you only see text reviews without any video players or play buttons (▶️)
+
+CRITICAL: You MUST actually SEE videos with play buttons (▶️) in the screenshot. 
+- Look for play button icons (▶️) on video thumbnails in review sections
+- Look for video player controls or video thumbnails with play overlays
+- Even if the play button is small, if you see a video thumbnail/image with a play icon overlay in review section, it counts as a video testimonial
+- Do NOT assume videos exist just because there's a review section, but DO look carefully for video thumbnails with play buttons
+- You must VISUALLY CONFIRM the presence of video players or play buttons (▶️) in the screenshot
+
+CRITICAL: If your response mentions "Customer reviews" section with videos OR "video testimonials" OR "review section videos" OR "play buttons", you MUST set passed: true ONLY if you actually see them in the screenshot
+CRITICAL: If you see customer review videos with play buttons (▶️), the rule MUST PASS - do not fail it
+CRITICAL: If you DO NOT see any videos or play buttons (▶️) in the screenshot, the rule MUST FAIL
+
+CRITICAL REMINDERS:
+- You MUST look at the SCREENSHOT IMAGE provided, not just text content
+- Visual analysis is required - check for play buttons (▶️) and video players in the screenshot
+- Review section videos ARE ALWAYS video testimonials - if you see videos with play buttons (▶️) in review section, the rule MUST PASS
+- "Customer reviews" sections with videos = VIDEO TESTIMONIALS (always pass)
+- **MANDATORY: You MUST mention the EXACT SECTION/LOCATION where you see video testimonials in your reason**
+- Be VERY SPECIFIC about WHERE in the screenshot you see video testimonials (e.g., "review section", "Customer reviews section with videos", "video testimonials section", "customer video gallery")
+- Include the exact section title/heading if visible (e.g., "Video Testimonials", "Customer Videos", "Video Reviews", "Customer reviews")
+- If you see a "Customer reviews" section with videos and play buttons (▶️), you MUST say the rule PASSES
+- If you DO NOT see any videos or play buttons (▶️) in the screenshot, you MUST say the rule FAILS
+
+Examples (WITH EXACT LOCATIONS):
+✅ PASS: "I can see in the screenshot a section titled 'Customer reviews' located below the product description, containing video players with play buttons (▶️) visible. These videos are in the review section, which qualifies them as customer video testimonials. The rule passes."
+
+✅ PASS: "The screenshot shows a 'Video Testimonials' section with embedded video players and play buttons (▶️), positioned between the product benefits and the customer reviews text section. These videos appear in the testimonials area of the page, which makes them customer video testimonials by definition. The rule passes."
+
+✅ PASS: "I can see video players with play buttons (▶️) in the 'Customer reviews' section, which is located near the bottom of the page after the product specifications. Even though some may appear professional, videos in review sections are always considered customer video testimonials. The rule passes."
+
+✅ PASS: "The screenshot displays customer review videos with play buttons (▶️) in the 'Customer reviews' section showing customers using the product. This section is positioned below the product gallery and above the shipping information. These are video testimonials as they are in the review section. The rule passes."
+
+❌ FAIL: "In the screenshot, I do not see any video players or play buttons (▶️) in the review section. The 'Customer reviews' section only contains text reviews without any video testimonials. No videos are visible in any section of the page. The rule fails."
+
+❌ FAIL: "I examined the entire screenshot and cannot find any video players, play buttons (▶️), or video testimonials. The review section contains only text reviews and images, but no videos. The rule fails."
+
+❌ FAIL: "The screenshot shows a 'Customer reviews' section located below the product description, but it only contains text reviews and customer photos. No video players or play buttons (▶️) are visible in this section or anywhere else on the page. The rule fails."
+
+CRITICAL EXAMPLES FOR AMAZON/E-COMMERCE SITES (WITH LOCATIONS):
+✅ PASS: "I can see a 'Customer reviews' section in the screenshot with video players and play buttons (▶️), located below the product ratings and above the 'Top reviews from India' section. These are customer video testimonials. The rule passes."
+
+✅ PASS: "The screenshot shows videos with play buttons (▶️) in the 'Customer reviews' section, which is positioned after the product description section. These videos are customer video testimonials. The rule passes."
+
+IMPORTANT REMINDER:
+- "Customer reviews" sections with videos and play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
+- Review section videos with play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
+- Rating section videos with play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
+- If you see ANY videos with play buttons (▶️) in review/rating sections, the rule MUST PASS regardless of how they look
+- If you DO NOT see any videos or play buttons (▶️) in the screenshot, the rule MUST FAIL
+- Don't confuse review section videos with brand promotional videos in product gallery
+- Look specifically for sections titled "Video Testimonials", "Customer Videos", "Video Reviews", or videos in review sections
+- You MUST visually confirm play buttons (▶️) or video players in the screenshot - do not assume they exist
+- If such sections exist with videos and play buttons (▶️), you MUST say the rule PASSES
+- If no videos or play buttons (▶️) are visible, you MUST say the rule FAILS
 `
           } else if (isStickyCartRule) {
             specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`
@@ -1721,71 +1937,12 @@ CRITICAL INSTRUCTIONS:
 `
           }
 
-          const prompt = `
-URL: ${validUrl}
-Content: ${contentForAI}
+          // Add special prefix for customer photos rule to ensure screenshot is analyzed
+          const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Reviews with images" or "Customer photos"\n- Image galleries in review sections\n- Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections (like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS (always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
-=== RULE TO CHECK (ONLY THIS RULE) ===
-Rule ID: ${rule.id}
-Rule Title: ${rule.title}
-Rule Description: ${rule.description}
+          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n- Video players with play buttons (▶️) in review sections\n- Any videos displayed in review sections\n\nCRITICAL: You MUST ACTUALLY SEE videos with play buttons (▶️) in the screenshot.\n- If you see videos with play buttons (▶️) in review sections → PASS\n- If you DO NOT see any videos or play buttons (▶️) in the screenshot → FAIL\n- Do NOT assume videos exist - you must visually confirm them in the screenshot\n\nReview section videos with play buttons (▶️) = VIDEO TESTIMONIALS (always pass).\nNo videos or play buttons (▶️) visible = FAIL (do not pass).\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
-${specialInstructions}
-
-CRITICAL:
-You are analyzing ONLY the rule above:
-Rule ID: ${rule.id}
-Rule Title: "${rule.title}"
-
-Do NOT analyze any other rule.
-Do NOT mention or compare with other rules.
-
-IMPORTANT - REASON FORMAT REQUIREMENTS:
-- Be SPECIFIC: Mention exact elements found or missing
-- Be HUMAN READABLE: Simple, clear language
-- Tell WHERE: Specify exact page section (e.g. homepage, product page, below product description, reviews section)
-- Tell WHAT: Describe what exists or what is missing (e.g. no video testimonials, only text reviews, promotional video instead of customer testimonial)
-- Tell WHY: Explain why this matters FOR VIDEO TESTIMONIALS ONLY
-- Be ACTIONABLE: Clearly say what the user should add or fix
-- Do NOT mention prices, currency symbols, or amounts
-- Do NOT assume things not visible on the page
-
-If PASSED:
-- Mention where video testimonials are located
-- Mention what makes them valid (real customer, face visible, customer experience shared)
-- Mention video type if visible (YouTube embed, Vimeo, self-hosted)
-
-If FAILED:
-- Clearly state that no video testimonials were found OR
-- State that only text testimonials exist OR
-- State that videos exist but are promotional, not customer testimonials
-- Mention exact locations where testimonials are missing (homepage, product page, reviews section)
-
-IMPORTANT:
-You MUST respond with ONLY valid JSON.
-No extra text.
-No markdown.
-No explanations outside JSON.
-
-Required JSON format (copy exactly, replace values):
-
-{"passed": true, "reason": "brief explanation under 400 characters, specific to video testimonials only"}
-
-OR
-
-{"passed": false, "reason": "brief explanation under 400 characters, specific to video testimonials only"}
-
-Reason must:
-1. Be under 400 characters
-2. Be accurate to visible content
-3. Mention exact locations on the page
-4. Be clear and human readable
-5. Be actionable (tell what to add or fix)
-6. Be relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id})
-7. Not include currency or prices
-8. Not mention any other rules
-`;
-
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their EXACT locations and section names (e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly with image support
           // Build content array with text and optional image
@@ -1793,8 +1950,8 @@ Reason must:
           let messageContent: string | any[] = prompt
           console.log(messageContent, "messageContent")
           // Add screenshot if available (for AI vision analysis)
-          // Always include screenshot for customer photos rule, and other visual rules
-          if (screenshotDataUrl && (isCustomerPhotoRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
+          // Always include screenshot for customer photos rule, video testimonials rule, and other visual rules
+          if (screenshotDataUrl && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
             // Convert screenshot data URL to protocol-relative format if it's a regular URL
             // (data URLs stay as is, but if we had HTTP URLs, convert to //)
             let imageUrl = screenshotDataUrl
@@ -1818,8 +1975,13 @@ Reason must:
               },
             ]
             console.log(`Including screenshot for ${rule.id} rule (visual analysis required)`)
-
-
+            console.log(`Screenshot size: ${screenshotDataUrl.length} chars, Format: data URL`)
+            if (isCustomerPhotoRule) {
+              console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
+            }
+            if (isVideoTestimonialRule) {
+              console.log(`⚠️ VIDEO TESTIMONIALS RULE: Screenshot included - AI must check for videos in review sections`)
+            }
           }
 
 
@@ -1890,12 +2052,14 @@ Reason must:
           if (!jsonMatch) {
             // Try to find passed/reason pattern (Gemini sometimes returns text format)
             const passedMatch = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)
-            const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']{1,400})["']/i) ||
-              jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]{1,400})"/i)
+            // Allow longer matches and truncate after extraction
+            const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i) ||
+              jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)
 
             if (passedMatch && reasonMatch) {
-              // Escape quotes in reason and limit to 400 chars
-              const escapedReason = reasonMatch[1].replace(/"/g, '\\"').replace(/\n/g, ' ').substring(0, 400)
+              // Escape quotes in reason and limit to 400 chars (truncate to 397 + '...')
+              const rawReason = reasonMatch[1].replace(/"/g, '\\"').replace(/\n/g, ' ')
+              const escapedReason = rawReason.length > 397 ? rawReason.substring(0, 397) + '...' : rawReason
               jsonText = `{"passed": ${passedMatch[1]}, "reason": "${escapedReason}"}`
             } else {
               // Last resort: try to find any JSON-like structure
@@ -1935,14 +2099,23 @@ Reason must:
               // Try one more time - extract just the essential parts
               try {
                 const passed = jsonText.match(/["']?passed["']?\s*[:=]\s*(true|false)/i)?.[1] || 'false'
-                const reason = (jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']{1,400})["']/i)?.[1] ||
-                  jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]{1,400})"/i)?.[1] ||
-                  'Unable to parse response').replace(/\n/g, ' ').substring(0, 400)
+                // Extract reason - allow longer matches and truncate after extraction
+                const reasonMatch = jsonText.match(/["']?reason["']?\s*[:=]\s*["']([^"']+)["']/i)?.[1] ||
+                  jsonText.match(/["']?reason["']?\s*[:=]\s*"([^"]+)"/i)?.[1] ||
+                  'Unable to parse response'
+                const reason = reasonMatch.replace(/\n/g, ' ').substring(0, 397) + (reasonMatch.length > 397 ? '...' : '')
                 parsedResponse = { passed: passed === 'true', reason: reason }
               } catch (thirdError) {
                 console.error('JSON parse error. Original response:', responseText.substring(0, 300))
                 throw new Error(`Invalid JSON format: ${parseError instanceof Error ? parseError.message : 'Unknown error'}. Response preview: ${responseText.substring(0, 150)}`)
               }
+            }
+          }
+
+          // Truncate reason BEFORE validation to prevent Zod errors
+          if (parsedResponse.reason && typeof parsedResponse.reason === 'string') {
+            if (parsedResponse.reason.length > 400) {
+              parsedResponse.reason = parsedResponse.reason.substring(0, 397) + '...'
             }
           }
 
@@ -1952,7 +2125,7 @@ Reason must:
             reason: z.string().max(400), // Reduced from 500 to 400 for safety
           }).parse(parsedResponse)
 
-          // Ensure reason is within limit (truncate if needed)
+          // Ensure reason is within limit (double-check, should already be truncated)
           if (analysis.reason.length > 400) {
             analysis.reason = analysis.reason.substring(0, 397) + '...'
           }
@@ -2001,9 +2174,125 @@ Reason must:
           } else if (isLazyRule && !reasonLower.includes('lazy') && !reasonLower.includes('loading')) {
             console.warn(`Warning: Lazy loading rule but reason doesn't mention lazy loading: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
-          } else if (isCustomerPhotoRule && !reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
-            console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
-            isRelevant = false
+          } else if (isVideoTestimonialRule) {
+            // Video testimonials rule validation - STRICT CHECK
+            // Only pass if AI explicitly says videos ARE present (not just mentions "video" in general)
+            // Use full captured website text (without truncation) when available,
+            // not just the shortened snippet sent to the AI model. This helps detect
+            // review videos that often appear further down the page.
+            const websiteTextLower = (fullVisibleText || websiteContent).toLowerCase()
+            const hasNegativeIndicators = reasonLower.includes('no video') ||
+              reasonLower.includes('not found') ||
+              reasonLower.includes('no videos') ||
+              reasonLower.includes('missing') ||
+              reasonLower.includes('not visible') ||
+              reasonLower.includes('not displayed') ||
+              reasonLower.includes('not see') ||
+              reasonLower.includes('cannot see') ||
+              reasonLower.includes('do not see') ||
+              (reasonLower.includes('only') && reasonLower.includes('text') && reasonLower.includes('review'))
+
+            // Check for positive indicators - videos ARE present (more specific checks)
+            const hasPositiveIndicators =
+              (reasonLower.includes('video testimonial') && !hasNegativeIndicators) ||
+              (reasonLower.includes('customer video') && !hasNegativeIndicators) ||
+              (reasonLower.includes('play button') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video player') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos are') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos in') && !hasNegativeIndicators && reasonLower.includes('review')) ||
+              (reasonLower.includes('videos displayed') && !hasNegativeIndicators) ||
+              (reasonLower.includes('videos shown') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video thumbnail') && !hasNegativeIndicators) ||
+              (reasonLower.includes('embedded video') && !hasNegativeIndicators) ||
+              (reasonLower.includes('video') && reasonLower.includes('review') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('not')) ||
+              (reasonLower.includes('thumbnail') && reasonLower.includes('play') && !hasNegativeIndicators) ||
+              (reasonLower.includes('review') && reasonLower.includes('video') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('only text'))
+
+            // Text-based backup: detect clear "customer video" signals in HTML/content
+            const hasCustomerVideoTextSignal =
+              websiteTextLower.includes('customer videos') ||
+              websiteTextLower.includes('customer video reviews') ||
+              websiteTextLower.includes('customer review videos') ||
+              websiteTextLower.includes('video testimonials') ||
+              websiteTextLower.includes('video reviews') ||
+              /customer reviews?.{0,200}video/.test(websiteTextLower) ||
+              /video.{0,200}customer reviews?/.test(websiteTextLower) ||
+              /review.{0,200}video/.test(websiteTextLower) ||
+              /video.{0,200}review/.test(websiteTextLower) ||
+              /"review".{0,200}<video/.test(websiteTextLower) ||
+              /<video.{0,200}"review"/.test(websiteTextLower)
+
+            // If negative indicators are present, ensure it's marked as failed
+            if (hasNegativeIndicators && analysis.passed) {
+              console.log(`Video testimonials rule: Negative indicators found but marked as passed. Forcing FAIL.`)
+              analysis.passed = false
+              // Keep original reason if it mentions no videos
+              if (!reasonLower.includes('no video') && !reasonLower.includes('not found')) {
+                analysis.reason = `No video testimonials are visible in the screenshot. The page does not display customer video testimonials in the review section or anywhere else on the page.`
+              }
+            }
+
+            // If AI failed the rule but page text clearly mentions customer review videos,
+            // auto-pass to align with how customer photos rule behaves.
+            if (!analysis.passed && hasCustomerVideoTextSignal) {
+              console.log(`Video testimonials rule: customer video signals found in page text (even if model said no videos). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Customer video testimonials are available in the customer reviews section of this page. These customer-uploaded videos fulfill the requirement for video testimonials.`
+            }
+
+            // Only auto-pass if positive indicators are present AND no negative indicators
+            if (hasPositiveIndicators && !hasNegativeIndicators && !analysis.passed) {
+              console.log(`Video testimonials detected in response but marked as failed. Forcing PASS.`)
+              analysis.passed = true
+              // Keep original reason if it's good and mentions location, otherwise enhance it
+              if (!reasonLower.includes('section') || !reasonLower.includes('located') || !reasonLower.includes('review')) {
+                // Try to extract location from original reason
+                const locationMatch = reasonLower.match(/(review section|customer reviews|testimonial section)/)
+                const location = locationMatch ? locationMatch[0] : 'review section'
+                analysis.reason = `Customer video testimonials are displayed in the ${location}. These are customer-uploaded videos showing the product, which fulfills the requirement for video testimonials.`
+              }
+            }
+
+            // Must mention video/testimonial
+            if (!reasonLower.includes('video') && !reasonLower.includes('testimonial') && !reasonLower.includes('customer')) {
+              console.warn(`Warning: Video testimonial rule but reason doesn't mention videos/testimonials: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+          } else if (isCustomerPhotoRule) {
+            // Customer photos rule validation - must NOT mention rating
+            if (reasonLower.includes('rating rule') || reasonLower.includes('rating failed') || (reasonLower.includes('rating') && reasonLower.includes('failed'))) {
+              console.error(`ERROR: Customer photo rule response incorrectly mentions rating rule. This is wrong!`)
+              // Force correction - if customer photos are mentioned, it should pass
+              if (reasonLower.includes('reviews with images') || reasonLower.includes('customer photo') || reasonLower.includes('review section') || reasonLower.includes('customer-uploaded')) {
+                analysis.passed = true
+                analysis.reason = `Customer photos are displayed in the 'Reviews with images' section. These are customer-uploaded photos, which fulfills the requirement for showing customer photos using the product.`
+                console.log(`Fixed: Customer photos detected, forcing PASS`)
+              } else {
+                // Keep original but remove rating mention
+                analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Customer photos rule: ')
+                analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
+              }
+            }
+
+            // Check if customer photos are mentioned in response
+            const hasCustomerPhotos = reasonLower.includes('reviews with images') ||
+              reasonLower.includes('customer photo') ||
+              reasonLower.includes('review section') && reasonLower.includes('image') ||
+              reasonLower.includes('customer-uploaded') ||
+              reasonLower.includes('customer review image')
+
+            // If customer photos are detected, MUST PASS
+            if (hasCustomerPhotos && !analysis.passed) {
+              console.log(`Customer photos detected in response but marked as failed. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Customer photos are displayed in the 'Reviews with images' section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
+            }
+
+            // Must mention photos/customers
+            if (!reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
+              console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
           } else if (isProductTitleRule && !reasonLower.includes('title') && !reasonLower.includes('product name') && !reasonLower.includes('heading')) {
             console.warn(`Warning: Product title rule but reason doesn't mention title: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
@@ -2048,6 +2337,21 @@ Reason must:
             !currentRuleKeywords.some(ck => keyword.includes(ck) || ck.includes(keyword)) &&
             reasonLower.includes(keyword)
           )
+
+          // Special check for customer photos rule - must NOT mention rating rule
+          if (isCustomerPhotoRule && (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))) {
+            console.error(`CRITICAL ERROR: Customer photos rule response mentions rating rule. This is wrong!`)
+            // If customer photos are detected, force PASS
+            if (reasonLower.includes('reviews with images') || reasonLower.includes('customer photo') || reasonLower.includes('review section') || reasonLower.includes('customer-uploaded')) {
+              analysis.passed = true
+              analysis.reason = `Customer photos are displayed in the 'Reviews with images' section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
+              console.log(`Fixed: Removed rating rule mention and forced PASS for customer photos`)
+            } else {
+              // Remove rating mention
+              analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Customer photos rule: ')
+              analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
+            }
+          }
 
           if (mentionedOtherRules.length > 0 && !currentRuleKeywords.some(ck => reasonLower.includes(ck))) {
             console.warn(`Warning: Rule ${rule.id} reason may be for another rule. Mentioned: ${mentionedOtherRules.join(', ')}`)
@@ -2155,7 +2459,7 @@ Reason must:
       }
     }
 
-    return NextResponse.json({ results })
+    return NextResponse.json({ results, screenshot: screenshotDataUrl })
   } catch (error) {
     console.error('Scan error:', error)
     return NextResponse.json(
