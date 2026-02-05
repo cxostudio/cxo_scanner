@@ -38,6 +38,7 @@ const ScanRequestSchema = z.object({
   rules: z.array(RuleSchema)
     .min(1, 'At least one rule is required')
     .max(100, 'Maximum 100 rules allowed per scan'),
+  captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
 })
 
 // Helper function to sleep/delay
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules } = validationResult.data
+    const { url, rules, captureScreenshot = true } = validationResult.data
     
     // Normalize URL
     let validUrl = url.trim()
@@ -834,58 +835,64 @@ export async function POST(request: NextRequest) {
                       
 
       // Capture screenshot once for all rules (for AI vision analysis)
+      // Only capture if captureScreenshot flag is true (to avoid redundant screenshots in subsequent batches)
       // Capture before closing browser so page is still available
       // Support multiple formats: PNG (best quality), JPEG (fallback), WebP (alternative)
-      try {
-        let screenshot: string | Buffer | null = null
-        let imageFormat = 'png'
-        
-        // Try PNG first (best quality, supports transparency, lossless)
+      if (captureScreenshot) {
         try {
-          screenshot = await page.screenshot({
-            type: 'png',
-            fullPage: false, // Only capture viewport for faster processing
-            encoding: 'base64',
-          }) as string
-          imageFormat = 'png'
-          console.log('Screenshot captured in PNG format')
-        } catch (pngError) {
-          // Fallback to JPEG if PNG fails (smaller file size, good quality)
+          let screenshot: string | Buffer | null = null
+          let imageFormat = 'png'
+          
+          // Try PNG first (best quality, supports transparency, lossless)
           try {
             screenshot = await page.screenshot({
-              type: 'jpeg',
-              fullPage: false,
+              type: 'png',
+              fullPage: true, // Capture full page to show complete website
               encoding: 'base64',
-              quality: 90, // High quality JPEG
             }) as string
-            imageFormat = 'jpeg'
-            console.log('Screenshot captured in JPEG format (PNG fallback)')
-          } catch (jpegError) {
-            // Final fallback to WebP (modern format, good compression)
+            imageFormat = 'png'
+            console.log('Screenshot captured in PNG format (full page)')
+          } catch (pngError) {
+            // Fallback to JPEG if PNG fails (smaller file size, good quality)
             try {
               screenshot = await page.screenshot({
-                type: 'webp',
-                fullPage: false,
+                type: 'jpeg',
+                fullPage: true, // Capture full page to show complete website
                 encoding: 'base64',
-                quality: 90, // High quality WebP
+                quality: 90, // High quality JPEG
               }) as string
-              imageFormat = 'webp'
-              console.log('Screenshot captured in WebP format (PNG/JPEG fallback)')
-            } catch (webpError) {
-              console.warn('Failed to capture screenshot in PNG, JPEG, and WebP:', webpError)
-              screenshot = null
+              imageFormat = 'jpeg'
+              console.log('Screenshot captured in JPEG format (PNG fallback, full page)')
+            } catch (jpegError) {
+              // Final fallback to WebP (modern format, good compression)
+              try {
+                screenshot = await page.screenshot({
+                  type: 'webp',
+                  fullPage: true, // Capture full page to show complete website
+                  encoding: 'base64',
+                  quality: 90, // High quality WebP
+                }) as string
+                imageFormat = 'webp'
+                console.log('Screenshot captured in WebP format (PNG/JPEG fallback, full page)')
+              } catch (webpError) {
+                console.warn('Failed to capture screenshot in PNG, JPEG, and WebP:', webpError)
+                screenshot = null
+              }
             }
           }
-        }
-        
-        if (screenshot) {
-          screenshotDataUrl = `data:image/${imageFormat};base64,${screenshot}`
-          console.log(`Screenshot ready in ${imageFormat.toUpperCase()} format for AI vision analysis`)
-        } else {
+          
+          if (screenshot) {
+            screenshotDataUrl = `data:image/${imageFormat};base64,${screenshot}`
+            console.log(`Screenshot ready in ${imageFormat.toUpperCase()} format for AI vision analysis`)
+          } else {
+            screenshotDataUrl = null
+          }
+        } catch (screenshotError) {
+          console.warn('Failed to capture screenshot:', screenshotError)
           screenshotDataUrl = null
         }
-      } catch (screenshotError) {
-        console.warn('Failed to capture screenshot:', screenshotError)
+      } else {
+        console.log('Skipping screenshot capture (not needed for this batch)')
         screenshotDataUrl = null
       }
       
@@ -2022,7 +2029,7 @@ CRITICAL INSTRUCTIONS:
       }
     }
 
-    return NextResponse.json({ results })
+    return NextResponse.json({ results, screenshot: screenshotDataUrl })
   } catch (error) {
     console.error('Scan error:', error)
     return NextResponse.json(

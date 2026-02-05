@@ -59,6 +59,8 @@ export default function Home() {
   const [showAnalyze, setShowAnalyze] = useState(false)
   const [rules, setRules] = useState<Rule[]>([])
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
+  const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
+  const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -99,6 +101,11 @@ export default function Home() {
   useEffect(() => {
     // Load rules on component mount
     loadRules()
+    // Load screenshot from localStorage if available
+    const savedScreenshot = localStorage.getItem('websiteScreenshot')
+    if (savedScreenshot) {
+      setWebsiteScreenshot(savedScreenshot)
+    }
   }, [])
 
   useEffect(() => {
@@ -209,6 +216,7 @@ export default function Home() {
           body: JSON.stringify({
             url: batch.url,
             rules: batch.rules,
+            captureScreenshot: true, // Capture screenshot for every batch to show progress
           }),
         })
 
@@ -228,6 +236,14 @@ export default function Home() {
         
         const batchResults = ScanResultsSchema.parse(data.results)
         allResults.push(...batchResults)
+        
+        // Store screenshot from every batch to show what AI is seeing
+        if (data.screenshot) {
+          setWebsiteScreenshot(data.screenshot)
+          setCurrentBatchNumber(i + 1)
+          localStorage.setItem('websiteScreenshot', data.screenshot)
+          console.log(`Screenshot updated from batch ${i + 1}`)
+        }
         
         const remainingBatches = batches.slice(i + 1)
         if (remainingBatches.length > 0) {
@@ -352,6 +368,9 @@ export default function Home() {
       setShowAnalyze(true)
       setMounted(0)
       setProgress(null)
+      setWebsiteScreenshot(null) // Reset screenshot for new scan
+      setCurrentBatchNumber(0) // Reset batch number
+      localStorage.removeItem('websiteScreenshot')
 
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
@@ -534,9 +553,26 @@ export default function Home() {
                 </span>
           </h2>
 
-      {/* Phone */}
-      <div className="flex justify-center">
-        <img src="/IPhone.png" className="w-[428px] h-[321px] object-cover" />
+      {/* Website Screenshot or Phone Placeholder */}
+      <div className="flex flex-col items-center">
+        {websiteScreenshot ? (
+          <>
+            {progress && (
+              <div className="mb-2 text-sm text-gray-600 font-semibold">
+                Batch {currentBatchNumber} of {progress.total} - Screenshot View
+              </div>
+            )}
+            <div className="relative w-[428px] max-h-[600px] border-4 border-gray-300 rounded-lg overflow-y-auto shadow-lg bg-white">
+              <img 
+                src={websiteScreenshot} 
+                alt={`Website being scanned - Batch ${currentBatchNumber} - Full page view`} 
+                className="w-full h-auto object-contain" 
+              />
+            </div>
+          </>
+        ) : (
+          <img src="/IPhone.png" className="w-[428px] h-[321px] object-cover" />
+        )}
       </div>
 
       {/* Steps */}
