@@ -101,11 +101,8 @@ export default function Home() {
   useEffect(() => {
     // Load rules on component mount
     loadRules()
-    // Load screenshot from localStorage if available
-    const savedScreenshot = localStorage.getItem('websiteScreenshot')
-    if (savedScreenshot) {
-      setWebsiteScreenshot(savedScreenshot)
-    }
+    // Screenshot is not stored in localStorage due to size limits
+    // It will be loaded from API response during scan
   }, [])
 
   useEffect(() => {
@@ -235,13 +232,27 @@ export default function Home() {
         }))
         
         const batchResults = ScanResultsSchema.parse(data.results)
-        allResults.push(...batchResults)
+        
+        // Remove duplicates before adding (check by ruleId)
+        const existingRuleIds = new Set(allResults.map(r => r.ruleId))
+        const newResults = batchResults.filter(result => {
+          if (existingRuleIds.has(result.ruleId)) {
+            console.warn(`Duplicate ruleId found: ${result.ruleId}, skipping duplicate`)
+            return false
+          }
+          existingRuleIds.add(result.ruleId)
+          return true
+        })
+        
+        allResults.push(...newResults)
         
         // Store screenshot from every batch to show what AI is seeing
+        // Note: Not storing in localStorage due to size limits, keeping only in state
         if (data.screenshot) {
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
-          localStorage.setItem('websiteScreenshot', data.screenshot)
+          // Don't store in localStorage - screenshots are too large and cause quota errors
+          // localStorage.setItem('websiteScreenshot', data.screenshot)
           console.log(`Screenshot updated from batch ${i + 1}`)
         }
         
@@ -370,7 +381,7 @@ export default function Home() {
       setProgress(null)
       setWebsiteScreenshot(null) // Reset screenshot for new scan
       setCurrentBatchNumber(0) // Reset batch number
-      localStorage.removeItem('websiteScreenshot')
+      // Screenshot not stored in localStorage, no need to remove
 
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
