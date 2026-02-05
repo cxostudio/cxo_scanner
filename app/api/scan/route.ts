@@ -120,6 +120,7 @@ export async function POST(request: NextRequest) {
     let websiteContent = ''
     let browser
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
+    let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     try {
       // Launch headless browser
       browser = await puppeteer.launch({
@@ -133,55 +134,57 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
       
-      // Navigate to the page and wait for network to be idle
+      // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
       await page.goto(validUrl, {
-        waitUntil: 'networkidle0', // Wait until network is completely idle (more strict)
-        timeout: 60000, // 60 second timeout for slow sites
+        waitUntil: 'load', // Faster than networkidle0 - good enough for screenshot
+        timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
       
-      // Additional wait for page to fully stabilize
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Quick wait for initial render
+      await new Promise(resolve => setTimeout(resolve, 1000))
       
-      // Wait for all images to load before taking screenshot
+      // Wait for critical images only (with timeout to avoid Vercel limit)
       console.log('Waiting for images to load...')
-      await page.evaluate(async () => {
-        const images = Array.from(document.querySelectorAll('img'))
-        const imagePromises = images.map((img) => {
-          if (img.complete) return Promise.resolve()
-          return new Promise((resolve, reject) => {
-            img.onload = resolve
-            img.onerror = resolve // Resolve even on error to not block
-            // Timeout after 5 seconds per image
-            setTimeout(resolve, 5000)
-          })
-        })
-        await Promise.all(imagePromises)
-      })
-      
-      // Wait for any lazy-loaded images
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      // Scroll through the page to trigger lazy loading
-      const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
-      const viewportHeight = await page.evaluate(() => window.innerHeight)
-      const scrollSteps = Math.ceil(scrollHeight / viewportHeight)
-      
-      for (let i = 0; i <= scrollSteps; i++) {
-        await page.evaluate((step, totalSteps, height) => {
-          window.scrollTo(0, (step / totalSteps) * height)
-        }, i, scrollSteps, scrollHeight)
-        await new Promise(resolve => setTimeout(resolve, 500)) // Wait for lazy loading
+      try {
+        await Promise.race([
+          page.evaluate(async () => {
+            const images = Array.from(document.querySelectorAll('img')).slice(0, 15) // Limit to first 15 images
+            const imagePromises = images.map((img) => {
+              if (img.complete) return Promise.resolve()
+              return new Promise((resolve) => {
+                img.onload = resolve
+                img.onerror = resolve
+                setTimeout(resolve, 2000) // Reduced timeout per image
+              })
+            })
+            await Promise.all(imagePromises)
+          }),
+          new Promise(resolve => setTimeout(resolve, 8000)) // Max 8 seconds for images
+        ])
+      } catch (e) {
+        console.warn('Image loading timeout, proceeding with screenshot')
       }
       
-      // Scroll back to top
-      await page.evaluate(() => {
-        window.scrollTo(0, 0)
-      })
+      // Quick scroll to trigger lazy loading (limited for Vercel timeout)
+      try {
+        const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
+        const viewportHeight = await page.evaluate(() => window.innerHeight)
+        if (scrollHeight > viewportHeight) {
+          // Quick scroll - only 2 steps instead of full scroll
+          for (let i = 0; i <= 2; i++) {
+            await page.evaluate((step, height) => {
+              window.scrollTo(0, (step / 2) * height)
+            }, i, scrollHeight)
+            await new Promise(resolve => setTimeout(resolve, 300)) // Reduced wait
+          }
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      } catch (e) {
+        console.warn('Scroll failed, proceeding with screenshot')
+      }
       
-      // Final wait for any remaining content to load
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      console.log('Page fully loaded, ready for screenshot')
+      console.log('Page loaded, ready for screenshot')
       
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
@@ -867,62 +870,28 @@ export async function POST(request: NextRequest) {
 
       // Capture screenshot once for all rules (for AI vision analysis)
       // Only capture if captureScreenshot flag is true (to avoid redundant screenshots in subsequent batches)
-      // Capture before closing browser so page is still available
-      // Page is already fully loaded with all images at this point
-      // Support multiple formats: PNG (best quality), JPEG (fallback), WebP (alternative)
+      // Capture screenshot - use early screenshot if available, otherwise take new one
       if (captureScreenshot) {
-        console.log('Taking screenshot of fully loaded page...')
-        try {
-          let screenshot: string | Buffer | null = null
-          let imageFormat = 'png'
-          
-          // Try PNG first (best quality, supports transparency, lossless)
+        if (earlyScreenshot) {
+          // Use early screenshot (captured before full load to avoid Vercel timeout)
+          screenshotDataUrl = earlyScreenshot
+          console.log('Using early screenshot (captured before full page load)')
+        } else {
+          // Try to capture final screenshot (if time permits)
+          console.log('Taking final screenshot...')
           try {
-            screenshot = await page.screenshot({
-              type: 'png',
-              fullPage: true, // Capture full page to show complete website
+            const screenshot = await page.screenshot({
+              type: 'jpeg',
+              fullPage: true,
               encoding: 'base64',
+              quality: 85,
             }) as string
-            imageFormat = 'png'
-            console.log('Screenshot captured in PNG format (full page)')
-          } catch (pngError) {
-            // Fallback to JPEG if PNG fails (smaller file size, good quality)
-            try {
-              screenshot = await page.screenshot({
-                type: 'jpeg',
-                fullPage: true, // Capture full page to show complete website
-                encoding: 'base64',
-                quality: 90, // High quality JPEG
-              }) as string
-              imageFormat = 'jpeg'
-              console.log('Screenshot captured in JPEG format (PNG fallback, full page)')
-            } catch (jpegError) {
-              // Final fallback to WebP (modern format, good compression)
-              try {
-                screenshot = await page.screenshot({
-                  type: 'webp',
-                  fullPage: true, // Capture full page to show complete website
-                  encoding: 'base64',
-                  quality: 90, // High quality WebP
-                }) as string
-                imageFormat = 'webp'
-                console.log('Screenshot captured in WebP format (PNG/JPEG fallback, full page)')
-              } catch (webpError) {
-                console.warn('Failed to capture screenshot in PNG, JPEG, and WebP:', webpError)
-                screenshot = null
-              }
-            }
+            screenshotDataUrl = `data:image/jpeg;base64,${screenshot}`
+            console.log('Final screenshot captured in JPEG format')
+          } catch (screenshotError) {
+            console.warn('Failed to capture final screenshot, using early one if available:', screenshotError)
+            screenshotDataUrl = earlyScreenshot || null
           }
-          
-          if (screenshot) {
-            screenshotDataUrl = `data:image/${imageFormat};base64,${screenshot}`
-            console.log(`Screenshot ready in ${imageFormat.toUpperCase()} format for AI vision analysis`)
-          } else {
-            screenshotDataUrl = null
-          }
-        } catch (screenshotError) {
-          console.warn('Failed to capture screenshot:', screenshotError)
-          screenshotDataUrl = null
         }
       } else {
         console.log('Skipping screenshot capture (not needed for this batch)')
