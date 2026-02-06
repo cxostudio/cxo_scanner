@@ -1106,6 +1106,11 @@ export async function POST(request: NextRequest) {
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
             (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
+          const isProductComparisonRule =
+            rule.id === 'product-comparison' ||
+            rule.title.toLowerCase().includes('product comparison') ||
+            rule.description.toLowerCase().includes('product comparison') ||
+            rule.description.toLowerCase().includes('compare') && rule.description.toLowerCase().includes('alternative')
 
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -1658,6 +1663,111 @@ CRITICAL INSTRUCTIONS:
 7. Mention the CTA text from "CTA Text" field
 8. For design check, analyze if badges are muted/monochromatic based on content description
 `
+          } else if (isProductComparisonRule) {
+            specialInstructions = `
+PRODUCT COMPARISON RULE - STEP-BY-STEP AUDIT:
+
+You are an expert E-commerce UX Auditor. Your task is to analyze if the product page includes a clear, scannable product comparison section.
+
+CRITICAL REQUIREMENTS (ALL 4 must be met to PASS):
+
+STEP 1 (Identify Alternatives - 2-3 Products):
+- Check if the page compares the primary product with 2-3 similar alternatives
+- Alternatives can be from the same store or competitors
+- Look for sections titled: "Compare Products", "Product Comparison", "Compare with Similar Products", "vs", "Alternatives", "Which One to Choose"
+- If NO comparison section found OR less than 2 alternatives → FAIL this step
+- If 2-3 alternatives are compared → PASS this step
+
+STEP 2 (Compare 4+ Attributes):
+- Check if at least 4 or more meaningful attributes are compared
+- Look for technical/functional attributes like: RAM, Battery, Performance, Price, Features, Warranty, Storage, Speed, Quality, Size, Weight, Material, etc.
+- Generic attributes like "Name" or "Image" do NOT count as meaningful
+- If less than 4 attributes compared → FAIL this step
+- If 4+ meaningful attributes compared → PASS this step
+
+STEP 3 (Side-by-Side Table Format):
+- Check if comparison uses a side-by-side, easy-to-scan table format
+- Look for: Table layout, columns for each product, rows for attributes, grid format
+- Text-only comparisons or paragraph format do NOT count
+- If NOT in table/grid format → FAIL this step
+- If in table/grid format → PASS this step
+
+STEP 4 (Comparison Exists):
+- Check if a comparison section actually exists on the page
+- The comparison must be visible and accessible
+- If NO comparison section found → FAIL this step
+- If comparison section exists → PASS this step
+
+FINAL VERDICT:
+- PASS if ALL 4 steps pass (2-3 alternatives, 4+ attributes, table format, comparison exists)
+- FAIL if ANY step fails
+
+EXAMPLES FOR AI TRAINING:
+
+✅ Example 1 - PASS (Complete Comparison):
+PRODUCT COMPARISON CHECK shows:
+- Comparison Section Found: YES
+- Section Title: "Compare Products"
+- Number of Alternatives: 3 (Product A, Product B, Product C)
+- Attributes Compared: 6 (Price, RAM, Battery, Performance, Warranty, Features)
+- Format: Side-by-side table with columns for each product
+- All Requirements Met: YES
+
+Output: {"passed": true, "reason": "Product comparison section found with 3 alternatives compared across 6 attributes (Price, RAM, Battery, Performance, Warranty, Features) in a side-by-side table format. The comparison is clear, scannable, and helps users make informed decisions."}
+
+❌ Example 2 - FAIL (Missing Alternatives):
+PRODUCT COMPARISON CHECK shows:
+- Comparison Section Found: YES
+- Section Title: "Similar Products"
+- Number of Alternatives: 1 (only one alternative product)
+- Attributes Compared: 5 (Price, Features, Warranty, Quality, Reviews)
+- Format: Side-by-side table
+- All Requirements Met: NO (only 1 alternative, need 2-3)
+
+Output: {"passed": false, "reason": "Product comparison section exists but only compares the primary product with 1 alternative. The rule requires 2-3 alternatives to be compared. While the comparison uses a table format, it fails because only 1 alternative is included instead of the required 2-3."}
+
+❌ Example 3 - FAIL (Insufficient Attributes):
+PRODUCT COMPARISON CHECK shows:
+- Comparison Section Found: YES
+- Section Title: "Compare Products"
+- Number of Alternatives: 3
+- Attributes Compared: 2 (Price, Name only)
+- Format: Table format
+- All Requirements Met: NO (only 2 attributes, need 4+)
+
+Output: {"passed": false, "reason": "Product comparison section exists with 3 alternatives in table format, but only 2 attributes (Price and Name) are compared. The rule requires at least 4 meaningful technical or functional attributes (such as RAM, Battery, Performance, Features, Warranty) to be compared. The current comparison is too limited to help users make informed decisions."}
+
+❌ Example 4 - FAIL (No Table Format):
+PRODUCT COMPARISON CHECK shows:
+- Comparison Section Found: YES
+- Section Title: "Product Alternatives"
+- Number of Alternatives: 3
+- Attributes Compared: 5
+- Format: Paragraph/text-only format (not table)
+- All Requirements Met: NO (not in table format)
+
+Output: {"passed": false, "reason": "Product comparison section exists with 3 alternatives and 5 attributes compared, but the comparison is presented in paragraph/text format rather than a side-by-side table. The rule requires an easy-to-scan table format so differences can be understood at a glance. The current text-only format makes it difficult to quickly compare products."}
+
+❌ Example 5 - FAIL (No Comparison Section):
+PRODUCT COMPARISON CHECK shows:
+- Comparison Section Found: NO
+- No comparison section visible on the page
+- All Requirements Met: NO (no comparison section found)
+
+Output: {"passed": false, "reason": "No product comparison section found on the page. The rule requires a clear, scannable product comparison section that compares the primary product with 2-3 similar alternatives across at least 4 meaningful attributes in a side-by-side table format."}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST check ALL 4 steps: Alternatives (2-3) → Attributes (4+) → Table Format → Comparison Exists
+2. If ANY step fails → FAIL the entire rule
+3. Be SPECIFIC about which step failed and why
+4. Mention exact section title/location if comparison exists
+5. Count meaningful attributes only (technical/functional, not generic like "Name")
+6. Table format means side-by-side columns, not paragraph text
+7. If PASSED: Confirm all 4 requirements are met with specific details (2-3 alternatives, 4+ attributes, table format)
+8. If FAILED: Specify exactly which requirement(s) are missing
+9. Do NOT mention currency symbols, prices, or amounts unless necessary for clarity
+10. Focus on checking if comparison exists and meets the format requirements, NOT on winner highlighting
+          `
           } else if (isCTAProminenceRule) {
             specialInstructions = `
 CTA PROMINENCE RULE - STEP-BY-STEP AUDIT:
@@ -2230,6 +2340,28 @@ CRITICAL INSTRUCTIONS:
           } else if (isProductTitleRule && !reasonLower.includes('title') && !reasonLower.includes('product name') && !reasonLower.includes('heading')) {
             console.warn(`Warning: Product title rule but reason doesn't mention title: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
+          } else if (isProductComparisonRule) {
+            // Product comparison rule must mention comparison/alternatives/attributes
+            const hasComparisonMention = reasonLower.includes('comparison') || 
+                                        reasonLower.includes('compare') || 
+                                        reasonLower.includes('alternative') ||
+                                        reasonLower.includes('attribute') ||
+                                        reasonLower.includes('table') ||
+                                        reasonLower.includes('versus') ||
+                                        reasonLower.includes('vs')
+            if (!hasComparisonMention) {
+              console.warn(`Warning: Product comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
+              isRelevant = false
+            }
+            // Check if response mentions key requirements
+            const mentionsAlternatives = reasonLower.includes('alternative') || reasonLower.includes('product') && (reasonLower.includes('2') || reasonLower.includes('3'))
+            const mentionsAttributes = reasonLower.includes('attribute') || reasonLower.includes('4') || reasonLower.includes('feature') || reasonLower.includes('ram') || reasonLower.includes('battery')
+            const mentionsTable = reasonLower.includes('table') || reasonLower.includes('format') || reasonLower.includes('side-by-side')
+            
+            // If passed but missing key requirements, it might be wrong
+            if (analysis.passed && (!mentionsAlternatives || !mentionsAttributes || !mentionsTable)) {
+              console.warn(`Warning: Product comparison rule passed but missing key requirements. Alternatives: ${mentionsAlternatives}, Attributes: ${mentionsAttributes}, Table: ${mentionsTable}`)
+            }
           } else if (isVariantRule) {
             // Variant rule must mention variant/preselect/selected
             const hasVariantMention = reasonLower.includes('variant') || reasonLower.includes('preselect') || reasonLower.includes('selected') || reasonLower.includes('default')
