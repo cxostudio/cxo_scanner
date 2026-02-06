@@ -86,8 +86,8 @@ export default function ScannerPage() {
   const totalCount = results ? results.length : 0
 
   return (
-    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen">
-      <div className="max-w-[400px] mx-[16px] w-full">
+    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
+      <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
         {/* Logo */}
         <div className="text-center my-[34px]">
           <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px]  object-cover" />
@@ -105,8 +105,8 @@ export default function ScannerPage() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
-              className="relative w-[375px] h-[812px] mx-auto scale-90 md:scale-100"
-              style={{ maxHeight: '90vh' }}
+              className="relative w-full max-w-[375px] mx-auto min-w-0"
+              style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
             >
               {/* iPhone Frame */}
               <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">

@@ -427,8 +427,8 @@ export default function Home() {
   }
 
   return (
-    <main className=" flex items-center justify-center md:px-4 bg-[#FDFDFD]">
-      <div className="max-w-[400px] mx-[16px]">
+    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
+      <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
         <>
@@ -568,7 +568,7 @@ export default function Home() {
             </>
           ) : (
            <>
-            <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center">
+            <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center whitespace-nowrap">
               <span>Analyzing your URL</span>
                 <span className="loader ml-2">
                   <span></span>
@@ -594,8 +594,8 @@ export default function Home() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
-              className="relative w-[375px] h-[812px] mx-auto scale-90 md:scale-100"
-              style={{ maxHeight: '90vh' }}
+              className="relative w-full max-w-[375px] mx-auto min-w-0"
+              style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
             >
               {/* iPhone Frame */}
               <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
