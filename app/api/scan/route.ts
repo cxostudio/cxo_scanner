@@ -158,6 +158,7 @@ export async function POST(request: NextRequest) {
     let browser
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
+    let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
     try {
       // Launch headless browser
       browser = await puppeteer.launch({
@@ -932,6 +933,50 @@ export async function POST(request: NextRequest) {
             screenshotDataUrl = earlyScreenshot || null
           }
         }
+
+        // If batch includes video testimonial or customer photos rule, capture a close-up of the reviews section
+        // (Amazon/e-commerce reviews are far down the page; full-page screenshot gets compressed and AI misses them)
+        const needsReviewsSection = rules.some((r) => {
+          const t = r.title.toLowerCase()
+          const d = r.description.toLowerCase()
+          return (
+            (t.includes('video') && (t.includes('testimonial') || t.includes('review') || t.includes('customer'))) ||
+            d.includes('video testimonial') ||
+            d.includes('customer video') ||
+            t.includes('customer photo') ||
+            d.includes('customer photo')
+          )
+        })
+        if (needsReviewsSection && page) {
+          try {
+            const scrolled = await page.evaluate(() => {
+              const sel = document.querySelector('#reviews, #cr-original-reviews, [id*="review"], [data-cel-widget*="review"], a[name="reviews"], [data-hook*="review"]')
+              if (sel) {
+                sel.scrollIntoView({ behavior: 'instant', block: 'start' })
+                return true
+              }
+              const h = document.body.scrollHeight
+              if (h > window.innerHeight) {
+                window.scrollTo(0, Math.min(h * 0.55, h - window.innerHeight))
+                return true
+              }
+              return false
+            })
+            if (scrolled) {
+              await new Promise((r) => setTimeout(r, 1800))
+              const revShot = await page.screenshot({
+                type: 'jpeg',
+                fullPage: false,
+                encoding: 'base64',
+                quality: 85,
+              }) as string
+              reviewsSectionScreenshotDataUrl = `data:image/jpeg;base64,${revShot}`
+              console.log('Reviews section screenshot captured for video testimonial / customer photos')
+            }
+          } catch (e) {
+            console.warn('Could not capture reviews section screenshot:', e)
+          }
+        }
       } else {
         console.log('Skipping screenshot capture (not needed for this batch)')
         screenshotDataUrl = null
@@ -1074,45 +1119,25 @@ export async function POST(request: NextRequest) {
 
           else if (isVideoTestimonialRule) {
             specialInstructions = `
-VIDEO TESTIMONIALS RULE - DETAILED CHECK:
+VIDEO TESTIMONIALS RULE - DETECT CUSTOMER-UPLOADED VIDEO (SCAN THE PAGE/VISUAL):
 
-Check KEY ELEMENTS for:
-- Video testimonials section
-- Embedded videos (YouTube, Vimeo, self-hosted)
-- Customer review videos
-- Customer face + voice presence
-- Placement (homepage / product page)
+GOAL: Detect videos that are clearly from customers (customer ne dali hui video), like Amazon/Flipkart review videos. Same logic on any website: scan and identify video that is part of a customer review.
 
-If FAILED: You MUST specify:
-1. WHETHER any video testimonials are present or not
-2. WHERE video testimonials are missing (e.g., "homepage", "product page", "below product description", "reviews section")
-3. WHAT is missing:
-   - No video testimonials at all
-   - Only text testimonials present
-   - Videos exist but are promotional, not customer testimonials
-4. WHY it's a problem (e.g., "video testimonials build trust and improve conversions")
+CRITICAL - CUSTOMER VIDEO = VIDEO INSIDE A REVIEW CARD/BLOCK (scan for this pattern):
+- Video with play button (▶️) that appears INSIDE the same block/card as: reviewer name (e.g. "Giri", "Akmal"), star rating, "Reviewed in [country] on [date]", "Verified Purchase", review title, and review text. That = customer-uploaded video → PASS.
+- Same pattern on any site: one review card containing (name + rating + review text + embedded video) = customer video testimonial.
+- Also count: videos in sections titled "Video Testimonials", "Customer Videos", "Customer reviews" (with play button in that section), or video inside any individual review entry.
 
-If PASSED: You MUST specify:
-1. WHERE the video testimonials are located on the page
-2. WHAT makes them valid (real customer, face visible, product mentioned)
-3. TYPE of video (YouTube embed, self-hosted, Vimeo)
+CRITICAL - WHAT DOES NOT COUNT:
+- Video only in product gallery / hero / main product area (no reviewer name, no review text in same block) → NOT customer video.
+- Brand demo or promotional video (not inside a review/reviewer block) → do NOT count.
 
-IMPORTANT:
-- Do NOT mention prices, currency symbols, or amounts
-- Do NOT assume customers are actors unless clearly promotional
-- Only evaluate visible content on the page
-- Be specific about WHERE on the page the video testimonials appear or are missing
+VERDICT:
+- If you find at least one video that is clearly in a CUSTOMER REVIEW context (inside a review card with reviewer name + rating + review content, or in a customer/review section) → PASS. Do not verify "sahi mai customer" – if the layout shows video as part of a review (customer se dali hui), treat as customer video and PASS.
+- If videos exist only in product gallery/hero and none in review/reviewer context → FAIL.
+- If no videos at all → FAIL.
 
-Example FAILURE:
-"No video testimonials were found on the homepage or product page. The website only includes text-based customer reviews below the product description. Adding real customer video testimonials would increase trust and engagement."
-
-Example SUCCESS:
-"A video testimonial section is present below the product description. Embedded YouTube videos feature real customers speaking about their experience with the product, making the testimonials authentic and trust-building."
-
-If no videos found at all:
-"No video testimonials or embedded customer videos were found on the page."
-
-Be SPECIFIC, factual, and based only on visible page content.
+Scan the page (or screenshot) and decide: is this video part of a customer review? If yes → PASS. Be SPECIFIC about where you see it (e.g. "video inside a review card with reviewer name and Verified Purchase").
 `
           }
 
@@ -1218,118 +1243,26 @@ IMPORTANT REMINDER:
 `
           } else if (isVideoTestimonialRule) {
             specialInstructions = `
-VIDEO TESTIMONIALS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
+VIDEO TESTIMONIALS RULE - DETECT CUSTOMER VIDEO BY SCANNING THE SCREENSHOT (customer se dali hui):
 
-CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for video testimonials.
+You will receive a SCREENSHOT. Your job: scan the image and detect if any video is clearly from a CUSTOMER (e.g. uploaded inside a review). Same logic as Amazon/Flipkart: video inside a review card = customer video.
 
-STEP 1 (Visual Scan - Look at the Screenshot):
-- Examine the ENTIRE screenshot image from top to bottom
-- Look specifically for sections titled: "Video Testimonials", "Customer Videos", "Video Reviews", "Watch Reviews", "Hear from Customers", "Customer Video Reviews"
-- Look for video players with play buttons (▶️) in: review section, testimonials section, customer reviews section, or user-generated content areas
-- Scan for videos that show customers talking about the product
+WHAT COUNTS AS CUSTOMER VIDEO (scan for this):
+1. VIDEO INSIDE AN INDIVIDUAL REVIEW CARD/BLOCK (strongest signal):
+   - Same visual block contains: reviewer name (e.g. "Giri", "Akmal"), star rating (★★★★★), "Reviewed in [country] on [date]", "Verified Purchase" (or similar), review title, review text, AND a video with play button (▶️). That video = customer-uploaded = PASS.
+   - On any website (Amazon, Flipkart, or others): if you see a review entry that has name + rating + review content + embedded video in one card/block, that video is customer video testimonial → PASS.
+2. Video with play button (▶️) inside sections: "Video Testimonials", "Customer Videos", "Customer reviews", "Video Reviews", or inside the reviews area (below product, with other reviews).
 
-STEP 2 (Amazon/E-commerce Review Sections - CRITICAL):
-MOST IMPORTANT: On e-commerce sites (like Amazon, Flipkart, etc.), look for:
-- Videos in review sections - THESE ARE CUSTOMER VIDEO TESTIMONIALS
-- Video players in "Customer reviews" section - THESE ARE CUSTOMER VIDEO TESTIMONIALS
-- Video thumbnails with play buttons (▶️) in review areas - THESE ARE CUSTOMER VIDEO TESTIMONIALS
-- Any videos displayed in review/rating sections - THESE ARE CUSTOMER VIDEO TESTIMONIALS
-- If you see ANY videos with play buttons (▶️) in a review section, rating section, or customer reviews section, the rule MUST PASS
+WHAT DOES NOT COUNT:
+- Video only in product gallery / hero / main product area (no reviewer name, no "Reviewed in", no review text in same block) → NOT customer video.
+- Brand/promotional video (not inside a review or review section) → do NOT count.
 
-STEP 3 (Identify Video Testimonials):
-Look for visual indicators of customer video testimonials:
-- Play button (▶️) visible on video thumbnails - THIS IS REQUIRED (can be small or large)
-- Video thumbnails with play button overlay in review sections - THESE ARE VIDEO TESTIMONIALS
-- Video players embedded in review/testimonial sections
-- Video thumbnails/images with play icons in customer reviews - THESE ARE VIDEO TESTIMONIALS
-- Customer faces visible in video thumbnails
-- Videos in sections titled "Video Testimonials", "Customer Videos", "Video Reviews"
-- Review section videos (videos uploaded by customers in reviews) - ALWAYS COUNT AS VIDEO TESTIMONIALS
-- Customer video galleries - ALWAYS COUNT AS VIDEO TESTIMONIALS
-- Videos in "Customer reviews" sections - ALWAYS COUNT AS VIDEO TESTIMONIALS
-- ANY image/thumbnail in review section with a play button icon (▶️) - THIS IS A VIDEO TESTIMONIAL
+VERDICT:
+- If you SEE a video (with play button ▶️) that is clearly part of a customer review (e.g. inside a review card with name + rating + "Reviewed in" / "Verified Purchase" + review text) → PASS. Khud dekh ke decide karo: ye video customer review ke andar hai = customer se dali hui = PASS. No extra verification.
+- If videos are only in product gallery/hero and none inside review cards or review section → FAIL.
+- If no videos at all → FAIL.
 
-STEP 4 (Review Section Videos are ALWAYS Video Testimonials):
-CRITICAL RULE: Videos in ANY review-related section are ALWAYS considered customer video testimonials:
-- "Customer reviews" section with videos → VIDEO TESTIMONIALS (PASS)
-- Review section with videos → VIDEO TESTIMONIALS (PASS)
-- Rating section with videos → VIDEO TESTIMONIALS (PASS)
-- Customer video galleries → VIDEO TESTIMONIALS (PASS)
-- User-generated video content sections → VIDEO TESTIMONIALS (PASS)
-- If you see videos with play buttons (▶️) in review/rating sections, DO NOT analyze if they look professional or not - THEY ARE VIDEO TESTIMONIALS
-
-STEP 5 (Differentiate from Brand Videos - ONLY for non-review sections):
-EXCLUDE these (they are NOT video testimonials) - BUT ONLY if they are NOT in review sections:
-- Brand promotional videos (if in product gallery, not review section)
-- Product demo videos by brand (if in product gallery, not review section)
-- Marketing videos (if in product gallery, not review section)
-
-IMPORTANT: If videos are in review sections, they are ALWAYS video testimonials regardless of appearance.
-
-STEP 6 (Final Verdict - CRITICAL):
-- PASS ONLY if you ACTUALLY SEE videos with play buttons (▶️) in the screenshot in "Customer reviews" section → MUST PASS
-- PASS ONLY if you ACTUALLY SEE videos with play buttons (▶️) in review sections in the screenshot → MUST PASS
-- PASS ONLY if you ACTUALLY SEE at least ONE (1) customer video testimonial with play button (▶️) in the screenshot → MUST PASS
-- PASS ONLY if review section ACTUALLY CONTAINS videos with play buttons (▶️) visible in the screenshot → MUST PASS
-- PASS ONLY if you ACTUALLY SEE customer-uploaded videos with play buttons (▶️) in the screenshot → MUST PASS
-- FAIL if you DO NOT SEE any videos or play buttons (▶️) in the screenshot
-- FAIL if you see NO videos in review sections
-- FAIL if no video players or play buttons (▶️) are visible in the screenshot
-- FAIL if you only see text reviews without any video players or play buttons (▶️)
-
-CRITICAL: You MUST actually SEE videos with play buttons (▶️) in the screenshot. 
-- Look for play button icons (▶️) on video thumbnails in review sections
-- Look for video player controls or video thumbnails with play overlays
-- Even if the play button is small, if you see a video thumbnail/image with a play icon overlay in review section, it counts as a video testimonial
-- Do NOT assume videos exist just because there's a review section, but DO look carefully for video thumbnails with play buttons
-- You must VISUALLY CONFIRM the presence of video players or play buttons (▶️) in the screenshot
-
-CRITICAL: If your response mentions "Customer reviews" section with videos OR "video testimonials" OR "review section videos" OR "play buttons", you MUST set passed: true ONLY if you actually see them in the screenshot
-CRITICAL: If you see customer review videos with play buttons (▶️), the rule MUST PASS - do not fail it
-CRITICAL: If you DO NOT see any videos or play buttons (▶️) in the screenshot, the rule MUST FAIL
-
-CRITICAL REMINDERS:
-- You MUST look at the SCREENSHOT IMAGE provided, not just text content
-- Visual analysis is required - check for play buttons (▶️) and video players in the screenshot
-- Review section videos ARE ALWAYS video testimonials - if you see videos with play buttons (▶️) in review section, the rule MUST PASS
-- "Customer reviews" sections with videos = VIDEO TESTIMONIALS (always pass)
-- **MANDATORY: You MUST mention the EXACT SECTION/LOCATION where you see video testimonials in your reason**
-- Be VERY SPECIFIC about WHERE in the screenshot you see video testimonials (e.g., "review section", "Customer reviews section with videos", "video testimonials section", "customer video gallery")
-- Include the exact section title/heading if visible (e.g., "Video Testimonials", "Customer Videos", "Video Reviews", "Customer reviews")
-- If you see a "Customer reviews" section with videos and play buttons (▶️), you MUST say the rule PASSES
-- If you DO NOT see any videos or play buttons (▶️) in the screenshot, you MUST say the rule FAILS
-
-Examples (WITH EXACT LOCATIONS):
-✅ PASS: "I can see in the screenshot a section titled 'Customer reviews' located below the product description, containing video players with play buttons (▶️) visible. These videos are in the review section, which qualifies them as customer video testimonials. The rule passes."
-
-✅ PASS: "The screenshot shows a 'Video Testimonials' section with embedded video players and play buttons (▶️), positioned between the product benefits and the customer reviews text section. These videos appear in the testimonials area of the page, which makes them customer video testimonials by definition. The rule passes."
-
-✅ PASS: "I can see video players with play buttons (▶️) in the 'Customer reviews' section, which is located near the bottom of the page after the product specifications. Even though some may appear professional, videos in review sections are always considered customer video testimonials. The rule passes."
-
-✅ PASS: "The screenshot displays customer review videos with play buttons (▶️) in the 'Customer reviews' section showing customers using the product. This section is positioned below the product gallery and above the shipping information. These are video testimonials as they are in the review section. The rule passes."
-
-❌ FAIL: "In the screenshot, I do not see any video players or play buttons (▶️) in the review section. The 'Customer reviews' section only contains text reviews without any video testimonials. No videos are visible in any section of the page. The rule fails."
-
-❌ FAIL: "I examined the entire screenshot and cannot find any video players, play buttons (▶️), or video testimonials. The review section contains only text reviews and images, but no videos. The rule fails."
-
-❌ FAIL: "The screenshot shows a 'Customer reviews' section located below the product description, but it only contains text reviews and customer photos. No video players or play buttons (▶️) are visible in this section or anywhere else on the page. The rule fails."
-
-CRITICAL EXAMPLES FOR AMAZON/E-COMMERCE SITES (WITH LOCATIONS):
-✅ PASS: "I can see a 'Customer reviews' section in the screenshot with video players and play buttons (▶️), located below the product ratings and above the 'Top reviews from India' section. These are customer video testimonials. The rule passes."
-
-✅ PASS: "The screenshot shows videos with play buttons (▶️) in the 'Customer reviews' section, which is positioned after the product description section. These videos are customer video testimonials. The rule passes."
-
-IMPORTANT REMINDER:
-- "Customer reviews" sections with videos and play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
-- Review section videos with play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
-- Rating section videos with play buttons (▶️) = ALWAYS VIDEO TESTIMONIALS (rule MUST PASS)
-- If you see ANY videos with play buttons (▶️) in review/rating sections, the rule MUST PASS regardless of how they look
-- If you DO NOT see any videos or play buttons (▶️) in the screenshot, the rule MUST FAIL
-- Don't confuse review section videos with brand promotional videos in product gallery
-- Look specifically for sections titled "Video Testimonials", "Customer Videos", "Video Reviews", or videos in review sections
-- You MUST visually confirm play buttons (▶️) or video players in the screenshot - do not assume they exist
-- If such sections exist with videos and play buttons (▶️), you MUST say the rule PASSES
-- If no videos or play buttons (▶️) are visible, you MUST say the rule FAILS
+MANDATORY in reason: mention WHERE you see the customer video (e.g. "video embedded inside a review card with reviewer name and Verified Purchase, in Customer reviews section").
 `
           } else if (isStickyCartRule) {
             specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`
@@ -1950,18 +1883,17 @@ CRITICAL INSTRUCTIONS:
           let messageContent: string | any[] = prompt
           console.log(messageContent, "messageContent")
           // Add screenshot if available (for AI vision analysis)
-          // Always include screenshot for customer photos rule, video testimonials rule, and other visual rules
-          if (screenshotDataUrl && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
-            // Convert screenshot data URL to protocol-relative format if it's a regular URL
-            // (data URLs stay as is, but if we had HTTP URLs, convert to //)
-            let imageUrl = screenshotDataUrl
-            console.log(imageUrl, "imageUrl");
-            // If it's not a data URL, convert to protocol-relative
-            if (!screenshotDataUrl.startsWith('data:')) {
-              imageUrl = toProtocolRelativeUrl(screenshotDataUrl, validUrl)
+          // For video testimonial / customer photos: prefer reviews-section close-up so AI can see review videos/photos
+          const screenshotToUse =
+            (isVideoTestimonialRule && reviewsSectionScreenshotDataUrl) || (isCustomerPhotoRule && reviewsSectionScreenshotDataUrl)
+              ? reviewsSectionScreenshotDataUrl
+              : screenshotDataUrl
+          if (screenshotToUse && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
+            let imageUrl = screenshotToUse
+            if (!screenshotToUse.startsWith('data:')) {
+              imageUrl = toProtocolRelativeUrl(screenshotToUse, validUrl)
             }
 
-            // For multimodal content, use array format
             messageContent = [
               {
                 type: 'text',
@@ -1975,7 +1907,9 @@ CRITICAL INSTRUCTIONS:
               },
             ]
             console.log(`Including screenshot for ${rule.id} rule (visual analysis required)`)
-            console.log(`Screenshot size: ${screenshotDataUrl.length} chars, Format: data URL`)
+            if ((isVideoTestimonialRule || isCustomerPhotoRule) && reviewsSectionScreenshotDataUrl) {
+              console.log(`Using reviews section close-up for ${rule.id} (reviews visible clearly)`)
+            }
             if (isCustomerPhotoRule) {
               console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
             }
