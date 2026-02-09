@@ -98,9 +98,8 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Website preview above results */}
-        {websiteScreenshot ? (
-          // When backend screenshot is available (local or Vercel)
+        {/* Local/full screenshot preview (no iframe, only if screenshot exists) */}
+        {websiteScreenshot && (
           <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
             <img
               src={websiteScreenshot}
@@ -108,17 +107,7 @@ export default function ScannerPage() {
               className="w-full h-auto object-contain"
             />
           </div>
-        ) : url ? (
-          // Fallback: try to show live website in an iframe (in case screenshot is missing on Vercel)
-          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <iframe
-              src={url}
-              title="Scanned website preview"
-              className="w-full"
-              style={{ minHeight: '500px' }}
-            />
-          </div>
-        ) : null}
+        )}
 
         {results && (
           <div className="mt-6">
