@@ -259,6 +259,7 @@ export default function Home() {
             console.warn('Could not store screenshot in sessionStorage:', e)
           }
         }
+
         
         const remainingBatches = batches.slice(i + 1)
         if (remainingBatches.length > 0) {
