@@ -612,6 +612,8 @@ export default function Home() {
                   </p>
                 </motion.div>
               </div>
+              
+              
 
               {/* Steps */}
               <div className="mt-[24px]">
