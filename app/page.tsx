@@ -320,7 +320,8 @@ export default function Home() {
         })).parse(finalData.results)
 
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
-        localStorage.setItem('scanUrl', websiteUrl)
+        // Store normalized URL (with protocol) so iframe works on Vercel
+        localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         // Store screenshot URL for results page (if available)
         if (websiteScreenshot) {
           // Store as data URL in sessionStorage instead of localStorage (smaller size limit)
@@ -333,13 +334,13 @@ export default function Home() {
         localStorage.removeItem('scanBatches')
       } else {
         localStorage.setItem('scanResults', JSON.stringify(allResults))
-        localStorage.setItem('scanUrl', websiteUrl)
+        localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
-      localStorage.setItem('scanUrl', websiteUrl)
+      localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
     }
 
@@ -612,7 +613,7 @@ export default function Home() {
                   </p>
                 </motion.div>
               </div>
-              
+
               
 
               {/* Steps */}
