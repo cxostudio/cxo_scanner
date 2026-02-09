@@ -224,6 +224,25 @@ export async function POST(request: NextRequest) {
 
       console.log('Page loaded, ready for screenshot')
 
+      // Capture early screenshot immediately after page load (for Vercel timeout safety)
+      // This ensures screenshot is available even if full scan times out
+      if (captureScreenshot && !earlyScreenshot) {
+        try {
+          console.log('Capturing early screenshot for Vercel safety...')
+          const earlyScreenshotBuffer = await page.screenshot({
+            type: 'jpeg',
+            fullPage: true,
+            encoding: 'base64',
+            quality: 75, // Slightly lower quality for faster capture
+          }) as string
+          earlyScreenshot = `data:image/jpeg;base64,${earlyScreenshotBuffer}`
+          console.log('Early screenshot captured successfully')
+        } catch (earlyScreenshotError) {
+          console.warn('Failed to capture early screenshot:', earlyScreenshotError)
+          // Continue without early screenshot
+        }
+      }
+
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
         return document.body.innerText || document.body.textContent || ''
@@ -990,6 +1009,12 @@ export async function POST(request: NextRequest) {
         websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
       }
     } catch (error) {
+      // Preserve early screenshot if available (important for Vercel timeout scenarios)
+      if (earlyScreenshot && !screenshotDataUrl) {
+        screenshotDataUrl = earlyScreenshot
+        console.log('Using early screenshot after error (Vercel timeout protection)')
+      }
+      
       // Close browser if it's still open
       if (browser) {
         try {
@@ -1013,6 +1038,18 @@ export async function POST(request: NextRequest) {
           websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
         }
       } catch (fetchError) {
+        // Even on fetch error, return early screenshot if available
+        if (earlyScreenshot) {
+          console.log('Returning early screenshot despite fetch error')
+          return NextResponse.json(
+            { 
+              error: `Failed to fetch website: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              screenshot: earlyScreenshot,
+              results: []
+            },
+            { status: 400 }
+          )
+        }
         return NextResponse.json(
           { error: `Failed to fetch website: ${error instanceof Error ? error.message : 'Unknown error'}` },
           { status: 400 }
@@ -2525,7 +2562,18 @@ CRITICAL INSTRUCTIONS:
       }
     }
 
-    return NextResponse.json({ results, screenshot: screenshotDataUrl })
+    // Always return screenshot (even if null) so frontend can handle it
+    // Log screenshot status for debugging Vercel issues
+    if (screenshotDataUrl) {
+      console.log(`Returning screenshot (length: ${screenshotDataUrl.length} chars)`)
+    } else {
+      console.warn('No screenshot available to return - this may cause UI issues on Vercel')
+    }
+    
+    return NextResponse.json({ 
+      results, 
+      screenshot: screenshotDataUrl || null // Explicitly return null if no screenshot
+    })
   } catch (error) {
     console.error('Scan error:', error)
     return NextResponse.json(
