@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
-import puppeteer from 'puppeteer'
+import puppeteer from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
 
 interface Rule {
@@ -161,10 +162,24 @@ export async function POST(request: NextRequest) {
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
     try {
       // Launch headless browser
-      browser = await puppeteer.launch({
+      // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
+      const isVercel = !!process.env.VERCEL
+      
+      const launchConfig: any = {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
+      }
+      
+      if (isVercel) {
+        launchConfig.executablePath = await chromium.executablePath()
+        launchConfig.args = [
+          ...launchConfig.args,
+          '--single-process',
+          '--font-render-hinting=medium',
+        ]
+      }
+      
+      browser = await puppeteer.launch(launchConfig)
 
       const page = await browser.newPage()
 
