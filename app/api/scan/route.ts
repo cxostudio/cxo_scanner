@@ -164,12 +164,12 @@ export async function POST(request: NextRequest) {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
       const isVercel = !!process.env.VERCEL
-      
+
       const launchConfig: any = {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       }
-      
+
       if (isVercel) {
         launchConfig.executablePath = await chromium.executablePath()
         launchConfig.args = [
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
           '--font-render-hinting=medium',
         ]
       }
-      
+
       browser = await puppeteer.launch(launchConfig)
 
       const page = await browser.newPage()
@@ -1029,7 +1029,7 @@ export async function POST(request: NextRequest) {
         screenshotDataUrl = earlyScreenshot
         console.log('Using early screenshot after error (Vercel timeout protection)')
       }
-      
+
       // Close browser if it's still open
       if (browser) {
         try {
@@ -1057,7 +1057,7 @@ export async function POST(request: NextRequest) {
         if (earlyScreenshot) {
           console.log('Returning early screenshot despite fetch error')
           return NextResponse.json(
-            { 
+            {
               error: `Failed to fetch website: ${error instanceof Error ? error.message : 'Unknown error'}`,
               screenshot: earlyScreenshot,
               results: []
@@ -2394,13 +2394,13 @@ CRITICAL INSTRUCTIONS:
             isRelevant = false
           } else if (isProductComparisonRule) {
             // Product comparison rule must mention comparison/alternatives/attributes
-            const hasComparisonMention = reasonLower.includes('comparison') || 
-                                        reasonLower.includes('compare') || 
-                                        reasonLower.includes('alternative') ||
-                                        reasonLower.includes('attribute') ||
-                                        reasonLower.includes('table') ||
-                                        reasonLower.includes('versus') ||
-                                        reasonLower.includes('vs')
+            const hasComparisonMention = reasonLower.includes('comparison') ||
+              reasonLower.includes('compare') ||
+              reasonLower.includes('alternative') ||
+              reasonLower.includes('attribute') ||
+              reasonLower.includes('table') ||
+              reasonLower.includes('versus') ||
+              reasonLower.includes('vs')
             if (!hasComparisonMention) {
               console.warn(`Warning: Product comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
@@ -2409,7 +2409,7 @@ CRITICAL INSTRUCTIONS:
             const mentionsAlternatives = reasonLower.includes('alternative') || reasonLower.includes('product') && (reasonLower.includes('2') || reasonLower.includes('3'))
             const mentionsAttributes = reasonLower.includes('attribute') || reasonLower.includes('4') || reasonLower.includes('feature') || reasonLower.includes('ram') || reasonLower.includes('battery')
             const mentionsTable = reasonLower.includes('table') || reasonLower.includes('format') || reasonLower.includes('side-by-side')
-            
+
             // If passed but missing key requirements, it might be wrong
             if (analysis.passed && (!mentionsAlternatives || !mentionsAttributes || !mentionsTable)) {
               console.warn(`Warning: Product comparison rule passed but missing key requirements. Alternatives: ${mentionsAlternatives}, Attributes: ${mentionsAttributes}, Table: ${mentionsTable}`)
@@ -2584,9 +2584,9 @@ CRITICAL INSTRUCTIONS:
     } else {
       console.warn('No screenshot available to return - this may cause UI issues on Vercel')
     }
-    
-    return NextResponse.json({ 
-      results, 
+
+    return NextResponse.json({
+      results,
       screenshot: screenshotDataUrl || null // Explicitly return null if no screenshot
     })
   } catch (error) {

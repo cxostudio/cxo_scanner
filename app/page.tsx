@@ -261,7 +261,7 @@ export default function Home() {
         } else {
           console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
         }
-        
+
 
         const remainingBatches = batches.slice(i + 1)
         if (remainingBatches.length > 0) {
