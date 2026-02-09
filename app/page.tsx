@@ -599,7 +599,7 @@ export default function Home() {
                 </span>
               </h2>
 
-              {/* Scanning message - iPhone will be shown in results */}
+              {/* Scanning message */}
               <div className="flex flex-col items-center mb-8">
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -614,7 +614,7 @@ export default function Home() {
               </div>
 
               {/* Steps */}
-              <div className="mt-[45px]">
+              <div className="mt-[24px]">
                 <AnimatePresence mode="popLayout">
                   {analysisSteps
                     .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
