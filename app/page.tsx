@@ -248,6 +248,7 @@ export default function Home() {
         
         // Store screenshot from every batch to show what AI is seeing
         // Store in both state and sessionStorage for results page
+        // Always try to set screenshot (even if null, to clear previous state if needed)
         if (data.screenshot) {
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
@@ -257,7 +258,12 @@ export default function Home() {
             console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
           } catch (e) {
             console.warn('Could not store screenshot in sessionStorage:', e)
+            // If sessionStorage fails, still keep it in state
           }
+        } else {
+          // Log when screenshot is missing (for debugging Vercel issues)
+          console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
+          // Don't clear existing screenshot, keep showing the last one
         }
         
         const remainingBatches = batches.slice(i + 1)
