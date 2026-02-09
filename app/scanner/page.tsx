@@ -181,10 +181,7 @@ export default function ScannerPage() {
 
                 <a href={url}
                   target="_blank"
-                  className="
-        absolute left-1/2 top-full z-50 mt-3
-        w-[990px] max-w-[90vw]
-        -translate-x-1/2
+                  className="absolute left-1/2 top-full z-50 mt-3 w-[990px] max-w-[90vw] -translate-x-1/2 
         rounded-lg border border-gray-300
         bg-white p-4
         text-sm text-gray-800
