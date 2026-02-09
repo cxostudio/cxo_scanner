@@ -389,6 +389,7 @@ export default function Home() {
         validUrl = 'https://' + validUrl
       }
 
+      // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
       setMounted(0)
       setProgress(null)
@@ -396,6 +397,19 @@ export default function Home() {
       setCurrentBatchNumber(0) // Reset batch number
       // Screenshot not stored in localStorage, no need to remove
 
+      // Wait for the page/UI to fully render before starting batch requests
+      // This ensures the site loads first, then batch requests go (important for Vercel free account)
+      await new Promise(resolve => {
+        // Use requestAnimationFrame to wait for next paint cycle
+        requestAnimationFrame(() => {
+          // Add a small delay to ensure UI is fully rendered
+          setTimeout(() => {
+            resolve(undefined)
+          }, 300) // 300ms delay to ensure page is visible
+        })
+      })
+
+      // Now start batch processing after page has loaded
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
       
