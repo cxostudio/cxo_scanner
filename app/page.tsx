@@ -248,7 +248,6 @@ export default function Home() {
 
         // Store screenshot from every batch to show what AI is seeing
         // Store in both state and sessionStorage for results page
-        // Always try to set screenshot (even if null, to clear previous state if needed)
         if (data.screenshot) {
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
@@ -258,12 +257,11 @@ export default function Home() {
             console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
           } catch (e) {
             console.warn('Could not store screenshot in sessionStorage:', e)
-            // If sessionStorage fails, still keep it in state
           }
         } else {
           console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
         }
-        
+
 
         const remainingBatches = batches.slice(i + 1)
         if (remainingBatches.length > 0) {
@@ -276,6 +274,11 @@ export default function Home() {
 
       } catch (err) {
         console.error(`Error processing batch ${i + 1}:`, err)
+        // Add detailed error info for batch 4 specifically
+        if (i === 3) {
+          console.error('Batch 4 failed - adding longer delay before next retry')
+          toast.error(`Batch ${i + 1} failed. Retrying with extended delay...`)
+        }
         batch.rules.forEach(rule => {
           allResults.push({
             ruleId: rule.id,
@@ -288,9 +291,11 @@ export default function Home() {
 
       // Add delay between batches to avoid rate limits (except for last batch)
       if (i < batches.length - 1) {
-        // Wait 10 seconds between batches to give rate limit window time to reset
-        // Backend already handles 40s delays between rules, this is just an extra buffer
-        await new Promise(resolve => setTimeout(resolve, 10000))
+        // Wait longer between batches - 20 seconds for batch 3->4, 15 seconds for others
+        // This helps prevent rate limit issues, especially for batch 4
+        const delayMs = i === 2 ? 20000 : 15000
+        console.log(`Waiting ${delayMs / 1000}s before batch ${i + 2}...`)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
       }
     }
 
@@ -560,9 +565,9 @@ export default function Home() {
                   <button
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${!isStepValid()
+                    className={`w-full py-5 rounded-xl transition-all duration-300 font-bold text-base text-center cursor-pointer transform hover:scale-105 ${!isStepValid()
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white hover:bg-gray-800'
+                      : 'bg-black text-white hover:bg-gray-800 shadow-lg hover:shadow-xl'
                       }`}
                   >
                     Continue ›
@@ -573,9 +578,9 @@ export default function Home() {
                   <button
                     onClick={handleStartScan}
                     disabled={!websiteUrl || !email}
-                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${!websiteUrl || !email
+                    className={`w-full py-6 rounded-xl transition-all duration-300 font-bold text-lg text-center cursor-pointer transform hover:scale-105 ${!websiteUrl || !email
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white hover:bg-gray-800'
+                      : 'bg-gradient-to-r from-black to-gray-800 text-white hover:from-gray-800 hover:to-black shadow-2xl hover:shadow-black/50'
                       }`}
                   >
                     Access my results ›
@@ -594,124 +599,45 @@ export default function Home() {
                 </span>
               </h2>
 
-              {/* Website Screenshot or Phone Placeholder */}
-              <div className="flex flex-col items-center">
-                {websiteScreenshot ? (
-                  <>
-                    {progress && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mb-4 text-sm text-gray-600 font-semibold"
-                      >
-                      </motion.div>
-                    )}
-                    {/* iPhone Frame with Screenshot */}
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      transition={{ duration: 0.6, ease: "easeOut" }}
-                      className="relative w-full max-w-[375px] mx-auto min-w-0"
-                      style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
-                    >
-                      {/* iPhone Frame */}
-                      <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
-                        {/* Notch */}
-                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-gray-900 rounded-b-[20px] z-10"></div>
-
-                        {/* Screen Area */}
-                        <div className="absolute top-[8px] left-[8px] right-[8px] bottom-[8px] bg-black rounded-[2.5rem] overflow-hidden">
-                          {/* Status Bar */}
-                          <div className="absolute top-0 left-0 right-0 h-[44px] bg-black z-20 flex items-center justify-between px-6 pt-2">
-                            <div className="text-white text-xs font-semibold">9:41</div>
-                            <div className="flex items-center gap-1">
-                              <div className="w-4 h-2 border border-white rounded-sm">
-                                <div className="w-3 h-1.5 bg-white rounded-sm m-0.5"></div>
-                              </div>
-                              <div className="w-5 h-3 border border-white rounded-sm">
-                                <div className="w-4 h-2 bg-white rounded-sm m-0.5"></div>
-                              </div>
-                              <div className="w-6 h-3 border border-white rounded-sm">
-                                <div className="w-5 h-2 bg-white rounded-sm m-0.5"></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Screenshot Content */}
-                          <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.3, duration: 0.5 }}
-                            className="absolute top-[44px] left-0 right-0 bottom-0 overflow-y-auto bg-white iphone-scrollbar"
-                            style={{
-                              scrollbarWidth: 'thin',
-                              scrollbarColor: 'rgba(0, 0, 0, 0.2) transparent'
-                            }}
-                          >
-                            <img
-                              src={websiteScreenshot}
-                              alt={`Website being scanned - Batch ${currentBatchNumber} - Full page view`}
-                              className="w-full h-auto object-contain"
-                            />
-                          </motion.div>
-
-                          {/* Home Indicator */}
-                          <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full"></div>
-                        </div>
-
-                        {/* Side Buttons (Volume, Power) */}
-                        <div className="absolute left-0 top-[120px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                        <div className="absolute left-0 top-[170px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                        <div className="absolute right-0 top-[140px] w-[3px] h-[60px] bg-gray-800 rounded-l-sm"></div>
-                      </div>
-                    </motion.div>
-                  </>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.5 }}
-                  >
-                  </motion.div>
-                )}
+              {/* Scanning message - iPhone will be shown in results */}
+              <div className="flex flex-col items-center mb-8">
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="text-center"
+                >
+                  <p className="text-gray-600 text-sm">
+                    Loading your website and checking all rules...
+                  </p>
+                </motion.div>
               </div>
 
               {/* Steps */}
               <div className="mt-[45px]">
-                <AnimatePresence mode="sync">
+                <AnimatePresence mode="popLayout">
                   {analysisSteps
-                    .map((title, index) => ({ title, index }))
+                    .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
                     .filter(({ index }) => {
                       const isCompleted = index < mounted
                       const shouldAnimateOut = isCompleted && mounted >= index + 2
                       return !shouldAnimateOut
                     })
-                    .map(({ title, index }) => {
+                    .map(({ title, index, id }) => {
                       const isCompleted = index < mounted
                       const isActive = index === mounted
 
                       return (
                         <motion.div
-                          key={index}
-                          layout
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{
-                            opacity: 1,
-                            y: 0,
-                          }}
+                          key={id}
+                          initial={{ opacity: 0, y: 30 }}
+                          animate={{ opacity: 1, y: 0 }}
                           exit={{
-                            x: 200,          // 👉 right side slide
+                            x: 300,
                             opacity: 0,
-                            transition: {
-                              duration: 0.6,
-                              ease: 'easeInOut',
-                            },
+                            transition: { duration: 0.5, ease: 'easeOut' },
                           }}
-                          transition={{
-                            layout: { duration: 0.4, ease: 'easeOut' },
-                            opacity: { duration: 0.3 },
-                            y: { duration: 0.3 },
-                          }}
+                          transition={{ duration: 0.4, ease: 'easeOut' }}
                           className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border ${isCompleted
                             ? 'border-green-500'
                             : isActive
@@ -720,28 +646,19 @@ export default function Home() {
                             }`}
                         >
                           {isCompleted ? (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                              className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0"
-                            >
+                            <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
                               <Check className="w-5 h-5 text-white" />
-                            </motion.div>
+                            </div>
                           ) : (
                             <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-black' : 'text-gray-400'}`} />
                           )}
 
-                          <motion.span
-                            animate={{
-                              textDecoration: isCompleted ? 'line-through' : 'none',
-                            }}
-                            transition={{ duration: 0.3 }}
+                          <span
                             className={`flex-1 ${isActive ? 'text-black font-semibold text-[12.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[12.8px] leading-[28.8px]'
-                              }`}
+                              } ${isCompleted ? 'line-through' : ''}`}
                           >
                             {title}
-                          </motion.span>
+                          </span>
                         </motion.div>
                       )
                     })}
