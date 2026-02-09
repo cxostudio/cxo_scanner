@@ -428,7 +428,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
+    <main className="flex items-center  justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
       <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
