@@ -160,6 +160,10 @@ export async function POST(request: NextRequest) {
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
+    // Deterministic detection for "customer video testimonials" (review videos).
+    // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
+    let customerReviewVideoFound = false
+    let customerReviewVideoEvidence: string[] = []
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer

@@ -420,6 +420,35 @@ export default function Home() {
         })
       })
 
+      // Fire-and-forget lightweight screenshot capture for UI preview.
+      // Runs in parallel with rule scanning so it doesn't slow down results.
+      try {
+        fetch('/api/screenshot', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: validUrl }),
+        })
+          .then(async (res) => {
+            if (!res.ok) return
+            const data = await res.json()
+            if (data?.screenshot) {
+              setWebsiteScreenshot(data.screenshot)
+              try {
+                sessionStorage.setItem('lastScreenshot', data.screenshot)
+              } catch (e) {
+                console.warn('Could not store screenshot from /api/screenshot in sessionStorage:', e)
+              }
+            }
+          })
+          .catch((err) => {
+            console.warn('Screenshot API call failed (non-blocking):', err)
+          })
+      } catch (sErr) {
+        console.warn('Screenshot API trigger failed (non-blocking):', sErr)
+      }
+
       // Now start batch processing after page has loaded
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
