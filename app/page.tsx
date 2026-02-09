@@ -405,7 +405,7 @@ export default function Home() {
           // Add a small delay to ensure UI is fully rendered
           setTimeout(() => {
             resolve(undefined)
-          }, 300) // 300ms delay to ensure page is visible
+          }, 200) // 300ms delay to ensure page is visible
         })
       })
 
