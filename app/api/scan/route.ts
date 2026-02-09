@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
         console.warn('Scroll failed, proceeding with screenshot')
       }
 
-      console.log('Page loaded, ready for screenshot')
+      console.log('Page loaded, ready for screenshot')  
 
       // Capture early screenshot immediately after page load (for Vercel timeout safety)
       // This ensures screenshot is available even if full scan times out
