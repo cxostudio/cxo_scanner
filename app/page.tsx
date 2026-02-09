@@ -248,7 +248,6 @@ export default function Home() {
         
         // Store screenshot from every batch to show what AI is seeing
         // Store in both state and sessionStorage for results page
-        // Always try to set screenshot (even if null, to clear previous state if needed)
         if (data.screenshot) {
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
@@ -258,12 +257,7 @@ export default function Home() {
             console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
           } catch (e) {
             console.warn('Could not store screenshot in sessionStorage:', e)
-            // If sessionStorage fails, still keep it in state
           }
-        } else {
-          // Log when screenshot is missing (for debugging Vercel issues)
-          console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
-          // Don't clear existing screenshot, keep showing the last one
         }
         
         const remainingBatches = batches.slice(i + 1)
@@ -395,7 +389,6 @@ export default function Home() {
         validUrl = 'https://' + validUrl
       }
 
-      // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
       setMounted(0)
       setProgress(null)
@@ -403,19 +396,6 @@ export default function Home() {
       setCurrentBatchNumber(0) // Reset batch number
       // Screenshot not stored in localStorage, no need to remove
 
-      // Wait for the page/UI to fully render before starting batch requests
-      // This ensures the site loads first, then batch requests go (important for Vercel free account)
-      await new Promise(resolve => {
-        // Use requestAnimationFrame to wait for next paint cycle
-        requestAnimationFrame(() => {
-          // Add a small delay to ensure UI is fully rendered
-          setTimeout(() => {
-            resolve(undefined)
-          }, 300) // 300ms delay to ensure page is visible
-        })
-      })
-
-      // Now start batch processing after page has loaded
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
       
