@@ -94,93 +94,36 @@ export default function ScannerPage() {
         </div>
 
         {/* Title */}
-        <h2 className="text-[33px] leading-[48px]  font-bold text-black text-center mb-8">
+        <h2 className="text-[33px] leading-[48px] font-bold text-black text-center mb-4">
           Your results are in!
         </h2>
 
-        {/* iPhone Frame with Screenshot (same as analyzing state) */}
-        <div className="flex justify-center mb-6">
-          {websiteScreenshot ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="relative w-full max-w-[375px] mx-auto min-w-0"
-              style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
-            >
-              {/* iPhone Frame */}
-              <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
-                {/* Notch */}
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-gray-900 rounded-b-[20px] z-10"></div>
-
-                {/* Screen Area */}
-                <div className="absolute top-[8px] left-[8px] right-[8px] bottom-[8px] bg-black rounded-[2.5rem] overflow-hidden">
-                  {/* Status Bar */}
-                  <div className="absolute top-0 left-0 right-0 h-[44px] bg-black z-20 flex items-center justify-between px-6 pt-2">
-                    <div className="text-white text-xs font-semibold">9:41</div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-4 h-2 border border-white rounded-sm">
-                        <div className="w-3 h-1.5 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-5 h-3 border border-white rounded-sm">
-                        <div className="w-4 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-6 h-3 border border-white rounded-sm">
-                        <div className="w-5 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Screenshot Content */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.5 }}
-                    className="absolute top-[44px] left-0 right-0 bottom-0 overflow-y-auto bg-white iphone-scrollbar"
-                    style={{
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(0, 0, 0, 0.2) transparent'
-                    }}
-                  >
-                    <img
-                      src={websiteScreenshot}
-                      alt="Website scan result - full page view"
-                      className="w-full object-contain"
-                      style={{ height: 'auto', minHeight: '1200px' }}
-                    />
-                  </motion.div>
-
-                  {/* Home Indicator */}
-                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full"></div>
-                </div>
-
-                {/* Side Buttons (Volume, Power) */}
-                <div className="absolute left-0 top-[120px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute left-0 top-[170px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute right-0 top-[140px] w-[3px] h-[60px] bg-gray-800 rounded-l-sm"></div>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5 }}
-            >
-              <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
-            </motion.div>
-          )}
-        </div>
+        {/* Simple full-page website preview (no phone frame, no animation) */}
+        {websiteScreenshot && (
+          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <img
+              src={websiteScreenshot}
+              alt="Full-page screenshot of the scanned website"
+              className="w-full h-auto object-contain"
+            />
+          </div>
+        )}
 
         {results && (
           <div className="mt-6">
-            <p className="relative text-[15px] leading-[20px] font-semibold text-gray-600 text-center mb-4">
+            <p className="relative text-[15px] leading-[20px] font-semibold text-gray-600 text-center mb-6">
               Scan results for:
-              <a href={url}
-                target="_blank" className="relative group ml-1 cursor-pointer text-blue-600">
-                {url.slice(0, 30)}...
-
-                <a href={url}
+              <span className="relative group ml-1">
+                <a
+                  href={url}
                   target="_blank"
+                  className="cursor-pointer text-blue-600"
+                  rel="noreferrer"
+                >
+                  {url.slice(0, 30)}...
+                </a>
+
+                <span
                   className="absolute left-1/2 top-full z-50 mt-3 w-[990px] max-w-[90vw] -translate-x-1/2 
         rounded-lg border border-gray-300
         bg-white p-4
@@ -194,8 +137,8 @@ export default function ScannerPage() {
                   <span className="block break-words">
                     {url}
                   </span>
-                </a>
-              </a>
+                </span>
+              </span>
             </p>
 
 
