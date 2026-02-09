@@ -732,7 +732,7 @@ export default function Home() {
                               textDecoration: isCompleted ? 'line-through' : 'none',
                             }}
                             transition={{ duration: 0.3 }}
-                            className={`flex-1 ${isActive ? 'text-black font-semibold text-[14.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[14.8px] leading-[28.8px]'
+                            className={`flex-1 ${isActive ? 'text-black font-semibold text-[12.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[12.8px] leading-[28.8px]'
                               }`}
                           >
                             {title}
