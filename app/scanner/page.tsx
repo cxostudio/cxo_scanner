@@ -19,7 +19,6 @@ export default function ScannerPage() {
   const [mounted, setMounted] = useState(false)
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set())
   const [visibleCount, setVisibleCount] = useState(8)
-  const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const pathname = usePathname();
 
   useEffect(() => {
@@ -50,16 +49,6 @@ export default function ScannerPage() {
       }
     }
 
-    // Try to load screenshot from last batch (stored in sessionStorage during scan)
-    try {
-      const lastScreenshot = sessionStorage.getItem('lastScreenshot')
-      if (lastScreenshot) {
-        setWebsiteScreenshot(lastScreenshot)
-      }
-    } catch (e) {
-      console.warn('Could not load screenshot from sessionStorage:', e)
-      setWebsiteScreenshot(null)
-    }
   }
 
 
@@ -98,77 +87,9 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* iPhone Frame with Screenshot (same as analyzing state) */}
+        {/* iPhone Frame with Static Image */}
         <div className="flex justify-center mb-6">
-          {websiteScreenshot ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="relative w-full max-w-[375px] mx-auto min-w-0"
-              style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
-            >
-              {/* iPhone Frame */}
-              <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
-                {/* Notch */}
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-gray-900 rounded-b-[20px] z-10"></div>
-
-                {/* Screen Area */}
-                <div className="absolute top-[8px] left-[8px] right-[8px] bottom-[8px] bg-black rounded-[2.5rem] overflow-hidden">
-                  {/* Status Bar */}
-                  <div className="absolute top-0 left-0 right-0 h-[44px] bg-black z-20 flex items-center justify-between px-6 pt-2">
-                    <div className="text-white text-xs font-semibold">9:41</div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-4 h-2 border border-white rounded-sm">
-                        <div className="w-3 h-1.5 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-5 h-3 border border-white rounded-sm">
-                        <div className="w-4 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-6 h-3 border border-white rounded-sm">
-                        <div className="w-5 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Screenshot Content */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.5 }}
-                    className="absolute top-[44px] left-0 right-0 bottom-0 overflow-y-auto bg-white iphone-scrollbar"
-                    style={{
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(0, 0, 0, 0.2) transparent'
-                    }}
-                  >
-                    <img
-                      src={websiteScreenshot}
-                      alt="Website scan result - full page view"
-                      className="w-full object-contain"
-                      style={{ height: 'auto', minHeight: '1200px' }}
-                    />
-                  </motion.div>
-
-                  {/* Home Indicator */}
-                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full"></div>
-                </div>
-
-                {/* Side Buttons (Volume, Power) */}
-                <div className="absolute left-0 top-[120px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute left-0 top-[170px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute right-0 top-[140px] w-[3px] h-[60px] bg-gray-800 rounded-l-sm"></div>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5 }}
-            >
-              <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
-            </motion.div>
-          )}
+          <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
         </div>
 
         {results && (

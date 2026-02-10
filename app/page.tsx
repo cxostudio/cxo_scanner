@@ -656,6 +656,7 @@ export default function Home() {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5 }}
           >
+           <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
         </motion.div>
         )}
       </div>
