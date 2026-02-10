@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
-import puppeteer from 'puppeteer'
+import puppeteer from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
 
 interface Rule {
@@ -159,12 +160,30 @@ export async function POST(request: NextRequest) {
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
+    // Deterministic detection for "customer video testimonials" (review videos).
+    // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
+    let customerReviewVideoFound = false
+    let customerReviewVideoEvidence: string[] = []
     try {
       // Launch headless browser
-      browser = await puppeteer.launch({
+      // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
+      const isVercel = !!process.env.VERCEL
+
+      const launchConfig: any = {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
+      }
+
+      if (isVercel) {
+        launchConfig.executablePath = await chromium.executablePath()
+        launchConfig.args = [
+          ...launchConfig.args,
+          '--single-process',
+          '--font-render-hinting=medium',
+        ]
+      }
+
+      browser = await puppeteer.launch(launchConfig)
 
       const page = await browser.newPage()
 
@@ -223,6 +242,25 @@ export async function POST(request: NextRequest) {
       }
 
       console.log('Page loaded, ready for screenshot')
+
+      // Capture early screenshot immediately after page load (for Vercel timeout safety)
+      // This ensures screenshot is available even if full scan times out
+      if (captureScreenshot && !earlyScreenshot) {
+        try {
+          console.log('Capturing early screenshot for Vercel safety...')
+          const earlyScreenshotBuffer = await page.screenshot({
+            type: 'jpeg',
+            fullPage: true,
+            encoding: 'base64',
+            quality: 75, // Slightly lower quality for faster capture
+          }) as string
+          earlyScreenshot = `data:image/jpeg;base64,${earlyScreenshotBuffer}`
+          console.log('Early screenshot captured successfully')
+        } catch (earlyScreenshotError) {
+          console.warn('Failed to capture early screenshot:', earlyScreenshotError)
+          // Continue without early screenshot
+        }
+      }
 
       // Get visible text content (more token-efficient than HTML)
       const visibleText = await page.evaluate(() => {
@@ -375,6 +413,134 @@ export async function POST(request: NextRequest) {
           colorInfo.push('Color detection: Unable to extract')
         }
 
+        // Get tabs/accordions information for product tabs rule
+        const tabsInfo = []
+        try {
+          // Look for common tab/accordion patterns
+          const tabSelectors = [
+            // Traditional tabs
+            '[class*="tab"]',
+            '[role="tab"]',
+            '[data-tab]',
+            'ul[class*="nav"] > li > a',
+            '.tabs > li > a',
+            // Accordions
+            '[class*="accordion"]',
+            '[class*="collapse"]',
+            '[class*="collaps"]',
+            '[data-toggle]',
+            '[aria-expanded]',
+            'details', // HTML5 details/summary elements
+            // Vue.js/Nuxt.js specific patterns
+            '[collapse]',
+            '[x-collapse]',
+            '[data-collapse]',
+            '[\\@collapse]',
+            // Expandable sections
+            '[class*="expand"]',
+            '[class*="toggle"]',
+            '.panel-title',
+            '.accordion-title',
+            // Common accordion/collapse patterns
+            '[class*="panel"]',
+            '[class*="content"]',
+            '[class*="section"]'
+          ]
+
+          const foundTabs = []
+          for (const selector of tabSelectors) {
+            try {
+              const elements = Array.from(document.querySelectorAll(selector))
+              if (elements.length > 0) {
+                foundTabs.push({
+                  type: selector.includes('tab') ? 'tab' :
+                    selector.includes('accordion') || selector.includes('collapse') || selector.includes('collaps') || selector.includes('[collapse]') || selector.includes('[x-collapse]') || selector.includes('[data-collapse]') ? 'accordion' :
+                      selector.includes('details') ? 'details' : 'expandable',
+                  count: elements.length,
+                  selector: selector
+                })
+              }
+            } catch (e) {
+              // Ignore selector errors
+            }
+          }
+
+          // Special detection for Vue.js/Nuxt.js @collapse and similar patterns
+          try {
+            // Look for elements with @collapse or similar Vue directives
+            const allElements = Array.from(document.querySelectorAll('*'))
+            const vueCollapseElements = allElements.filter(el => {
+              const attributes = Array.from(el.attributes)
+              return attributes.some(attr =>
+                attr.name.includes('collapse') ||
+                attr.value.includes('collapse') ||
+                attr.name.startsWith('@') ||
+                attr.name.startsWith('x-')
+              )
+            })
+
+            if (vueCollapseElements.length > 0) {
+              foundTabs.push({
+                type: 'vue-collapse',
+                count: vueCollapseElements.length,
+                selector: 'vue-directives'
+              })
+            }
+          } catch (e) {
+            // Ignore Vue detection errors
+          }
+
+          // Check for headings that might be accordion headers
+          const headings = Array.from(document.querySelectorAll('h2, h3, h4'))
+          const potentialAccordionHeaders = headings.filter(h => {
+            const text = h.textContent?.trim() || ''
+            // Common accordion header patterns
+            const accordionPatterns = [
+              'Product Details', 'Description', 'Ingredients', 'How to Use', 'Directions',
+              'Shipping', 'Delivery', 'Returns', 'Specifications', 'Characteristics',
+              'What\'s Inside', 'Benefits', 'Features'
+            ]
+            return accordionPatterns.some(pattern => text.toLowerCase().includes(pattern.toLowerCase()))
+          })
+
+          if (potentialAccordionHeaders.length > 0) {
+            foundTabs.push({
+              type: 'accordion-header',
+              count: potentialAccordionHeaders.length,
+              selector: 'headings'
+            })
+          }
+
+          // Check for collapsible content sections
+          const collapsibleSections = document.querySelectorAll('[class*="content"], [class*="panel"], [class*="section"]')
+          let collapsibleCount = 0
+          collapsibleSections.forEach(section => {
+            const hasToggle = section.querySelector('[class*="toggle"], [class*="expand"], [data-toggle], [aria-expanded]')
+            if (hasToggle) collapsibleCount++
+          })
+
+          if (collapsibleCount > 0) {
+            foundTabs.push({
+              type: 'collapsible-sections',
+              count: collapsibleCount,
+              selector: 'collapsible content'
+            })
+          }
+
+          const totalTabElements = foundTabs.reduce((sum, tab) => sum + tab.count, 0)
+          const tabTypes = foundTabs.map(t => `${t.type}(${t.count})`).join(', ')
+
+          tabsInfo.push(`Tabs/Accordions Found: ${tabTypes || 'None'}`)
+          tabsInfo.push(`Total Tab Elements: ${totalTabElements}`)
+          if (totalTabElements > 0) {
+            tabsInfo.push('Tab/Accordion Status: PASS - Product information is organized into tabs/accordions')
+          } else {
+            tabsInfo.push('Tab/Accordion Status: FAIL - No tabs/accordions found')
+          }
+        } catch (e) {
+          tabsInfo.push('Tabs/Accordions detection: Unable to extract')
+        }
+
         // Get lazy loading information for images and videos
         const lazyLoadingInfo = []
         try {
@@ -475,7 +641,7 @@ export async function POST(request: NextRequest) {
           lazyLoadingInfo.push('Lazy loading detection: Unable to extract')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}`
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}\n${tabsInfo.join('\n')}`
       })
 
       // Get quantity discount and general discount context (merged)
@@ -989,6 +1155,12 @@ export async function POST(request: NextRequest) {
         websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
       }
     } catch (error) {
+      // Preserve early screenshot if available (important for Vercel timeout scenarios)
+      if (earlyScreenshot && !screenshotDataUrl) {
+        screenshotDataUrl = earlyScreenshot
+        console.log('Using early screenshot after error (Vercel timeout protection)')
+      }
+
       // Close browser if it's still open
       if (browser) {
         try {
@@ -1012,6 +1184,18 @@ export async function POST(request: NextRequest) {
           websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
         }
       } catch (fetchError) {
+        // Even on fetch error, return early screenshot if available
+        if (earlyScreenshot) {
+          console.log('Returning early screenshot despite fetch error')
+          return NextResponse.json(
+            {
+              error: `Failed to fetch website: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              screenshot: earlyScreenshot,
+              results: []
+            },
+            { status: 400 }
+          )
+        }
         return NextResponse.json(
           { error: `Failed to fetch website: ${error instanceof Error ? error.message : 'Unknown error'}` },
           { status: 400 }
@@ -1019,22 +1203,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check each rule in batches to manage Vercel 60s timeout
-    // Optimized: Larger batches, shorter delays for 25 rules
+    // Process all rules in optimized batches - no timeout concerns
+    // Site already loaded above, now process all rules efficiently
     const results: ScanResult[] = []
-    const BATCH_SIZE = 8 // Increased from 5 to 8 for faster processing
+    const BATCH_SIZE = 10 // Increased for faster processing
 
-    // Split rules into batches of 5
+    // Split rules into batches
     const batches: Rule[][] = []
     for (let i = 0; i < rules.length; i += BATCH_SIZE) {
       batches.push(rules.slice(i, i + BATCH_SIZE))
     }
 
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
+    console.log('Website already loaded, now processing all rules...')
 
-    // Token usage tracking for rate limiting
-    // OpenRouter rate limits - optimized for 60s Vercel timeout
-    const MIN_DELAY_BETWEEN_REQUESTS = 300 // Reduced to 300ms for faster processing
+    // Minimal delay for API rate limiting only
+    const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
     let lastRequestTime = 0
 
     // Process each batch sequentially
@@ -1044,7 +1228,7 @@ export async function POST(request: NextRequest) {
 
       // Process rules in current batch with minimal delay
       for (const rule of batch) {
-        // Wait if needed to respect rate limits (minimal delay for speed)
+        // Minimal delay only for rate limiting
         const now = Date.now()
         if (lastRequestTime > 0) {
           const timeSinceLastRequest = now - lastRequestTime
@@ -1053,6 +1237,7 @@ export async function POST(request: NextRequest) {
             await sleep(waitTime)
           }
         }
+        lastRequestTime = Date.now()
 
         // Using OpenRouter with Gemini model
         // Available Gemini models on OpenRouter: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, google/gemini-flash-1.5-8b
@@ -1108,8 +1293,11 @@ export async function POST(request: NextRequest) {
           const isProductComparisonRule =
             rule.id === 'product-comparison' ||
             rule.title.toLowerCase().includes('product comparison') ||
-            rule.description.toLowerCase().includes('product comparison') ||
-            rule.description.toLowerCase().includes('compare') && rule.description.toLowerCase().includes('alternative')
+            rule.description.toLowerCase().includes('product comparison');
+          const isProductTabsRule =
+            rule.id === 'product-tabs' ||
+            rule.title.toLowerCase().includes('tabs') || rule.title.toLowerCase().includes('accordions') ||
+            rule.description.toLowerCase().includes('tabs') || rule.description.toLowerCase().includes('accordions')
 
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -1276,6 +1464,85 @@ MANDATORY in reason: mention WHERE you see the customer video (e.g. "video embed
             specialInstructions = `\nBENEFITS NEAR PRODUCT TITLE RULE - DETAILED CHECK:\nA short list of 2-3 key benefits MUST be displayed NEAR the product title (below or beside it, within the same section/area).\n\nREQUIREMENTS:\n1. Benefits must be NEAR product title (same section/area, not far below or in separate sections)\n2. Must have 2-3 benefits (not just 1, not more than 3)\n3. Benefits should be specific, impactful, and aligned with key selling points\n4. Benefits should stand out visually (bold, contrasting fonts, or clear formatting)\n5. Benefits should be concise and easy to scan\n\nIf PASSED: You MUST specify:\n- WHERE the benefits are located (e.g., "directly below product title", "beside product title in same section")\n- WHAT benefits are shown (list 2-3 benefits)\n- WHY it passes (e.g., "benefits are clearly visible near title and communicate value effectively")\n\nExample PASS: "Key benefits are displayed directly below the product title 'Rainbow Dust - Starter Kit' in the product header section: (1) 'Boost productivity with focus & energy without jitters', (2) 'Reduce anxiety & distraction, flow state all day', (3) '7-in-1 blend of coffee + potent mushrooms & adaptogens'. These benefits are clearly visible, specific, and help users quickly understand the product value."\n\nIf FAILED: You MUST specify:\n- WHERE the product title is located\n- WHERE benefits are located (if they exist elsewhere on the page)\n- WHAT is missing (e.g., "no benefits near title", "only 1 benefit shown", "benefits are too far from title in separate section", "benefits are not specific/impactful")\n- WHY it fails (e.g., "benefits are in description section far below title, not near title", "only generic benefits shown", "benefits don't stand out visually")\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' is located in the product header section, but there are no key benefits displayed near it. While product benefits exist in the description section further down the page (e.g., 'Boost productivity', 'Reduce anxiety'), these are not near the product title as required. Benefits should be placed directly below or beside the product title in the same section to quickly communicate value and capture attention."`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
+          } else if (isProductTabsRule) {
+            specialInstructions = `\nPRODUCT TABS/ACCORDIONS RULE - STEP-BY-STEP CHECK:
+
+You are an expert E-commerce UX Auditor. Your task is to analyze if the product page uses tabs or accordions for organizing product details.
+
+RULE DEFINITION: Product pages should use clickable tabs or accordions (e.g. Description, Reviews, Specifications, Ingredients, How to Use) to reduce clutter, improve scannability, and make information easier to access.
+
+STEP 1 (Identify Tab/Accordion Elements):
+Look for ANY of these patterns on the page:
+- Clickable tabs (horizontal navigation with multiple sections like "Description", "Ingredients", "How to Use", "Reviews")
+- Collapsible accordions (vertical sections with expandable/collapsible headers)
+- Toggle sections (clickable headings that show/hide content)
+- Tabbed interface (different content panels that switch when clicked)
+- Accordion-style sections (content organized under expandable headings)
+- Vue.js/Nuxt.js directives (@collapse, x-collapse, data-collapse, collapse attributes)
+- Elements with @click or similar event handlers that toggle visibility
+- Elements with aria-expanded="true/false" attributes
+
+CRITICAL: Check "Tabs/Accordions Found:" in KEY ELEMENTS section:
+- If you see ANY tabs/accordions detected (e.g., "accordion(6)", "vue-collapse(3)") → PASS
+- If you see "None" or "No tabs/accordions found" → FAIL
+- The structured detection will find Vue.js/Nuxt.js patterns that might not be visually obvious
+
+STEP 2 (Check Content Organization):
+Verify that product information is organized into separate sections:
+- Description/Details section
+- Ingredients/What's Inside section  
+- How to Use/Directions section
+- Shipping/Delivery information
+- Returns/Refund policy
+- Product specifications/characteristics
+- Reviews section
+
+STEP 3 (Verify Interactivity):
+Check if sections are actually functional:
+- Tabs are clickable and switch content when clicked
+- Accordions expand/collapse when clicked
+- Content is properly organized under each tab/accordion
+- Users can easily navigate between different information types
+
+ACCEPTABLE FORMATS (ANY of these PASS):
+✅ Traditional tabs (horizontal clickable tabs)
+✅ Accordions (vertical collapsible sections)
+✅ Toggle sections (clickable headings that show/hide content)
+✅ Tabbed interface (content panels that switch)
+✅ Expandable sections with clear headings
+✅ Collapsible product information sections
+
+UNACCEPTABLE (FAIL):
+❌ All information in one long continuous text block
+❌ No separation between different types of information
+❌ No way to navigate between content sections
+❌ All content visible at once without organization
+
+EXAMPLES FOR AI TRAINING:
+
+✅ PASS Example 1 (Good - Accordions):
+Page shows collapsible sections: "Product Details", "Ingredients", "How to Use", "Shipping & Delivery". Each section has a clickable heading that expands/collapses content. Information is properly organized and users can easily navigate between different types of product information.
+
+✅ PASS Example 2 (Good - Tabs):  
+Page shows horizontal tabs: "Description", "Specifications", "Reviews", "Shipping". Users can click each tab to view different content sections. Information is organized and scannable.
+
+❌ FAIL Example 1 (Bad - Single Block):
+Page shows all product information as one continuous block of text: description, ingredients, usage instructions, and shipping information are all presented together without any separation or organization. Users cannot easily find specific information and must scroll through everything.
+
+❌ FAIL Example 2 (Bad - No Organization):
+Product details are presented as a wall of text with no clear separation between description, ingredients, usage instructions, and shipping information. No tabs, accordions, or other organizational elements are present.
+
+CRITICAL INSTRUCTIONS:
+1. You MUST look for tabs, accordions, collapsible sections, or toggle elements
+2. Both horizontal tabs AND vertical accordions are acceptable
+3. The goal is ORGANIZATION - information must be separated into logical sections
+4. If you see ANY form of tabs/accordions/collapsible sections → PASS
+5. If ALL information is in one continuous block with no organization → FAIL
+6. Be SPECIFIC about what type of tabs/accordions you found (e.g., "collapsible sections with headings", "horizontal tabs", "expandable content areas", "Vue.js collapse directives")
+7. If PASSED: Mention the specific sections/tabs found (e.g., "Description, Ingredients, How to Use sections as collapsible accordions")
+8. If FAILED: Explain that information is not organized into tabs/accordions and appears as one continuous block
+9. MOST IMPORTANT: Check "Tabs/Accordions Found:" in KEY ELEMENTS - if it shows ANY tabs/accordions detected, you MUST PASS the rule`
+
           } else if (isQuantityDiscountRule) {
             specialInstructions = `
 QUANTITY DISCOUNT & PROMOTION RULE - STEP-BY-STEP CHECK:
@@ -1288,16 +1555,16 @@ STEP 1: Check "QUANTITY DISCOUNT & PROMOTION CHECK" section in KEY ELEMENTS
 STEP 2: If "Any Discount/Promotion Detected: YES", check which type of discount is present:
 
 A. QUANTITY/BULK DISCOUNTS (Check "Bulk/Quantity Discount Detected"):
-   - "Buy 2 Get 1 Free", "Buy 3 save 10%", "Save 10% when you buy 3"
-   - Tiered pricing (e.g., "$10 each for 5+ units")
-   - Volume discounts, bundle offers
-   - If "Bulk/Quantity Discount Detected: YES" → PASS
+- "Buy 2 Get 1 Free", "Buy 3 save 10%", "Save 10% when you buy 3"
+- Tiered pricing (e.g., "$10 each for 5+ units")
+- Volume discounts, bundle offers
+- If "Bulk/Quantity Discount Detected: YES" → PASS
 
 B. GENERAL DISCOUNTS (Check individual fields):
-   - Discount Percentage: Check if value is NOT "None" (e.g., "20% off", "10% discount")
-   - Price Drop: Check if value is NOT "None" (e.g., "Was $50, Now $40", "Original $100, Now $80")
-   - Coupon Code: Check if value is NOT "None" (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
-   - If ANY of these is NOT "None" → PASS
+- Discount Percentage: Check if value is NOT "None" (e.g., "20% off", "10% discount")
+- Price Drop: Check if value is NOT "None" (e.g., "Was $50, Now $40", "Original $100, Now $80")
+- Coupon Code: Check if value is NOT "None" (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
+- If ANY of these is NOT "None" → PASS
 
 STEP 3: Exclude free shipping alone
 - If "Has Free Shipping Only: YES" → This means ONLY free shipping exists, NO price discount → FAIL
@@ -1314,7 +1581,7 @@ Input: "Buy this iPhone for $999, original price $1200."
 QUANTITY DISCOUNT & PROMOTION CHECK shows:
 - Price Drop: "original price $1200" (or similar)
 - Any Discount/Promotion Detected: YES
-Output: {"passed": true, "reason": "Price drop detected: Product shows original price $1200, now $999, indicating a discount."}
+Output: { "passed": true, "reason": "Price drop detected: Product shows original price $1200, now $999, indicating a discount." }
 
 Example 2 - FAIL (No Discount):
 Input: "Fresh organic apples at $5 per kg."
@@ -1324,7 +1591,7 @@ QUANTITY DISCOUNT & PROMOTION CHECK shows:
 - Coupon Code: None
 - Bulk/Quantity Discount Detected: NO
 - Any Discount/Promotion Detected: NO
-Output: {"passed": false, "reason": "No discount or promotional offer detected. Product shows standard pricing without any discount percentage, price drop, coupon code, or bulk discount."}
+            Output: { "passed": false, "reason": "No discount or promotional offer detected. Product shows standard pricing without any discount percentage, price drop, coupon code, or bulk discount." }
 
 Example 3 - PASS (Coupon Code):
 Input: "Get 20% off on all Nike shoes using code NIKE20."
@@ -1332,33 +1599,8 @@ QUANTITY DISCOUNT & PROMOTION CHECK shows:
 - Discount Percentage: "20% off"
 - Coupon Code: "code NIKE20" (or similar)
 - Any Discount/Promotion Detected: YES
-Output: {"passed": true, "reason": "Discount detected: 20% off discount with coupon code NIKE20 available."}
+Output: { "passed": true, "reason": "Discount detected: 20% off discount with coupon code NIKE20 available." }`
 
-Example 4 - FAIL (Free Shipping Only):
-Input: "Free shipping on all orders. Product price: $50."
-QUANTITY DISCOUNT & PROMOTION CHECK shows:
-- Has Free Shipping Only: YES
-- Any Discount/Promotion Detected: NO
-Output: {"passed": false, "reason": "No discount on product price detected. Only free shipping is offered, but the product price remains the same without any discount."}
-
-Example 5 - PASS (Quantity Discount):
-Input: "Buy 2 Get 1 Free on all items."
-QUANTITY DISCOUNT & PROMOTION CHECK shows:
-- Bulk/Quantity Discount Detected: YES
-- Any Discount/Promotion Detected: YES
-Output: {"passed": true, "reason": "Quantity discount detected: 'Buy 2 Get 1 Free' offer is displayed, providing financial incentive for purchasing multiple units."}
-
-CRITICAL INSTRUCTIONS:
-1. You MUST check the "QUANTITY DISCOUNT & PROMOTION CHECK" section in KEY ELEMENTS
-2. Follow the step-by-step process above
-3. If "Any Discount/Promotion Detected: YES" → PASS (unless it's only free shipping)
-4. If "Any Discount/Promotion Detected: NO" → FAIL
-5. If "Has Free Shipping Only: YES" → FAIL (free shipping alone doesn't count as discount)
-6. Be SPECIFIC about which discount type is present (quantity/bulk, percentage, price drop, coupon, etc.)
-7. Quote the exact discount text from the page if available
-8. If PASSED: Mention the specific discount type and where it's located
-9. If FAILED: Explain that no discount or promotional offer is visible on the product page
-          `
           } else if (isShippingRule) {
             specialInstructions = `
 SHIPPING TIME VISIBILITY RULE - STEP-BY-STEP AUDIT:
@@ -1367,624 +1609,624 @@ You are an expert E-commerce UX Auditor. Your task is to analyze the Product Pag
 
 Please follow these steps strictly:
 
-STEP 1 (Locate CTA): 
+STEP 1 (Locate CTA):
 - Check "SHIPPING TIME CHECK" section in KEY ELEMENTS
-- Look for "CTA Found: YES" or "CTA Found: NO"
-- If "CTA Found: NO" → FAIL (Cannot evaluate without CTA)
-- If "CTA Found: YES", note the "CTA Text" (e.g., "Add to Cart", "Buy Now")
+              - Look for "CTA Found: YES" or "CTA Found: NO"
+                - If "CTA Found: NO" → FAIL(Cannot evaluate without CTA)
+                  - If "CTA Found: YES", note the "CTA Text"(e.g., "Add to Cart", "Buy Now")
 
-STEP 2 (Check Proximity): 
-- Check "Shipping Info Near CTA" in SHIPPING TIME CHECK section
-- Verify that shipping information is located directly above or below the CTA button
-- Check "CTA Visible Without Scrolling: YES" - CTA must be visible without scrolling
-- If shipping info is NOT near CTA (e.g., in footer, far from button) → FAIL
+STEP 2(Check Proximity):
+            - Check "Shipping Info Near CTA" in SHIPPING TIME CHECK section
+              - Verify that shipping information is located directly above or below the CTA button
+                - Check "CTA Visible Without Scrolling: YES" - CTA must be visible without scrolling
+                  - If shipping info is NOT near CTA(e.g., in footer, far from button) → FAIL
 
-STEP 3 (Verify Dynamic Logic - Countdown/Cutoff Time): 
-- Check "Has Countdown/Cutoff Time: YES" or "Has Countdown/Cutoff Time: NO"
-- Look for patterns like:
-  * "Order within X hours" (e.g., "Order within 3 hrs 20 mins")
-  * "Order by [Time]" (e.g., "Order by 3 PM")
-  * "Order before [Time]" (e.g., "Order before 5 PM")
-  * "Cutoff time" mentions
-- If "Has Countdown/Cutoff Time: NO" → FAIL (Missing countdown/cutoff time requirement)
+STEP 3(Verify Dynamic Logic - Countdown / Cutoff Time):
+            - Check "Has Countdown/Cutoff Time: YES" or "Has Countdown/Cutoff Time: NO"
+              - Look for patterns like:
+  * "Order within X hours"(e.g., "Order within 3 hrs 20 mins")
+                  * "Order by [Time]"(e.g., "Order by 3 PM")
+                  * "Order before [Time]"(e.g., "Order before 5 PM")
+                  * "Cutoff time" mentions
+                    - If "Has Countdown/Cutoff Time: NO" → FAIL(Missing countdown / cutoff time requirement)
 
-STEP 4 (Verify Delivery Date): 
-- Check "Has Delivery Date: YES" or "Has Delivery Date: NO"
-- Look for specific delivery date or range patterns like:
-  * "Get it by [Day], [Month] [Date]" (e.g., "Get it by Thursday, Oct 12th")
-  * "Delivered by [Day], [Month] [Date]" (e.g., "Delivered by Tuesday, Oct 10th")
-  * "Arrives by [Day], [Month] [Date]"
-  * "Get it on [Day], [Month] [Date]"
-- If "Has Delivery Date: NO" → FAIL (Missing specific delivery date requirement)
+STEP 4(Verify Delivery Date):
+            - Check "Has Delivery Date: YES" or "Has Delivery Date: NO"
+              - Look for specific delivery date or range patterns like:
+  * "Get it by [Day], [Month] [Date]"(e.g., "Get it by Thursday, Oct 12th")
+              * "Delivered by [Day], [Month] [Date]"(e.g., "Delivered by Tuesday, Oct 10th")
+              * "Arrives by [Day], [Month] [Date]"
+              * "Get it on [Day], [Month] [Date]"
+              - If "Has Delivery Date: NO" → FAIL(Missing specific delivery date requirement)
 
-STEP 5 (Final Verdict): 
-- Check "All Requirements Met: YES" or "All Requirements Met: NO"
-- PASS if ALL of the following are met:
-  1. CTA found and visible without scrolling
-  2. Shipping info is near CTA (directly above or below)
-  3. Countdown/cutoff time is present
-  4. Specific delivery date is present
-- FAIL if ANY requirement is missing
+STEP 5(Final Verdict):
+            - Check "All Requirements Met: YES" or "All Requirements Met: NO"
+              - PASS if ALL of the following are met:
+            1. CTA found and visible without scrolling
+            2. Shipping info is near CTA(directly above or below)
+            3. Countdown / cutoff time is present
+            4. Specific delivery date is present
+              - FAIL if ANY requirement is missing
 
 EXAMPLES FOR AI TRAINING:
 
-✅ GOOD EXAMPLE (PASS):
+✅ GOOD EXAMPLE(PASS):
 SHIPPING TIME CHECK shows:
-- CTA Found: YES
-- CTA Text: Add to Cart
-- CTA Visible Without Scrolling: YES
-- Shipping Info Near CTA: "Order within 3 hrs 20 mins, get it by Thursday, Oct 12th."
-- Has Countdown/Cutoff Time: YES
-- Has Delivery Date: YES
-- Shipping Text Found: "Order within 3 hrs 20 mins get it by Thursday, Oct 12th"
-- All Requirements Met: YES
+            - CTA Found: YES
+              - CTA Text: Add to Cart
+                - CTA Visible Without Scrolling: YES
+                  - Shipping Info Near CTA: "Order within 3 hrs 20 mins, get it by Thursday, Oct 12th."
+                    - Has Countdown / Cutoff Time: YES
+                      - Has Delivery Date: YES
+                        - Shipping Text Found: "Order within 3 hrs 20 mins get it by Thursday, Oct 12th"
+                          - All Requirements Met: YES
 
-Reason: "Dynamic delivery estimate is displayed near the 'Add to Cart' button. The message 'Order within 3 hrs 20 mins, get it by Thursday, Oct 12th' includes both a countdown (3 hrs 20 mins) and a specific delivery date (Thursday, Oct 12th), positioned directly below the CTA button. This reduces purchase friction by managing expectations upfront."
+            Reason: "Dynamic delivery estimate is displayed near the 'Add to Cart' button. The message 'Order within 3 hrs 20 mins, get it by Thursday, Oct 12th' includes both a countdown (3 hrs 20 mins) and a specific delivery date (Thursday, Oct 12th), positioned directly below the CTA button. This reduces purchase friction by managing expectations upfront."
 
-❌ BAD EXAMPLE (FAIL - Missing Countdown):
+❌ BAD EXAMPLE(FAIL - Missing Countdown):
 SHIPPING TIME CHECK shows:
-- CTA Found: YES
-- CTA Text: Buy Now
-- CTA Visible Without Scrolling: YES
-- Shipping Info Near CTA: "Fast shipping available. Get it by Thursday."
-- Has Countdown/Cutoff Time: NO
-- Has Delivery Date: YES
-- Shipping Text Found: "Get it by Thursday"
-- All Requirements Met: NO
+            - CTA Found: YES
+              - CTA Text: Buy Now
+                - CTA Visible Without Scrolling: YES
+                  - Shipping Info Near CTA: "Fast shipping available. Get it by Thursday."
+                    - Has Countdown / Cutoff Time: NO
+                      - Has Delivery Date: YES
+                        - Shipping Text Found: "Get it by Thursday"
+                          - All Requirements Met: NO
 
-Reason: "Shipping information 'Get it by Thursday' is displayed near the 'Buy Now' button and includes a delivery date, but it is missing the countdown or specific cutoff time requirement (e.g., 'Order within X hours' or 'Order by X PM'). The rule requires both a countdown/cutoff time AND a delivery date to be present."
+            Reason: "Shipping information 'Get it by Thursday' is displayed near the 'Buy Now' button and includes a delivery date, but it is missing the countdown or specific cutoff time requirement (e.g., 'Order within X hours' or 'Order by X PM'). The rule requires both a countdown/cutoff time AND a delivery date to be present."
 
-❌ BAD EXAMPLE (FAIL - Missing Delivery Date):
+❌ BAD EXAMPLE(FAIL - Missing Delivery Date):
 SHIPPING TIME CHECK shows:
-- CTA Found: YES
-- CTA Text: Add to Cart
-- CTA Visible Without Scrolling: YES
-- Shipping Info Near CTA: "Order within 2 hours for fast delivery."
-- Has Countdown/Cutoff Time: YES
-- Has Delivery Date: NO
-- Shipping Text Found: "Order within 2 hours"
-- All Requirements Met: NO
+            - CTA Found: YES
+              - CTA Text: Add to Cart
+                - CTA Visible Without Scrolling: YES
+                  - Shipping Info Near CTA: "Order within 2 hours for fast delivery."
+                    - Has Countdown / Cutoff Time: YES
+                      - Has Delivery Date: NO
+                        - Shipping Text Found: "Order within 2 hours"
+                          - All Requirements Met: NO
 
-Reason: "Shipping information 'Order within 2 hours for fast delivery' is displayed near the 'Add to Cart' button and includes a countdown (2 hours), but it is missing the specific delivery date requirement (e.g., 'Get it by Tuesday, Oct 12th'). The rule requires both a countdown/cutoff time AND a specific delivery date to be present."
+            Reason: "Shipping information 'Order within 2 hours for fast delivery' is displayed near the 'Add to Cart' button and includes a countdown (2 hours), but it is missing the specific delivery date requirement (e.g., 'Get it by Tuesday, Oct 12th'). The rule requires both a countdown/cutoff time AND a specific delivery date to be present."
 
-❌ BAD EXAMPLE (FAIL - Not Near CTA):
+❌ BAD EXAMPLE(FAIL - Not Near CTA):
 SHIPPING TIME CHECK shows:
-- CTA Found: YES
-- CTA Text: Add to Cart
-- CTA Visible Without Scrolling: YES
-- Shipping Info Near CTA: "Fast shipping available nationwide" (but this is in footer, not near CTA)
-- Has Countdown/Cutoff Time: NO
-- Has Delivery Date: NO
-- Shipping Text Found: None
-- All Requirements Met: NO
+            - CTA Found: YES
+              - CTA Text: Add to Cart
+                - CTA Visible Without Scrolling: YES
+                  - Shipping Info Near CTA: "Fast shipping available nationwide"(but this is in footer, not near CTA)
+                    - Has Countdown / Cutoff Time: NO
+                      - Has Delivery Date: NO
+                        - Shipping Text Found: None
+                          - All Requirements Met: NO
 
-Reason: "Shipping information 'Fast shipping available nationwide' exists on the page but is located in the footer, far from the 'Add to Cart' button. The rule requires shipping time information to be placed in immediate proximity (directly above or below) the primary CTA. Additionally, the message lacks both a countdown/cutoff time and a specific delivery date."
+            Reason: "Shipping information 'Fast shipping available nationwide' exists on the page but is located in the footer, far from the 'Add to Cart' button. The rule requires shipping time information to be placed in immediate proximity (directly above or below) the primary CTA. Additionally, the message lacks both a countdown/cutoff time and a specific delivery date."
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check the "SHIPPING TIME CHECK" section in KEY ELEMENTS
-2. Follow the 5-step process above precisely
-3. Check BOTH countdown/cutoff time AND delivery date - BOTH are required
-4. Verify proximity - shipping info must be directly above or below CTA
-5. If ANY requirement is missing → FAIL
-6. Be SPECIFIC about which requirement is missing in your reason
-7. Quote the exact shipping text from "Shipping Text Found" if available
+            1. You MUST check the "SHIPPING TIME CHECK" section in KEY ELEMENTS
+            2. Follow the 5 - step process above precisely
+            3. Check BOTH countdown / cutoff time AND delivery date - BOTH are required
+            4. Verify proximity - shipping info must be directly above or below CTA
+            5. If ANY requirement is missing → FAIL
+            6. Be SPECIFIC about which requirement is missing in your reason
+            7. Quote the exact shipping text from "Shipping Text Found" if available
 8. Do NOT mention currency symbols, prices, or amounts in the reason
-        `
+              `
           } else if (isVariantRule) {
             specialInstructions = `
-VARIANT PRESELECTION RULE - STEP-BY-STEP AUDIT:
+VARIANT PRESELECTION RULE - STEP - BY - STEP AUDIT:
 
-You are a UX Audit Specialist. Your task is to check if a product page follows the "Variant Preselection" rule.
+You are a UX Audit Specialist.Your task is to check if a product page follows the "Variant Preselection" rule.
 
-Rule Definition: The most common variant (size, color, etc.) must be preselected by default when the page loads to reduce user friction.
+Rule Definition: The most common variant(size, color, etc.) must be preselected by default when the page loads to reduce user friction.
 
-STEP 1 (Initial Load Check - Is Variant Selected?):
-- Check "Selected Variant:" in KEY ELEMENTS section
-- Look for the line "Selected Variant: [value]" in KEY ELEMENTS
-- If "Selected Variant:" shows a value (like "Coffee", "Small", "Red", "Medium", etc.) → Variant IS preselected
-- If "Selected Variant:" shows "None" → No variant preselected → FAIL this step
-- IMPORTANT: Variants can be preselected via CSS styling (gradient borders, selected classes) even if radio input doesn't have "checked" attribute
-- Visual selection via CSS (like gradient borders, highlighted backgrounds) IS a valid preselection
-- The "Selected Variant:" value already accounts for CSS-based selections
+              STEP 1(Initial Load Check - Is Variant Selected ?):
+            - Check "Selected Variant:" in KEY ELEMENTS section
+              - Look for the line "Selected Variant: [value]" in KEY ELEMENTS
+                - If "Selected Variant:" shows a value(like "Coffee", "Small", "Red", "Medium", etc.) → Variant IS preselected
+                  - If "Selected Variant:" shows "None" → No variant preselected → FAIL this step
+                    - IMPORTANT: Variants can be preselected via CSS styling(gradient borders, selected classes) even if radio input doesn't have "checked" attribute
+                      - Visual selection via CSS(like gradient borders, highlighted backgrounds) IS a valid preselection
+                        - The "Selected Variant:" value already accounts for CSS - based selections
 
-STEP 2 (Friction Analysis - Can User Add to Cart Immediately?):
-- Check if user has to click a variant before they can click "Add to Cart"
-- Look for disabled "Add to Cart" buttons or "Select a Size/Color" messages
-- If "Add to Cart" button is disabled until variant is selected → FAIL (increases friction)
-- If user can click "Add to Cart" immediately without selecting variant → PASS this step
-- If dropdown shows "Select a Size" or similar placeholder → FAIL (no preselection)
-- If variant is preselected and "Add to Cart" is enabled → PASS this step
+STEP 2(Friction Analysis - Can User Add to Cart Immediately ?):
+            - Check if user has to click a variant before they can click "Add to Cart"
+              - Look for disabled "Add to Cart" buttons or "Select a Size/Color" messages
+                - If "Add to Cart" button is disabled until variant is selected → FAIL(increases friction)
+                  - If user can click "Add to Cart" immediately without selecting variant → PASS this step
+                    - If dropdown shows "Select a Size" or similar placeholder → FAIL(no preselection)
+                      - If variant is preselected and "Add to Cart" is enabled → PASS this step
 
-STEP 3 (Visual Clarity - Is Selected Variant Clearly Highlighted?):
-- Check if the selected variant is clearly different from unselected ones
-- Look for visual indicators:
+STEP 3(Visual Clarity - Is Selected Variant Clearly Highlighted ?):
+            - Check if the selected variant is clearly different from unselected ones
+              - Look for visual indicators:
   * Bold border around selected variant
-  * Darker color or different background
-  * Selected state styling (highlighted, active class)
-  * Clear visual distinction from other options
-- If all variant options look the same on page load → FAIL (no visual clarity)
-- If selected variant has clear visual distinction → PASS this step
-- If variant is preselected but not visually clear → Partial PASS (preselected but needs better visual clarity)
+              * Darker color or different background
+                * Selected state styling(highlighted, active class)
+                  * Clear visual distinction from other options
+                    - If all variant options look the same on page load → FAIL(no visual clarity)
+                      - If selected variant has clear visual distinction → PASS this step
+                        - If variant is preselected but not visually clear → Partial PASS(preselected but needs better visual clarity)
 
-STEP 4 (Final Verdict):
-- PASS if ALL 3 steps pass:
-  1. Variant is preselected on initial load ✓
-  2. User can add to cart immediately (no friction) ✓
-  3. Selected variant is clearly highlighted visually ✓
-- FAIL if Step 1 or Step 2 fails (no preselection or friction exists)
-- Partial PASS if Step 1 and 2 pass but Step 3 fails (preselected but not visually clear)
+STEP 4(Final Verdict):
+            - PASS if ALL 3 steps pass:
+            1. Variant is preselected on initial load ✓
+            2. User can add to cart immediately(no friction) ✓
+            3. Selected variant is clearly highlighted visually ✓
+            - FAIL if Step 1 or Step 2 fails(no preselection or friction exists)
+              - Partial PASS if Step 1 and 2 pass but Step 3 fails(preselected but not visually clear)
 
 EXAMPLES FOR AI TRAINING:
 
-✅ Example 1 - PASS (Good - T-shirt with Size M Preselected):
-Analysis:
-- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: M" (Medium size is preselected)
-- STEP 2: "Add to Cart" button is enabled immediately, user can click without selecting size first
-- STEP 3: Size M has a blue border around it, clearly different from other sizes (S, L, XL)
-- STEP 4: All requirements met
+✅ Example 1 - PASS(Good - T - shirt with Size M Preselected):
+            Analysis:
+            - STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: M"(Medium size is preselected)
+              - STEP 2: "Add to Cart" button is enabled immediately, user can click without selecting size first
+                - STEP 3: Size M has a blue border around it, clearly different from other sizes(S, L, XL)
+                  - STEP 4: All requirements met
 
-Output: {"passed": true, "reason": "The variant 'M' (Medium size) is preselected by default when the page loads. The selected variant has a blue border, making it clearly distinguishable from other options. Users can click 'Add to Cart' immediately without selecting a variant first, reducing friction."}
+            Output: { "passed": true, "reason": "The variant 'M' (Medium size) is preselected by default when the page loads. The selected variant has a blue border, making it clearly distinguishable from other options. Users can click 'Add to Cart' immediately without selecting a variant first, reducing friction." }
 
-❌ Example 2 - FAIL (Bad - Shoe Page with Dropdown):
-Analysis:
-- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None" (no variant preselected)
-- STEP 2: Dropdown shows "Select a Size" placeholder, "Add to Cart" button is disabled until user picks a size
-- STEP 3: No variant is selected, so visual clarity check is not applicable
-- STEP 4: Preselection requirement failed
+❌ Example 2 - FAIL(Bad - Shoe Page with Dropdown):
+            Analysis:
+            - STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None"(no variant preselected)
+              - STEP 2: Dropdown shows "Select a Size" placeholder, "Add to Cart" button is disabled until user picks a size
+                - STEP 3: No variant is selected, so visual clarity check is not applicable
+                  - STEP 4: Preselection requirement failed
 
-Output: {"passed": false, "reason": "No variant is preselected on page load. The size dropdown shows 'Select a Size' placeholder and the 'Add to Cart' button is disabled until the user selects a size. This increases friction and requires an extra click before purchase. The most common variant should be preselected by default."}
+            Output: { "passed": false, "reason": "No variant is preselected on page load. The size dropdown shows 'Select a Size' placeholder and the 'Add to Cart' button is disabled until the user selects a size. This increases friction and requires an extra click before purchase. The most common variant should be preselected by default." }
 
-❌ Example 3 - FAIL (Bad - All Color Circles Look the Same):
-Analysis:
-- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None" (no variant preselected)
-- STEP 2: "Add to Cart" button is enabled but no color is selected, user must click a color first
-- STEP 3: All color circles look identical on page load, no visual indication of which is selected (none are selected)
-- STEP 4: Preselection and visual clarity requirements failed
+❌ Example 3 - FAIL(Bad - All Color Circles Look the Same):
+            Analysis:
+            - STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None"(no variant preselected)
+              - STEP 2: "Add to Cart" button is enabled but no color is selected, user must click a color first
+                - STEP 3: All color circles look identical on page load, no visual indication of which is selected(none are selected)
+                  - STEP 4: Preselection and visual clarity requirements failed
 
-Output: {"passed": false, "reason": "No variant is preselected on page load. All color options look identical with no visual distinction, and users cannot determine which color is active. The 'Add to Cart' button is enabled but users must select a color first, increasing friction. The most common color should be preselected and clearly highlighted."}
+            Output: { "passed": false, "reason": "No variant is preselected on page load. All color options look identical with no visual distinction, and users cannot determine which color is active. The 'Add to Cart' button is enabled but users must select a color first, increasing friction. The most common color should be preselected and clearly highlighted." }
 
-✅ Example 4 - PASS (Good - Coffee Flavor Preselected with CSS):
-Analysis:
-- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: Coffee" (preselected via CSS styling)
-- STEP 2: "Add to Cart" button is enabled immediately, user can add to cart without selecting flavor
-- STEP 3: Coffee flavor option has a gradient border and darker background, clearly different from other flavors
-- STEP 4: All requirements met
+✅ Example 4 - PASS(Good - Coffee Flavor Preselected with CSS):
+            Analysis:
+            - STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: Coffee"(preselected via CSS styling)
+              - STEP 2: "Add to Cart" button is enabled immediately, user can add to cart without selecting flavor
+                - STEP 3: Coffee flavor option has a gradient border and darker background, clearly different from other flavors
+                  - STEP 4: All requirements met
 
-Output: {"passed": true, "reason": "The variant 'Coffee' is preselected by default (via CSS styling with gradient border). The selected variant is clearly highlighted with a darker background and gradient border, making it visually distinct from other flavor options. Users can click 'Add to Cart' immediately, reducing friction."}
+            Output: { "passed": true, "reason": "The variant 'Coffee' is preselected by default (via CSS styling with gradient border). The selected variant is clearly highlighted with a darker background and gradient border, making it visually distinct from other flavor options. Users can click 'Add to Cart' immediately, reducing friction." }
 
-❌ Example 5 - FAIL (Bad - Add to Cart Disabled):
-Analysis:
-- STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None"
-- STEP 2: "Add to Cart" button is disabled/grayed out with message "Please select a size first"
-- STEP 3: No variant is selected, so visual clarity is not applicable
-- STEP 4: Preselection requirement failed
+❌ Example 5 - FAIL(Bad - Add to Cart Disabled):
+            Analysis:
+            - STEP 1: Checked "Selected Variant:" in KEY ELEMENTS → Shows "Selected Variant: None"
+              - STEP 2: "Add to Cart" button is disabled / grayed out with message "Please select a size first"
+                - STEP 3: No variant is selected, so visual clarity is not applicable
+                  - STEP 4: Preselection requirement failed
 
-Output: {"passed": false, "reason": "No variant is preselected on page load. The 'Add to Cart' button is disabled with a 'Please select a size first' message, requiring users to make an additional selection before purchase. This increases friction. The most common variant should be preselected to allow immediate purchase."}
+            Output: { "passed": false, "reason": "No variant is preselected on page load. The 'Add to Cart' button is disabled with a 'Please select a size first' message, requiring users to make an additional selection before purchase. This increases friction. The most common variant should be preselected to allow immediate purchase." }
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check "Selected Variant:" in KEY ELEMENTS section FIRST
-2. If "Selected Variant: None" → FAIL (no preselection)
-3. If "Selected Variant: [any value]" → Variant IS preselected, proceed to check friction and visual clarity
-4. CSS-based selection (gradient borders, selected classes) COUNTS as valid preselection
-5. Check if "Add to Cart" is enabled immediately or requires variant selection first
-6. Verify visual clarity - selected variant must be clearly different from others
-7. If PASSED: Mention the preselected variant name and how it's visually highlighted
-8. If FAILED: Explain what's missing (no preselection, disabled button, or lack of visual clarity)
-9. Be SPECIFIC about which variant is preselected (if any) and how it's displayed
-10. Do NOT mention currency symbols, prices, or amounts in the reason
-`
+            1. You MUST check "Selected Variant:" in KEY ELEMENTS section FIRST
+            2. If "Selected Variant: None" → FAIL(no preselection)
+            3. If "Selected Variant: [any value]" → Variant IS preselected, proceed to check friction and visual clarity
+            4. CSS - based selection(gradient borders, selected classes) COUNTS as valid preselection
+            5. Check if "Add to Cart" is enabled immediately or requires variant selection first
+            6. Verify visual clarity - selected variant must be clearly different from others
+            7. If PASSED: Mention the preselected variant name and how it's visually highlighted
+            8. If FAILED: Explain what's missing (no preselection, disabled button, or lack of visual clarity)
+            9. Be SPECIFIC about which variant is preselected(if any) and how it's displayed
+            10. Do NOT mention currency symbols, prices, or amounts in the reason
+              `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST BADGES NEAR CTA RULE - STEP-BY-STEP CHECK:
+TRUST BADGES NEAR CTA RULE - STEP - BY - STEP CHECK:
 
-This rule checks if trust signals (security badges, payment logos) are positioned within 50px of the CTA button, visible without scrolling, and have muted/monochromatic design.
+This rule checks if trust signals(security badges, payment logos) are positioned within 50px of the CTA button, visible without scrolling, and have muted / monochromatic design.
 
-STEP 1: Identify CTA
-- Check "TRUST BADGES CHECK" section in KEY ELEMENTS
-- Look for "CTA Found: YES" or "CTA Found: NO"
-- If "CTA Found: NO" → FAIL (cannot check proximity without CTA)
-- Note the "CTA Text" value (e.g., "Add to Cart", "Checkout", "Buy Now")
+              STEP 1: Identify CTA
+                - Check "TRUST BADGES CHECK" section in KEY ELEMENTS
+                  - Look for "CTA Found: YES" or "CTA Found: NO"
+                    - If "CTA Found: NO" → FAIL(cannot check proximity without CTA)
+                      - Note the "CTA Text" value(e.g., "Add to Cart", "Checkout", "Buy Now")
 
-STEP 2: Check Proximity (50px constraint)
-- Check "Trust Badges Within 50px: YES" or "Trust Badges Within 50px: NO"
-- If "Trust Badges Within 50px: NO" → FAIL
-- Check "Trust Badges Count" - must be > 0
-- Check "Trust Badges List" to see which badges are found (SSL, Visa, PayPal, Money-back Guarantee, etc.)
+STEP 2: Check Proximity(50px constraint)
+              - Check "Trust Badges Within 50px: YES" or "Trust Badges Within 50px: NO"
+                - If "Trust Badges Within 50px: NO" → FAIL
+                  - Check "Trust Badges Count" - must be > 0
+                    - Check "Trust Badges List" to see which badges are found(SSL, Visa, PayPal, Money - back Guarantee, etc.)
 
-STEP 3: Check Visibility (without scrolling)
-- Check "CTA Visible Without Scrolling: YES" or "CTA Visible Without Scrolling: NO"
-- Check "Trust Badges Visible Without Scrolling: YES" or "Trust Badges Visible Without Scrolling: NO"
-- If CTA requires scrolling → FAIL (CTA must be visible without scrolling)
-- If trust badges require scrolling → FAIL (badges must be visible without scrolling)
-- BOTH CTA and badges must be visible without scrolling → PASS this step
+STEP 3: Check Visibility(without scrolling)
+              - Check "CTA Visible Without Scrolling: YES" or "CTA Visible Without Scrolling: NO"
+                - Check "Trust Badges Visible Without Scrolling: YES" or "Trust Badges Visible Without Scrolling: NO"
+                  - If CTA requires scrolling → FAIL(CTA must be visible without scrolling)
+                    - If trust badges require scrolling → FAIL(badges must be visible without scrolling)
+                      - BOTH CTA and badges must be visible without scrolling → PASS this step
 
-STEP 4: Check Design (muted/monochromatic, less prominent than CTA)
-- This step requires visual analysis of the page content
-- Trust badges should use muted colors or monochromatic design
-- Badges should have lower visual weight than the main CTA button
-- If badges are too bright, colorful, or distracting → FAIL
-- If badges compete with CTA for attention → FAIL
-- If badges are subtle and don't distract from CTA → PASS this step
+STEP 4: Check Design(muted / monochromatic, less prominent than CTA)
+              - This step requires visual analysis of the page content
+                - Trust badges should use muted colors or monochromatic design
+                  - Badges should have lower visual weight than the main CTA button
+                    - If badges are too bright, colorful, or distracting → FAIL
+                      - If badges compete with CTA for attention → FAIL
+                        - If badges are subtle and don't distract from CTA → PASS this step
 
 DETERMINE RESULT:
-- PASS only if ALL 4 steps pass:
-  1. CTA is found ✓
-  2. Trust badges are within 50px of CTA ✓
-  3. Both CTA and badges are visible without scrolling ✓
-  4. Badges are muted/monochromatic and less prominent than CTA ✓
-- FAIL if ANY step fails
+            - PASS only if ALL 4 steps pass:
+            1. CTA is found ✓
+            2. Trust badges are within 50px of CTA ✓
+            3. Both CTA and badges are visible without scrolling ✓
+            4. Badges are muted / monochromatic and less prominent than CTA ✓
+            - FAIL if ANY step fails
 
-EXAMPLES:
+            EXAMPLES:
 
-Example 1 - PASS (All requirements met):
+Example 1 - PASS(All requirements met):
 TRUST BADGES CHECK shows:
-- CTA Found: YES
-- CTA Text: "Add to Cart"
-- CTA Visible Without Scrolling: YES
-- Trust Badges Within 50px: YES
-- Trust Badges Count: 3
-- Trust Badges Visible Without Scrolling: YES
-- Trust Badges List: "SSL Secure, Visa, PayPal"
-Output: {"passed": true, "reason": "Trust signals (SSL Secure, Visa, PayPal) are positioned within 50px of the 'Add to Cart' button, visible without scrolling, and use muted design that doesn't distract from the CTA."}
+            - CTA Found: YES
+              - CTA Text: "Add to Cart"
+                - CTA Visible Without Scrolling: YES
+                  - Trust Badges Within 50px: YES
+                    - Trust Badges Count: 3
+                      - Trust Badges Visible Without Scrolling: YES
+                        - Trust Badges List: "SSL Secure, Visa, PayPal"
+            Output: { "passed": true, "reason": "Trust signals (SSL Secure, Visa, PayPal) are positioned within 50px of the 'Add to Cart' button, visible without scrolling, and use muted design that doesn't distract from the CTA." }
 
-Example 2 - FAIL (No badges within 50px):
+Example 2 - FAIL(No badges within 50px):
 TRUST BADGES CHECK shows:
-- CTA Found: YES
-- CTA Text: "Add to Cart"
-- CTA Visible Without Scrolling: YES
-- Trust Badges Within 50px: NO
-- Trust Badges Count: 0
-Output: {"passed": false, "reason": "No trust signals (SSL, payment logos, security badges) are positioned within 50px of the 'Add to Cart' button. Trust badges must be within 50px of the CTA to reassure users and reduce hesitation."}
+            - CTA Found: YES
+              - CTA Text: "Add to Cart"
+                - CTA Visible Without Scrolling: YES
+                  - Trust Badges Within 50px: NO
+                    - Trust Badges Count: 0
+            Output: { "passed": false, "reason": "No trust signals (SSL, payment logos, security badges) are positioned within 50px of the 'Add to Cart' button. Trust badges must be within 50px of the CTA to reassure users and reduce hesitation." }
 
-Example 3 - FAIL (Badges require scrolling):
+Example 3 - FAIL(Badges require scrolling):
 TRUST BADGES CHECK shows:
-- CTA Found: YES
-- CTA Visible Without Scrolling: YES
-- Trust Badges Within 50px: YES
-- Trust Badges Visible Without Scrolling: NO
-Output: {"passed": false, "reason": "Trust badges are within 50px of the CTA but are not visible without scrolling. Both the CTA and trust badges must be visible without scrolling to meet the requirement."}
+            - CTA Found: YES
+              - CTA Visible Without Scrolling: YES
+                - Trust Badges Within 50px: YES
+                  - Trust Badges Visible Without Scrolling: NO
+            Output: { "passed": false, "reason": "Trust badges are within 50px of the CTA but are not visible without scrolling. Both the CTA and trust badges must be visible without scrolling to meet the requirement." }
 
-Example 4 - FAIL (Badges too prominent/distracting):
+Example 4 - FAIL(Badges too prominent / distracting):
 TRUST BADGES CHECK shows:
-- CTA Found: YES
-- Trust Badges Within 50px: YES
-- Trust Badges Visible Without Scrolling: YES
-- (Visual analysis: Badges are bright, colorful, and compete with CTA for attention)
-Output: {"passed": false, "reason": "Trust badges are within 50px of the CTA and visible without scrolling, but they use bright, colorful designs that compete with the main CTA for attention. Badges should use muted or monochromatic designs with lower visual weight than the CTA."}
+            - CTA Found: YES
+              - Trust Badges Within 50px: YES
+                - Trust Badges Visible Without Scrolling: YES
+                  - (Visual analysis: Badges are bright, colorful, and compete with CTA for attention)
+                    Output: { "passed": false, "reason": "Trust badges are within 50px of the CTA and visible without scrolling, but they use bright, colorful designs that compete with the main CTA for attention. Badges should use muted or monochromatic designs with lower visual weight than the CTA." }
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check the "TRUST BADGES CHECK" section in KEY ELEMENTS
-2. Follow the step-by-step process above (Identify CTA → Check Proximity → Check Visibility → Check Design)
-3. Be SPECIFIC about which trust badges are found (SSL, Visa, PayPal, Money-back Guarantee, etc.)
-4. If FAILED: Specify which step failed (proximity, visibility, or design)
-5. If PASSED: Confirm all 4 steps passed
-6. Quote exact badge names from "Trust Badges List" if available
+            1. You MUST check the "TRUST BADGES CHECK" section in KEY ELEMENTS
+            2. Follow the step - by - step process above(Identify CTA → Check Proximity → Check Visibility → Check Design)
+            3. Be SPECIFIC about which trust badges are found(SSL, Visa, PayPal, Money - back Guarantee, etc.)
+            4. If FAILED: Specify which step failed(proximity, visibility, or design)
+            5. If PASSED: Confirm all 4 steps passed
+            6. Quote exact badge names from "Trust Badges List" if available
 7. Mention the CTA text from "CTA Text" field
-8. For design check, analyze if badges are muted/monochromatic based on content description
-`
+            8. For design check, analyze if badges are muted / monochromatic based on content description
+              `
           } else if (isProductComparisonRule) {
             specialInstructions = `
-PRODUCT COMPARISON RULE - STEP-BY-STEP AUDIT:
+PRODUCT COMPARISON RULE - STEP - BY - STEP AUDIT:
 
-You are an expert E-commerce UX Auditor. Your task is to analyze if the product page includes a clear, scannable product comparison section.
+You are an expert E - commerce UX Auditor.Your task is to analyze if the product page includes a clear, scannable product comparison section.
 
-CRITICAL REQUIREMENTS (ALL 4 must be met to PASS):
+CRITICAL REQUIREMENTS(ALL 4 must be met to PASS):
 
-STEP 1 (Identify Alternatives - 2-3 Products):
-- Check if the page compares the primary product with 2-3 similar alternatives
-- Alternatives can be from the same store or competitors
-- Look for sections titled: "Compare Products", "Product Comparison", "Compare with Similar Products", "vs", "Alternatives", "Which One to Choose"
-- If NO comparison section found OR less than 2 alternatives → FAIL this step
-- If 2-3 alternatives are compared → PASS this step
+STEP 1(Identify Alternatives - 2 - 3 Products):
+            - Check if the page compares the primary product with 2 - 3 similar alternatives
+              - Alternatives can be from the same store or competitors
+                - Look for sections titled: "Compare Products", "Product Comparison", "Compare with Similar Products", "vs", "Alternatives", "Which One to Choose"
+                  - If NO comparison section found OR less than 2 alternatives → FAIL this step
+                    - If 2 - 3 alternatives are compared → PASS this step
 
-STEP 2 (Compare 4+ Attributes):
-- Check if at least 4 or more meaningful attributes are compared
-- Look for technical/functional attributes like: RAM, Battery, Performance, Price, Features, Warranty, Storage, Speed, Quality, Size, Weight, Material, etc.
+STEP 2(Compare 4 + Attributes):
+            - Check if at least 4 or more meaningful attributes are compared
+              - Look for technical / functional attributes like: RAM, Battery, Performance, Price, Features, Warranty, Storage, Speed, Quality, Size, Weight, Material, etc.
 - Generic attributes like "Name" or "Image" do NOT count as meaningful
-- If less than 4 attributes compared → FAIL this step
-- If 4+ meaningful attributes compared → PASS this step
+              - If less than 4 attributes compared → FAIL this step
+                - If 4 + meaningful attributes compared → PASS this step
 
-STEP 3 (Side-by-Side Table Format):
-- Check if comparison uses a side-by-side, easy-to-scan table format
-- Look for: Table layout, columns for each product, rows for attributes, grid format
-- Text-only comparisons or paragraph format do NOT count
-- If NOT in table/grid format → FAIL this step
-- If in table/grid format → PASS this step
+STEP 3(Side - by - Side Table Format):
+            - Check if comparison uses a side - by - side, easy - to - scan table format
+              - Look for: Table layout, columns for each product, rows for attributes, grid format
+                - Text - only comparisons or paragraph format do NOT count
+                  - If NOT in table / grid format → FAIL this step
+                    - If in table / grid format → PASS this step
 
-STEP 4 (Comparison Exists):
-- Check if a comparison section actually exists on the page
-- The comparison must be visible and accessible
-- If NO comparison section found → FAIL this step
-- If comparison section exists → PASS this step
+STEP 4(Comparison Exists):
+            - Check if a comparison section actually exists on the page
+              - The comparison must be visible and accessible
+                - If NO comparison section found → FAIL this step
+                  - If comparison section exists → PASS this step
 
 FINAL VERDICT:
-- PASS if ALL 4 steps pass (2-3 alternatives, 4+ attributes, table format, comparison exists)
-- FAIL if ANY step fails
+            - PASS if ALL 4 steps pass(2 - 3 alternatives, 4 + attributes, table format, comparison exists)
+              - FAIL if ANY step fails
 
 EXAMPLES FOR AI TRAINING:
 
-✅ Example 1 - PASS (Complete Comparison):
+✅ Example 1 - PASS(Complete Comparison):
 PRODUCT COMPARISON CHECK shows:
-- Comparison Section Found: YES
-- Section Title: "Compare Products"
-- Number of Alternatives: 3 (Product A, Product B, Product C)
-- Attributes Compared: 6 (Price, RAM, Battery, Performance, Warranty, Features)
-- Format: Side-by-side table with columns for each product
-- All Requirements Met: YES
+            - Comparison Section Found: YES
+              - Section Title: "Compare Products"
+                - Number of Alternatives: 3(Product A, Product B, Product C)
+                  - Attributes Compared: 6(Price, RAM, Battery, Performance, Warranty, Features)
+                    - Format: Side - by - side table with columns for each product
+                      - All Requirements Met: YES
 
-Output: {"passed": true, "reason": "Product comparison section found with 3 alternatives compared across 6 attributes (Price, RAM, Battery, Performance, Warranty, Features) in a side-by-side table format. The comparison is clear, scannable, and helps users make informed decisions."}
+            Output: { "passed": true, "reason": "Product comparison section found with 3 alternatives compared across 6 attributes (Price, RAM, Battery, Performance, Warranty, Features) in a side-by-side table format. The comparison is clear, scannable, and helps users make informed decisions." }
 
-❌ Example 2 - FAIL (Missing Alternatives):
+❌ Example 2 - FAIL(Missing Alternatives):
 PRODUCT COMPARISON CHECK shows:
-- Comparison Section Found: YES
-- Section Title: "Similar Products"
-- Number of Alternatives: 1 (only one alternative product)
-- Attributes Compared: 5 (Price, Features, Warranty, Quality, Reviews)
-- Format: Side-by-side table
-- All Requirements Met: NO (only 1 alternative, need 2-3)
+            - Comparison Section Found: YES
+              - Section Title: "Similar Products"
+                - Number of Alternatives: 1(only one alternative product)
+                  - Attributes Compared: 5(Price, Features, Warranty, Quality, Reviews)
+                    - Format: Side - by - side table
+                      - All Requirements Met: NO(only 1 alternative, need 2 - 3)
 
-Output: {"passed": false, "reason": "Product comparison section exists but only compares the primary product with 1 alternative. The rule requires 2-3 alternatives to be compared. While the comparison uses a table format, it fails because only 1 alternative is included instead of the required 2-3."}
+            Output: { "passed": false, "reason": "Product comparison section exists but only compares the primary product with 1 alternative. The rule requires 2-3 alternatives to be compared. While the comparison uses a table format, it fails because only 1 alternative is included instead of the required 2-3." }
 
-❌ Example 3 - FAIL (Insufficient Attributes):
+❌ Example 3 - FAIL(Insufficient Attributes):
 PRODUCT COMPARISON CHECK shows:
-- Comparison Section Found: YES
-- Section Title: "Compare Products"
-- Number of Alternatives: 3
-- Attributes Compared: 2 (Price, Name only)
-- Format: Table format
-- All Requirements Met: NO (only 2 attributes, need 4+)
+            - Comparison Section Found: YES
+              - Section Title: "Compare Products"
+                - Number of Alternatives: 3
+                  - Attributes Compared: 2(Price, Name only)
+                    - Format: Table format
+                      - All Requirements Met: NO(only 2 attributes, need 4 +)
 
-Output: {"passed": false, "reason": "Product comparison section exists with 3 alternatives in table format, but only 2 attributes (Price and Name) are compared. The rule requires at least 4 meaningful technical or functional attributes (such as RAM, Battery, Performance, Features, Warranty) to be compared. The current comparison is too limited to help users make informed decisions."}
+            Output: { "passed": false, "reason": "Product comparison section exists with 3 alternatives in table format, but only 2 attributes (Price and Name) are compared. The rule requires at least 4 meaningful technical or functional attributes (such as RAM, Battery, Performance, Features, Warranty) to be compared. The current comparison is too limited to help users make informed decisions." }
 
-❌ Example 4 - FAIL (No Table Format):
+❌ Example 4 - FAIL(No Table Format):
 PRODUCT COMPARISON CHECK shows:
-- Comparison Section Found: YES
-- Section Title: "Product Alternatives"
-- Number of Alternatives: 3
-- Attributes Compared: 5
-- Format: Paragraph/text-only format (not table)
-- All Requirements Met: NO (not in table format)
+            - Comparison Section Found: YES
+              - Section Title: "Product Alternatives"
+                - Number of Alternatives: 3
+                  - Attributes Compared: 5
+                    - Format: Paragraph / text - only format(not table)
+                      - All Requirements Met: NO(not in table format)
 
-Output: {"passed": false, "reason": "Product comparison section exists with 3 alternatives and 5 attributes compared, but the comparison is presented in paragraph/text format rather than a side-by-side table. The rule requires an easy-to-scan table format so differences can be understood at a glance. The current text-only format makes it difficult to quickly compare products."}
+            Output: { "passed": false, "reason": "Product comparison section exists with 3 alternatives and 5 attributes compared, but the comparison is presented in paragraph/text format rather than a side-by-side table. The rule requires an easy-to-scan table format so differences can be understood at a glance. The current text-only format makes it difficult to quickly compare products." }
 
-❌ Example 5 - FAIL (No Comparison Section):
+❌ Example 5 - FAIL(No Comparison Section):
 PRODUCT COMPARISON CHECK shows:
-- Comparison Section Found: NO
-- No comparison section visible on the page
-- All Requirements Met: NO (no comparison section found)
+            - Comparison Section Found: NO
+              - No comparison section visible on the page
+                - All Requirements Met: NO(no comparison section found)
 
-Output: {"passed": false, "reason": "No product comparison section found on the page. The rule requires a clear, scannable product comparison section that compares the primary product with 2-3 similar alternatives across at least 4 meaningful attributes in a side-by-side table format."}
+            Output: { "passed": false, "reason": "No product comparison section found on the page. The rule requires a clear, scannable product comparison section that compares the primary product with 2-3 similar alternatives across at least 4 meaningful attributes in a side-by-side table format." }
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check ALL 4 steps: Alternatives (2-3) → Attributes (4+) → Table Format → Comparison Exists
-2. If ANY step fails → FAIL the entire rule
-3. Be SPECIFIC about which step failed and why
-4. Mention exact section title/location if comparison exists
-5. Count meaningful attributes only (technical/functional, not generic like "Name")
-6. Table format means side-by-side columns, not paragraph text
-7. If PASSED: Confirm all 4 requirements are met with specific details (2-3 alternatives, 4+ attributes, table format)
-8. If FAILED: Specify exactly which requirement(s) are missing
-9. Do NOT mention currency symbols, prices, or amounts unless necessary for clarity
+            1. You MUST check ALL 4 steps: Alternatives(2 - 3) → Attributes(4 +) → Table Format → Comparison Exists
+            2. If ANY step fails → FAIL the entire rule
+            3. Be SPECIFIC about which step failed and why
+            4. Mention exact section title / location if comparison exists
+            5. Count meaningful attributes only(technical / functional, not generic like "Name")
+            6. Table format means side - by - side columns, not paragraph text
+            7. If PASSED: Confirm all 4 requirements are met with specific details(2 - 3 alternatives, 4 + attributes, table format)
+            8. If FAILED: Specify exactly which requirement(s) are missing
+            9. Do NOT mention currency symbols, prices, or amounts unless necessary for clarity
 10. Focus on checking if comparison exists and meets the format requirements, NOT on winner highlighting
-          `
+              `
           } else if (isCTAProminenceRule) {
             specialInstructions = `
-CTA PROMINENCE RULE - STEP-BY-STEP AUDIT:
+CTA PROMINENCE RULE - STEP - BY - STEP AUDIT:
 
-Task: Audit the "CTA Prominence" of this product page.
+            Task: Audit the "CTA Prominence" of this product page.
 
-You are an expert E-commerce UX Auditor. Follow these steps strictly:
+You are an expert E - commerce UX Auditor.Follow these steps strictly:
 
-STEP 1 (Identify - Find Primary CTA):
-- Look for the primary "Add to Cart" or "Buy Now" button
-- Check "CTA CONTEXT" section in KEY ELEMENTS for CTA information
-- Identify the main call-to-action button (not secondary buttons like "Wishlist" or "Compare")
+STEP 1(Identify - Find Primary CTA):
+            - Look for the primary "Add to Cart" or "Buy Now" button
+              - Check "CTA CONTEXT" section in KEY ELEMENTS for CTA information
+                - Identify the main call - to - action button(not secondary buttons like "Wishlist" or "Compare")
 
-STEP 2 (Check Position - Above the Fold):
-- Verify if the button is "Above the Fold" (visible without scrolling)
-- Check if button is immediately visible when page loads
-- If button requires scrolling to see → FAIL (must be above the fold)
-- If button is visible at the top of the page without scrolling → PASS this step
+STEP 2(Check Position - Above the Fold):
+            - Verify if the button is "Above the Fold"(visible without scrolling)
+              - Check if button is immediately visible when page loads
+                - If button requires scrolling to see → FAIL(must be above the fold)
+                  - If button is visible at the top of the page without scrolling → PASS this step
 
-STEP 3 (Analyze Contrast - Color Stands Out):
-- Check if the button color stands out clearly from the page background
-- Good examples: Solid electric blue button on white background, bright green on white, high-contrast colors
-- Bad examples: Ghost button (transparent with thin border), light gray on white, low-contrast colors
-- Button should have high visual contrast against background
-- If button blends into background → FAIL
-- If button has clear, high-contrast color → PASS this step
+STEP 3(Analyze Contrast - Color Stands Out):
+            - Check if the button color stands out clearly from the page background
+              - Good examples: Solid electric blue button on white background, bright green on white, high - contrast colors
+                - Bad examples: Ghost button(transparent with thin border), light gray on white, low - contrast colors
+                  - Button should have high visual contrast against background
+                    - If button blends into background → FAIL
+                      - If button has clear, high - contrast color → PASS this step
 
-STEP 4 (Check Size - Largest Clickable Element):
-- Verify if the button is the largest, most clickable element in the product section
-- Compare button size with other buttons (Wishlist, Compare, etc.)
-- Button should be larger than secondary buttons
-- Button should be easily clickable (not too small)
-- If button is smaller than other elements or too small → FAIL
-- If button is the largest clickable element → PASS this step
+STEP 4(Check Size - Largest Clickable Element):
+            - Verify if the button is the largest, most clickable element in the product section
+              - Compare button size with other buttons(Wishlist, Compare, etc.)
+                - Button should be larger than secondary buttons
+                  - Button should be easily clickable(not too small)
+                    - If button is smaller than other elements or too small → FAIL
+                      - If button is the largest clickable element → PASS this step
 
-STEP 5 (Final Verdict):
-- PASS if ALL 4 steps pass:
-  1. Primary CTA identified ✓
-  2. Above the fold (visible without scrolling) ✓
-  3. High-contrast color (stands out from background) ✓
-  4. Largest clickable element (bigger than secondary buttons) ✓
-- FAIL if ANY step fails
+STEP 5(Final Verdict):
+            - PASS if ALL 4 steps pass:
+            1. Primary CTA identified ✓
+            2. Above the fold(visible without scrolling) ✓
+            3. High - contrast color(stands out from background) ✓
+            4. Largest clickable element(bigger than secondary buttons) ✓
+            - FAIL if ANY step fails
 
 EXAMPLES FOR AI TRAINING:
 
-✅ Example 1 - PASS (Good - Solid Electric Blue Button):
-Analysis:
-- STEP 1: Found primary "Add to Cart" button
-- STEP 2: Button is above the fold, visible immediately without scrolling
-- STEP 3: Button uses solid electric blue color on white background - high contrast, clearly stands out
-- STEP 4: Button is the largest clickable element in product section, bigger than "Wishlist" and "Compare" buttons
-- STEP 5: All requirements met
+✅ Example 1 - PASS(Good - Solid Electric Blue Button):
+            Analysis:
+            - STEP 1: Found primary "Add to Cart" button
+              - STEP 2: Button is above the fold, visible immediately without scrolling
+                - STEP 3: Button uses solid electric blue color on white background - high contrast, clearly stands out
+                  - STEP 4: Button is the largest clickable element in product section, bigger than "Wishlist" and "Compare" buttons
+                    - STEP 5: All requirements met
 
-Output: {"passed": true, "reason": "The 'Add to Cart' button is prominently displayed above the fold with a solid electric blue color on white background, providing high contrast. It is the largest clickable element in the product section and is immediately visible without scrolling, meeting all prominence requirements."}
+            Output: { "passed": true, "reason": "The 'Add to Cart' button is prominently displayed above the fold with a solid electric blue color on white background, providing high contrast. It is the largest clickable element in the product section and is immediately visible without scrolling, meeting all prominence requirements." }
 
-❌ Example 2 - FAIL (Bad - Ghost Button):
-Analysis:
-- STEP 1: Found primary "Add to Cart" button
-- STEP 2: Button is above the fold, visible without scrolling
-- STEP 3: Button is a ghost button (transparent with thin border) that blends into the white background - low contrast
-- STEP 4: Button size is reasonable but lacks visual prominence due to low contrast
-- STEP 5: Contrast requirement failed
+❌ Example 2 - FAIL(Bad - Ghost Button):
+            Analysis:
+            - STEP 1: Found primary "Add to Cart" button
+              - STEP 2: Button is above the fold, visible without scrolling
+                - STEP 3: Button is a ghost button(transparent with thin border) that blends into the white background - low contrast
+                  - STEP 4: Button size is reasonable but lacks visual prominence due to low contrast
+                    - STEP 5: Contrast requirement failed
 
-Output: {"passed": false, "reason": "The 'Add to Cart' button is above the fold but uses a ghost button design (transparent with thin border) that blends into the white background. The low contrast makes it less prominent than required. The button should use a solid, high-contrast color to stand out clearly."}
+            Output: { "passed": false, "reason": "The 'Add to Cart' button is above the fold but uses a ghost button design (transparent with thin border) that blends into the white background. The low contrast makes it less prominent than required. The button should use a solid, high-contrast color to stand out clearly." }
 
-❌ Example 3 - FAIL (Bad - Below the Fold):
-Analysis:
-- STEP 1: Found primary "Add to Cart" button
-- STEP 2: Button requires scrolling to be visible - located below the fold
-- STEP 3: Button has good contrast (green on white)
-- STEP 4: Button is large and prominent
-- STEP 5: Position requirement failed
+❌ Example 3 - FAIL(Bad - Below the Fold):
+            Analysis:
+            - STEP 1: Found primary "Add to Cart" button
+              - STEP 2: Button requires scrolling to be visible - located below the fold
+                - STEP 3: Button has good contrast(green on white)
+                  - STEP 4: Button is large and prominent
+                    - STEP 5: Position requirement failed
 
-Output: {"passed": false, "reason": "The 'Add to Cart' button requires scrolling to be visible and is located below the fold. While it has good contrast and size, it must be positioned above the fold (visible without scrolling) to meet the prominence requirement."}
+            Output: { "passed": false, "reason": "The 'Add to Cart' button requires scrolling to be visible and is located below the fold. While it has good contrast and size, it must be positioned above the fold (visible without scrolling) to meet the prominence requirement." }
 
-✅ Example 4 - PASS (Good - High Contrast, Large Size):
-Analysis:
-- STEP 1: Found primary "Buy Now" button
-- STEP 2: Button is above the fold, immediately visible
-- STEP 3: Button uses bright orange color on dark background - excellent contrast
-- STEP 4: Button is significantly larger than other buttons in the section
-- STEP 5: All requirements met
+✅ Example 4 - PASS(Good - High Contrast, Large Size):
+            Analysis:
+            - STEP 1: Found primary "Buy Now" button
+              - STEP 2: Button is above the fold, immediately visible
+                - STEP 3: Button uses bright orange color on dark background - excellent contrast
+                  - STEP 4: Button is significantly larger than other buttons in the section
+                    - STEP 5: All requirements met
 
-Output: {"passed": true, "reason": "The 'Buy Now' button is prominently displayed above the fold with a bright orange color on dark background, providing excellent contrast. It is the largest clickable element in the product section and is immediately visible, meeting all prominence requirements."}
+            Output: { "passed": true, "reason": "The 'Buy Now' button is prominently displayed above the fold with a bright orange color on dark background, providing excellent contrast. It is the largest clickable element in the product section and is immediately visible, meeting all prominence requirements." }
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check ALL 4 steps: Identify → Position → Contrast → Size
-2. Above the fold means visible WITHOUT scrolling
-3. High contrast means button color clearly stands out from background
-4. Largest element means bigger than secondary buttons in the same section
-5. Ghost buttons (transparent with borders) typically FAIL contrast check
-6. Solid, bright colors on contrasting backgrounds typically PASS
-7. If PASSED: Mention position (above fold), contrast (color description), and size
-8. If FAILED: Specify which step failed (position, contrast, or size) and why
-9. Do NOT mention currency symbols, prices, or amounts in the reason
-10. Focus on visual prominence: position, contrast, and size
-`
+            1. You MUST check ALL 4 steps: Identify → Position → Contrast → Size
+            2. Above the fold means visible WITHOUT scrolling
+            3. High contrast means button color clearly stands out from background
+            4. Largest element means bigger than secondary buttons in the same section
+            5. Ghost buttons(transparent with borders) typically FAIL contrast check
+            6. Solid, bright colors on contrasting backgrounds typically PASS
+            7. If PASSED: Mention position(above fold), contrast(color description), and size
+            8. If FAILED: Specify which step failed(position, contrast, or size) and why
+            9. Do NOT mention currency symbols, prices, or amounts in the reason
+            10. Focus on visual prominence: position, contrast, and size
+              `
           } else if (isFreeShippingThresholdRule) {
             specialInstructions = `
-FREE SHIPPING THRESHOLD RULE - STEP-BY-STEP AUDIT:
+FREE SHIPPING THRESHOLD RULE - STEP - BY - STEP AUDIT:
 
-Task: Audit the "Free Shipping Threshold" visibility on this product page.
+            Task: Audit the "Free Shipping Threshold" visibility on this product page.
 
-You are an expert E-commerce UX Auditor. Follow these steps strictly:
+You are an expert E - commerce UX Auditor.Follow these steps strictly:
 
-STEP 1 (Locate - Find CTA Button):
-- Identify the main "Add to Cart" button
-- Check "CTA CONTEXT" section in KEY ELEMENTS for CTA location
-- Note the button's position on the page
+STEP 1(Locate - Find CTA Button):
+            - Identify the main "Add to Cart" button
+              - Check "CTA CONTEXT" section in KEY ELEMENTS for CTA location
+                - Note the button's position on the page
 
-STEP 2 (Verify Proximity - Within 50-100 pixels):
-- Look at the area immediately surrounding the main "Add to Cart" button
-- Check if free shipping message is within 50-100 pixels of the button
-- Check if message is directly above or below the button
-- Check "CTA CONTEXT" section for shipping information near CTA
-- If shipping info is in header banner or footer (far from button) → FAIL
-- If shipping info is within 50-100px of button → PASS this step
+STEP 2(Verify Proximity - Within 50 - 100 pixels):
+            - Look at the area immediately surrounding the main "Add to Cart" button
+              - Check if free shipping message is within 50 - 100 pixels of the button
+                - Check if message is directly above or below the button
+                  - Check "CTA CONTEXT" section for shipping information near CTA
+                    - If shipping info is in header banner or footer(far from button) → FAIL
+                      - If shipping info is within 50 - 100px of button → PASS this step
 
-STEP 3 (Check Language - Threshold Language):
-- Verify if the message uses "Threshold Language"
-- Look for phrases like:
+STEP 3(Check Language - Threshold Language):
+            - Verify if the message uses "Threshold Language"
+              - Look for phrases like:
   * "Add $X more for Free Shipping"
-  * "Free shipping over $50"
-  * "You are $X away from FREE shipping"
-  * "Spend $X more to get free shipping"
-- Generic messages like "Free shipping available" or "Free shipping on all orders" do NOT count
-- Must include specific threshold amount or "add X more" language
-- If threshold language is present → PASS this step
-- If only generic shipping info → FAIL
+                  * "Free shipping over $50"
+                  * "You are $X away from FREE shipping"
+                  * "Spend $X more to get free shipping"
+                  - Generic messages like "Free shipping available" or "Free shipping on all orders" do NOT count
+                    - Must include specific threshold amount or "add X more" language
+                      - If threshold language is present → PASS this step
+                        - If only generic shipping info → FAIL
 
-STEP 4 (Visual Check - Clear and Readable):
-- Verify if the text is clear and easy to read
-- Check if text is not more distracting than the main CTA
-- Text should be visible but not compete with CTA for attention
-- Text should be readable (good font size, contrast)
-- If text is too small or hard to read → FAIL
-- If text is clear and readable without distracting from CTA → PASS this step
+STEP 4(Visual Check - Clear and Readable):
+            - Verify if the text is clear and easy to read
+              - Check if text is not more distracting than the main CTA
+                - Text should be visible but not compete with CTA for attention
+                  - Text should be readable(good font size, contrast)
+                    - If text is too small or hard to read → FAIL
+                      - If text is clear and readable without distracting from CTA → PASS this step
 
-STEP 5 (Final Verdict):
-- PASS if ALL 4 steps pass:
-  1. CTA button located ✓
-  2. Free shipping message within 50-100px of CTA ✓
-  3. Threshold language used (e.g., "Add $X more") ✓
-  4. Text is clear and readable without distracting from CTA ✓
-- FAIL if ANY step fails
+STEP 5(Final Verdict):
+            - PASS if ALL 4 steps pass:
+            1. CTA button located ✓
+            2. Free shipping message within 50 - 100px of CTA ✓
+            3. Threshold language used(e.g., "Add $X more") ✓
+            4. Text is clear and readable without distracting from CTA ✓
+            - FAIL if ANY step fails
 
 EXAMPLES FOR AI TRAINING:
 
-✅ Example 1 - PASS (Good - Threshold Language Near CTA):
-Analysis:
-- STEP 1: Found "Add to Cart" button in product section
-- STEP 2: Free shipping message "You are $12 away from FREE shipping" is placed directly above the Add to Cart button, within 50-100px
-- STEP 3: Message uses threshold language ("$12 away from FREE shipping") - specific amount mentioned
-- STEP 4: Text is clear, readable, and doesn't distract from the main CTA
-- STEP 5: All requirements met
+✅ Example 1 - PASS(Good - Threshold Language Near CTA):
+            Analysis:
+            - STEP 1: Found "Add to Cart" button in product section
+              - STEP 2: Free shipping message "You are $12 away from FREE shipping" is placed directly above the Add to Cart button, within 50 - 100px
+                - STEP 3: Message uses threshold language("$12 away from FREE shipping") - specific amount mentioned
+                  - STEP 4: Text is clear, readable, and doesn't distract from the main CTA
+                    - STEP 5: All requirements met
 
-Output: {"passed": true, "reason": "Free shipping threshold message 'You are $12 away from FREE shipping' is displayed directly above the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount and is clear and readable without distracting from the main CTA."}
+            Output: { "passed": true, "reason": "Free shipping threshold message 'You are $12 away from FREE shipping' is displayed directly above the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount and is clear and readable without distracting from the main CTA." }
 
-❌ Example 2 - FAIL (Bad - Only in Header Banner):
-Analysis:
-- STEP 1: Found "Add to Cart" button in product section
-- STEP 2: Free shipping information "Free shipping on orders over $50" is only mentioned in the header banner at the top of the page, far from the CTA button
-- STEP 3: Message uses threshold language but location is wrong
-- STEP 4: Text is readable but not near CTA
-- STEP 5: Proximity requirement failed
+❌ Example 2 - FAIL(Bad - Only in Header Banner):
+            Analysis:
+            - STEP 1: Found "Add to Cart" button in product section
+              - STEP 2: Free shipping information "Free shipping on orders over $50" is only mentioned in the header banner at the top of the page, far from the CTA button
+                - STEP 3: Message uses threshold language but location is wrong
+                  - STEP 4: Text is readable but not near CTA
+                    - STEP 5: Proximity requirement failed
 
-Output: {"passed": false, "reason": "Free shipping information 'Free shipping on orders over $50' is only mentioned in the header banner at the top of the page, far from the 'Add to Cart' button. The message must be located within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and increase Average Order Value."}
+            Output: { "passed": false, "reason": "Free shipping information 'Free shipping on orders over $50' is only mentioned in the header banner at the top of the page, far from the 'Add to Cart' button. The message must be located within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and increase Average Order Value." }
 
-❌ Example 3 - FAIL (Bad - Generic Language):
-Analysis:
-- STEP 1: Found "Add to Cart" button
-- STEP 2: Shipping message "Free shipping available" is near the button, within 50-100px
-- STEP 3: Message does NOT use threshold language - it's generic ("Free shipping available" instead of "Add $X more for Free Shipping")
-- STEP 4: Text is readable
-- STEP 5: Language requirement failed
+❌ Example 3 - FAIL(Bad - Generic Language):
+            Analysis:
+            - STEP 1: Found "Add to Cart" button
+              - STEP 2: Shipping message "Free shipping available" is near the button, within 50 - 100px
+                - STEP 3: Message does NOT use threshold language - it's generic ("Free shipping available" instead of "Add $X more for Free Shipping")
+                  - STEP 4: Text is readable
+                    - STEP 5: Language requirement failed
 
-Output: {"passed": false, "reason": "Shipping message 'Free shipping available' is located near the 'Add to Cart' button but does not use threshold language. The message should use persuasive language like 'Add $X more for Free Shipping' or 'You are $X away from FREE shipping' with a specific amount to encourage higher order values."}
+            Output: { "passed": false, "reason": "Shipping message 'Free shipping available' is located near the 'Add to Cart' button but does not use threshold language. The message should use persuasive language like 'Add $X more for Free Shipping' or 'You are $X away from FREE shipping' with a specific amount to encourage higher order values." }
 
-✅ Example 4 - PASS (Good - Below CTA with Threshold):
-Analysis:
-- STEP 1: Found "Add to Cart" button
-- STEP 2: Free shipping message "Spend $25 more to get free shipping" is placed directly below the Add to Cart button, within 50-100px
-- STEP 3: Message uses threshold language ("Spend $25 more") with specific amount
-- STEP 4: Text is clear, readable, and appropriately sized
-- STEP 5: All requirements met
+✅ Example 4 - PASS(Good - Below CTA with Threshold):
+            Analysis:
+            - STEP 1: Found "Add to Cart" button
+              - STEP 2: Free shipping message "Spend $25 more to get free shipping" is placed directly below the Add to Cart button, within 50 - 100px
+                - STEP 3: Message uses threshold language("Spend $25 more") with specific amount
+                  - STEP 4: Text is clear, readable, and appropriately sized
+                    - STEP 5: All requirements met
 
-Output: {"passed": true, "reason": "Free shipping threshold message 'Spend $25 more to get free shipping' is displayed directly below the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount ($25) and is clear and readable, effectively encouraging higher order values."}
+            Output: { "passed": true, "reason": "Free shipping threshold message 'Spend $25 more to get free shipping' is displayed directly below the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount ($25) and is clear and readable, effectively encouraging higher order values." }
 
-❌ Example 4 - FAIL (Bad - Too Far from CTA):
-Analysis:
-- STEP 1: Found "Add to Cart" button in product section
-- STEP 2: Free shipping message "Free shipping over $50" is in the page footer, more than 100px away from the CTA button
-- STEP 3: Message uses threshold language
-- STEP 4: Text is readable but location is wrong
-- STEP 5: Proximity requirement failed
+❌ Example 4 - FAIL(Bad - Too Far from CTA):
+            Analysis:
+            - STEP 1: Found "Add to Cart" button in product section
+              - STEP 2: Free shipping message "Free shipping over $50" is in the page footer, more than 100px away from the CTA button
+                - STEP 3: Message uses threshold language
+                  - STEP 4: Text is readable but location is wrong
+                    - STEP 5: Proximity requirement failed
 
-Output: {"passed": false, "reason": "Free shipping message 'Free shipping over $50' is located in the page footer, more than 100px away from the 'Add to Cart' button. The message must be within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and effectively increase Average Order Value."}
+            Output: { "passed": false, "reason": "Free shipping message 'Free shipping over $50' is located in the page footer, more than 100px away from the 'Add to Cart' button. The message must be within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and effectively increase Average Order Value." }
 
 CRITICAL INSTRUCTIONS:
-1. You MUST check ALL 4 steps: Locate CTA → Verify Proximity → Check Language → Visual Check
-2. Proximity means within 50-100 pixels, directly above or below the CTA button
-3. Threshold language means specific phrases like "Add $X more" or "Free shipping over $X"
-4. Generic messages like "Free shipping available" do NOT count as threshold language
-5. Message must be in immediate eye-path of CTA, not in header banners or footers
-6. If PASSED: Mention proximity (within 50-100px), threshold language used, and location
-7. If FAILED: Specify which step failed (proximity, language, or visibility) and suggest exact text to use
-8. Do NOT mention currency symbols in the reason unless necessary for clarity
+            1. You MUST check ALL 4 steps: Locate CTA → Verify Proximity → Check Language → Visual Check
+            2. Proximity means within 50 - 100 pixels, directly above or below the CTA button
+            3. Threshold language means specific phrases like "Add $X more" or "Free shipping over $X"
+            4. Generic messages like "Free shipping available" do NOT count as threshold language
+            5. Message must be in immediate eye - path of CTA, not in header banners or footers
+            6. If PASSED: Mention proximity(within 50 - 100px), threshold language used, and location
+            7. If FAILED: Specify which step failed(proximity, language, or visibility) and suggest exact text to use
+            8. Do NOT mention currency symbols in the reason unless necessary for clarity
 9. Focus on proximity, language, and visibility requirements
-10. Suggest specific threshold language if missing (e.g., "Add $X more for Free Shipping")
-`
+            10. Suggest specific threshold language if missing(e.g., "Add $X more for Free Shipping")
+              `
           }
 
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
-          const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Reviews with images" or "Customer photos"\n- Image galleries in review sections\n- Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections (like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS (always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE.You MUST look at this image carefully.\n\nLook specifically for: \n - Sections titled "Reviews with images" or "Customer photos"\n - Image galleries in review sections\n - Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections(like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS(always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below: \n\n` : ''
 
-          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE. You MUST look at this image carefully.\n\nLook specifically for:\n- Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n- Video players with play buttons (▶️) in review sections\n- Any videos displayed in review sections\n\nCRITICAL: You MUST ACTUALLY SEE videos with play buttons (▶️) in the screenshot.\n- If you see videos with play buttons (▶️) in review sections → PASS\n- If you DO NOT see any videos or play buttons (▶️) in the screenshot → FAIL\n- Do NOT assume videos exist - you must visually confirm them in the screenshot\n\nReview section videos with play buttons (▶️) = VIDEO TESTIMONIALS (always pass).\nNo videos or play buttons (▶️) visible = FAIL (do not pass).\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE.You MUST look at this image carefully.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos displayed in review sections\n\nCRITICAL: You MUST ACTUALLY SEE videos with play buttons(▶️) in the screenshot.\n - If you see videos with play buttons(▶️) in review sections → PASS\n - If you DO NOT see any videos or play buttons(▶️) in the screenshot → FAIL\n - Do NOT assume videos exist - you must visually confirm them in the screenshot\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible = FAIL(do not pass).\n\nNow analyze the screenshot image provided below: \n\n` : ''
 
-          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}URL: ${validUrl}\nContent: ${contentForAI}\n\n=== RULE TO CHECK (ONLY THIS RULE) ===\nRule ID: ${rule.id}\nRule Title: ${rule.title}\nRule Description: ${rule.description}\n${specialInstructions}\n\nCRITICAL: You are analyzing ONLY the rule above (Rule ID: ${rule.id}, Title: "${rule.title}"). Your response must be SPECIFIC to this rule only. Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS:\n- Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n- Be ACTIONABLE: User should know exactly what to fix\n- Do NOT mention currency symbols, prices, or amounts (like Rs. 3,166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n- Your reason MUST be relevant ONLY to the rule above (${rule.title})\n\nIf PASSED: List specific elements found that meet THIS rule (${rule.title}) with their EXACT locations and section names (e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\nRequired JSON format (copy exactly, replace values):\n{"passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nOR\n\n{"passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only"}\n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}" (Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\n === RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly with image support
           // Build content array with text and optional image
@@ -2015,9 +2257,9 @@ CRITICAL INSTRUCTIONS:
                 },
               },
             ]
-            console.log(`Including screenshot for ${rule.id} rule (visual analysis required)`)
+            console.log(`Including screenshot for ${rule.id} rule(visual analysis required)`)
             if ((isVideoTestimonialRule || isCustomerPhotoRule) && reviewsSectionScreenshotDataUrl) {
-              console.log(`Using reviews section close-up for ${rule.id} (reviews visible clearly)`)
+              console.log(`Using reviews section close - up for ${rule.id}(reviews visible clearly)`)
             }
             if (isCustomerPhotoRule) {
               console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
@@ -2074,7 +2316,7 @@ CRITICAL INSTRUCTIONS:
           let jsonText = responseText.trim()
 
           // Method 1: Remove markdown code blocks (common in Gemini)
-          jsonText = jsonText.replace(/```json\n?/gi, '').replace(/```\n?/g, '').replace(/```jsonl\n?/gi, '')
+          jsonText = jsonText.replace(/```json\n ? /gi, '').replace(/```\n?/g, '').replace(/```jsonl\n ?/gi, '')
 
           // Method 2: Remove any text before first {
           const firstBrace = jsonText.indexOf('{')
@@ -2341,13 +2583,13 @@ CRITICAL INSTRUCTIONS:
             isRelevant = false
           } else if (isProductComparisonRule) {
             // Product comparison rule must mention comparison/alternatives/attributes
-            const hasComparisonMention = reasonLower.includes('comparison') || 
-                                        reasonLower.includes('compare') || 
-                                        reasonLower.includes('alternative') ||
-                                        reasonLower.includes('attribute') ||
-                                        reasonLower.includes('table') ||
-                                        reasonLower.includes('versus') ||
-                                        reasonLower.includes('vs')
+            const hasComparisonMention = reasonLower.includes('comparison') ||
+              reasonLower.includes('compare') ||
+              reasonLower.includes('alternative') ||
+              reasonLower.includes('attribute') ||
+              reasonLower.includes('table') ||
+              reasonLower.includes('versus') ||
+              reasonLower.includes('vs')
             if (!hasComparisonMention) {
               console.warn(`Warning: Product comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
@@ -2356,7 +2598,7 @@ CRITICAL INSTRUCTIONS:
             const mentionsAlternatives = reasonLower.includes('alternative') || reasonLower.includes('product') && (reasonLower.includes('2') || reasonLower.includes('3'))
             const mentionsAttributes = reasonLower.includes('attribute') || reasonLower.includes('4') || reasonLower.includes('feature') || reasonLower.includes('ram') || reasonLower.includes('battery')
             const mentionsTable = reasonLower.includes('table') || reasonLower.includes('format') || reasonLower.includes('side-by-side')
-            
+
             // If passed but missing key requirements, it might be wrong
             if (analysis.passed && (!mentionsAlternatives || !mentionsAttributes || !mentionsTable)) {
               console.warn(`Warning: Product comparison rule passed but missing key requirements. Alternatives: ${mentionsAlternatives}, Attributes: ${mentionsAttributes}, Table: ${mentionsTable}`)
@@ -2472,7 +2714,8 @@ CRITICAL INSTRUCTIONS:
                   result: result,
                 }),
               }).catch(err => console.error('Failed to save training data:', err))
-            } else {
+            }
+            else {
               console.warn(`Skipping training data save - response may not be relevant to rule: ${rule.title}`)
             }
           } catch (trainingError) {
@@ -2524,7 +2767,18 @@ CRITICAL INSTRUCTIONS:
       }
     }
 
-    return NextResponse.json({ results, screenshot: screenshotDataUrl })
+    // Always return screenshot (even if null) so frontend can handle it
+    // Log screenshot status for debugging Vercel issues
+    if (screenshotDataUrl) {
+      console.log(`Returning screenshot (length: ${screenshotDataUrl.length} chars)`)
+    } else {
+      console.warn('No screenshot available to return - this may cause UI issues on Vercel')
+    }
+
+    return NextResponse.json({
+      results,
+      screenshot: screenshotDataUrl || null // Explicitly return null if no screenshot
+    })
   } catch (error) {
     console.error('Scan error:', error)
     return NextResponse.json(

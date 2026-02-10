@@ -1,6 +1,6 @@
 'use client'
 
-import { useState,useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Cog, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -121,14 +121,14 @@ export default function Home() {
     // Map batch progress to analysis steps
     const totalBatches = progress.total
     const currentBatch = progress.current
-    
+
     // Calculate which step should be active based on batch progress
     // Distribute steps evenly across batches
     const targetStep = Math.min(
       Math.floor((currentBatch / totalBatches) * analysisSteps.length),
       analysisSteps.length - 1
     )
-    
+
     setMounted(targetStep)
   }, [progress, showAnalyze])
 
@@ -152,30 +152,30 @@ export default function Home() {
     const BATCH_SIZE = 5
     const batches: BatchData[] = []
     const timestamp = Date.now()
-    
+
     const totalRules = rulesToScan.length
     const remainder = totalRules % BATCH_SIZE
     // Calculate total batches: first batch gets remainder, rest get BATCH_SIZE
     const totalBatches = remainder > 0
       ? 1 + Math.floor((totalRules - (BATCH_SIZE + remainder)) / BATCH_SIZE)
       : Math.floor(totalRules / BATCH_SIZE)
-    
+
     let ruleIndex = 0
-    
+
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
       // First batch gets remainder if exists, otherwise BATCH_SIZE
       let currentBatchSize = BATCH_SIZE
       if (batchIndex === 0 && remainder > 0) {
         currentBatchSize = BATCH_SIZE + remainder
       }
-      
+
       // Stop if no more rules left
       if (ruleIndex >= totalRules) {
         break
       }
-      
+
       const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
-      
+
       batches.push({
         batchId: `batch-${timestamp}-${batchIndex}`,
         url: urlToScan,
@@ -184,27 +184,27 @@ export default function Home() {
         totalBatches: totalBatches,
         timestamp: timestamp,
       })
-      
+
       ruleIndex += currentBatchSize
     }
-    
+
     localStorage.setItem('scanBatches', JSON.stringify(batches))
     localStorage.setItem('scanResults', JSON.stringify([]))
-    
+
     return batches
   }
 
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
-    
+
     setProgress({ current: 0, total: batches.length })
-    
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
-      
+
       try {
         setProgress({ current: i + 1, total: batches.length })
-        
+
         const response = await fetch('/api/scan', {
           method: 'POST',
           headers: {
@@ -223,16 +223,16 @@ export default function Home() {
         }
 
         const data = await response.json()
-        
+
         const ScanResultsSchema = z.array(z.object({
           ruleId: z.string(),
           ruleTitle: z.string(),
           passed: z.boolean(),
           reason: z.string(),
         }))
-        
+
         const batchResults = ScanResultsSchema.parse(data.results)
-        
+
         // Remove duplicates before adding (check by ruleId)
         const existingRuleIds = new Set(allResults.map(r => r.ruleId))
         const newResults = batchResults.filter(result => {
@@ -243,9 +243,9 @@ export default function Home() {
           existingRuleIds.add(result.ruleId)
           return true
         })
-        
+
         allResults.push(...newResults)
-        
+
         // Store screenshot from every batch to show what AI is seeing
         // Store in both state and sessionStorage for results page
         if (data.screenshot) {
@@ -260,18 +260,23 @@ export default function Home() {
           }
         }
 
-        
+
         const remainingBatches = batches.slice(i + 1)
         if (remainingBatches.length > 0) {
           localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
         } else {
           localStorage.removeItem('scanBatches')
         }
-        
+
         localStorage.setItem('scanResults', JSON.stringify(allResults))
-        
+
       } catch (err) {
         console.error(`Error processing batch ${i + 1}:`, err)
+        // Add detailed error info for batch 4 specifically
+        if (i === 3) {
+          console.error('Batch 4 failed - adding longer delay before next retry')
+          toast.error(`Batch ${i + 1} failed. Retrying with extended delay...`)
+        }
         batch.rules.forEach(rule => {
           allResults.push({
             ruleId: rule.id,
@@ -281,15 +286,17 @@ export default function Home() {
           })
         })
       }
-      
+
       // Add delay between batches to avoid rate limits (except for last batch)
       if (i < batches.length - 1) {
-        // Wait 10 seconds between batches to give rate limit window time to reset
-        // Backend already handles 40s delays between rules, this is just an extra buffer
-        await new Promise(resolve => setTimeout(resolve, 10000))
+        // Wait longer between batches - 20 seconds for batch 3->4, 15 seconds for others
+        // This helps prevent rate limit issues, especially for batch 4
+        const delayMs = i === 2 ? 20000 : 15000
+        console.log(`Waiting ${delayMs / 1000}s before batch ${i + 2}...`)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
       }
     }
-    
+
     try {
       const finalResponse = await fetch('/api/scan/combine', {
         method: 'POST',
@@ -300,7 +307,7 @@ export default function Home() {
           results: allResults,
         }),
       })
-      
+
       if (finalResponse.ok) {
         const finalData = await finalResponse.json()
         const validatedResults = z.array(z.object({
@@ -309,9 +316,10 @@ export default function Home() {
           passed: z.boolean(),
           reason: z.string(),
         })).parse(finalData.results)
-        
+
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
-        localStorage.setItem('scanUrl', websiteUrl)
+        // Store normalized URL (with protocol) so iframe works on Vercel
+        localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         // Store screenshot URL for results page (if available)
         if (websiteScreenshot) {
           // Store as data URL in sessionStorage instead of localStorage (smaller size limit)
@@ -324,20 +332,20 @@ export default function Home() {
         localStorage.removeItem('scanBatches')
       } else {
         localStorage.setItem('scanResults', JSON.stringify(allResults))
-        localStorage.setItem('scanUrl', websiteUrl)
+        localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
-      localStorage.setItem('scanUrl', websiteUrl)
+      localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
     }
-    
+
     setProgress(null)
     // Complete all steps
     setMounted(analysisSteps.length - 1)
-    
+
     // Wait a bit then redirect
     setTimeout(() => {
       router.push('/scanner')
@@ -357,11 +365,11 @@ export default function Home() {
       // Wait a bit for state to update
       await new Promise(resolve => setTimeout(resolve, 100))
       rulesToUse = rules
-      
+
       // If still empty, try loading directly
       if (rulesToUse.length === 0) {
         try {
-          
+
           const response = await fetch('/data/predefined-rules.json')
           if (!response.ok) {
             throw new Error('Failed to load rules')
@@ -399,7 +407,7 @@ export default function Home() {
 
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
-      
+
       toast.success('Scan completed successfully!')
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -428,18 +436,18 @@ export default function Home() {
   }
 
   return (
-    <main className="flex items-center  justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
+    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
       <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
-        <>
-          {/* Logo */}
-          <div className="text-center my-[34px]">
-          <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
-          </div>
-          
-          {/* Back Button and Progress Bar */}
-          <div className="flex items-center gap-3">
+          <>
+            {/* Logo */}
+            <div className="text-center my-[34px]">
+              <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
+            </div>
+
+            {/* Back Button and Progress Bar */}
+            <div className="flex items-center gap-3">
 
               <button
                 onClick={handleBack}
@@ -447,15 +455,15 @@ export default function Home() {
               >
                 <span className="text-gray-700 text-xl mb-1">‹</span>
               </button>
-            {/* Progress Bar */}
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-[#757575] h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progressPercentage}%` }}
-              ></div>
+              {/* Progress Bar */}
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-[#757575] h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${progressPercentage}%` }}
+                ></div>
+              </div>
             </div>
-          </div>
-        </>
+          </>
         )}
         {/* Step Content */}
         <div className="my-[35px] mx-[16px]">
@@ -510,16 +518,16 @@ export default function Home() {
                     </h2>
                   </div>
                   <div className="mt-[33px]">
-                      <label className="block text-sm font-semibold text-black">
-                        Website URL:
-                      </label>
-                      <input
-                        type="url"
-                        value={websiteUrl}
-                        onChange={(e) => setWebsiteUrl(e.target.value)}
-                        placeholder="Enter the URL of your main product page"
-                        className="w-full mt-[13px] px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none"
-                      />
+                    <label className="block text-sm font-semibold text-black">
+                      Website URL:
+                    </label>
+                    <input
+                      type="url"
+                      value={websiteUrl}
+                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      placeholder="Enter the URL of your main product page"
+                      className="w-full mt-[13px] px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none"
+                    />
                     <div className="relative mt-[19px]">
                       <label className="block text-sm font-semibold text-black">
                         Email address:
@@ -542,11 +550,10 @@ export default function Home() {
                   <button
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${
-                      !isStepValid()
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        : 'bg-black text-white hover:bg-gray-800'
-                    }`}
+                    className={`w-full py-5 rounded-xl transition-all duration-300 font-bold text-base text-center cursor-pointer transform hover:scale-105 ${!isStepValid()
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-black text-white hover:bg-gray-800 shadow-lg hover:shadow-xl'
+                      }`}
                   >
                     Continue ›
                   </button>
@@ -556,11 +563,10 @@ export default function Home() {
                   <button
                     onClick={handleStartScan}
                     disabled={!websiteUrl || !email}
-                    className={`w-full py-[18px] rounded-xl transition font-semibold text-sm text-center cursor-pointer ${
-                      !websiteUrl || !email
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                        : 'bg-black text-white hover:bg-gray-800'
-                    }`}
+                    className={`w-full py-6 rounded-xl transition-all duration-300 font-bold text-lg text-center cursor-pointer transform hover:scale-105 ${!websiteUrl || !email
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-black to-gray-800 text-white hover:from-gray-800 hover:to-black shadow-2xl hover:shadow-black/50'
+                      }`}
                   >
                     Access my results ›
                   </button>
@@ -568,173 +574,84 @@ export default function Home() {
               )}
             </>
           ) : (
-           <>
-            <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center whitespace-nowrap">
-              <span>Analyzing your URL</span>
+            <>
+              <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center whitespace-nowrap">
+                <span>Analyzing your URL</span>
                 <span className="loader ml-2">
                   <span></span>
                   <span></span>
                   <span></span>
                 </span>
-          </h2>
+              </h2>
 
-      {/* Website Screenshot or Phone Placeholder */}
-      <div className="flex flex-col items-center">
-        {websiteScreenshot ? (
-          <>
-            {progress && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-4 text-sm text-gray-600 font-semibold"
-              >
-              </motion.div>
-            )}
-            {/* iPhone Frame with Screenshot */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="relative w-full max-w-[375px] mx-auto min-w-0"
-              style={{ aspectRatio: '375/812', maxHeight: 'min(90vh, 812px)' }}
-            >
-              {/* iPhone Frame */}
-              <div className="absolute inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-gray-800 rounded-[3rem] shadow-2xl border-[8px] border-gray-900">
-                {/* Notch */}
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-gray-900 rounded-b-[20px] z-10"></div>
-                
-                {/* Screen Area */}
-                <div className="absolute top-[8px] left-[8px] right-[8px] bottom-[8px] bg-black rounded-[2.5rem] overflow-hidden">
-                  {/* Status Bar */}
-                  <div className="absolute top-0 left-0 right-0 h-[44px] bg-black z-20 flex items-center justify-between px-6 pt-2">
-                    <div className="text-white text-xs font-semibold">9:41</div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-4 h-2 border border-white rounded-sm">
-                        <div className="w-3 h-1.5 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-5 h-3 border border-white rounded-sm">
-                        <div className="w-4 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                      <div className="w-6 h-3 border border-white rounded-sm">
-                        <div className="w-5 h-2 bg-white rounded-sm m-0.5"></div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Screenshot Content */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.5 }}
-                    className="absolute top-[44px] left-0 right-0 bottom-0 overflow-y-auto bg-white iphone-scrollbar"
-                    style={{ 
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(0, 0, 0, 0.2) transparent'
-                    }}
-                  >
-                    <img 
-                      src={websiteScreenshot} 
-                      alt={`Website being scanned - Batch ${currentBatchNumber} - Full page view`} 
-                      className="w-full h-auto object-contain" 
-                    />
-                  </motion.div>
-                  
-                  {/* Home Indicator */}
-                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full"></div>
-                </div>
-                
-                {/* Side Buttons (Volume, Power) */}
-                <div className="absolute left-0 top-[120px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute left-0 top-[170px] w-[3px] h-[32px] bg-gray-800 rounded-r-sm"></div>
-                <div className="absolute right-0 top-[140px] w-[3px] h-[60px] bg-gray-800 rounded-l-sm"></div>
-              </div>
-            </motion.div>
-          </>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5 }}
-          >
-           <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
-        </motion.div>
-        )}
-      </div>
-
-      {/* Steps */}
-      <div className="mt-[45px]">
-        <AnimatePresence mode="sync">
-          {analysisSteps
-            .map((title, index) => ({ title, index }))
-            .filter(({ index }) => {
-              const isCompleted = index < mounted
-              const shouldAnimateOut = isCompleted && mounted >= index + 2
-              return !shouldAnimateOut
-            })
-            .map(({ title, index }) => {
-              const isCompleted = index < mounted
-              const isActive = index === mounted
-
-              return (
+              {/* Scanning message */}
+              <div className="flex flex-col items-center mb-8">
                 <motion.div
-                  key={index}
-                  layout
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                  }}
-                  exit={{
-                    x: 200,          // 👉 right side slide
-                    opacity: 0,
-                    transition: {
-                      duration: 0.6,
-                      ease: 'easeInOut',
-                    },
-                  }}
-                  transition={{
-                    layout: { duration: 0.4, ease: 'easeOut' },
-                    opacity: { duration: 0.3 },
-                    y: { duration: 0.3 },
-                  }}
-                  className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border ${
-                    isCompleted
-                      ? 'border-green-500'
-                      : isActive
-                      ? 'border-black border-2'
-                      : 'border-gray-300'
-                  }`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="text-center"
                 >
-                  {isCompleted ? (
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                      className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0"
-                    >
-                      <Check className="w-5 h-5 text-white" />
-                    </motion.div>
-                  ) : (
-                    <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-black' : 'text-gray-400'}`} />
-                  )}
-
-                  <motion.span
-                    animate={{
-                      textDecoration: isCompleted ? 'line-through' : 'none',
-                    }}
-                    transition={{ duration: 0.3 }}
-                    className={`flex-1 ${
-                      isActive ? 'text-black font-semibold text-[14.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[14.8px] leading-[28.8px]'
-                    }`}
-                  >
-                    {title}
-                  </motion.span>
+                  <p className="text-gray-600 text-sm">
+                    Loading your website and checking all rules...
+                  </p>
                 </motion.div>
-              )
-            })}
-        </AnimatePresence>
-      </div>
-           </>
+              </div>
+
+              
+
+              {/* Steps */}
+              <div className="mt-[24px]">
+                <AnimatePresence mode="popLayout">
+                  {analysisSteps
+                    .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
+                    .filter(({ index }) => {
+                      const isCompleted = index < mounted
+                      const shouldAnimateOut = isCompleted && mounted >= index + 2
+                      return !shouldAnimateOut
+                    })
+                    .map(({ title, index, id }) => {
+                      const isCompleted = index < mounted
+                      const isActive = index === mounted
+
+                      return (
+                        <motion.div
+                          key={id}
+                          initial={{ opacity: 0, y: 30 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{
+                            x: 300,
+                            opacity: 0,
+                            transition: { duration: 0.5, ease: 'easeOut' },
+                          }}
+                          transition={{ duration: 0.4, ease: 'easeOut' }}
+                          className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border ${isCompleted
+                            ? 'border-green-500'
+                            : isActive
+                              ? 'border-black border-2'
+                              : 'border-gray-300'
+                            }`}
+                        >
+                          {isCompleted ? (
+                            <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                              <Check className="w-5 h-5 text-white" />
+                            </div>
+                          ) : (
+                            <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-black' : 'text-gray-400'}`} />
+                          )}
+
+                          <span
+                            className={`flex-1 ${isActive ? 'text-black font-semibold text-[12.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[12.8px] leading-[28.8px]'
+                              } ${isCompleted ? 'line-through' : ''}`}
+                          >
+                            {title}
+                          </span>
+                        </motion.div>
+                      )
+                    })}
+                </AnimatePresence>
+              </div>
+            </>
           )}
         </div>
 
@@ -754,7 +671,7 @@ export default function Home() {
                   <img src="/client_third.png" alt="user" className="w-[40px] h-[40px] object-cover" />
                 </div>
               </div>
-              
+
               {/* Right: Stars and Text */}
               <div className="flex flex-col">
                 <div className="flex items-center gap-1">

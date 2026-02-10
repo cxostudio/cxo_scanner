@@ -19,6 +19,8 @@ export default function ScannerPage() {
   const [mounted, setMounted] = useState(false)
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set())
   const [visibleCount, setVisibleCount] = useState(8)
+  const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
+  const [iframeError, setIframeError] = useState<boolean>(false)
   const pathname = usePathname();
 
   useEffect(() => {
@@ -83,25 +85,74 @@ export default function ScannerPage() {
         </div>
 
         {/* Title */}
-        <h2 className="text-[33px] leading-[48px]  font-bold text-black text-center mb-8">
+        <h2 className="text-[33px] leading-[48px] font-bold text-black text-center mb-4">
           Your results are in!
         </h2>
 
-        {/* iPhone Frame with Static Image */}
-        <div className="flex justify-center mb-6">
-          <img src="/IPhone.png" className="w-full max-w-[256px] h-auto object-contain" />
-        </div>
+        {/* Website iframe preview - shows live website */}
+        {url && !iframeError && (
+          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <p className="text-sm font-medium text-gray-700">Live Website Preview</p>
+            </div>
+            <iframe
+              src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
+              className="w-full"
+              style={{ height: '400px' }}
+              title="Live Website Preview"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              loading="lazy"
+              onError={() => {
+                console.log('Iframe blocked in scanner page, falling back to screenshot')
+                setIframeError(true)
+              }}
+            />
+          </div>
+        )}
+
+        {/* Fallback to screenshot when iframe is blocked */}
+        {(iframeError || (websiteScreenshot && !url)) && (
+          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <p className="text-sm font-medium text-gray-700">
+                {iframeError ? 'Website Preview (Screenshot)' : 'Website Screenshot'}
+              </p>
+            </div>
+            {websiteScreenshot ? (
+              <img
+                src={websiteScreenshot}
+                alt="Full-page screenshot of the scanned website"
+                className="w-full h-auto object-contain"
+                style={{ maxHeight: '400px' }}
+              />
+            ) : (
+              <div className="p-6 bg-gray-50">
+                <div className="text-center">
+                  <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                  <p className="text-sm text-gray-600">
+                    {iframeError ? 'Loading screenshot...' : 'No screenshot available'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {results && (
           <div className="mt-6">
-            <p className="relative text-[15px] leading-[20px] font-semibold text-gray-600 text-center mb-4">
+            <p className="relative text-[15px] leading-[20px] font-semibold text-gray-600 text-center mb-6">
               Scan results for:
-              <a href={url}
-                target="_blank" className="relative group ml-1 cursor-pointer text-blue-600">
-                {url.slice(0, 30)}...
-
-                <a href={url}
+              <span className="relative group ml-1">
+                <a
+                  href={url}
                   target="_blank"
+                  className="cursor-pointer text-blue-600"
+                  rel="noreferrer"
+                >
+                  {url.slice(0, 30)}...
+                </a>
+
+                <span
                   className="absolute left-1/2 top-full z-50 mt-3 w-[990px] max-w-[90vw] -translate-x-1/2 
         rounded-lg border border-gray-300
         bg-white p-4
@@ -115,8 +166,8 @@ export default function ScannerPage() {
                   <span className="block break-words">
                     {url}
                   </span>
-                </a>
-              </a>
+                </span>
+              </span>
             </p>
 
 
@@ -220,4 +271,3 @@ export default function ScannerPage() {
     </main>
   )
 }
-
