@@ -61,6 +61,7 @@ export default function Home() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
+  const [iframeError, setIframeError] = useState<boolean>(false)
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -249,6 +250,7 @@ export default function Home() {
         // Store screenshot from every batch to show what AI is seeing
         // Store in both state and sessionStorage for results page
         if (data.screenshot) {
+          console.log(`Screenshot received from batch ${i + 1}, length: ${data.screenshot.length}`)
           setWebsiteScreenshot(data.screenshot)
           setCurrentBatchNumber(i + 1)
           // Store in sessionStorage for results page (not localStorage due to size limits)
@@ -406,6 +408,7 @@ export default function Home() {
       setProgress(null)
       setWebsiteScreenshot(null) // Reset screenshot for new scan
       setCurrentBatchNumber(0) // Reset batch number
+      setIframeError(false) // Reset iframe error
       // Screenshot not stored in localStorage, no need to remove
 
       // Wait for the page/UI to fully render before starting batch requests
@@ -423,6 +426,7 @@ export default function Home() {
       // Fire-and-forget lightweight screenshot capture for UI preview.
       // Runs in parallel with rule scanning so it doesn't slow down results.
       try {
+        console.log('Triggering screenshot API for URL:', validUrl)
         fetch('/api/screenshot', {
           method: 'POST',
           headers: {
@@ -431,19 +435,28 @@ export default function Home() {
           body: JSON.stringify({ url: validUrl }),
         })
           .then(async (res) => {
-            if (!res.ok) return
+            console.log('Screenshot API response status:', res.status)
+            if (!res.ok) {
+              console.error('Screenshot API failed with status:', res.status)
+              return
+            }
             const data = await res.json()
+            console.log('Screenshot API response data:', data)
             if (data?.screenshot) {
+              console.log('Screenshot received, setting state')
               setWebsiteScreenshot(data.screenshot)
               try {
                 sessionStorage.setItem('lastScreenshot', data.screenshot)
+                console.log('Screenshot stored in sessionStorage')
               } catch (e) {
                 console.warn('Could not store screenshot from /api/screenshot in sessionStorage:', e)
               }
+            } else {
+              console.warn('No screenshot in API response')
             }
           })
           .catch((err) => {
-            console.warn('Screenshot API call failed (non-blocking):', err)
+            console.error('Screenshot API call failed (non-blocking):', err)
           })
       } catch (sErr) {
         console.warn('Screenshot API trigger failed (non-blocking):', sErr)
@@ -629,7 +642,70 @@ export default function Home() {
                 </span>
               </h2>
 
-              {/* Scanning message */}
+              {/* Website Preview during analysis */}
+              {websiteUrl && !iframeError && (
+                <div className="mb-8">
+                  <div className="text-center mb-3">
+                    <p className="text-sm text-gray-600 font-medium">Website Preview</p>
+                    {progress && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Analyzing batch {progress.current} of {progress.total}...
+                      </p>
+                    )}
+                  </div>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <iframe
+                      src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
+                      className="w-full"
+                      style={{ height: '400px' }}
+                      title="Website Preview"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                      loading="lazy"
+                      onError={() => {
+                        console.log('Iframe blocked, falling back to screenshot')
+                        setIframeError(true)
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback to screenshot when iframe is blocked */}
+              {(iframeError || !websiteUrl) && (
+                <div className="mb-8">
+                  <div className="text-center mb-3">
+                    <p className="text-sm text-gray-600 font-medium">
+                      {iframeError ? 'Website Preview (Screenshot)' : 'Website Analysis in Progress'}
+                    </p>
+                    {progress && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Analyzing batch {progress.current} of {progress.total}...
+                      </p>
+                    )}
+                  </div>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    {websiteScreenshot ? (
+                      <img
+                        src={websiteScreenshot}
+                        alt="Website screenshot being analyzed"
+                        className="w-full h-auto object-contain"
+                        style={{ maxHeight: '400px' }}
+                      />
+                    ) : (
+                      <div className="p-6 bg-gray-50">
+                        <div className="text-center">
+                          <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                          <p className="text-sm text-gray-600">
+                            {iframeError ? 'Loading screenshot...' : 'Analyzing website content...'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Scanning message
               <div className="flex flex-col items-center mb-8">
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -641,9 +717,9 @@ export default function Home() {
                     Loading your website and checking all rules...
                   </p>
                 </motion.div>
-              </div>
+              </div> */}
 
-              
+
 
               {/* Steps */}
               <div className="mt-[24px]">
