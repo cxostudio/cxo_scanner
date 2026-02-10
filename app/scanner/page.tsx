@@ -20,6 +20,7 @@ export default function ScannerPage() {
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set())
   const [visibleCount, setVisibleCount] = useState(8)
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
+  const [iframeError, setIframeError] = useState<boolean>(false)
   const pathname = usePathname();
 
   useEffect(() => {
@@ -98,14 +99,52 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Local/full screenshot preview (no iframe, only if screenshot exists) */}
-        {websiteScreenshot && (
+        {/* Website iframe preview - shows live website */}
+        {url && !iframeError && (
           <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <img
-              src={websiteScreenshot}
-              alt="Full-page screenshot of the scanned website"
-              className="w-full h-auto object-contain"
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <p className="text-sm font-medium text-gray-700">Live Website Preview</p>
+            </div>
+            <iframe
+              src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
+              className="w-full"
+              style={{ height: '400px' }}
+              title="Live Website Preview"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              loading="lazy"
+              onError={() => {
+                console.log('Iframe blocked in scanner page, falling back to screenshot')
+                setIframeError(true)
+              }}
             />
+          </div>
+        )}
+
+        {/* Fallback to screenshot when iframe is blocked */}
+        {(iframeError || (websiteScreenshot && !url)) && (
+          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <p className="text-sm font-medium text-gray-700">
+                {iframeError ? 'Website Preview (Screenshot)' : 'Website Screenshot'}
+              </p>
+            </div>
+            {websiteScreenshot ? (
+              <img
+                src={websiteScreenshot}
+                alt="Full-page screenshot of the scanned website"
+                className="w-full h-auto object-contain"
+                style={{ maxHeight: '400px' }}
+              />
+            ) : (
+              <div className="p-6 bg-gray-50">
+                <div className="text-center">
+                  <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                  <p className="text-sm text-gray-600">
+                    {iframeError ? 'Loading screenshot...' : 'No screenshot available'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
