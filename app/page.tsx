@@ -758,7 +758,7 @@ export default function Home() {
                               <Check className="w-5 h-5 text-white" />
                             </div>
                           ) : (
-                            <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-black' : 'text-gray-400'}`} />
+                            <Cog className={`w-5 h-5 shrink-0   ${isActive ? 'text-black animate-spin' : 'text-gray-400'}`} />
                           )}
 
                           <span
