@@ -98,7 +98,7 @@ export default function Home() {
     'Generating conversion recommendations',
     'Finalizing your audit report',
   ]
-
+// load site screenshot
   useEffect(() => {
     // Load rules on component mount
     loadRules()

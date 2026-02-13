@@ -48,13 +48,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { 
-      url, 
-      rules, 
-      captureScreenshot = true, 
-      preCapturedScreenshot, 
-      preCapturedText, 
-      preCapturedElements 
+    const {
+      url,
+      rules,
+      captureScreenshot: shouldCaptureScreenshot = true,
+      preCapturedScreenshot,
+      preCapturedText,
+      preCapturedElements
     } = validationResult.data
 
     // Normalize URL
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       await scrollPage(page, validUrl)
 
       // Capture screenshot
-      if (captureScreenshot) {
+      if (shouldCaptureScreenshot) {
         screenshotDataUrl = await captureScreenshot(page)
       }
 
