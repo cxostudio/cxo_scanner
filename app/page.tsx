@@ -698,6 +698,7 @@ export default function Home() {
                 </div>
               )}
 
+
               {/* Fallback to screenshot when iframe is blocked */}
               {(iframeError || !websiteUrl) && (
                 <div className="mb-8">
