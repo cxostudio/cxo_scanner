@@ -210,7 +210,7 @@ export default function ScannerPage() {
               </div>
 
               {/* Decorative shadow beneath with animation */}
-              <div
+              <motion.div
                 className="absolute -bottom-6 left-8 right-8 h-8 bg-black/20 blur-xl rounded-full"
                 animate={{
                   scale: [1, 1.1, 1],
