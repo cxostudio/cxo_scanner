@@ -660,8 +660,35 @@ export default function Home() {
                       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                       loading="lazy"
                       onError={() => {
-                        console.log('Iframe blocked, falling back to screenshot')
+                        console.log('Iframe blocked, triggering screenshot fallback immediately')
                         setIframeError(true)
+                        // Trigger screenshot API immediately for faster fallback
+                        if (websiteUrl && !websiteScreenshot) {
+                          const validUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
+                          fetch('/api/screenshot', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: validUrl }),
+                          })
+                            .then(async (res) => {
+                              if (res.ok) {
+                                const data = await res.json()
+                                if (data?.screenshot) {
+                                  setWebsiteScreenshot(data.screenshot)
+                                  try {
+                                    sessionStorage.setItem('lastScreenshot', data.screenshot)
+                                  } catch (e) {
+                                    console.error('Could not store screenshot in sessionStorage:', e)
+                                  }
+                                }
+                              }
+                            })
+                            .catch((err) => {
+                              console.error('Screenshot fallback failed:', err)
+                            })
+                        }
                       }}
                       onLoad={() => {
                         console.log('Iframe loaded successfully')
@@ -671,13 +698,12 @@ export default function Home() {
                 </div>
               )}
 
+
               {/* Fallback to screenshot when iframe is blocked */}
               {(iframeError || !websiteUrl) && (
                 <div className="mb-8">
                   <div className="text-center mb-3">
-                    <p className="text-sm text-gray-600 font-medium">
-                      {iframeError ? 'Website Preview (Screenshot)' : 'Website Analysis in Progress'}
-                    </p>
+                    <p className="text-sm text-gray-600 font-medium">Website Preview</p>
                     {progress && (
                       <p className="text-xs text-gray-500 mt-1">
                         Analyzing batch {progress.current} of {progress.total}...
@@ -705,22 +731,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-
-              {/* Scanning message
-              <div className="flex flex-col items-center mb-8">
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="text-center"
-                >
-                  <p className="text-gray-600 text-sm">
-                    Loading your website and checking all rules...
-                  </p>
-                </motion.div>
-              </div> */}
-
-
 
               {/* Steps */}
               <div className="mt-[24px]">
