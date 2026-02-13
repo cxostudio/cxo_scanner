@@ -117,6 +117,9 @@ export default function ScannerPage() {
                   console.log('Iframe blocked, falling back to screenshot')
                   setIframeError(true)
                 }}
+                onLoad={() => {
+                  console.log('Iframe loaded successfully')
+                }}
               />
             </div>
           </div>

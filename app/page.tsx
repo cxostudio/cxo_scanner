@@ -655,13 +655,16 @@ export default function Home() {
                     <iframe
                       src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
                       className="w-full"
-                      style={{ height: '400px' }}
+                      style={{ blockSize: '400px' }}
                       title="Website Preview"
                       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                       loading="lazy"
                       onError={() => {
                         console.log('Iframe blocked, falling back to screenshot')
                         setIframeError(true)
+                      }}
+                      onLoad={() => {
+                        console.log('Iframe loaded successfully')
                       }}
                     />
                   </div>
