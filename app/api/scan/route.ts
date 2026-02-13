@@ -187,15 +187,61 @@ export async function POST(request: NextRequest) {
 
       const page = await browser.newPage()
 
-      // Set viewport and user agent
+      // Set viewport
       await page.setViewport({ width: 1920, height: 1080 })
+
+      // Set extra headers to avoid detection
+      await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+      })
+
+      // Override navigator.webdriver to avoid detection
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        })
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        })
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en'],
+        })
+        // Remove headless from user agent
+        const ua = navigator.userAgent.replace(/headless/gi, '')
+        Object.defineProperty(navigator, 'userAgent', {
+          get: () => ua,
+        })
+      })
+
+      // Set user agent after page creation
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
       // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
-      await page.goto(validUrl, {
-        waitUntil: 'load', // Faster than networkidle0 - good enough for screenshot
+      const response = await page.goto(validUrl, {
+        waitUntil: 'networkidle2', // Better for avoiding detection
         timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
+
+      // Check if we got redirected to Google or error page
+      const currentUrl = page.url()
+      if (currentUrl.includes('google.com') || currentUrl.includes('captcha') || !response) {
+        console.warn('Redirected to Google/Captcha or no response, trying alternative...')
+        // Try again with different approach
+        await page.goto(validUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000,
+        })
+      }
 
       // Quick wait for initial render
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -227,18 +273,43 @@ export async function POST(request: NextRequest) {
         const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
         const viewportHeight = await page.evaluate(() => window.innerHeight)
         if (scrollHeight > viewportHeight) {
-          // Quick scroll - only 2 steps instead of full scroll
-          for (let i = 0; i <= 2; i++) {
-            await page.evaluate((step, height) => {
-              window.scrollTo(0, (step / 2) * height)
-            }, i, scrollHeight)
-            await new Promise(resolve => setTimeout(resolve, 300)) // Reduced wait
+          console.log(`Scrolling to trigger lazy loading. Page height: ${scrollHeight}`)
+          // More scroll steps for Amazon and lazy-loaded images
+          const steps = 5
+          for (let i = 0; i <= steps; i++) {
+            await page.evaluate((step, totalSteps, height) => {
+              window.scrollTo(0, (step / totalSteps) * height)
+            }, i, steps, scrollHeight)
+            await new Promise(resolve => setTimeout(resolve, 500)) // Longer wait for images to load
           }
+          // Scroll back to top
           await page.evaluate(() => window.scrollTo(0, 0))
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 1000)) // Wait for above-fold images
         }
       } catch (e) {
         console.warn('Scroll failed, proceeding with screenshot')
+      }
+
+      // Extra wait for Amazon lazy-loaded images
+      const isAmazon = validUrl.includes('amazon.')
+      if (isAmazon) {
+        console.log('Amazon detected, waiting extra for lazy-loaded images...')
+        await new Promise(resolve => setTimeout(resolve, 3000))
+
+        // Try to force load images by scrolling again
+        try {
+          await page.evaluate(() => {
+            // Force all lazy images to load
+            document.querySelectorAll('img[data-src], img[data-lazy], img[lazy]').forEach((img: any) => {
+              if (img.dataset.src) img.src = img.dataset.src
+              if (img.dataset.lazy) img.src = img.dataset.lazy
+              img.loading = 'eager'
+            })
+          })
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        } catch (e) {
+          console.warn('Failed to force load images')
+        }
       }
 
       console.log('Page loaded, ready for screenshot')
@@ -1338,124 +1409,108 @@ Scan the page (or screenshot) and decide: is this video part of a customer revie
             specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
-CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
+CUSTOMER PHOTOS RULE - STRICT VISUAL ANALYSIS OF SCREENSHOT:
 
-CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for customer photos.
+YOU MUST VISUALLY ANALYZE THE SCREENSHOT IMAGE to detect ACTUAL CUSTOMER PRODUCT PHOTOS. Profile avatars/initials do NOT count.
 
-STEP 1 (Visual Scan - Look at the Screenshot):
-- Examine the ENTIRE screenshot image from top to bottom
-- Look specifically for sections titled: "Reviews with images", "Customer photos", "Review images", "Customer reviews with photos", "Photos from reviews"
-- Look for images in: product gallery, description section, review section, rating section, or user-generated content areas
-- Scan for photos that show the product being USED by real customers
+WHAT ARE REAL CUSTOMER PHOTOS (MUST SEE IN IMAGE):
+1. PHOTOS OF PRODUCT BEING USED by customers:
+   - Customer holding/wearing/using the product
+   - Product in real-world setting (home, office, outdoor)
+   - Unprofessional angles/lighting (user-generated style)
+   
+2. LOCATION IN REVIEW SECTION:
+   - Inside "Reviews with images" or "Customer photos" gallery
+   - Photo thumbnails in review cards (not just text)
+   - Multiple photos showing product from different angles
+   
+3. VISUAL INDICATORS:
+   - Actual photo thumbnails (not profile initials like "A", "B")
+   - Images larger than 50x50 pixels (product photos, not avatars)
+   - Photos with "helpful", "like" buttons below them
 
-STEP 2 (Amazon/E-commerce Review Sections - CRITICAL):
-MOST IMPORTANT: On e-commerce sites (like Amazon, Flipkart, etc.), look for:
-- Sections titled "Reviews with images" or "Photos from reviews" - THESE ARE CUSTOMER PHOTOS
-- Image galleries within review sections - THESE ARE CUSTOMER PHOTOS
-- Any images displayed in review/rating sections - THESE ARE CUSTOMER PHOTOS
-- Customer photo carousels or galleries - THESE ARE CUSTOMER PHOTOS
-- If you see ANY images in a review section, rating section, or "Reviews with images" section, the rule MUST PASS
+WHAT DOES NOT COUNT (FAIL if only these exist):
+- Profile avatars with initials (A, B, S, etc.) - NOT customer product photos
+- Colored circles with letters - NOT product photos
+- Text-only reviews without images
+- Product photos only in main gallery (professional shots)
+- Small 30x30 profile pictures
 
-STEP 3 (Identify Customer Photos):
-Look for visual indicators of authentic customer photos:
-- Natural lighting (not studio lighting)
-- Real-world backgrounds (homes, offices, outdoor settings)
-- Non-professional models (regular people, not models)
-- Product in use (being worn, held, or used in real life)
-- User-uploaded style (different angles, casual settings)
-- Review section images (photos uploaded by customers in reviews) - ALWAYS COUNT AS CUSTOMER PHOTOS
-- Customer gallery images (user-generated content sections) - ALWAYS COUNT AS CUSTOMER PHOTOS
-- Images in "Reviews with images" sections - ALWAYS COUNT AS CUSTOMER PHOTOS
-
-STEP 4 (Review Section Images are ALWAYS Customer Photos):
-CRITICAL RULE: Images in ANY review-related section are ALWAYS considered customer photos:
-- "Reviews with images" section → CUSTOMER PHOTOS (PASS)
-- Review section with images → CUSTOMER PHOTOS (PASS)
-- Rating section with images → CUSTOMER PHOTOS (PASS)
-- Customer photo galleries → CUSTOMER PHOTOS (PASS)
-- User-generated content sections → CUSTOMER PHOTOS (PASS)
-- If you see images in review/rating sections, DO NOT analyze if they look professional or not - THEY ARE CUSTOMER PHOTOS
-
-STEP 5 (Differentiate from Professional Photos - ONLY for non-review sections):
-EXCLUDE these (they are NOT customer photos) - BUT ONLY if they are NOT in review sections:
-- Studio shots with white/plain backgrounds (if in product gallery, not review section)
-- Professional product photography (if in product gallery, not review section)
-- Branded/model photos (if in product gallery, not review section)
-- Product-only images (if in product gallery, not review section)
-- Stock photos (if in product gallery, not review section)
-
-IMPORTANT: If images are in review sections, they are ALWAYS customer photos regardless of appearance.
-
-STEP 6 (Final Verdict - CRITICAL):
-- PASS if you find images in "Reviews with images" section (even if they look professional) → MUST PASS
-- PASS if you find images in review sections (even if they look professional) → MUST PASS
-- PASS if you find at least ONE (1) authentic customer photo anywhere in the screenshot → MUST PASS
-- PASS if review section contains ANY images (they are customer photos by definition) → MUST PASS
-- PASS if you see customer-uploaded photos anywhere → MUST PASS
-- FAIL ONLY if you see NO images in review sections AND only professional/studio photos in product gallery
-- FAIL ONLY if no images are visible in the screenshot at all
-
-CRITICAL: If your response mentions "Reviews with images" section OR "customer photos" OR "review section images", you MUST set passed: true
-CRITICAL: Do NOT mention "rating rule" in your response - this is the CUSTOMER PHOTOS rule, not the rating rule
-CRITICAL: If you see customer photos, the rule MUST PASS - do not fail it
-
-CRITICAL REMINDERS:
-- You MUST look at the SCREENSHOT IMAGE provided, not just text content
-- Visual analysis is required - check the actual images in the screenshot
-- Review section images ARE ALWAYS customer photos - if you see images in review section, the rule MUST PASS
-- "Reviews with images" sections = CUSTOMER PHOTOS (always pass)
-- **MANDATORY: You MUST mention the EXACT SECTION/LOCATION where you see customer photos in your reason**
-- Be VERY SPECIFIC about WHERE in the screenshot you see customer photos (e.g., "review section", "Reviews with images section", "customer review images", "gallery", "user photos section")
-- Include the exact section title/heading if visible (e.g., "Reviews with images", "Customer photos", "Review images")
-- If you see a "Reviews with images" section with photos, you MUST say the rule PASSES
-
-Examples (WITH EXACT LOCATIONS):
-✅ PASS: "I can see in the screenshot a section titled 'Reviews with images' located below the product description, containing multiple customer-uploaded photos. These images are in the review section, which qualifies them as customer photos. The rule passes."
-
-✅ PASS: "The screenshot shows a 'Customer reviews' section with images uploaded by customers, located near the bottom of the page after the product specifications. These images appear in the review/rating area of the page, which makes them customer photos by definition. The rule passes."
-
-✅ PASS: "I can see images in the 'Reviews with images' section, which is positioned between the product details and the 'Top reviews from India' section. Even though some may appear professional, images in review sections are always considered customer photos. The rule passes."
-
-✅ PASS: "The screenshot displays customer review images in the 'Customer reviews' section showing the product from different angles. This section is located below the product gallery and above the shipping information. These are customer photos as they are in the review section. The rule passes."
-
-❌ FAIL: "In the screenshot, I only see professional product images with white backgrounds and studio lighting in the product gallery section. No images are visible in any review section, 'Reviews with images' section, or customer photo galleries. The rule fails."
-
-CRITICAL EXAMPLES FOR AMAZON/E-COMMERCE SITES (WITH LOCATIONS):
-✅ PASS: "I can see a 'Reviews with images' section in the screenshot with multiple photos, located below the product ratings and above the 'Top reviews from India' section. These are customer photos. The rule passes."
-
-✅ PASS: "The screenshot shows images in the 'Customer reviews' section, which is positioned after the product description section. These images are customer photos. The rule passes."
-
-IMPORTANT REMINDER:
-- "Reviews with images" sections = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
-- Review section images = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
-- Rating section images = ALWAYS CUSTOMER PHOTOS (rule MUST PASS)
-- If you see ANY images in review/rating sections, the rule MUST PASS regardless of how they look
-- Don't confuse review section images with professional product gallery images
-- Look specifically for sections titled "Reviews with images", "Customer photos", "Review images", etc.
-- If such sections exist with images, you MUST say the rule PASSES
-`
-          } else if (isVideoTestimonialRule) {
-            specialInstructions = `
-VIDEO TESTIMONIALS RULE - DETECT CUSTOMER VIDEO BY SCANNING THE SCREENSHOT (customer se dali hui):
-
-You will receive a SCREENSHOT. Your job: scan the image and detect if any video is clearly from a CUSTOMER (e.g. uploaded inside a review). Same logic as Amazon/Flipkart: video inside a review card = customer video.
-
-WHAT COUNTS AS CUSTOMER VIDEO (scan for this):
-1. VIDEO INSIDE AN INDIVIDUAL REVIEW CARD/BLOCK (strongest signal):
-   - Same visual block contains: reviewer name (e.g. "Giri", "Akmal"), star rating (★★★★★), "Reviewed in [country] on [date]", "Verified Purchase" (or similar), review title, review text, AND a video with play button (▶️). That video = customer-uploaded = PASS.
-   - On any website (Amazon, Flipkart, or others): if you see a review entry that has name + rating + review content + embedded video in one card/block, that video is customer video testimonial → PASS.
-2. Video with play button (▶️) inside sections: "Video Testimonials", "Customer Videos", "Customer reviews", "Video Reviews", or inside the reviews area (below product, with other reviews).
-
-WHAT DOES NOT COUNT:
-- Video only in product gallery / hero / main product area (no reviewer name, no "Reviewed in", no review text in same block) → NOT customer video.
-- Brand/promotional video (not inside a review or review section) → do NOT count.
+VISUAL CHECK PROCESS:
+1. Scan the screenshot for ANY photo thumbnails in review section
+2. Verify they are PRODUCT photos, not profile avatars
+3. Check if photos show real usage (not just product on white background)
+4. If actual customer photos found → PASS
+5. If only avatars/initials/text reviews → FAIL
 
 VERDICT:
-- If you SEE a video (with play button ▶️) that is clearly part of a customer review (e.g. inside a review card with name + rating + "Reviewed in" / "Verified Purchase" + review text) → PASS. Khud dekh ke decide karo: ye video customer review ke andar hai = customer se dali hui = PASS. No extra verification.
-- If videos are only in product gallery/hero and none inside review cards or review section → FAIL.
-- If no videos at all → FAIL.
+- PASS if you VISUALLY SEE customer-uploaded product photos (not avatars)
+- FAIL if only profile initials/avatars or text-only reviews
 
-MANDATORY in reason: mention WHERE you see the customer video (e.g. "video embedded inside a review card with reviewer name and Verified Purchase, in Customer reviews section").
+MANDATORY IN REASON:
+- Describe what you see: "photo thumbnail showing customer holding product"
+- Confirm: "actual product photo, not profile avatar"
+- OR if failing: "only profile avatars with initials, no customer product photos"
+
+EXAMPLE PASS: "Visually detected customer product photos in 'Reviews with images' section. Found 3 photo thumbnails showing: (1) Customer holding product in home setting, (2) Product being used on desk, (3) Unboxing photo with real background. These are actual customer-uploaded product photos."
+
+EXAMPLE FAIL: "Only found profile avatars with colored circles and initials (S, A, M, P) next to text reviews. No customer product photos visible in review section. The rule requires actual photos of customers using the product, not just profile pictures."
+`
+            specialInstructions = `
+VIDEO TESTIMONIALS RULE - AI VISUAL ANALYSIS OF SCREENSHOT:
+
+YOU MUST VISUALLY ANALYZE THE SCREENSHOT IMAGE to detect customer videos. DO NOT rely only on text content.
+
+VISUAL DETECTION - LOOK FOR THESE IN THE IMAGE:
+
+1. VIDEO THUMBNAIL WITH PLAY BUTTON (▶️):
+   - Look for dark video thumbnail with white/circular play button overlay
+   - Duration badge visible ("0:15", "0:30", "1:45")
+   - This is the strongest indicator of customer video
+
+2. CUSTOMER CONTEXT AROUND VIDEO (VISUAL CHECK):
+   - Reviewer name/avatar ABOVE or BELOW the video
+   - Star rating (★★★★☆) near the video
+   - "Verified Purchase" or "Verified" badge near video
+   - Review text/comment near the video
+   - Date like "Reviewed on [date]" near video
+
+3. LOCATION IN PAGE (WHERE YOU SEE IT):
+   - Below "Customer Reviews" section heading
+   - Inside a review card/block with customer info
+   - In "Reviews with images/videos" section
+   - In "Testimonials" or "Video Reviews" section
+   - NOT in main product gallery at top
+
+4. REAL CUSTOMER VIDEO INDICATORS:
+   - Video thumbnail shows real person (not product only)
+   - Casual/home setting visible in thumbnail
+   - Customer name/photo associated with it
+   - Review text present in same visual block
+
+WHAT IS NOT CUSTOMER VIDEO (VISUALLY CHECK):
+   - Product-only video in main gallery (no person, no review context)
+   - Professional marketing video with logo/branding
+   - Video without any reviewer name/rating nearby
+   - Video at top of page in product images section
+
+AI DECISION PROCESS:
+1. Scan entire screenshot image from top to bottom
+2. Look for any video thumbnail with ▶️ play button
+3. Check if that video has customer context (name, rating, review text)
+4. If YES → PASS (customer video testimonial detected)
+5. If NO customer context → FAIL (not a customer testimonial)
+
+VERDICT:
+- PASS if you VISUALLY SEE any video with play button + customer context (name/rating/review)
+- FAIL if no videos in review section, or only product demo videos
+
+MANDATORY IN REASON:
+- Describe EXACTLY what you see in image: "video thumbnail with play button in [section]"
+- Mention customer context: "reviewer name [X] with [Y] star rating"
+- Confirm: "This is a customer-uploaded video testimonial"
+
+EXAMPLE: "Visually detected video thumbnail with ▶️ play button in 'Customer Reviews' section. Video is associated with reviewer 'Sarah M.' showing 4-star rating and review text. The thumbnail shows a real person holding the product in home setting - clearly a customer-uploaded video testimonial."
 `
           } else if (isStickyCartRule) {
             specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`

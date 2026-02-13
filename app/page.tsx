@@ -642,62 +642,25 @@ export default function Home() {
                 </span>
               </h2>
 
-              {/* Website Preview during analysis */}
-              {websiteUrl && !iframeError && (
+              {/* Website Screenshot Preview during analysis - Static Image Only - 400x700px with scroll */}
+              {websiteUrl && (
                 <div className="mb-8">
                   <div className="text-center mb-3">
                     <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-                    {progress && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Analyzing batch {progress.current} of {progress.total}...
-                      </p>
-                    )}
                   </div>
-                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                    <iframe
-                      src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                      className="w-full"
-                      style={{ height: '400px' }}
-                      title="Website Preview"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                      loading="lazy"
-                      onError={() => {
-                        console.log('Iframe blocked, falling back to screenshot')
-                        setIframeError(true)
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Fallback to screenshot when iframe is blocked */}
-              {(iframeError || !websiteUrl) && (
-                <div className="mb-8">
-                  <div className="text-center mb-3">
-                    <p className="text-sm text-gray-600 font-medium">
-                      {iframeError ? 'Website Preview (Screenshot)' : 'Website Analysis in Progress'}
-                    </p>
-                    {progress && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Analyzing batch {progress.current} of {progress.total}...
-                      </p>
-                    )}
-                  </div>
-                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                  <div className="overflow-auto" style={{ width: '320px', height: '320px', margin: '0 auto' }}>
                     {websiteScreenshot ? (
                       <img
                         src={websiteScreenshot}
-                        alt="Website screenshot being analyzed"
-                        className="w-full h-auto object-contain"
-                        style={{ maxHeight: '400px' }}
+                        alt="Full-page screenshot of the scanned website"
+                        className="w-full h-auto block"
+                        style={{ maxHeight: 'none' }}
                       />
                     ) : (
-                      <div className="p-6 bg-gray-50">
+                      <div className="p-6 bg-gray-50 h-full flex items-center justify-center">
                         <div className="text-center">
                           <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                          <p className="text-sm text-gray-600">
-                            {iframeError ? 'Loading screenshot...' : 'Analyzing website content...'}
-                          </p>
+                          <p className="text-sm text-gray-600">Loading screenshot...</p>
                         </div>
                       </div>
                     )}
