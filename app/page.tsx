@@ -98,7 +98,7 @@ export default function Home() {
     'Generating conversion recommendations',
     'Finalizing your audit report',
   ]
-// load site screenshot
+
   useEffect(() => {
     // Load rules on component mount
     loadRules()
@@ -111,26 +111,25 @@ export default function Home() {
       setMounted(0)
       return
     }
-  }, [showAnalyze])
 
-  useEffect(() => {
-    if (!showAnalyze || !progress) {
-      return
+    // If we have progress, update mounted based on batch progress
+    if (progress) {
+      // Map batch progress to analysis steps
+      const totalBatches = progress.total
+      const currentBatch = progress.current
+
+      // Calculate which step should be active based on batch progress
+      // Distribute steps evenly across batches
+      const targetStep = Math.min(
+        Math.floor((currentBatch / totalBatches) * analysisSteps.length),
+        analysisSteps.length - 1
+      )
+
+      setMounted(targetStep)
+    } else {
+      // When showAnalyze is true but no progress yet, show the first step
+      setMounted(0)
     }
-
-    // Update mounted based on batch progress
-    // Map batch progress to analysis steps
-    const totalBatches = progress.total
-    const currentBatch = progress.current
-
-    // Calculate which step should be active based on batch progress
-    // Distribute steps evenly across batches
-    const targetStep = Math.min(
-      Math.floor((currentBatch / totalBatches) * analysisSteps.length),
-      analysisSteps.length - 1
-    )
-
-    setMounted(targetStep)
   }, [progress, showAnalyze])
 
   const loadRules = async () => {
@@ -198,11 +197,6 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
-    // Store first batch captured data to reuse for subsequent batches
-    let firstBatchScreenshot: string | null = null
-    let firstBatchText: string = ''
-    let firstBatchElements: string = ''
-
     setProgress({ current: 0, total: batches.length })
 
     for (let i = 0; i < batches.length; i++) {
@@ -211,7 +205,7 @@ export default function Home() {
       try {
         setProgress({ current: i + 1, total: batches.length })
 
-        const response: Response = await fetch('/api/scan', {
+        const response = await fetch('/api/scan', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -219,13 +213,7 @@ export default function Home() {
           body: JSON.stringify({
             url: batch.url,
             rules: batch.rules,
-            captureScreenshot: i === 0, // Only capture screenshot for first batch
-            // Pass pre-captured content for batches 2+ to avoid re-launching browser
-            ...(i > 0 && firstBatchScreenshot && {
-              preCapturedScreenshot: firstBatchScreenshot,
-              preCapturedText: firstBatchText,
-              preCapturedElements: firstBatchElements,
-            }),
+            captureScreenshot: true, // Capture screenshot for every batch to show progress
           }),
         })
 
@@ -235,14 +223,6 @@ export default function Home() {
         }
 
         const data = await response.json()
-
-        // Store first batch data for reuse in subsequent batches
-        if (i === 0) {
-          firstBatchScreenshot = data.screenshot || null
-          firstBatchText = data.visibleText || ''
-          firstBatchElements = data.keyElements || ''
-          console.log('First batch data captured for reuse')
-        }
 
         const ScanResultsSchema = z.array(z.object({
           ruleId: z.string(),
@@ -423,7 +403,6 @@ export default function Home() {
 
       // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
-      setMounted(0)
       setProgress(null)
       setWebsiteScreenshot(null) // Reset screenshot for new scan
       setCurrentBatchNumber(0) // Reset batch number
@@ -661,80 +640,65 @@ export default function Home() {
                 </span>
               </h2>
 
-              {/* Website Screenshot Preview during analysis - iPhone Mobile Mockup */}
-              {websiteUrl && (
+              {/* Website Preview during analysis */}
+              {websiteUrl && !iframeError && (
                 <div className="mb-8">
                   <div className="text-center mb-3">
                     <p className="text-sm text-gray-600 font-medium">Website Preview</p>
+                    {progress && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Analyzing batch {progress.current} of {progress.total}...
+                      </p>
+                    )}
                   </div>
-                  <div className="flex justify-center">
-                    {/* iPhone Frame */}
-                    <div className="relative" style={{ width: '280px' }}>
-                      {/* iPhone Outer Frame */}
-                      <div className="relative bg-[#1a1a1a] rounded-[3rem] p-2 shadow-2xl">
-                        {/* iPhone Inner Bezel */}
-                        <div className="relative bg-black rounded-[2.5rem] p-1 overflow-hidden">
-                          {/* Dynamic Island / Notch */}
-                          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20">
-                            <div className="bg-black rounded-full h-6 w-24 flex items-center justify-center">
-                              <div className="w-2 h-2 rounded-full bg-[#1a1a1a] ml-6"></div>
-                            </div>
-                          </div>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <iframe
+                      src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
+                      className="w-full"
+                      style={{ height: '400px' }}
+                      title="Website Preview"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                      loading="lazy"
+                      onError={() => {
+                        console.log('Iframe blocked, falling back to screenshot')
+                        setIframeError(true)
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
-                          {/* Screen Container */}
-                          <div className="relative bg-white rounded-[2.2rem] overflow-hidden" style={{ height: '480px' }}>
-                            {/* Status Bar */}
-                            <div className="absolute top-0 left-0 right-0 h-8 bg-white z-10 flex items-center justify-between px-6 pt-1">
-                              <span className="text-xs font-semibold text-black">9:41</span>
-                              <div className="flex items-center gap-1">
-                                <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M12 3C7.46 3 3.34 4.78.29 7.67c-.18.18-.29.43-.29.71 0 .28.11.53.29.71l11 11c.39.39 1.02.39 1.41 0l11-11c.18-.18.29-.43.29-.71 0-.28-.11-.53-.29-.71C20.66 4.78 16.54 3 12 3z" />
-                                </svg>
-                                <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z" />
-                                </svg>
-                              </div>
-                            </div>
-
-                            {/* Screenshot Content */}
-                            <div className="overflow-auto h-full pt-8">
-                              {websiteScreenshot ? (
-                                <img
-                                  src={websiteScreenshot}
-                                  alt="Mobile website preview"
-                                  className="w-full h-auto block"
-                                  style={{ maxHeight: 'none' }}
-                                />
-                              ) : (
-                                <div className="h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-                                  <div className="text-center px-4">
-                                    <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                                    <p className="text-xs text-gray-600">Loading screenshot...</p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Bottom fade for scroll indication */}
-                            <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white via-white/80 to-transparent z-10 pointer-events-none"></div>
-                          </div>
-
-                          {/* Home Indicator */}
-                          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-20">
-                            <div className="w-28 h-1 bg-white/30 rounded-full"></div>
-                          </div>
+              {/* Fallback to screenshot when iframe is blocked */}
+              {(iframeError || !websiteUrl) && (
+                <div className="mb-8">
+                  <div className="text-center mb-3">
+                    <p className="text-sm text-gray-600 font-medium">
+                      {iframeError ? 'Website Preview (Screenshot)' : 'Website Analysis in Progress'}
+                    </p>
+                    {progress && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Analyzing batch {progress.current} of {progress.total}...
+                      </p>
+                    )}
+                  </div>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    {websiteScreenshot ? (
+                      <img
+                        src={websiteScreenshot}
+                        alt="Website screenshot being analyzed"
+                        className="w-full h-auto object-contain"
+                        style={{ maxHeight: '400px' }}
+                      />
+                    ) : (
+                      <div className="p-6 bg-gray-50">
+                        <div className="text-center">
+                          <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                          <p className="text-sm text-gray-600">
+                            {iframeError ? 'Loading screenshot...' : 'Analyzing website content...'}
+                          </p>
                         </div>
-
-                        {/* Side Buttons */}
-                        <div className="absolute top-20 -left-1 w-1 h-8 bg-[#2a2a2a] rounded-l-md"></div>
-                        <div className="absolute top-32 -left-1 w-1 h-12 bg-[#2a2a2a] rounded-l-md"></div>
-                        <div className="absolute top-48 -left-1 w-1 h-12 bg-[#2a2a2a] rounded-l-md"></div>
-                        <div className="absolute top-28 -right-1 w-1 h-16 bg-[#2a2a2a] rounded-r-md"></div>
                       </div>
-
-                      {/* Decorative shadow beneath */}
-                      <div className="absolute -bottom-6 left-8 right-8 h-8 bg-black/20 blur-xl rounded-full"></div>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -814,7 +778,7 @@ export default function Home() {
         {!showAnalyze && (
           <div className="my-[18px]">
             <div className="flex justify-center gap-3">
-              {/* Left: Profile Images */}
+              {/* Start: Profile Images */}
               <div className="flex -space-x-2">
                 <div className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200">
                   <img src="/client_first.png" alt="user" className="w-[40px] h-[40px] object-cover" />
@@ -827,7 +791,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Right: Stars and Text */}
+              {/* End: Stars and Text */}
               <div className="flex flex-col">
                 <div className="flex items-center gap-1">
                   {[...Array(5)].map((_, i) => (
@@ -845,4 +809,3 @@ export default function Home() {
     </main>
   )
 }
-
