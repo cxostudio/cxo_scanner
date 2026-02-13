@@ -83,7 +83,7 @@
     "id": "product-comparison",
     "title": "Include a product comparison section",
     "description": "The product page must include a comparison section that compares the primary product with 2-3 similar alternatives. The comparison must: 1. Identify 2-3 similar alternatives. 2. Compare 4+ technical or functional attributes (e.g., RAM, Battery, Price, Features). 3. Use a scannable table format. 4. Explicitly highlight the 'Winner' or 'Unique Value' for the primary product. 5. Be objective yet persuasive to reduce decision fatigue. The comparison should show why the primary product is the best choice while being honest about alternatives."
-  },  
+  },
   {
     "id": "ugc-customer-photos",
     "title": "Show customer photos using the product",
@@ -92,23 +92,23 @@
   {
     "id": "video-testimonials",
     "title": "Add video testimonials",
-    "description": "Video testimonials from real customers should be included to increase trust, engagement, and conversion rates."
+    "description": "Video testimonials from real customers must be included on the product page to increase trust, engagement, and conversion rates. A video testimonial must: 1. Include a visible play button (e.g., play icon overlay, YouTube embed with play button). 2. Be located within customer review cards, testimonial sections, or sections explicitly titled 'Video Testimonials', 'Customer Videos', or similar. 3. Feature real customers speaking about their experience with the product. Product gallery videos, product demos, or promotional videos do NOT count as customer testimonials."
   },
   {
     "id": "variant-preselection",
     "title": "Preselect the most common variant",
     "description": "Ensure the most popular size, color, or configuration is selected by default when the page loads. The preselected variant must be clearly highlighted visually (e.g., bold border, darker color, selected state) and allow users to click 'Add to Cart' immediately without selecting a variant first. If 'Add to Cart' button is disabled until a variant is selected, or all variant options look the same on page load, the rule fails."
-  },  
-    {
-      "id": "cta-prominence",
-      "title": "Make the main CTA the most prominent element",
-      "description": "The primary CTA (Add to Cart/Buy Now) must be the visual focal point. It must be placed 'above the fold' (visible without scrolling), use a high-contrast color against the background (e.g., solid electric blue on white), be larger than secondary buttons, and use clear action-oriented text. Ghost buttons (transparent with thin borders) that blend into the background do NOT meet this requirement."
-    },
-    {
-      "id": "free-shipping-threshold",
-      "title": "Highlight free shipping threshold near CTA",
-      "description": "Display the free shipping incentive in the immediate eye-path of the CTA. It must be located within 50-100 pixels of the main 'Add to Cart' button (directly above or below), use persuasive threshold language like 'Add $X more for Free Shipping' or 'Free shipping over $50', and be clear and readable without being more distracting than the main CTA. Shipping information only in header banners or page footer does NOT meet this requirement."
-    },
+  },
+  {
+    "id": "cta-prominence",
+    "title": "Make the main CTA the most prominent element",
+    "description": "The primary CTA (Add to Cart/Buy Now) must be the visual focal point. It must be placed 'above the fold' (visible without scrolling), use a high-contrast color against the background (e.g., solid electric blue on white), be larger than secondary buttons, and use clear action-oriented text. Ghost buttons (transparent with thin borders) that blend into the background do NOT meet this requirement."
+  },
+  {
+    "id": "free-shipping-threshold",
+    "title": "Highlight free shipping threshold near CTA",
+    "description": "Display the free shipping incentive in the immediate eye-path of the CTA. It must be located within 50-100 pixels of the main 'Add to Cart' button (directly above or below), use persuasive threshold language like 'Add $X more for Free Shipping' or 'Free shipping over $50', and be clear and readable without being more distracting than the main CTA. Shipping information only in header banners or page footer does NOT meet this requirement."
+  },
   {
     "id": "trust-badges-near-cta",
     "title": "Display trust signals near the CTA",
@@ -118,11 +118,10 @@
     "id": "quantity-discounts",
     "title": "Offer quantity or bulk discounts",
     "description": "Product pages must display specific financial incentives for purchasing multiple units of the same product or bundles. Valid examples include 'Buy 2 Get 1 Free', tiered pricing (e.g., $10 each for 5+ units), or 'Save 10% when you buy 3'. General single-item discounts, sitewide sales, or 'Free Shipping' do not qualify."
-  },  
+  },
   {
     "id": "shipping-time-visibility",
     "title": "Display shipping time near CTA",
     "description": "Ensure a dynamic delivery estimate (e.g., 'Order within X hours, get it by Y date') is placed in immediate proximity to the primary CTA. CRITERIA: 1. Must be located directly above or below the Add to Cart/Buy Now button. 2. Must include a countdown or specific cutoff time (e.g., 'Order within 2 hours', 'Order by 3 PM'). 3. Must provide a specific delivery date or range (e.g., 'Get it by Tuesday, Oct 12th', 'Delivered by Thursday'). IMPACT: High - This reduces purchase friction and prevents cart abandonment by managing expectations upfront."
   }
-  
 ]

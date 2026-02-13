@@ -99,52 +99,149 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Website iframe preview - shows live website */}
-        {url && !iframeError && (
-          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-              <p className="text-sm font-medium text-gray-700">Live Website Preview</p>
-            </div>
-            <iframe
-              src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
-              className="w-full"
-              style={{ height: '400px' }}
-              title="Live Website Preview"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-              loading="lazy"
-              onError={() => {
-                console.log('Iframe blocked in scanner page, falling back to screenshot')
-                setIframeError(true)
+        {/* Website Screenshot Preview - iPhone Mobile Mockup with Framer Motion */}
+        {url && (
+          <div className="w-full mb-8">
+            {/* iPhone Frame with In-Out Animation */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{
+                duration: 0.6,
+                ease: [0.25, 0.46, 0.45, 0.94],
+                delay: 0.2
               }}
-            />
-          </div>
-        )}
+              className="relative mx-auto"
+              style={{ width: '280px' }}
+            >
+              {/* Phone container - no scale animation */}
+              <div>
+                {/* iPhone Outer Frame */}
+                <div className="relative bg-[#1a1a1a] rounded-[3rem] p-2 shadow-2xl">
+                  {/* iPhone Inner Bezel */}
+                  <div className="relative bg-black rounded-[2.5rem] p-1 overflow-hidden">
+                    {/* Dynamic Island / Notch */}
+                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20">
+                      <div className="bg-black rounded-full h-6 w-24 flex items-center justify-center">
+                        {/* Camera dot */}
+                        <div className="w-2 h-2 rounded-full bg-[#1a1a1a] ml-6"></div>
+                      </div>
+                    </div>
 
-        {/* Fallback to screenshot when iframe is blocked */}
-        {(iframeError || (websiteScreenshot && !url)) && (
-          <div className="w-full mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-              <p className="text-sm font-medium text-gray-700">
-                {iframeError ? 'Website Preview (Screenshot)' : 'Website Screenshot'}
-              </p>
-            </div>
-            {websiteScreenshot ? (
-              <img
-                src={websiteScreenshot}
-                alt="Full-page screenshot of the scanned website"
-                className="w-full h-auto object-contain"
-                style={{ maxHeight: '400px' }}
-              />
-            ) : (
-              <div className="p-6 bg-gray-50">
-                <div className="text-center">
-                  <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                  <p className="text-sm text-gray-600">
-                    {iframeError ? 'Loading screenshot...' : 'No screenshot available'}
-                  </p>
+                    {/* Screen Container - Increased Height */}
+                    <div className="relative bg-white rounded-[2.2rem] overflow-hidden" style={{ height: '480px' }}>
+                      {/* Status Bar */}
+                      <div className="absolute top-0 left-0 right-0 h-8 bg-white z-10 flex items-center justify-between px-6 pt-1">
+                        <span className="text-xs font-semibold text-black">9:41</span>
+                        <div className="flex items-center gap-1">
+                          <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 3C7.46 3 3.34 4.78.29 7.67c-.18.18-.29.43-.29.71 0 .28.11.53.29.71l11 11c.39.39 1.02.39 1.41 0l11-11c.18-.18.29-.43.29-.71 0-.28-.11-.53-.29-.71C20.66 4.78 16.54 3 12 3z" />
+                          </svg>
+                          <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z" />
+                          </svg>
+                        </div>
+                      </div>
+
+                      {/* Screenshot Content with fade animation */}
+                      <motion.div
+                        className="overflow-auto h-full pt-8"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.5, duration: 0.5 }}
+                      >
+                        {websiteScreenshot ? (
+                          <motion.img
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ duration: 0.5 }}
+                            src={websiteScreenshot}
+                            alt="Mobile website preview"
+                            className="w-full h-auto block"
+                            style={{ maxHeight: 'none' }}
+                          />
+                        ) : (
+                          <div className="h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+                            <div className="text-center px-4">
+                              <motion.div
+                                className="relative"
+                                animate={{ rotate: 360 }}
+                                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                              >
+                                {/* Animated scanning effect */}
+                                <div className="w-14 h-14 mx-auto mb-3 relative">
+                                  <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
+                                  <div className="absolute inset-0 border-4 border-t-blue-500 border-r-blue-500 rounded-full"></div>
+                                  <motion.div
+                                    className="absolute inset-2 bg-blue-500/10 rounded-full"
+                                    animate={{ scale: [1, 1.2, 1] }}
+                                    transition={{ duration: 1.5, repeat: Infinity }}
+                                  />
+                                </div>
+                              </motion.div>
+                              <motion.p
+                                className="text-xs text-gray-500 font-medium"
+                                animate={{ opacity: [0.5, 1, 0.5] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                              >
+                                Scanning...
+                              </motion.p>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+
+                      {/* Bottom fade for scroll indication */}
+                      <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white via-white/80 to-transparent z-10 pointer-events-none"></div>
+                    </div>
+
+                    {/* Home Indicator */}
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 z-20">
+                      <div className="w-28 h-1 bg-white/30 rounded-full"></div>
+                    </div>
+                  </div>
+
+                  {/* Side Buttons */}
+                  <div className="absolute top-20 -left-1 w-1 h-8 bg-[#2a2a2a] rounded-l-md"></div>
+                  <div className="absolute top-32 -left-1 w-1 h-12 bg-[#2a2a2a] rounded-l-md"></div>
+                  <div className="absolute top-48 -left-1 w-1 h-12 bg-[#2a2a2a] rounded-l-md"></div>
+                  <div className="absolute top-28 -right-1 w-1 h-16 bg-[#2a2a2a] rounded-r-md"></div>
                 </div>
               </div>
-            )}
+
+              {/* Decorative shadow beneath with animation */}
+              <motion.div
+                className="absolute -bottom-6 left-8 right-8 h-8 bg-black/20 blur-xl rounded-full"
+                animate={{
+                  scale: [1, 1.1, 1],
+                  opacity: [0.2, 0.3, 0.2]
+                }}
+                transition={{
+                  duration: 4,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+              />
+            </motion.div>
+
+            {/* Preview Label with animation */}
+            <motion.div
+              className="text-center mt-6"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6, duration: 0.4 }}
+            >
+              <motion.span
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-full text-xs text-gray-600 font-medium"
+                whileHover={{ scale: 1.05 }}
+                transition={{ type: "spring", stiffness: 400 }}
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                Mobile Preview
+              </motion.span>
+            </motion.div>
           </div>
         )}
 
@@ -278,6 +375,6 @@ export default function ScannerPage() {
           </div>
         )}
       </div>
-    </main>
+    </main >
   )
 }
