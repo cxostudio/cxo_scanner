@@ -112,7 +112,7 @@
   {
     "id": "trust-badges-near-cta",
     "title": "Display trust signals near the CTA",
-    "description": "Security badges and payment logos (SSL, Visa, PayPal, Money-back Guarantee) must be positioned within 50px of the 'Add to Cart' or 'Checkout' buttons. These signals must be visible without scrolling and should use high-quality, muted or monochromatic designs so their visual weight is lower than the main CTA to avoid distraction."
+    "description": "Security badges and payment logos (SSL, Visa, PayPal, Money-back Guarantee) must be positioned within 200px of the 'Add to Cart' or 'Checkout' buttons. These signals must be visible without scrolling and should use high-quality, muted or monochromatic designs so their visual weight is lower than the main CTA to avoid distraction."
   },
   {
     "id": "quantity-discounts",
