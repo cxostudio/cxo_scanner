@@ -1256,9 +1256,8 @@ export async function POST(request: NextRequest) {
         }
         lastRequestTime = Date.now()
 
-        // Using OpenRouter with Gemini model
-        // Available Gemini models on OpenRouter: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, google/gemini-flash-1.5-8b
-        const modelName = 'google/gemini-2.5-flash-lite' // Latest Gemini Flash model
+        // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
+        const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
 
         try {
 
@@ -2770,7 +2769,7 @@ CRITICAL INSTRUCTIONS:
 
             // Handle 404 errors (model not found)
             if (errorMessage.includes('404') || errorMessage.includes('No endpoints found') || errorMessage.includes('not found')) {
-              errorMessage = `Model not found. The model '${modelName}' is not available on OpenRouter. Please try using: google/gemini-2.0-flash-exp, google/gemini-pro-1.5, or google/gemini-flash-1.5-8b`
+              errorMessage = `Model not found. The model '${modelName}' is not available on OpenRouter. Set OPENROUTER_MODEL in .env.local to one of: google/gemini-2.5-flash, google/gemini-2.5-flash-lite, google/gemini-2.0-flash-exp, google/gemini-pro-1.5`
             }
             // Handle rate limit errors specifically (OpenRouter returns these with retry-after info)
             else if (errorMessage.includes('rate_limit') || errorMessage.includes('Rate limit') || errorMessage.includes('429') || errorMessage.includes('TPM')) {
