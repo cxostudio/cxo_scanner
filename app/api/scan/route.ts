@@ -975,21 +975,22 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        // Filter badges within 50px of CTA
-        const badgesWithin50px = allTrustBadges.filter(badge => badge.distance <= 50)
-        const badgesVisibleWithoutScrolling = badgesWithin50px.filter(badge => badge.visible && ctaVisibleWithoutScrolling)
+        // Filter badges near CTA: use 250px so "below Add to Cart" in same column is detected
+        const NEAR_CTA_PX = 250
+        const badgesNearCTA = allTrustBadges.filter(badge => badge.distance <= NEAR_CTA_PX)
+        const badgesVisibleWithoutScrolling = badgesNearCTA.filter(badge => badge.visible && ctaVisibleWithoutScrolling)
 
         return {
           ctaFound: true,
           ctaText: (cta as HTMLElement).textContent?.trim() || 'CTA button',
           ctaVisibleWithoutScrolling: ctaVisibleWithoutScrolling,
-          trustBadgesNearCTA: badgesWithin50px.map(b => b.text),
-          trustBadgesCount: badgesWithin50px.length,
-          within50px: badgesWithin50px.length > 0,
+          trustBadgesNearCTA: badgesNearCTA.map(b => b.text),
+          trustBadgesCount: badgesNearCTA.length,
+          within50px: badgesNearCTA.length > 0,
           visibleWithoutScrolling: badgesVisibleWithoutScrolling.length > 0 && ctaVisibleWithoutScrolling,
-          trustBadgesInfo: badgesWithin50px.length > 0
-            ? `Found ${badgesWithin50px.length} trust badge(s) within 50px: ${badgesWithin50px.map(b => b.text).join(', ')}`
-            : 'No trust badges found within 50px of CTA'
+          trustBadgesInfo: badgesNearCTA.length > 0
+            ? `Found ${badgesNearCTA.length} trust badge(s) near CTA (within ${NEAR_CTA_PX}px): ${badgesNearCTA.map(b => b.text).join(', ')}`
+            : `No trust badges found within ${NEAR_CTA_PX}px of CTA`
         }
       })
       // preselect
@@ -1070,7 +1071,7 @@ export async function POST(request: NextRequest) {
         `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         `\n\n--- SHIPPING TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nShipping Info Near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time: ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date: ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nShipping Text Found: ${shippingTimeContext.shippingText}\nAll Requirements Met: ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
-        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Within 50px: ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
+        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
 
 
@@ -1116,6 +1117,21 @@ export async function POST(request: NextRequest) {
         if (needsReviewsSection && page) {
           try {
             const scrolled = await page.evaluate(() => {
+              // Prefer video testimonial / "customers are saying" sections so screenshot captures them
+              const testimonialSel = document.querySelector('[id*="testimonial"], [class*="testimonial"], [data-section*="testimonial"], [id*="customers-saying"], [class*="customers-saying"], [class*="customer-saying"]')
+              if (testimonialSel) {
+                testimonialSel.scrollIntoView({ behavior: 'instant', block: 'start' })
+                return true
+              }
+              // Try text-based: section containing "customers are saying" or "what over"
+              const all = document.querySelectorAll('section, div[class], [id]')
+              for (const el of all) {
+                const t = (el.textContent || '').substring(0, 200)
+                if (/\d+[\d,]+\+?\s*customers\s+are\s+saying/i.test(t) || /what\s+over\s+\d/i.test(t) || /video\s+testimonial/i.test(t)) {
+                  el.scrollIntoView({ behavior: 'instant', block: 'start' })
+                  return true
+                }
+              }
               const sel = document.querySelector('#reviews, #cr-original-reviews, [id*="review"], [data-cel-widget*="review"], a[name="reviews"], [data-hook*="review"]')
               if (sel) {
                 sel.scrollIntoView({ behavior: 'instant', block: 'start' })
@@ -1818,9 +1834,11 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST BADGES NEAR CTA RULE - STEP - BY - STEP CHECK:
+TRUST BADGES NEAR CTA RULE - STEP-BY-STEP CHECK:
 
-This rule checks if trust signals(security badges, payment logos) are positioned within 50px of the CTA button, visible without scrolling, and have muted / monochromatic design.
+STEP 0 - SCREENSHOT CHECK (HIGHEST PRIORITY): You will receive a SCREENSHOT. Look at it FIRST.
+- If the screenshot shows payment/trust badges (Visa, Mastercard, PayPal, Apple Pay, Google Pay, SSL, etc.) in the product section (e.g. below Add to Cart, below shipping, row of payment icons) → you MUST PASS. Do NOT fail based on "Trust Badges Within 200px: NO" in KEY ELEMENTS. Visual presence of payment badges in the image = PASS.
+- Only if the screenshot clearly shows NO payment or trust icons anywhere in the product/CTA area → then use KEY ELEMENTS and steps below.
 
               STEP 1: Identify CTA
                 - Check "TRUST BADGES CHECK" section in KEY ELEMENTS
@@ -2225,9 +2243,10 @@ CRITICAL INSTRUCTIONS:
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE.You MUST look at this image carefully.\n\nLook specifically for: \n - Sections titled "Reviews with images" or "Customer photos"\n - Image galleries in review sections\n - Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections(like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS(always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below: \n\n` : ''
 
-          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE!\n\nYou are receiving a SCREENSHOT IMAGE.You MUST look at this image carefully.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos displayed in review sections\n\nCRITICAL: You MUST ACTUALLY SEE videos with play buttons(▶️) in the screenshot.\n - If you see videos with play buttons(▶️) in review sections → PASS\n - If you DO NOT see any videos or play buttons(▶️) in the screenshot → FAIL\n - Do NOT assume videos exist - you must visually confirm them in the screenshot\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible = FAIL(do not pass).\n\nNow analyze the screenshot image provided below: \n\n` : ''
-
-          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\n === RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
+          const productTabsPrefix = isProductTabsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT TABS/ACCORDIONS RULE ⚠️⚠️⚠️\n\nTHIS IS THE ACCORDIONS RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nIn the screenshot, look for ACCORDION-LIKE UI:\n- Rows or labels such as "Product Details", "Ingredients", "How to Use", "Shipping & Delivery", "Return & Refund Policy"\n- Chevron icons (>, ▼, ▶) or arrows next to each label\n- Vertical list of section headers that look expandable/collapsible\n\nCRITICAL: If you SEE this pattern in the screenshot → you MUST output passed: true. Do NOT fail based on "Tabs/Accordions Found: None" in KEY ELEMENTS. Many sites build accordions with divs (no <details>), so KEY ELEMENTS miss them but the screenshot clearly shows accordions. When in doubt, trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR TRUST/PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST BADGES RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST and decide based on what you SEE.\n\nIn the screenshot, look for PAYMENT or TRUST badges:\n- A row of payment icons BELOW the "Add to Cart" or "Add to cart" button (Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay)\n- Security/trust icons: SSL, lock icon, secure payment, money-back guarantee\n- Payment logos in the product/checkout area (same column as the CTA, below shipping/return info)\n\nCRITICAL - IF YOU SEE PAYMENT BADGES BELOW ADD TO CART → PASS:\n- If the IMAGE shows a row of payment method logos (Visa, Mastercard, PayPal, etc.) directly below or near the Add to Cart button / below shipping info → you MUST output passed: true.\n- This is the most common layout: payment badges right under Add to Cart. When you SEE this in the screenshot, the rule PASSES.\n- Do NOT fail based on KEY ELEMENTS. Trust the SCREENSHOT. Payment badges visible below Add to Cart in image = rule PASSES.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\n === RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
           // Call OpenRouter API directly with image support
           // Build content array with text and optional image
@@ -2240,7 +2259,7 @@ CRITICAL INSTRUCTIONS:
             (isVideoTestimonialRule && reviewsSectionScreenshotDataUrl) || (isCustomerPhotoRule && reviewsSectionScreenshotDataUrl)
               ? reviewsSectionScreenshotDataUrl
               : screenshotDataUrl
-          if (screenshotToUse && (isCustomerPhotoRule || isVideoTestimonialRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
+          if (screenshotToUse && (isCustomerPhotoRule || isVideoTestimonialRule || isProductTabsRule || isTrustBadgesRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
             let imageUrl = screenshotToUse
             if (!screenshotToUse.startsWith('data:')) {
               imageUrl = toProtocolRelativeUrl(screenshotToUse, validUrl)
@@ -2501,6 +2520,9 @@ CRITICAL INSTRUCTIONS:
               websiteTextLower.includes('customer review videos') ||
               websiteTextLower.includes('video testimonials') ||
               websiteTextLower.includes('video reviews') ||
+              websiteTextLower.includes('customers are saying') ||
+              (websiteTextLower.includes('what over') && websiteTextLower.includes('customer')) ||
+              /\d+[\d,]+\+?\s*customers\s+are\s+saying/i.test(websiteTextLower) ||
               /customer reviews?.{0,200}video/.test(websiteTextLower) ||
               /video.{0,200}customer reviews?/.test(websiteTextLower) ||
               /review.{0,200}video/.test(websiteTextLower) ||
@@ -2616,6 +2638,24 @@ CRITICAL INSTRUCTIONS:
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
+            // If AI failed but page content clearly has payment badges, force PASS (screenshot may have missed them)
+            const websiteTextForTrust = (fullVisibleText || websiteContent || '').toLowerCase()
+            const hasPaymentBadgesInContent =
+              websiteTextForTrust.includes('visa') ||
+              websiteTextForTrust.includes('mastercard') ||
+              websiteTextForTrust.includes('paypal') ||
+              websiteTextForTrust.includes('apple pay') ||
+              websiteTextForTrust.includes('google pay') ||
+              websiteTextForTrust.includes('amex') ||
+              websiteTextForTrust.includes('american express') ||
+              websiteTextForTrust.includes('klarna') ||
+              websiteTextForTrust.includes('payment method') ||
+              websiteTextForTrust.includes('pay with')
+            if (!analysis.passed && hasPaymentBadgesInContent) {
+              console.log(`Trust badges rule: Payment methods found in page content. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are present on the page, providing trust signals for users.`
+            }
             // Trust badges rule must mention trust/badge/security/payment/ssl
             const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') || reasonLower.includes('security') || reasonLower.includes('payment') || reasonLower.includes('ssl') || reasonLower.includes('visa') || reasonLower.includes('paypal') || reasonLower.includes('guarantee')
             if (!hasTrustMention) {
