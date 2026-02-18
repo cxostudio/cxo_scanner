@@ -269,6 +269,9 @@ export async function POST(request: NextRequest) {
       // Store complete visible text for downstream heuristics
       fullVisibleText = visibleText
 
+      // Brief wait so computed styles (e.g. text color) are stable on Vercel before color detection
+      await new Promise(r => setTimeout(r, 500))
+
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
       const keyElements = await page.evaluate(() => {
@@ -363,27 +366,27 @@ export async function POST(request: NextRequest) {
         // Get color information for color rules - check computed styles
         const colorInfo = []
         try {
-          // Sample key elements to check colors
-          const sampleElements = [
-            ...Array.from(document.querySelectorAll('body, h1, h2, h3, p, a, button, [class*="text"], [class*="color"]')).slice(0, 20),
-            ...Array.from(document.querySelectorAll('[style*="color"], [style*="background"]')).slice(0, 10)
-          ]
+          // Sample key elements (body last so we can ignore its default black on Vercel when CSS loads late)
+          const textElements = Array.from(document.querySelectorAll('h1, h2, h3, h4, p, a, button, [class*="text"], [class*="color"], [style*="color"]')).slice(0, 25)
+          const bodyEl = document.body
+          const sampleElements = [...textElements, ...(bodyEl ? [bodyEl] : [])]
 
-          const uniqueColors = new Set()
+          const uniqueColors = new Set<string>()
+          const pureBlackSources: string[] = [] // tagName for elements that have #000000
+
           sampleElements.forEach(el => {
             try {
               const computedStyle = window.getComputedStyle(el)
               const textColor = computedStyle.color
               const bgColor = computedStyle.backgroundColor
 
-              // Convert rgb to hex if needed
               const rgbToHex = (rgb: string): string | null => {
                 if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null
                 const match = rgb.match(/\d+/g)
                 if (!match || match.length < 3) return null
-                const r = parseInt(match[0])
-                const g = parseInt(match[1])
-                const b = parseInt(match[2])
+                const r = parseInt(match[0], 10)
+                const g = parseInt(match[1], 10)
+                const b = parseInt(match[2], 10)
                 return '#' + [r, g, b].map(x => {
                   const hex = x.toString(16)
                   return hex.length === 1 ? '0' + hex : hex
@@ -392,19 +395,24 @@ export async function POST(request: NextRequest) {
 
               const textHex = rgbToHex(textColor)
               const bgHex = rgbToHex(bgColor)
+              const tag = (el.tagName || '').toLowerCase()
 
-              if (textHex) uniqueColors.add(`text:${textHex}`)
-              if (bgHex) uniqueColors.add(`bg:${bgHex}`)
+              if (textHex) {
+                uniqueColors.add(`text:${textHex}`)
+                if (textHex === '#000000') pureBlackSources.push(`text:${tag}`)
+              }
+              if (bgHex) {
+                uniqueColors.add(`bg:${bgHex}`)
+                if (bgHex === '#000000') pureBlackSources.push(`bg:${tag}`)
+              }
             } catch (e) {
               // Ignore errors
             }
           })
 
-          // Check for pure black (#000000 or rgb(0,0,0))
-          const colorArray = Array.from(uniqueColors) as string[]
-          const hasPureBlack = colorArray.some((c: string) =>
-            c.includes('#000000') || c.includes('rgb(0, 0, 0)') || c.includes('rgb(0,0,0)')
-          )
+          // Only report pure black if a non-body element has it (body often defaults to black before CSS loads on Vercel)
+          const hasPureBlackOnNonBody = pureBlackSources.some(s => !s.endsWith('body'))
+          const hasPureBlack = hasPureBlackOnNonBody
 
           const colorList = Array.from(uniqueColors).slice(0, 15).join(', ')
           colorInfo.push(`Colors found: ${colorList || 'No colors detected'}`)

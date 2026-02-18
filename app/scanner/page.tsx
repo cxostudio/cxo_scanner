@@ -268,7 +268,7 @@ export default function ScannerPage() {
               <div className="flex justify-center mb-6">
                 <button
                   onClick={loadMore}
-                  className="w-full py-3 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-colors"
+                  className="w-full py-3 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-colors cursor-pointer"
                 >
                   Load more results
                 </button>
