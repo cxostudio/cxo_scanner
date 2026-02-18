@@ -2545,43 +2545,45 @@ CRITICAL INSTRUCTIONS:
               (reasonLower.includes('thumbnail') && reasonLower.includes('play') && !hasNegativeIndicators) ||
               (reasonLower.includes('review') && reasonLower.includes('video') && !hasNegativeIndicators && !reasonLower.includes('no') && !reasonLower.includes('only text'))
 
-            // Text-based backup: detect clear "customer video" signals in HTML/content
+            // Text-based backup: only force pass on EXPLICIT section headings/phrases (not just "video" + "review" anywhere)
             const hasCustomerVideoTextSignal =
-              websiteTextLower.includes('customer videos') ||
-              websiteTextLower.includes('customer video reviews') ||
-              websiteTextLower.includes('customer review videos') ||
               websiteTextLower.includes('video testimonials') ||
-              websiteTextLower.includes('video reviews') ||
-              websiteTextLower.includes('customers are saying') ||
-              (websiteTextLower.includes('what over') && websiteTextLower.includes('customer')) ||
-              /\d+[\d,]+\+?\s*customers\s+are\s+saying/i.test(websiteTextLower) ||
-              /customer reviews?.{0,200}video/.test(websiteTextLower) ||
-              /video.{0,200}customer reviews?/.test(websiteTextLower) ||
-              /review.{0,200}video/.test(websiteTextLower) ||
-              /video.{0,200}review/.test(websiteTextLower) ||
-              /"review".{0,200}<video/.test(websiteTextLower) ||
-              /<video.{0,200}"review"/.test(websiteTextLower)
+              websiteTextLower.includes('customer videos') ||
+              websiteTextLower.includes('watch customer videos') ||
+              websiteTextLower.includes('customer video reviews') ||
+              websiteTextLower.includes('review videos') ||
+              (websiteTextLower.includes('video') && websiteTextLower.includes('testimonial') && (websiteTextLower.includes('section') || websiteTextLower.includes('play'))) ||
+              /section.*video.*testimonial|video.*testimonial.*section/i.test(websiteTextLower)
+            // Do NOT use broad patterns like "review" + "video" - they match icon names (e.g. circle-play) and cause false pass
 
-            // If negative indicators are present, ensure it's marked as failed
+            // If negative indicators are present, ensure it's marked as failed (even if AI passed)
             if (hasNegativeIndicators && analysis.passed) {
               console.log(`Video testimonials rule: Negative indicators found but marked as passed. Forcing FAIL.`)
               analysis.passed = false
-              // Keep original reason if it mentions no videos
               if (!reasonLower.includes('no video') && !reasonLower.includes('not found')) {
                 analysis.reason = `No video testimonials are visible in the screenshot. The page does not display customer video testimonials in the review section or anywhere else on the page.`
               }
             }
 
-            // If AI failed the rule but page text clearly mentions customer review videos,
-            // auto-pass to align with how customer photos rule behaves.
+            // If AI passed but reason is generic (no play button/video player mentioned), verify: force fail when page has only text reviews
+            const reasonMentionsActualVideo = reasonLower.includes('play button') || reasonLower.includes('video player') || reasonLower.includes('▶') || reasonLower.includes('embedded video') || reasonLower.includes('video thumbnail')
+            const pageHasVideoEvidence = /\bplay\s+button|watch\s+video|video\s+player|▶|youtube|vimeo|\.mp4|video\s+testimonial/i.test(websiteTextLower)
+            const pageHasOnlyTextReviews = /verified.*review|review.*verified/i.test(websiteTextLower) && !websiteTextLower.includes('video testimonial') && !pageHasVideoEvidence
+            if (analysis.passed && !reasonMentionsActualVideo && pageHasOnlyTextReviews) {
+              console.log(`Video testimonials rule: AI passed but no actual video evidence; page looks like text-only reviews. Forcing FAIL.`)
+              analysis.passed = false
+              analysis.reason = `No video testimonials are visible. The page shows text-only customer reviews (e.g. Verified reviews) but no video players or play buttons in the review section. Add customer video testimonials to pass.`
+            }
+
+            // Only auto-pass when page has EXPLICIT video testimonial section text (not just "video" somewhere)
             if (!analysis.passed && hasCustomerVideoTextSignal) {
-              console.log(`Video testimonials rule: customer video signals found in page text (even if model said no videos). Forcing PASS.`)
+              console.log(`Video testimonials rule: explicit video testimonial text found. Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Customer video testimonials are available in the customer reviews section of this page. These customer-uploaded videos fulfill the requirement for video testimonials.`
             }
 
-            // Only auto-pass if positive indicators are present AND no negative indicators
-            if (hasPositiveIndicators && !hasNegativeIndicators && !analysis.passed) {
+            // Only auto-pass if positive indicators are present AND no negative indicators AND page is not text-only reviews
+            if (hasPositiveIndicators && !hasNegativeIndicators && !pageHasOnlyTextReviews && !analysis.passed) {
               console.log(`Video testimonials detected in response but marked as failed. Forcing PASS.`)
               analysis.passed = true
               // Keep original reason if it's good and mentions location, otherwise enhance it
