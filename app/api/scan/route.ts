@@ -1314,6 +1314,10 @@ export async function POST(request: NextRequest) {
             rule.id === 'product-tabs' ||
             rule.title.toLowerCase().includes('tabs') || rule.title.toLowerCase().includes('accordions') ||
             rule.description.toLowerCase().includes('tabs') || rule.description.toLowerCase().includes('accordions')
+          const isImageAnnotationsRule =
+            rule.id === 'image-annotations' ||
+            (rule.title.toLowerCase().includes('annotation') && rule.title.toLowerCase().includes('image')) ||
+            (rule.description.toLowerCase().includes('annotations') && rule.description.toLowerCase().includes('product images'))
 
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
@@ -1323,6 +1327,8 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isLazyRule) {
             specialInstructions = `\nLAZY LOADING RULE - DETAILED CHECK:\nCheck "Lazy loading status:" and "Images without lazy loading:" in KEY ELEMENTS.\n\nIf FAILED: You MUST specify:\n1. WHICH images/videos are missing lazy loading (use image file names or descriptions from KEY ELEMENTS)\n2. WHERE these images/videos are located on the page (e.g., "product gallery section", "hero section", "product images area", "main product image", "thumbnail gallery", "description section")\n3. WHY it's a problem (e.g., "should have loading='lazy' attribute to improve page load time")\n\nIMPORTANT: \n- Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166, £39.00) in the failure reason\n- Only mention image/video file names, descriptions, or locations\n- Be specific about WHERE on the page these images are located\n\nExample: "Images without lazy loading: The main product image for 'Rainbow Dust - Starter Kit' (found in product gallery section) is missing the loading='lazy' attribute. Additionally, images in the 'POPULAR PRODUCTS' section also lack lazy loading. These should be lazy-loaded to improve initial page load time."\n\nIf no images/videos found: "No images or videos found on the page to evaluate for lazy loading."\n\nBe SPECIFIC about which elements are missing lazy loading and WHERE they are located, but DO NOT include prices or currency.`
+          } else if (isImageAnnotationsRule) {
+            specialInstructions = `\nANNOTATIONS IN PRODUCT IMAGES RULE - YOUR REASON MUST INCLUDE BOTH:\n\n1. WHAT BADGES/ANNOTATIONS ARE CURRENTLY ON THE IMAGES (required in every response):\n- List exactly which annotations or badges you see on the product images (e.g. "Current badges: none", or "Present: 'vitamin C' on main image, 'hydrating' on second image", or "Only a 'new' tag on one thumbnail").\n- If there are no badges/annotations, say clearly "Current badges on product images: none" or "No annotations present on product images".\n\n2. WHAT IS MISSING (if FAILED) OR WHY IT PASSES (if PASSED):\n- If FAILED: After stating what is present, say what should be added (e.g. "Add badges like 'dark spot correction', 'radiance boosting' to communicate key benefits").\n- If PASSED: List the specific annotations/badges found and where they appear.\n\nExample FAIL reason: "Current badges on product images: none. Product images are missing annotations or badges that highlight key benefits like 'dark spot correction' or 'radiance boosting'. Adding these visual cues would help users quickly understand the product's value."\n\nExample PASS reason: "Product images include annotations: 'vitamin C' and 'brightening' on the main image, 'hydrating' on the second. These badges communicate key benefits clearly."`
           }
 
           else if (isVideoTestimonialRule) {

@@ -645,11 +645,11 @@ export default function Home() {
                 <div className="mb-8">
                   <div className="text-center mb-3">
                     <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-                    {progress && (
+                    {/* {progress && (
                       <p className="text-xs text-gray-500 mt-1">
                         Analyzing batch {progress.current} of {progress.total}...
                       </p>
-                    )}
+                    )} */}
                   </div>
                   <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
                     <iframe
@@ -704,11 +704,11 @@ export default function Home() {
                 <div className="mb-8">
                   <div className="text-center mb-3">
                     <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-                    {progress && (
+                    {/* {progress && (
                       <p className="text-xs text-gray-500 mt-1">
                         Analyzing batch {progress.current} of {progress.total}...
                       </p>
-                    )}
+                    )} */}
                   </div>
                   <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
                     {websiteScreenshot ? (
