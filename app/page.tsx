@@ -345,14 +345,8 @@ export default function Home() {
       localStorage.removeItem('scanBatches')
     }
 
-    setProgress(null)
-    // Complete all steps
-    setMounted(analysisSteps.length - 1)
-
-    // Wait a bit then redirect
-    setTimeout(() => {
-      router.push('/scanner')
-    }, 1000)
+    // Don't set progress to null here (would reset mounted to 0 and flash all step loaders)
+    // Toast + redirect happen in handleStartScan right after this returns
   }
 
   const handleStartScan = async () => {
@@ -465,6 +459,7 @@ export default function Home() {
       await processBatches(batches)
 
       toast.success('Scan completed successfully!')
+      router.push('/scanner')
     } catch (err) {
       if (err instanceof z.ZodError) {
         toast.error(`Invalid URL: ${err.errors[0]?.message || 'Please enter a valid URL'}`)
