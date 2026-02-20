@@ -38,15 +38,32 @@ const RuleSchema = z.object({
 
 const URLSchema = z.string()
   .min(1, 'URL is required')
+  .max(2048, 'URL is too long')
+  .refine((url) => !/\s/.test(url), 'URL must not contain spaces')
   .refine((url) => {
     try {
-      const validUrl = url.startsWith('http') ? url : `https://${url}`
-      new URL(validUrl)
+      const validUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
+      const parsed = new URL(validUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+      const host = parsed.hostname.toLowerCase()
+      if (!host || host.length < 4) return false
+      const hasDot = host.includes('.')
+      const isLocalhost = host === 'localhost' || host.startsWith('localhost.')
+      if (!hasDot && !isLocalhost) return false
+      if (hasDot) {
+        const parts = host.split('.')
+        const tld = parts[parts.length - 1]
+        if (!tld || tld.length < 2) return false
+      }
       return true
     } catch {
       return false
     }
-  }, 'Invalid URL format')
+  }, 'Please enter a valid website URL (e.g. https://example.com or www.mystore.com)')
+
+  const EmailSchema = z.string()
+  .min(1, 'Email is required')
+  .email('Please enter a valid email address')
 
 export default function Home() {
   const router = useRouter()
@@ -56,6 +73,8 @@ export default function Home() {
   const [selectedRevenue, setSelectedRevenue] = useState<string | null>(null)
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [email, setEmail] = useState('')
+  const [urlError, setUrlError] = useState('')
+  const [emailError, setEmailError] = useState('')
   const [showAnalyze, setShowAnalyze] = useState(false)
   const [rules, setRules] = useState<Rule[]>([])
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
@@ -350,8 +369,32 @@ export default function Home() {
   }
 
   const handleStartScan = async () => {
-    if (!websiteUrl.trim()) {
-      toast.error('Please enter a website URL')
+    setUrlError('')
+    setEmailError('')
+
+    const urlTrimmed = websiteUrl.trim()
+    const emailTrimmed = email.trim()
+
+    if (!urlTrimmed) {
+      setUrlError('Website URL is required')
+      return
+    }
+    if (!emailTrimmed) {
+      setEmailError('Email address is required')
+      return
+    }
+
+    const urlResult = URLSchema.safeParse(urlTrimmed)
+    if (!urlResult.success) {
+      const msg = urlResult.error.errors[0]?.message || 'Invalid URL'
+      setUrlError(msg)
+      return
+    }
+
+    const emailResult = EmailSchema.safeParse(emailTrimmed)
+    if (!emailResult.success) {
+      const msg = emailResult.error.errors[0]?.message || 'Invalid email'
+      setEmailError(msg)
       return
     }
 
@@ -389,8 +432,7 @@ export default function Home() {
     }
 
     try {
-      const validatedUrl = URLSchema.parse(websiteUrl.trim())
-      let validUrl = validatedUrl
+      let validUrl = urlResult.data!
       if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
         validUrl = 'https://' + validUrl
       }
@@ -462,7 +504,7 @@ export default function Home() {
       router.push('/scanner')
     } catch (err) {
       if (err instanceof z.ZodError) {
-        toast.error(`Invalid URL: ${err.errors[0]?.message || 'Please enter a valid URL'}`)
+        console.error('Validation error:', err.errors)
       } else {
         toast.error(err instanceof Error ? err.message : 'An error occurred')
       }
@@ -570,26 +612,44 @@ export default function Home() {
                   </div>
                   <div className="mt-[33px]">
                     <label className="block text-sm font-semibold text-black">
-                      Website URL:
+                      Website URL: <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="url"
                       value={websiteUrl}
-                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      onChange={(e) => {
+                        setWebsiteUrl(e.target.value)
+                        if (urlError) setUrlError('')
+                      }}
                       placeholder="Enter the URL of your main product page"
-                      className="w-full mt-[13px] px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none"
+                      className={`w-full mt-[13px] px-4 py-3 border rounded-xl bg-white text-sm focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
+                      required
+                      aria-invalid={!!urlError}
+                      aria-describedby={urlError ? 'url-error' : undefined}
                     />
+                    {urlError && (
+                      <p id="url-error" className="mt-1.5 text-sm text-red-500">{urlError}</p>
+                    )}
                     <div className="relative mt-[19px]">
                       <label className="block text-sm font-semibold text-black">
-                        Email address:
+                        Email address: <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="email"
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => {
+                          setEmail(e.target.value)
+                          if (emailError) setEmailError('')
+                        }}
                         placeholder="Enter your best email address"
-                        className="w-full mt-[12px] px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm focus:outline-none"
+                        className={`w-full mt-[12px] px-4 py-3 border rounded-xl bg-white text-sm focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
+                        required
+                        aria-invalid={!!emailError}
+                        aria-describedby={emailError ? 'email-error' : undefined}
                       />
+                      {emailError && (
+                        <p id="email-error" className="mt-1.5 text-sm text-red-500">{emailError}</p>
+                      )}
                     </div>
                   </div>
                 </>
