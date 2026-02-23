@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       input: [{ role: 'user', content: message }],
       tools: [loadSkillTool],
       reasoning: { effort: 'medium' },
-      maxTokens: 1024,
+      maxOutputTokens: 1024,
     })
 
     const responseText = await result.getText()
