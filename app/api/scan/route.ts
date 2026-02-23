@@ -3,6 +3,8 @@ import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
 import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
+import path from 'path'
+import fs from 'fs'
 
 
 interface Rule {
@@ -1247,6 +1249,15 @@ export async function POST(request: NextRequest) {
     const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
     let lastRequestTime = 0
 
+    // System prompt from skills file (skills/my-skill/SKILL.md)
+    let systemPrompt: string
+    try {
+      const skillsPath = path.join(process.cwd(), 'skills', 'my-skill', 'SKILL.md')
+      systemPrompt = fs.readFileSync(skillsPath, 'utf-8')
+    } catch {
+      systemPrompt = 'You are an expert website rule checker. Output only valid JSON: {"passed": true|false, "reason": "..."}. Be specific, human readable, actionable. Reason under 400 characters, only about the given rule.'
+    }
+
     // Process each batch sequentially
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex]
@@ -2324,15 +2335,14 @@ CRITICAL INSTRUCTIONS:
           const chatCompletion = await openRouter.chat.send({
             model: modelName,
             messages: [
-              {
-                role: "user",
-                content: messageContent,
-              },
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: messageContent },
             ],
             temperature: 0.0,
-            maxTokens: 256,
+            maxTokens: 1024,
             topP: 1.0,
             stream: false,
+            reasoning: { effort: 'medium' },
           });
           const responseTextsss =
             chatCompletion.choices?.[0]?.message?.content?.[0];
