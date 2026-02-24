@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
             await new Promise(resolve => setTimeout(resolve, 300)) // Reduced wait
           }
           await page.evaluate(() => window.scrollTo(0, 0))
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 850))
         }
       } catch (e) {
         console.warn('Scroll failed, proceeding with screenshot')
@@ -2342,35 +2342,37 @@ CRITICAL INSTRUCTIONS:
             maxTokens: 1024,
             topP: 1.0,
             stream: false,
-            reasoning: { effort: 'medium' },
+            // No reasoning for consistent results; reasoning causes same URL to get different pass/fail counts
           });
-          const responseTextsss =
-            chatCompletion.choices?.[0]?.message?.content?.[0];
-          console.log("AI:", responseTextsss);
+          const rawContent = (chatCompletion as any)?.choices?.[0]?.message?.content ?? (chatCompletion as any)?.message?.content ?? (chatCompletion as any)?.content
 
-          // Extract and parse JSON response - Gemini compatible
-          // Gemini may return different structure, so check all possible paths
+          // Extract and parse JSON response - normalize content (string vs array with thinking + text)
           let responseText = ''
-          // Try different response structures (Gemini/OpenRouter compatibility)
-          if ((chatCompletion as any)?.choices?.[0]?.message?.content) {
-            responseText = (chatCompletion as any).choices[0].message.content
-          } else if ((chatCompletion as any)?.message?.content) {
-            responseText = (chatCompletion as any).message.content
-          } else if ((chatCompletion as any)?.content) {
-            responseText = (chatCompletion as any).content
-          } else if ((chatCompletion as any)?.text) {
-            responseText = (chatCompletion as any).text
-          } else if (typeof chatCompletion === 'string') {
-            responseText = chatCompletion
+          if (rawContent === undefined || rawContent === null) {
+            const fallback = (chatCompletion as any)?.text ?? (typeof chatCompletion === 'string' ? chatCompletion : '')
+            responseText = typeof fallback === 'string' ? fallback : ''
+          } else if (Array.isArray(rawContent)) {
+            // Reasoning models return [{ type: 'thinking', text: '...' }, { type: 'text', text: '{"passed":...}' }]
+            // Use only type 'text' parts for parsing so result is consistent and we don't mix thinking with JSON
+            const textParts = rawContent
+              .filter((p: { type?: string; text?: string }) => p && p.type === 'text')
+              .map((p: { text?: string }) => (typeof (p && p.text) === 'string' ? p!.text : ''))
+              .filter(Boolean)
+            responseText = textParts.length > 0 ? textParts.join('\n') : ''
+            if (!responseText && rawContent.length > 0) {
+              const first = rawContent[0]
+              if (first && typeof (first as { text?: string }).text === 'string') responseText = (first as { text: string }).text
+            }
+          } else if (typeof rawContent === 'string') {
+            responseText = rawContent
           } else {
-            // Log full response for debugging
-            console.error('Unexpected response structure:', JSON.stringify(chatCompletion).substring(0, 500))
-            throw new Error('Unexpected response structure from API')
+            responseText = ''
           }
 
-          if (!responseText || responseText.trim().length === 0) {
+          if (!responseText || typeof responseText !== 'string' || responseText.trim().length === 0) {
             throw new Error('Empty response from API - no content received')
           }
+          responseText = responseText.trim()
 
           // Clean and extract JSON - multiple methods for Gemini compatibility
           let jsonText = responseText.trim()
