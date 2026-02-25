@@ -99,25 +99,34 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Dual view: same top alignment; desktop wider, phone height ~20% of desktop */}
+        {/* Desktop browser preview only */}
         {url && (
           <div className="mb-8 rounded-2xl overflow-hidden p-4 sm:p-5">
-            <div className="flex flex-col sm:flex-row gap-4 items-start justify-center">
-              {/* Desktop - wider */}
-              <div className="w-full sm:flex-1 max-w-2xl h-[400px]">
+            <div className="flex justify-center">
+              {/* Desktop - browser window: traffic lights, address bar, site content */}
+              <div className="w-full max-w-2xl h-[400px]">
                 <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-xl h-full flex flex-col">
+                  {/* Title bar: traffic lights */}
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
                     <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
                     <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
                   </div>
+                  {/* Address bar - site looks like it's open in browser */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
+                    <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-xs font-medium">
+                      <svg className="w-3.5 h-3.5 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
+                      <span className="truncate">{url.startsWith('http') ? url : `https://${url}`}</span>
+                    </div>
+                  </div>
+                  {/* Site content - website loads here inside desktop browser */}
                   <div className="flex-1 min-h-0 overflow-hidden bg-white">
                     {!iframeError ? (
                       <iframe
                         src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
-                        className="w-full h-full min-h-0"
+                        className="w-full h-full min-h-0 border-0"
                         style={{ blockSize: '100%', minHeight: 0 }}
-                        title="Desktop Preview"
+                        title="Website inside desktop browser"
                         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                         loading="lazy"
                         onError={() => setIframeError(true)}
@@ -128,26 +137,6 @@ export default function ScannerPage() {
                       <div className="w-full h-full bg-[#18181b] flex items-center justify-center text-zinc-500 text-sm">No preview</div>
                     )}
                   </div>
-                </div>
-              </div>
-              {/* Mobile - top-aligned, height ~20% of desktop (260*0.2≈52) */}
-              <div className="w-full sm:w-auto shrink-0 max-w-[120px] sm:max-w-[250px]">
-                <div className="mx-auto rounded-2xl overflow-hidden bg-[#1c1c1e] border-[6px] border-[#27272a] shadow-xl p-0.5">
-                  {!iframeError ? (
-                    <iframe
-                      src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
-                      className="w-full bg-white rounded-xl"
-                      style={{ blockSize: '400px' }}
-                      title="Mobile Preview"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                      loading="lazy"
-                      onError={() => setIframeError(true)}
-                    />
-                  ) : websiteScreenshot ? (
-                    <img src={websiteScreenshot} alt="Mobile" className="w-full h-[56px] object-cover object-top rounded-xl" />
-                  ) : (
-                    <div className="w-full h-[56px] bg-[#18181b] rounded-xl flex items-center justify-center text-zinc-500 text-xs">No preview</div>
-                  )}
                 </div>
               </div>
             </div>

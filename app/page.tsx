@@ -81,23 +81,8 @@ export default function Home() {
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
-  const [estTimeLeft, setEstTimeLeft] = useState<number>(12)
+  const [loadingDots, setLoadingDots] = useState('')
   const totalSteps = 3
-
-  // Estimated time countdown during analysis (updates from progress when available)
-  useEffect(() => {
-    if (!showAnalyze) return
-    if (progress) {
-      const remaining = Math.max(0, (progress.total - progress.current) * 4)
-      setEstTimeLeft((prev) => (remaining > 0 ? remaining : prev))
-    }
-  }, [showAnalyze, progress?.current, progress?.total])
-
-  useEffect(() => {
-    if (!showAnalyze || estTimeLeft <= 0) return
-    const t = setInterval(() => setEstTimeLeft((prev) => Math.max(0, prev - 1)), 1000)
-    return () => clearInterval(t)
-  }, [showAnalyze, estTimeLeft])
 
   // Step 1 buttons data
   const step1Buttons = [
@@ -456,7 +441,6 @@ export default function Home() {
       // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
       setProgress(null)
-      setEstTimeLeft(12)
       setWebsiteScreenshot(null) // Reset screenshot for new scan
       setCurrentBatchNumber(0) // Reset batch number
       setIframeError(false) // Reset iframe error
@@ -546,7 +530,7 @@ export default function Home() {
   }
 
   return (
-    <main className={`flex items-center justify-center md:px-4 min-h-screen w-full overflow-x-hidden ${showAnalyze ? 'bg-[#0c0c0e]' : 'bg-[#FDFDFD]'}`}>
+    <main className="flex items-center justify-center md:px-4 min-h-screen w-full overflow-x-hidden">
       <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[400px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
@@ -705,34 +689,39 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
-                <p className="text-white text-center text-xl font-semibold tracking-tight mb-6">BYTEEX.</p>
-                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 bg-gradient-to-r from-purple-400 via-purple-500 to-purple-600 bg-clip-text text-transparent">
-                  Analyzing Your URL...
+                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 text-gray-600 flex items-center justify-center gap-2 flex-wrap">
+                  Analyzing Your URL
+                  <span className="flex gap-1 items-center" aria-hidden>
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
                 </h2>
-                {websiteUrl && (
-                  <p className="text-sm text-white/95 text-center mb-8 break-all px-2">
-                    {websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}
-                  </p>
-                )}
 
-                {/* Dual view: same top alignment; desktop 100% height, phone ~20% of desktop height */}
+                {/* Desktop browser preview only */}
                 {websiteUrl && (
-                  <div className="mb-6 flex flex-col sm:flex-row gap-4 sm:gap-6 items-start justify-center">
-                    {/* Desktop - wider, full height */}
-                    <div className="w-full sm:flex-1 max-w-2xl h-[320px]">
+                  <div className="mb-6 flex justify-center">
+                    {/* Desktop - browser window: traffic lights, address bar, site content */}
+                    <div className="w-full max-w-2xl h-[320px]">
                       <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-2xl flex flex-col h-full">
                         <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
                           <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
                           <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
                           <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
                         </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
+                          <div className="flex-1 flex items-center gap-2 px-3 py-1 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-[11px] font-medium">
+                            <svg className="w-3 h-3 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
+                            <span className="truncate">{websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}</span>
+                          </div>
+                        </div>
                         <div className="flex-1 min-h-0 overflow-hidden bg-white">
                           {!iframeError ? (
                             <iframe
                               src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                              className="w-full h-full min-h-0"
+                              className="w-full h-full min-h-0 border-0"
                               style={{ blockSize: '100%', minHeight: 0 }}
-                              title="Desktop Preview"
+                              title="Website inside desktop browser"
                               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                               loading="lazy"
                               onError={() => {
@@ -755,45 +744,11 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    {/* Mobile - beside desktop, top-aligned, height ~20% of desktop (320*0.2≈64; 70px for clear “bahut chhota”) */}
-                    <div className="w-full sm:w-auto shrink-0 max-w-[120px] sm:max-w-[140px]">
-                      <div className="mx-auto rounded-2xl overflow-hidden bg-[#1c1c1e] border-[6px] border-[#27272a] shadow-2xl p-0.5">
-                        {!iframeError ? (
-                          <iframe
-                            src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                            className="w-full bg-white rounded-xl"
-                            style={{ blockSize: '70px' }}
-                            title="Mobile Preview"
-                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                            loading="lazy"
-                            onError={() => setIframeError(true)}
-                          />
-                        ) : websiteScreenshot ? (
-                          <img src={websiteScreenshot} alt="Mobile" className="w-full h-[70px] object-cover object-top rounded-xl" />
-                        ) : (
-                          <div className="w-full h-[70px] bg-[#18181b] rounded-xl flex items-center justify-center">
-                            <div className="w-5 h-5 border-2 border-[#3f3f46] border-t-purple-500 rounded-full animate-spin" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
                   </div>
                 )}
 
-                {/* Dark grey pills - Est. time + AI analyzing */}
-                <div className="flex flex-wrap items-center justify-center gap-2 mb-1">
-                  <span className="px-4 py-2 rounded-full bg-[#27272a] text-white text-sm font-medium">
-                    Est. time left: <strong>{estTimeLeft}s</strong>
-                  </span>
-                  <span className="px-4 py-2 rounded-full bg-[#27272a] text-white text-sm font-medium flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    AI analyzing
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-500 text-center mb-8">This typically takes 10–15 seconds.</p>
-
-                {/* Steps - dark cards, purple check / purple gear / grey gear */}
-                <p className="text-sm font-medium text-zinc-500 mb-3">Website URL:</p>
+                {/* Steps - loading strips (visible dark cards with white text) */}
+                <p className="text-sm font-medium text-white mb-3">Website URL:</p>
                 <div className="space-y-3">
                   <AnimatePresence mode="popLayout">
                     {analysisSteps
@@ -814,42 +769,29 @@ export default function Home() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ x: 200, opacity: 0 }}
                             transition={{ duration: 0.3 }}
-                            className="flex items-center gap-4 p-4 rounded-xl bg-[#27272a] border border-[#3f3f46]"
+                            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
                             {isCompleted ? (
-                              <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center shrink-0">
+                              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
                                 <Check className="w-3.5 h-3.5 text-white" />
                               </div>
                             ) : (
-                              <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-purple-400 animate-spin' : 'text-zinc-500'}`} />
+                              <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-gray-400  animate-spin' : 'text-gray-400'}`} />
                             )}
-                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-zinc-400 line-through' : isActive ? 'text-white' : 'text-zinc-500'}`}>
+                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
                               {title}
                             </span>
-                            {isCompleted && <span className="text-purple-400 text-sm font-medium">Finished</span>}
+                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
                             {isActive && (
-                              <span className="text-zinc-400 text-sm font-medium flex items-center gap-1.5">
+                              <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
                                 Analyzing...
-                                <span className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
+                                <span className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
                               </span>
                             )}
                           </motion.div>
                         )
                       })}
                   </AnimatePresence>
-                </div>
-
-                {/* Trusted by footer - BYTEEX style */}
-                <div className="mt-10 text-center">
-                  <div className="inline-block px-4 py-2 rounded-full bg-[#27272a] border border-[#3f3f46] text-zinc-400 text-sm font-medium mb-4">
-                    Trusted by over 100 DTC brands
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-6 text-zinc-500 text-xs font-medium">
-                    <span>FOREVER JEWELRY</span>
-                    <span>MEXTRADE</span>
-                    <span>MOLLY MAID</span>
-                    <span>OMNIDESK</span>
-                  </div>
                 </div>
               </div>
 
