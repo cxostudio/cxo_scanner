@@ -689,9 +689,9 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
-                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 text-gray-600 flex items-center justify-center gap-2 flex-wrap">
+                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 text-gray-600 flex items-baseline justify-center gap-2 flex-wrap">
                   Analyzing Your URL
-                  <span className="flex gap-1 items-center" aria-hidden>
+                  <span className="flex gap-1 items-end" aria-hidden>
                     <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
                     <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
