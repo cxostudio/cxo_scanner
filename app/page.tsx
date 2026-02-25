@@ -785,7 +785,6 @@ export default function Home() {
                             {isActive && (
                               <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
                                 Analyzing...
-                                <span className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
                               </span>
                             )}
                           </motion.div>
