@@ -81,6 +81,7 @@ export default function Home() {
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
+  const [loadingDots, setLoadingDots] = useState('')
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -529,8 +530,8 @@ export default function Home() {
   }
 
   return (
-    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
-      <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
+    <main className="flex items-center justify-center md:px-4 min-h-screen w-full overflow-x-hidden">
+      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[400px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -686,158 +687,117 @@ export default function Home() {
             </>
           ) : (
             <>
-              <h2 className="text-3xl md:text-4xl font-bold text-[#919191] text-center mb-8 flex items-center justify-center whitespace-nowrap">
-                <span>Analyzing your URL</span>
-                <span className="loader ml-2">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-              </h2>
+              {/* BYTEEX-style dark analyze screen */}
+              <div className="pt-8 pb-12">
+                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 text-gray-600 flex items-center justify-center gap-2 flex-wrap">
+                  Analyzing Your URL
+                  <span className="flex gap-1 items-center" aria-hidden>
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                </h2>
 
-              {/* Website Preview during analysis */}
-              {websiteUrl && !iframeError && (
-                <div className="mb-8">
-                  <div className="text-center mb-3">
-                    <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-                    {/* {progress && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Analyzing batch {progress.current} of {progress.total}...
-                      </p>
-                    )} */}
-                  </div>
-                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                    <iframe
-                      src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                      className="w-full"
-                      style={{ blockSize: '400px' }}
-                      title="Website Preview"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                      loading="lazy"
-                      onError={() => {
-                        console.log('Iframe blocked, triggering screenshot fallback immediately')
-                        setIframeError(true)
-                        // Trigger screenshot API immediately for faster fallback
-                        if (websiteUrl && !websiteScreenshot) {
-                          const validUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
-                          fetch('/api/screenshot', {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({ url: validUrl }),
-                          })
-                            .then(async (res) => {
-                              if (res.ok) {
-                                const data = await res.json()
-                                if (data?.screenshot) {
-                                  setWebsiteScreenshot(data.screenshot)
-                                  try {
-                                    sessionStorage.setItem('lastScreenshot', data.screenshot)
-                                  } catch (e) {
-                                    console.error('Could not store screenshot in sessionStorage:', e)
-                                  }
+                {/* Desktop browser preview only */}
+                {websiteUrl && (
+                  <div className="mb-6 flex justify-center">
+                    {/* Desktop - browser window: traffic lights, address bar, site content */}
+                    <div className="w-full max-w-2xl h-[320px]">
+                      <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-2xl flex flex-col h-full">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
+                          <div className="flex-1 flex items-center gap-2 px-3 py-1 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-[11px] font-medium">
+                            <svg className="w-3 h-3 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
+                            <span className="truncate">{websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden bg-white">
+                          {!iframeError ? (
+                            <iframe
+                              src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
+                              className="w-full h-full min-h-0 border-0"
+                              style={{ blockSize: '100%', minHeight: 0 }}
+                              title="Website inside desktop browser"
+                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                              loading="lazy"
+                              onError={() => {
+                                setIframeError(true)
+                                if (websiteUrl && !websiteScreenshot) {
+                                  const validUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
+                                  fetch('/api/screenshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: validUrl }) })
+                                    .then(async (res) => { if (res.ok) { const d = await res.json(); if (d?.screenshot) { setWebsiteScreenshot(d.screenshot); try { sessionStorage.setItem('lastScreenshot', d.screenshot) } catch (_) {} } } })
+                                    .catch(() => {})
                                 }
-                              }
-                            })
-                            .catch((err) => {
-                              console.error('Screenshot fallback failed:', err)
-                            })
-                        }
-                      }}
-                      onLoad={() => {
-                        console.log('Iframe loaded successfully')
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-
-              {/* Fallback to screenshot when iframe is blocked */}
-              {(iframeError || !websiteUrl) && (
-                <div className="mb-8">
-                  <div className="text-center mb-3">
-                    <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-                    {/* {progress && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Analyzing batch {progress.current} of {progress.total}...
-                      </p>
-                    )} */}
-                  </div>
-                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                    {websiteScreenshot ? (
-                      <img
-                        src={websiteScreenshot}
-                        alt="Website screenshot being analyzed"
-                        className="w-full h-auto object-contain"
-                        style={{ maxHeight: '400px' }}
-                      />
-                    ) : (
-                      <div className="p-6 bg-gray-50">
-                        <div className="text-center">
-                          <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                          <p className="text-sm text-gray-600">
-                            {iframeError ? 'Loading screenshot...' : 'Analyzing website content...'}
-                          </p>
+                              }}
+                            />
+                          ) : websiteScreenshot ? (
+                            <img src={websiteScreenshot} alt="Desktop" className="w-full h-full object-cover object-top" />
+                          ) : (
+                            <div className="w-full h-full bg-[#18181b] flex items-center justify-center">
+                              <div className="w-10 h-10 border-2 border-[#3f3f46] border-t-purple-500 rounded-full animate-spin" />
+                            </div>
+                          )}
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Steps */}
-              <div className="mt-[24px]">
-                <AnimatePresence mode="popLayout">
-                  {analysisSteps
-                    .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
-                    .filter(({ index }) => {
-                      const isCompleted = index < mounted
-                      const shouldAnimateOut = isCompleted && mounted >= index + 2
-                      return !shouldAnimateOut
-                    })
-                    .map(({ title, index, id }) => {
-                      const isCompleted = index < mounted
-                      const isActive = index === mounted
+                {/* Steps - loading strips (visible dark cards with white text) */}
+                <p className="text-sm font-medium text-white mb-3">Website URL:</p>
+                <div className="space-y-3">
+                  <AnimatePresence mode="popLayout">
+                    {analysisSteps
+                      .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
+                      .filter(({ index }) => {
+                        const isCompleted = index < mounted
+                        const shouldAnimateOut = isCompleted && mounted >= index + 2
+                        return !shouldAnimateOut
+                      })
+                      .map(({ title, index, id }) => {
+                        const isCompleted = index < mounted
+                        const isActive = index === mounted
 
-                      return (
-                        <motion.div
-                          key={id}
-                          initial={{ opacity: 0, y: 30 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{
-                            x: 300,
-                            opacity: 0,
-                            transition: { duration: 0.5, ease: 'easeOut' },
-                          }}
-                          transition={{ duration: 0.4, ease: 'easeOut' }}
-                          className={`flex items-center gap-4 p-4 my-[14px] rounded-xl border ${isCompleted
-                            ? 'border-green-500'
-                            : isActive
-                              ? 'border-black border-2'
-                              : 'border-gray-300'
-                            }`}
-                        >
-                          {isCompleted ? (
-                            <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                              <Check className="w-5 h-5 text-white" />
-                            </div>
-                          ) : (
-                            <Cog className={`w-5 h-5 shrink-0   ${isActive ? 'text-black animate-spin' : 'text-gray-400'}`} />
-                          )}
-
-                          <span
-                            className={`flex-1 ${isActive ? 'text-black font-semibold text-[12.8px] leading-[28.8px]' : 'text-gray-400 font-semibold text-[12.8px] leading-[28.8px]'
-                              } ${isCompleted ? 'line-through' : ''}`}
+                        return (
+                          <motion.div
+                            key={id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ x: 200, opacity: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
-                            {title}
-                          </span>
-                        </motion.div>
-                      )
-                    })}
-                </AnimatePresence>
+                            {isCompleted ? (
+                              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                                <Check className="w-3.5 h-3.5 text-white" />
+                              </div>
+                            ) : (
+                              <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-gray-400  animate-spin' : 'text-gray-400'}`} />
+                            )}
+                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                              {title}
+                            </span>
+                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
+                            {isActive && (
+                              <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
+                                Analyzing...
+                                <span className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                              </span>
+                            )}
+                          </motion.div>
+                        )
+                      })}
+                  </AnimatePresence>
+                </div>
               </div>
+
+              {!websiteUrl && (
+                <div className="py-12 text-center text-zinc-500">Loading...</div>
+              )}
             </>
           )}
         </div>

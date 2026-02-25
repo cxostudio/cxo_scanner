@@ -88,10 +88,10 @@ export default function ScannerPage() {
 
   return (
     <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
-      <div className="max-w-[400px] w-full mx-auto px-4 sm:px-6">
+      <div className="max-w-[1000px] w-full mx-auto px-4 sm:px-6">
         {/* Logo */}
         <div className="text-center my-[34px]">
-          <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px]  object-cover" />
+          <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
         </div>
 
         {/* Title */}
@@ -99,59 +99,48 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Website Preview - Same as scanning page */}
-        {url && !iframeError && (
-          <div className="mb-8">
-            <div className="text-center mb-3">
-              <p className="text-sm text-gray-600 font-medium">Website Preview</p>
-            </div>
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-              <iframe
-                src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
-                className="w-full"
-                style={{ blockSize: '400px' }}
-                title="Website Preview"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                loading="lazy"
-                onError={() => {
-                  console.log('Iframe blocked, falling back to screenshot')
-                  setIframeError(true)
-                }}
-                onLoad={() => {
-                  console.log('Iframe loaded successfully')
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Fallback to screenshot when iframe is blocked */}
-        {(iframeError || !url) && (
-          <div className="mb-8">
-            <div className="text-center mb-3">
-              <p className="text-sm text-gray-600 font-medium">
-                {iframeError ? 'Website Preview (Screenshot)' : 'Website Analysis Complete'}
-              </p>
-            </div>
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-              {websiteScreenshot ? (
-                <img
-                  src={websiteScreenshot}
-                  alt="Website screenshot"
-                  className="w-full h-auto object-contain"
-                  style={{ blockSize: '400px' }}
-                />
-              ) : (
-                <div className="p-6 bg-gray-50">
-                  <div className="text-center">
-                    <div className="w-12 h-12 mx-auto mb-3 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                    <p className="text-sm text-gray-600">
-                      Loading preview...
-                    </p>
+        {/* Desktop browser preview only */}
+        {url && (
+          <div className="mb-8 rounded-2xl overflow-hidden p-4 sm:p-5">
+            <div className="flex justify-center">
+              {/* Desktop - browser window: traffic lights, address bar, site content */}
+              <div className="w-full max-w-2xl h-[400px]">
+                <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-xl h-full flex flex-col">
+                  {/* Title bar: traffic lights */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+                  </div>
+                  {/* Address bar - site looks like it's open in browser */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
+                    <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-xs font-medium">
+                      <svg className="w-3.5 h-3.5 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
+                      <span className="truncate">{url.startsWith('http') ? url : `https://${url}`}</span>
+                    </div>
+                  </div>
+                  {/* Site content - website loads here inside desktop browser */}
+                  <div className="flex-1 min-h-0 overflow-hidden bg-white">
+                    {!iframeError ? (
+                      <iframe
+                        src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
+                        className="w-full h-full min-h-0 border-0"
+                        style={{ blockSize: '100%', minHeight: 0 }}
+                        title="Website inside desktop browser"
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                        loading="lazy"
+                        onError={() => setIframeError(true)}
+                      />
+                    ) : websiteScreenshot ? (
+                      <img src={websiteScreenshot} alt="Desktop" className="w-full h-full object-cover object-top" />
+                    ) : (
+                      <div className="w-full h-full bg-[#18181b] flex items-center justify-center text-zinc-500 text-sm">No preview</div>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
             </div>
+            <p className="text-sm text-zinc-400 text-center mt-4 font-medium">Analysis complete</p>
           </div>
         )}
 
