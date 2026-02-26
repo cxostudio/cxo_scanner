@@ -56,7 +56,14 @@ Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "N
 
 ### Lazy Loading
 
-Check "Lazy loading status:" and "Images without lazy loading:" in KEY ELEMENTS. If FAILED: specify WHICH images/videos are missing lazy loading, WHERE they are on the page, WHY it's a problem. Do not mention currency/prices. Be specific about locations (e.g. product gallery section, hero section).
+Rule: **First image (and first video) = eager loading** (no `loading="lazy"`). **Second, third and all subsequent images/videos = lazy loading** (`loading="lazy"` required).
+
+Check in KEY ELEMENTS:
+- "First image loading:" / "First video loading:" – must be eager/default, NOT lazy. If "lazy (should be eager)" → FAIL.
+- "Above-fold / first image with lazy (should be eager):" – if present → FAIL (first image should not be lazy).
+- "Images (2nd and after):" / "Images without lazy loading:" – 2nd and later images must have lazy. If any without lazy → FAIL.
+
+If FAILED: say (1) whether the first image/video incorrectly has lazy, and/or (2) which 2nd+ images/videos are missing lazy and where they are. Do not mention currency/prices.
 
 ### Image Annotations
 
