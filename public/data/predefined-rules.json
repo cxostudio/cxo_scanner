@@ -6,8 +6,8 @@
   },
   {
     "id": "images-lazy-loading",
-    "title": "Enable lazy loading for below-the-fold images and videos",
-    "description": "Images and videos that appear below the fold should use lazy loading so they load only when entering the viewport, reducing initial page load time and improving performance. The first visible (above-the-fold) image can use eager loading to ensure it loads immediately."
+    "title": "Lazy loading required for below-the-fold media",
+    "description": "Check all images and videos that appear below the fold. If they use lazy loading (e.g., loading=\"lazy\", lazyload class, intersection observer, or delayed source loading), the rule passes. If any below-the-fold media loads eagerly without lazy loading, the rule fails. Above-the-fold media is allowed to load eagerly."
   },
   {
     "id": "navigation-breadcrumbs",

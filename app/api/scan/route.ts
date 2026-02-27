@@ -552,109 +552,84 @@ export async function POST(request: NextRequest) {
           tabsInfo.push('Tabs/Accordions detection: Unable to extract')
         }
 
-        // Get lazy loading information: 1st image/video = eager expected, 2nd+ = lazy expected
+        // Lazy loading: only below-the-fold check. Above the fold is not checked.
         const lazyLoadingInfo = []
         try {
           const images = Array.from(document.querySelectorAll('img'))
           const videos = Array.from(document.querySelectorAll('video'))
-
-          let imagesWithLazy = 0
-          let imagesWithoutLazy = 0
-          let videosWithLazy = 0
-          let videosWithoutLazy = 0
-          const imagesWithoutLazyList: string[] = []
-          const videosWithoutLazyList: string[] = []
-          let firstImageHasLazy = false
-          let firstImageDesc = ''
-          let firstVideoHasLazy = false
-          let firstVideoDesc = ''
-
+          const viewportHeight = window.innerHeight
+          let belowFoldWithoutLazy: string[] = []
+          let belowFoldWithLazy = 0
+        
           const hasLazy = (el: Element) => {
-            const loadingAttr = el.getAttribute('loading')
-            return loadingAttr === 'lazy' || el.hasAttribute('data-lazy') || el.classList.contains('lazy')
+            const loading = el.getAttribute('loading')
+            const preload = el.getAttribute('preload')
+            return (
+              loading === 'lazy' ||
+              preload === 'none' ||
+              el.hasAttribute('data-src') ||
+              el.hasAttribute('data-lazy') ||
+              el.hasAttribute('data-original') ||
+              el.classList.contains('lazy') ||
+              el.classList.contains('lazyload')
+            )
           }
-
-          // Images: 1st = eager (no lazy), 2nd+ = lazy required
-          images.forEach((img, index) => {
-            const loadingAttr = img.getAttribute('loading')
-            let src = img.getAttribute('src') || img.getAttribute('data-src') || `image-${index + 1}`
-            if (src && !src.startsWith('data:') && !src.startsWith('//')) {
-              try {
-                if (src.startsWith('http://') || src.startsWith('https://')) {
-                  const urlObj = new URL(src)
-                  src = `//${urlObj.host}${urlObj.pathname}${urlObj.search}${urlObj.hash}`
-                } else if (src.startsWith('/')) {
-                  const baseUrl = window.location.origin
-                  src = `//${new URL(baseUrl).host}${src}`
-                }
-              } catch (e) {}
-            }
-            const shortSrc = src.length > 50 ? src.substring(0, 50) + '...' : src
-
-            if (index === 0) {
-              // First image: must be eager (no loading="lazy")
+        
+          const getShortSrc = (src: string | null, i: number, type: string) => {
+            if (!src) return `${type}-${i + 1}`
+            return src.length > 60 ? src.substring(0, 60) + '...' : src
+          }
+        
+          // Check images
+          images.forEach((img, i) => {
+            const rect = img.getBoundingClientRect()
+            const src = img.getAttribute('src') || img.getAttribute('data-src')
+            const short = getShortSrc(src, i, 'image')
+        
+            if (rect.top >= viewportHeight) {
+              // BELOW FOLD
               if (hasLazy(img)) {
-                firstImageHasLazy = true
-                firstImageDesc = shortSrc
+                belowFoldWithLazy++
+              } else {
+                belowFoldWithoutLazy.push(short)
               }
-              lazyLoadingInfo.push(`First image loading: ${loadingAttr === 'lazy' ? 'lazy (should be eager)' : loadingAttr || 'eager/default (OK)'}`)
-              return
-            }
-
-            // 2nd, 3rd, ... images: must have lazy
-            if (hasLazy(img)) {
-              imagesWithLazy++
-            } else {
-              imagesWithoutLazy++
-              if (imagesWithoutLazyList.length < 5) imagesWithoutLazyList.push(shortSrc)
             }
           })
-
-          // Videos: 1st = eager, 2nd+ = lazy required
-          videos.forEach((video, index) => {
-            const loadingAttr = video.getAttribute('loading')
-            const src = video.getAttribute('src') || video.querySelector('source')?.getAttribute('src') || `video-${index + 1}`
-            const shortSrc = (src && src.length > 50) ? src.substring(0, 50) + '...' : src || `video-${index + 1}`
-
-            if (index === 0) {
+        
+          // Check videos
+          videos.forEach((video, i) => {
+            const rect = video.getBoundingClientRect()
+            const src =
+              video.getAttribute('src') ||
+              video.querySelector('source')?.getAttribute('src')
+            const short = getShortSrc(src || null, i, 'video')
+        
+            if (rect.top >= viewportHeight) {
               if (hasLazy(video)) {
-                firstVideoHasLazy = true
-                firstVideoDesc = shortSrc
+                belowFoldWithLazy++
+              } else {
+                belowFoldWithoutLazy.push(short)
               }
-              lazyLoadingInfo.push(`First video loading: ${loadingAttr === 'lazy' ? 'lazy (should be eager)' : loadingAttr || 'eager/default (OK)'}`)
-              return
-            }
-
-            if (hasLazy(video)) {
-              videosWithLazy++
-            } else {
-              videosWithoutLazy++
-              if (videosWithoutLazyList.length < 5) videosWithoutLazyList.push(shortSrc)
             }
           })
-
-          if (images.length > 0 || videos.length > 0) {
-            lazyLoadingInfo.push(`Images (2nd and after): ${imagesWithLazy} with lazy, ${imagesWithoutLazy} without lazy`)
-            lazyLoadingInfo.push(`Videos (2nd and after): ${videosWithLazy} with lazy, ${videosWithoutLazy} without lazy`)
-            if (firstImageHasLazy) {
-              lazyLoadingInfo.push(`Above-fold / first image with lazy (should be eager): ${firstImageDesc || 'first image'}`)
-            }
-            if (firstVideoHasLazy) {
-              lazyLoadingInfo.push(`First video with lazy (should be eager): ${firstVideoDesc || 'first video'}`)
-            }
-            if (imagesWithoutLazy > 0) {
-              lazyLoadingInfo.push(`Images without lazy loading: ${imagesWithoutLazyList.join(', ')}${imagesWithoutLazy > 5 ? ` (+${imagesWithoutLazy - 5} more)` : ''}`)
-            }
-            if (videosWithoutLazy > 0) {
-              lazyLoadingInfo.push(`Videos without lazy loading: ${videosWithoutLazyList.join(', ')}${videosWithoutLazy > 5 ? ` (+${videosWithoutLazy - 5} more)` : ''}`)
-            }
-            const failFirst = firstImageHasLazy || firstVideoHasLazy
-            const failRest = imagesWithoutLazy > 0 || videosWithoutLazy > 0
-            const allOk = !failFirst && !failRest
-            lazyLoadingInfo.push(`Lazy loading status: ${allOk ? 'PASS - First image/video eager, 2nd+ have lazy' : 'FAIL - ' + (failFirst ? 'First image/video should be eager (no lazy). ' : '') + (failRest ? 'Some 2nd+ images/videos missing lazy.' : '')}`)
+        
+          if (belowFoldWithoutLazy.length === 0) {
+            lazyLoadingInfo.push(
+              `Lazy loading status: PASS - All below-the-fold media uses lazy loading`
+            )
           } else {
-            lazyLoadingInfo.push('Lazy loading: No images or videos found')
+            lazyLoadingInfo.push(
+              `Lazy loading status: FAIL - Some below-the-fold media missing lazy loading`
+            )
+            lazyLoadingInfo.push(
+              `Missing lazy loading: ${belowFoldWithoutLazy.slice(0, 5).join(', ')}${
+                belowFoldWithoutLazy.length > 5
+                  ? ` (+${belowFoldWithoutLazy.length - 5} more)`
+                  : ''
+              }`
+            )
           }
+        
         } catch (e) {
           lazyLoadingInfo.push('Lazy loading detection: Unable to extract')
         }
@@ -1361,7 +1336,7 @@ export async function POST(request: NextRequest) {
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isLazyRule) {
-            specialInstructions = `\nLAZY LOADING RULE - BY POSITION:\n- First image (and first video): must use EAGER loading (no loading="lazy"). If KEY ELEMENTS show "First image loading: lazy (should be eager)" or "Above-fold / first image with lazy (should be eager):" → FAIL.\n- Second, third and all subsequent images/videos: must have loading="lazy". Check "Images (2nd and after):", "Images without lazy loading:" in KEY ELEMENTS. If any 2nd+ image/video lacks lazy → FAIL.\n\nIf FAILED: say (1) if the first image/video incorrectly has lazy, and/or (2) which 2nd+ images/videos are missing lazy and where (e.g. product gallery, thumbnails, description). Do NOT mention currency or prices.`
+            specialInstructions = `\nLAZY LOADING RULE - BELOW THE FOLD ONLY (no eager check):\n- Only BELOW THE FOLD images and videos are checked. Above the fold is not checked; do not fail for above-the-fold.\n- Check "Lazy loading status:" and "Missing lazy loading:" in KEY ELEMENTS. If "Lazy loading status: PASS" → PASS. If "Lazy loading status: FAIL" → FAIL.\n- If FAILED: Your reason MUST say WHERE lazy loading was not found: use the list from "Missing lazy loading:" (those are the below-the-fold images/videos missing lazy) and mention section/position (e.g. product gallery, description section, thumbnails). Do NOT mention currency or prices. Do NOT mention first image eager or above-the-fold.`
           } else if (isImageAnnotationsRule) {
             specialInstructions = `\nANNOTATIONS IN PRODUCT IMAGES RULE - YOUR REASON MUST INCLUDE BOTH:\n\n1. WHAT BADGES/ANNOTATIONS ARE CURRENTLY ON THE IMAGES (required in every response):\n- List exactly which annotations or badges you see on the product images (e.g. "Current badges: none", or "Present: 'vitamin C' on main image, 'hydrating' on second image", or "Only a 'new' tag on one thumbnail").\n- If there are no badges/annotations, say clearly "Current badges on product images: none" or "No annotations present on product images".\n\n2. WHAT IS MISSING (if FAILED) OR WHY IT PASSES (if PASSED):\n- If FAILED: After stating what is present, say what should be added (e.g. "Add badges like 'dark spot correction', 'radiance boosting' to communicate key benefits").\n- If PASSED: List the specific annotations/badges found and where they appear.\n\nExample FAIL reason: "Current badges on product images: none. Product images are missing annotations or badges that highlight key benefits like 'dark spot correction' or 'radiance boosting'. Adding these visual cues would help users quickly understand the product's value."\n\nExample PASS reason: "Product images include annotations: 'vitamin C' and 'brightening' on the main image, 'hydrating' on the second. These badges communicate key benefits clearly."`
           } else if (isThumbnailsRule) {

@@ -56,14 +56,26 @@ Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "N
 
 ### Lazy Loading
 
-Rule: **First image (and first video) = eager loading** (no `loading="lazy"`). **Second, third and all subsequent images/videos = lazy loading** (`loading="lazy"` required).
+Rule: Images and videos that appear below the fold must use lazy loading.
+Media visible in the first screen (above the fold) may load eagerly.
 
 Check in KEY ELEMENTS:
-- "First image loading:" / "First video loading:" – must be eager/default, NOT lazy. If "lazy (should be eager)" → FAIL.
-- "Above-fold / first image with lazy (should be eager):" – if present → FAIL (first image should not be lazy).
-- "Images (2nd and after):" / "Images without lazy loading:" – 2nd and later images must have lazy. If any without lazy → FAIL.
 
-If FAILED: say (1) whether the first image/video incorrectly has lazy, and/or (2) which 2nd+ images/videos are missing lazy and where they are. Do not mention currency/prices.
+Identify media listed as appearing below the fold or after scrolling.
+
+If any below-the-fold image/video loads without lazy loading → FAIL.
+
+If all below-the-fold media uses lazy loading → PASS.
+
+If FAILED:
+
+Clearly mention which image/video is missing lazy loading
+
+Mention where it appears on the page (section, position, or content area)
+
+Explain that below-the-fold media should load lazily for performance.
+
+Do not mention currency or prices.
 
 ### Image Annotations
 
