@@ -48,18 +48,19 @@ export async function GET(request: NextRequest) {
 
     // Get the HTML content
     const html = await response.text()
+    const base = new URL(targetUrl).origin
 
     // Modify HTML to remove security restrictions
     const modifiedHtml = html
       .replace(/<meta[^>]*http-equiv[^>]*X-Frame-Options[^>]*>/gi, '')
       .replace(/<meta[^>]*content[^>]*X-Frame-Options[^>]*>/gi, '')
-      .replace(/X-Frame-Options[^;]*/gi, '')
-      .replace(/Content-Security-Policy[^;]*/gi, '')
-      .replace(/frame-ancestors[^;]*/gi, '')
+      // .replace(/X-Frame-Options[^;]*/gi, '')
+      // .replace(/Content-Security-Policy[^;]*/gi, '')
+      // .replace(/frame-ancestors[^;]*/gi, '')
       .replace(/<head>/i, `<head>
         <meta http-equiv="Content-Security-Policy" content="frame-ancestors *;">
         <meta http-equiv="X-Frame-Options" content="ALLOWALL">
-        <base href="${targetUrl}">
+       <base href="${base}/">
       `)
 
     // Return the modified HTML
