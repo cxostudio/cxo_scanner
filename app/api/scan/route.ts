@@ -2841,39 +2841,6 @@ CRITICAL INSTRUCTIONS:
 
           // Update last request time after successful API call
           lastRequestTime = Date.now()
-
-          // Save training data automatically - only if response is valid and relevant
-          try {
-            // Validate response relevance before saving
-            const reasonLower = result.reason.toLowerCase()
-            const ruleText = (rule.title + ' ' + rule.description).toLowerCase()
-
-            // Check if reason is relevant to the rule (basic validation)
-            const isRelevant = reasonLower.includes(rule.title.toLowerCase().split(' ')[0]) ||
-              reasonLower.length > 20 // If reason is substantial, likely relevant
-
-            if (isRelevant && !result.reason.includes('Error:')) {
-              await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/training-data`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  url: validUrl,
-                  websiteContent: contentForAI,
-                  rule: {
-                    id: rule.id,
-                    title: rule.title,
-                    description: rule.description,
-                  },
-                  result: result,
-                }),
-              }).catch(err => console.error('Failed to save training data:', err))
-            }
-            else {
-              console.warn(`Skipping training data save - response may not be relevant to rule: ${rule.title}`)
-            }
-          } catch (trainingError) {
-            console.error('Error saving training data:', trainingError)
-          }
         } catch (error) {
           let errorMessage = 'Unknown error occurred'
 
