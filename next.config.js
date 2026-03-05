@@ -4,7 +4,7 @@ const nextConfig = {
   // Optimize for Vercel serverless
   experimental: {
     // Increase memory for API routes that use Puppeteer
-    serverComponentsExternalPackages: ["puppeteer-core", "@sparticuz/chromium"],
+    serverComponentsExternalPackages: ["puppeteer-core", "@sparticuz/chromium", "tesseract.js"],
   },
   onDemandEntries: {
     maxInactiveAge: 50 * 1000,
