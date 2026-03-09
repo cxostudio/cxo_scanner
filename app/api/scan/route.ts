@@ -5,9 +5,6 @@ import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
 import path from 'path'
 import fs from 'fs'
-import { createWorker } from 'tesseract.js'
-
-
 interface Rule {
   id: string
   title: string
@@ -181,6 +178,7 @@ export async function POST(request: NextRequest) {
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
+    let keyElements: string | undefined // DOM-derived string including lazy loading status (used for lazy rule when screenshot path is active)
     // Deterministic detection for "customer video testimonials" (review videos).
     // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
     let customerReviewVideoFound = false
@@ -301,7 +299,7 @@ export async function POST(request: NextRequest) {
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
-      const keyElements = await page.evaluate(() => {
+      keyElements = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
           .map(el => {
             const text = el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || ''
@@ -1072,113 +1070,14 @@ export async function POST(request: NextRequest) {
         return null
       })
 
-      // --- OCR: read text from visible images (iframe-aware). If iframeSelector set, use iframe content frame; else main page ---
-      const maxOcrImages = process.env.VERCEL ? 3 : 5
-      let ocrImageText = ''
-      let ocrWorker: Awaited<ReturnType<typeof createWorker>> | null = null
-      try {
-        type ImageItem = { index: number; x: number; y: number; width: number; height: number }
-        type ImageItemIframe = { index: string; src?: string; alt?: string; rect: { x: number; y: number; width: number; height: number } }
-        let imagesData: ImageItem[] = []
-        let clipOffset = { left: 0, top: 0 }
-
-        if (iframeSelector) {
-          await page.waitForSelector(iframeSelector, { visible: true, timeout: 8000 }).catch(() => null)
-          const iframeEl = await page.$(iframeSelector)
-          if (iframeEl) {
-            const frame = await iframeEl.contentFrame()
-            if (frame) {
-              const iframeBoundingBox = await page.evaluate((sel: string) => {
-                const el = document.querySelector(sel)
-                if (!el || (el as HTMLElement).offsetParent === null) return null
-                const r = (el as Element).getBoundingClientRect()
-                return { left: r.left, top: r.top, width: r.width, height: r.height }
-              }, iframeSelector)
-              if (iframeBoundingBox) {
-                clipOffset = { left: iframeBoundingBox.left, top: iframeBoundingBox.top }
-                const imagesInIframe = await frame.evaluate((maxY: number) => {
-                  const images = Array.from(document.querySelectorAll('img'))
-                  const data: { index: string; src?: string; alt?: string; rect: { x: number; y: number; width: number; height: number } }[] = []
-                  images.forEach((img, i) => {
-                    const r = img.getBoundingClientRect()
-                    if (r.width >= 40 && r.height >= 40 && r.top >= 0 && r.top < maxY) {
-                      data.push({
-                        index: `iframe_img_${i + 1}`,
-                        src: img.src || undefined,
-                        alt: img.alt || undefined,
-                        rect: { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }
-                      })
-                    }
-                  })
-                  return data.slice(0, 5)
-                }, 1200) as ImageItemIframe[]
-                if (imagesInIframe.length > 0) {
-                  imagesData = imagesInIframe.map((img, i) => ({
-                    index: i + 1,
-                    x: clipOffset.left + img.rect.x,
-                    y: clipOffset.top + img.rect.y,
-                    width: img.rect.width,
-                    height: img.rect.height
-                  }))
-                }
-              }
-            }
-          }
-        }
-        if (imagesData.length === 0) {
-          const mainPageRects = await page.evaluate((maxY: number) => {
-            const imgs = Array.from(document.querySelectorAll('img')).filter(img => {
-              const r = img.getBoundingClientRect()
-              return r.width >= 40 && r.height >= 40 && r.top >= 0 && r.top < maxY
-            })
-            return imgs.slice(0, 5).map((img, i) => {
-              const r = img.getBoundingClientRect()
-              return { index: i + 1, x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }
-            })
-          }, 1200) as ImageItem[]
-          imagesData = mainPageRects
-          clipOffset = { left: 0, top: 0 }
-        }
-
-        if (imagesData.length > 0) {
-          ocrWorker = await createWorker('eng', undefined, { logger: () => {} })
-          const lines: string[] = []
-          for (let i = 0; i < Math.min(imagesData.length, maxOcrImages); i++) {
-            const rect = imagesData[i]
-            try {
-              const clip = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-              if (clip.width <= 0 || clip.height <= 0) {
-                lines.push(`Image ${rect.index}: (skipped, invalid dimensions)`)
-                continue
-              }
-              const buf = await page.screenshot({ clip, type: 'png', encoding: 'binary' }) as Buffer
-              const dataUri = `data:image/png;base64,${Buffer.from(buf).toString('base64')}`
-              const { data } = await ocrWorker.recognize(dataUri)
-              const text = (data?.text || '').trim().replace(/\s+/g, ' ').substring(0, 500)
-              lines.push(`Image ${rect.index}: ${text || '(no text detected)'}`)
-            } catch (_) {
-              lines.push(`Image ${rect.index}: (OCR skipped)`)
-            }
-          }
-          ocrImageText = lines.join('\n')
-        }
-      } catch (e) {
-        console.warn('OCR image text extraction failed (non-blocking):', e)
-      } finally {
-        if (ocrWorker) {
-          await ocrWorker.terminate().catch(() => {})
-        }
-      }
-
-      // Combine visible text and key elements (token-efficient)
+      // Combine visible text and key elements (DOM only, no image/OCR reading)
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\nSelected Variant: ${selectedVariant || 'None'}` +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
-        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}` +
-        (ocrImageText ? `\n\n--- TEXT IN IMAGES (OCR) ---\nText extracted from visible page images (use for annotations, badges, labels, prices on images):\n${ocrImageText}` : '')
+        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
 
 
@@ -1205,26 +1104,6 @@ export async function POST(request: NextRequest) {
           } catch (screenshotError) {
             console.warn('Failed to capture final screenshot, using early one if available:', screenshotError)
             screenshotDataUrl = earlyScreenshot || null
-          }
-        }
-
-        // OCR on full-page screenshot so answer is based on what's visible in the page image
-        if (screenshotDataUrl) {
-          let pageScreenshotWorker: Awaited<ReturnType<typeof createWorker>> | null = null
-          try {
-            pageScreenshotWorker = await createWorker('eng', undefined, { logger: () => {} })
-            const { data } = await pageScreenshotWorker.recognize(screenshotDataUrl)
-            const pageOcrText = (data?.text || '').trim().replace(/\s+/g, ' ').substring(0, 2000)
-            if (pageOcrText) {
-              websiteContent += `\n\n--- TEXT FROM PAGE SCREENSHOT (OCR) ---\nText read from full page screenshot (use as primary basis for rule check):\n${pageOcrText}`
-              console.log('Page screenshot OCR completed, appended to content')
-            }
-          } catch (pageOcrErr) {
-            console.warn('Page screenshot OCR failed (non-blocking):', pageOcrErr)
-          } finally {
-            if (pageScreenshotWorker) {
-              await pageScreenshotWorker.terminate().catch(() => {})
-            }
           }
         }
 
@@ -1381,6 +1260,13 @@ export async function POST(request: NextRequest) {
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     console.log('Website already loaded, now processing all rules...')
 
+    // Lazy loading rule = DOM only (keyElements); all other rules = DOM/content via OpenRouter (no image)
+    const isLazyRule = (r: Rule): boolean =>
+      r.id === 'images-lazy-loading' ||
+      r.title.toLowerCase().includes('lazy') ||
+      r.description.toLowerCase().includes('lazy') ||
+      r.description.toLowerCase().includes('lazy loading')
+
     // Minimal delay for API rate limiting only
     const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
     let lastRequestTime = 0
@@ -1411,6 +1297,21 @@ export async function POST(request: NextRequest) {
           }
         }
         lastRequestTime = Date.now()
+
+        // Lazy loading rule = DOM only (no OpenRouter)
+        if (isLazyRule(rule)) {
+          const passed = keyElements != null && keyElements.includes('Lazy loading status: PASS')
+          const missingMatch = keyElements?.match(/Missing lazy loading: ([^\n]+)/)
+          const reason = passed
+            ? 'Below-the-fold images and videos use lazy loading.'
+            : missingMatch
+              ? `Below-the-fold media missing lazy loading: ${missingMatch[1].trim()}.`
+              : keyElements != null
+                ? 'Lazy loading status: FAIL or unable to parse.'
+                : 'Lazy loading could not be evaluated (no DOM from page).'
+          results.push({ ruleId: rule.id, ruleTitle: rule.title, passed, reason })
+          continue
+        }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
         const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
@@ -2220,25 +2121,15 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
             console.log('[DELIVERY RULE] Content sent to AI (DELIVERY TIME CHECK section):\n', deliveryBlock)
           }
 
-          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\n${websiteContent.includes('TEXT FROM PAGE SCREENSHOT (OCR)') ? 'Use "TEXT FROM PAGE SCREENSHOT (OCR)" in Content as the primary basis for your answer (text read from the page image).\n\n' : ''}\n\n=== RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\nYou ALSO receive a SCREENSHOT IMAGE of this same page (when available). You have TWO sources of truth: (1) the DOM/content in "Content" above, and (2) the screenshot image you see. For this single rule, mark "passed": true if the requirement is clearly satisfied in EITHER the DOM/content OR the screenshot. Only mark "passed": false when BOTH sources show that the requirement is NOT satisfied. If one source shows the rule is met and the other is unclear or missing, you MUST treat the rule as PASSED.\n\n=== RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
 
-          // Call OpenRouter API directly with image support
-          // Build content array with text and optional image
-          // OpenRouter format: content can be string or array of content parts
-          let messageContent: string | any[] = prompt
-          console.log(messageContent, "messageContent")
-          // Add screenshot if available (for AI vision analysis)
-          // For video testimonial / customer photos: prefer reviews-section close-up so AI can see review videos/photos
-          const screenshotToUse =
-            (isVideoTestimonialRule && reviewsSectionScreenshotDataUrl) || (isCustomerPhotoRule && reviewsSectionScreenshotDataUrl)
-              ? reviewsSectionScreenshotDataUrl
-              : screenshotDataUrl
-          if (screenshotToUse && (isCustomerPhotoRule || isVideoTestimonialRule || isProductTabsRule || isTrustBadgesRule || isBenefitsNearTitleRule || isThumbnailsRule || isBeforeAfterRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule || isShippingRule)) {
-            let imageUrl = screenshotToUse
-            if (!screenshotToUse.startsWith('data:')) {
-              imageUrl = toProtocolRelativeUrl(screenshotToUse, validUrl)
+          // Call OpenRouter with BOTH DOM/content and screenshot image (when available)
+          let messageContent: any = prompt
+          if (screenshotDataUrl) {
+            let imageUrl = screenshotDataUrl
+            if (!screenshotDataUrl.startsWith('data:')) {
+              imageUrl = toProtocolRelativeUrl(screenshotDataUrl, validUrl)
             }
-
             messageContent = [
               {
                 type: 'text',
@@ -2251,19 +2142,7 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
                 },
               },
             ]
-            console.log(`Including screenshot for ${rule.id} rule(visual analysis required)`)
-            if ((isVideoTestimonialRule || isCustomerPhotoRule) && reviewsSectionScreenshotDataUrl) {
-              console.log(`Using reviews section close - up for ${rule.id}(reviews visible clearly)`)
-            }
-            if (isCustomerPhotoRule) {
-              console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
-            }
-            if (isVideoTestimonialRule) {
-              console.log(`⚠️ VIDEO TESTIMONIALS RULE: Screenshot included - AI must check for videos in review sections`)
-            }
           }
-
-
 
           const chatCompletion = await openRouter.chat.send({
             model: modelName,
@@ -2273,7 +2152,8 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
             ],
             temperature: 0.0,
             maxTokens: 700,
-            topP: 1.0,
+            topP: 0.1,
+            seed: 42,
             stream: false,
             // No reasoning for consistent results; reasoning causes same URL to get different pass/fail counts
           });

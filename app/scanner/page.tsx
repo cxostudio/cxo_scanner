@@ -1,10 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { usePathname } from "next/navigation";
 import { Check, X, ChevronDown, AlertCircle } from 'lucide-react';
 import { z } from 'zod'
-import { motion } from 'framer-motion'
 
 interface ScanResult {
   ruleId: string
@@ -21,7 +19,6 @@ export default function ScannerPage() {
   const [visibleCount, setVisibleCount] = useState(8)
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [iframeError, setIframeError] = useState<boolean>(false)
-  const pathname = usePathname();
 
   useEffect(() => {
     setMounted(true)
@@ -29,37 +26,30 @@ export default function ScannerPage() {
   }, [])
 
   const loadResults = () => {
-    const storedResults = localStorage.getItem('scanResults')
-    const storedUrl = localStorage.getItem('scanUrl')
+    try {
+      const storedUrl = localStorage.getItem('scanUrl')
+      if (storedUrl) {
+        setUrl(storedUrl)
+      }
 
-    if (storedResults) {
-      try {
+      const storedResults = localStorage.getItem('scanResults')
+      if (storedResults) {
         const parsed = z.array(z.object({
           ruleId: z.string(),
           ruleTitle: z.string(),
           passed: z.boolean(),
           reason: z.string(),
         })).parse(JSON.parse(storedResults))
-
         setResults(parsed)
-        if (storedUrl) {
-          setUrl(storedUrl)
-        }
-      } catch (error) {
-        console.error('Error loading results:', error)
-        setResults(null)
       }
-    }
 
-    // Try to load screenshot from last batch (stored in sessionStorage during scan)
-    try {
       const lastScreenshot = sessionStorage.getItem('lastScreenshot')
       if (lastScreenshot) {
         setWebsiteScreenshot(lastScreenshot)
       }
-    } catch (e) {
-      console.warn('Could not load screenshot from sessionStorage:', e)
-      setWebsiteScreenshot(null)
+    } catch (error) {
+      console.error('Error loading scanner data:', error)
+      setResults(null)
     }
   }
 
@@ -140,7 +130,6 @@ export default function ScannerPage() {
                 </div>
               </div>
             </div>
-            <p className="text-sm text-zinc-400 text-center mt-4 font-medium">Analysis complete</p>
           </div>
         )}
 
