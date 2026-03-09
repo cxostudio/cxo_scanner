@@ -81,7 +81,6 @@ export default function Home() {
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
-  const [loadingDots, setLoadingDots] = useState('')
   const totalSteps = 3
 
   // Step 1 buttons data
