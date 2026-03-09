@@ -117,13 +117,33 @@ The TITLE itself (not description) must be descriptive, specific, include key at
 
 Look for tabs, accordions, collapsible sections (e.g. "Product Details", "Ingredients", "How to Use"). Check "Tabs/Accordions Found:" in KEY ELEMENTS. If any tabs/accordions detected → PASS. If "None" → FAIL. Trust the screenshot: many sites use divs (no &lt;details&gt;), so KEY ELEMENTS may miss them but the screenshot shows accordions.
 
-### Quantity Discount / Promotion
+### Quantity / Discount Check
 
-Check "QUANTITY DISCOUNT & PROMOTION CHECK" in KEY ELEMENTS. PASS if: "Any Discount/Promotion Detected: YES" (quantity/bulk discount, price drop, coupon code). FAIL if only free shipping with no price reduction, or no discount.
+PASS if ANY of the following appear on the product page:
 
-### Shipping Time Near CTA
+• **Tiered quantity pricing** – e.g. "1x item", "2x items", "3x items"
+• **Percentage discount** – e.g. "Save 16%", "20% off"
+• **Price drop** – e.g. "€46.10 → €39.18"
 
-Check "SHIPPING TIME CHECK" in KEY ELEMENTS. Need: CTA found and visible without scrolling; shipping info near CTA (directly above/below); Has Countdown/Cutoff Time: YES; Has Delivery Date: YES. All required. If any missing → FAIL. Be specific about which requirement is missing.
+FAIL if none of these appear.
+
+Check "QUANTITY / DISCOUNT CHECK" in KEY ELEMENTS. If "Rule passes (any of above): YES" → PASS. If "Rule passes: NO" → FAIL.
+
+Important: Ignore coupon codes. Ignore free shipping. Only tiered pricing, percentage discount, or price drop count.
+
+### Delivery estimate near CTA (Display delivery estimate near CTA)
+
+Check "DELIVERY TIME CHECK" in KEY ELEMENTS.
+
+Required:
+1. CTA found (Add to Cart / Buy Now).
+2. Delivery information directly above or below the CTA.
+3. Delivery date or delivery range present (e.g. "Get it by Tuesday, Oct 12", "Order now and get it between Wed, Mar 11 and Thu, Mar 12").
+
+Optional: Countdown/cutoff time (e.g. "Order within 2 hours", "Order by 3 PM") is NOT required. Do not fail if "Has Countdown/Cutoff Time (optional): NO".
+
+PASS if CTA + shipping near CTA + delivery date or range. FAIL if any of these is missing or shipping is only in footer.
+Be specific about which requirement is missing.
 
 ### Variant Preselection
 

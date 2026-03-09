@@ -5,8 +5,6 @@ import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
 import path from 'path'
 import fs from 'fs'
-
-
 interface Rule {
   id: string
   title: string
@@ -43,10 +41,28 @@ const ScanRequestSchema = z.object({
     .min(1, 'At least one rule is required')
     .max(100, 'Maximum 100 rules allowed per scan'),
   captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
+  iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
 })
 
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// Strip HTML to plain text so AI gets readable content (used when Puppeteer fails and we fall back to fetch)
+function htmlToPlainText(html: string): string {
+  let text = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text
+}
 
 // Helper function to extract retry-after time from error message (for error messages only)
 const extractRetryAfter = (errorMessage: string): number => {
@@ -99,7 +115,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules, captureScreenshot = true } = validationResult.data
+    const { url, rules, captureScreenshot = true, iframeSelector } = validationResult.data
 
     // Normalize URL
     let validUrl = url.trim()
@@ -162,10 +178,13 @@ export async function POST(request: NextRequest) {
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
+    let keyElements: string | undefined // DOM-derived string including lazy loading status (used for lazy rule when screenshot path is active)
     // Deterministic detection for "customer video testimonials" (review videos).
     // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
     let customerReviewVideoFound = false
     let customerReviewVideoEvidence: string[] = []
+    let quantityDiscountContext: { foundPatterns: string[]; tieredPricing: boolean; percentDiscount: boolean; priceDrop: boolean; hasAnyDiscount: boolean; debugSnippet?: string } = { foundPatterns: [], tieredPricing: false, percentDiscount: false, priceDrop: false, hasAnyDiscount: false }
+    let shippingTimeContext: { ctaFound: boolean; ctaText: string; ctaVisibleWithoutScrolling: boolean; shippingInfoNearCTA: string; hasCountdown: boolean; hasDeliveryDate: boolean; shippingText: string; allRequirementsMet: boolean } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -245,6 +264,9 @@ export async function POST(request: NextRequest) {
 
       console.log('Page loaded, ready for screenshot')
 
+      // Wait 2s after load so full site settles (scripts, DOM, recommendations) before first-batch scan
+      await new Promise((r) => setTimeout(r, 2000))
+
       // Capture early screenshot immediately after page load (for Vercel timeout safety)
       // This ensures screenshot is available even if full scan times out
       if (captureScreenshot && !earlyScreenshot) {
@@ -272,12 +294,12 @@ export async function POST(request: NextRequest) {
       fullVisibleText = visibleText
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
-      const colorWaitMs = process.env.VERCEL ? 1500 : 600
+      const colorWaitMs = process.env.VERCEL ? 1500 : 1500
       await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
-      const keyElements = await page.evaluate(() => {
+      keyElements = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
           .map(el => {
             const text = el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || ''
@@ -637,120 +659,61 @@ export async function POST(request: NextRequest) {
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}\n${tabsInfo.join('\n')}`
       })
 
-      // Get quantity discount and general discount context (merged)
-      const quantityDiscountContext = await page.evaluate(() => {
+      // QUANTITY / DISCOUNT CHECK: PASS if discount-type content appears ANYWHERE on the page. Log snippet to console for debugging.
+      quantityDiscountContext = await page.evaluate(() => {
         const bodyText = document.body.innerText || ''
-        const bodyTextLower = bodyText.toLowerCase()
+        const foundPatterns: string[] = []
 
-        // Common discount patterns (bulk, quantity, and regular discounts)
-        const patterns = [
-          "buy 2",
-          "buy 3",
-          "buy more save",
-          "quantity discount",
-          "bulk discount",
-          "volume discount",
-          "save when you buy",
-          "x for",
-          "packs of",
-          "bundle",
-          // Regular discount patterns
-          "% off",
-          "percent off",
-          "special price",
-          "bank offer",
-          "flat",
-          "off",
-          "cashback",
-          "discount",
-          "save",
-          "offer"
-        ]
+        // Tiered quantity pricing: "1x item", "2x items", "3x items" (flexible spacing)
+        const tieredPricing = /\b(1x\s*item|2x\s*items|3x\s*items|\d+x\s*items?)\b/i.test(bodyText) ||
+          (/\b1x\b/i.test(bodyText) && /\b2x\b/i.test(bodyText) && /item/i.test(bodyText))
+        if (tieredPricing) foundPatterns.push('Tiered quantity pricing (e.g. 1x item, 2x items)')
 
-        const found = patterns.filter(p => bodyTextLower.includes(p))
+        // Percentage discount: "Save 16%", "(16%)", "Save €6,92 (16%)", or save + %, or any X%
+        const percentDiscount = /(?:save\s+)?\d+%\s*(?:off)?/i.test(bodyText) ||
+          /\d+\s*%\s*off/i.test(bodyText) ||
+          /\(\s*\d+\s*%\s*\)/.test(bodyText) ||
+          /save\s+[€$£]?[\d.,]+\s*\(\s*\d+\s*%\)/i.test(bodyText) ||
+          (/\bsave\b/i.test(bodyText) && /\d+\s*%/.test(bodyText)) ||
+          /\d+\s*%/.test(bodyText)
+        if (percentDiscount) foundPatterns.push('Percentage discount (e.g. Save 16%, 20% off)')
 
-        // Also check for discount percentages/amounts in text
-        const hasDiscountPercentage = /(\d+)%\s*off/i.test(bodyText) || /off\s*(\d+)%/i.test(bodyText)
-        const hasDiscountAmount = /flat\s*₹?\s*\d+/i.test(bodyText) || /₹?\s*\d+\s*off/i.test(bodyText)
-        const hasSpecialPrice = bodyTextLower.includes("special price")
-        const hasBankOffer = bodyTextLower.includes("bank offer")
+        // Price drop: arrow, was/now, European + save, or any two currency amounts anywhere
+        const priceDropArrow = /[€$£]\s*\d+[.,]\d+\s*(?:→|–|-|to)\s*[€$£]?\s*\d+[.,]?\d*/i.test(bodyText)
+        const priceDropWasNow = /(?:was|from|original)\s*[€$£]?\s*\d+[.,]?\d*\s*(?:now|to)\s*[€$£]?\s*\d+[.,]?\d*/i.test(bodyText)
+        const priceDropEuropean = /[€$£]\s*\d+,\d+/.test(bodyText) && /save\s+[€$£]?[\d.,]+/i.test(bodyText)
+        const twoPrices = (bodyText.match(/[€$£]\s*\d+[.,]\d+/g) || []).length >= 2
+        const priceDrop = priceDropArrow || priceDropWasNow || priceDropEuropean || twoPrices
+        if (priceDrop) foundPatterns.push('Price drop (original → discounted)')
 
-        // Step 1: Check for discount percentage (e.g., "20% off", "10% discount")
-        const discountPercentagePatterns = [
-          /(\d+)%\s*off/i,
-          /off\s*(\d+)%/i,
-          /(\d+)%\s*discount/i,
-          /discount\s*of\s*(\d+)%/i,
-          /save\s*(\d+)%/i,
-          /(\d+)%\s*save/i
-        ]
+        // Any discount-type signal anywhere on the page (broad)
+        const anyDiscountSignal = /\b(?:save|discount|off|sale|reduced|compare\s*at)\b/i.test(bodyText) && (/\d+%/.test(bodyText) || /[€$£]\s*\d+/.test(bodyText))
+        if (anyDiscountSignal && foundPatterns.length === 0) foundPatterns.push('Discount/save/sale text on page')
 
-        let discountPercentage = null
-        for (const pattern of discountPercentagePatterns) {
-          const match = bodyText.match(pattern)
-          if (match) {
-            discountPercentage = match[0]
-            break
-          }
-        }
+        const hasAnyDiscount = tieredPricing || percentDiscount || priceDrop || anyDiscountSignal
 
-        // Step 2: Check for price drop (e.g., "Was $50, Now $40", "Original $100, Now $80")
-        const priceDropPatterns = [
-          /was\s*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
-          /original\s*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
-          /was\s*[₹$€£]?\s*[\d,]+\.?\d*\s*,\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
-          /[₹$€£]?\s*[\d,]+\.?\d*\s*was\s*[₹$€£]?\s*[\d,]+\.?\d*/i,
-          /strike.*[₹$€£]?\s*[\d,]+\.?\d*\s*now\s*[₹$€£]?\s*[\d,]+\.?\d*/i
-        ]
-
-        let priceDrop = null
-        for (const pattern of priceDropPatterns) {
-          const match = bodyText.match(pattern)
-          if (match) {
-            priceDrop = match[0]
-            break
-          }
-        }
-
-        // Step 3: Check for coupon codes (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
-        const couponPatterns = [
-          /use\s+code\s+[A-Z0-9]+/i,
-          /coupon\s+code\s*:?\s*[A-Z0-9]+/i,
-          /promo\s+code\s*:?\s*[A-Z0-9]+/i,
-          /code\s*:?\s*[A-Z0-9]{4,}/i,
-          /apply\s+code\s+[A-Z0-9]+/i
-        ]
-
-        let couponCode = null
-        for (const pattern of couponPatterns) {
-          const match = bodyText.match(pattern)
-          if (match) {
-            couponCode = match[0]
-            break
-          }
-        }
-
-        // Step 4: Exclude free shipping alone (unless it's part of a discount)
-        const hasFreeShipping = /free\s+shipping/i.test(bodyTextLower)
-        const hasOnlyFreeShipping = hasFreeShipping && !discountPercentage && !priceDrop && !couponCode && !hasDiscountPercentage && !hasDiscountAmount && !hasSpecialPrice && !hasBankOffer
-
-        // Determine if discount exists (quantity/bulk OR general discount)
-        const hasBulkDiscount = found.length > 0 || hasDiscountPercentage || hasDiscountAmount || hasSpecialPrice || hasBankOffer
-        const hasGeneralDiscount = !!(discountPercentage || priceDrop || couponCode)
-        const hasAnyDiscount = hasBulkDiscount || (hasGeneralDiscount && !hasOnlyFreeShipping)
+        // Snippet for console debug (what AI / detection sees)
+        const debugSnippet = bodyText.substring(0, 2800)
 
         return {
-          foundPatterns: found,
-          hasBulkDiscount: hasBulkDiscount,
-          discountPercentage: discountPercentage || 'None',
-          priceDrop: priceDrop || 'None',
-          couponCode: couponCode || 'None',
-          hasFreeShipping: hasFreeShipping,
-          hasOnlyFreeShipping: hasOnlyFreeShipping,
-          hasAnyDiscount: hasAnyDiscount,
-          preview: bodyText.substring(0, 1000)
+          foundPatterns,
+          tieredPricing,
+          percentDiscount,
+          priceDrop,
+          hasAnyDiscount: hasAnyDiscount || anyDiscountSignal,
+          debugSnippet,
         }
       })
+
+      // Console: show discount detection result and page text snippet so you can see what was seen
+      console.log('[DISCOUNT CHECK] Result:', {
+        hasAnyDiscount: quantityDiscountContext.hasAnyDiscount,
+        tieredPricing: quantityDiscountContext.tieredPricing,
+        percentDiscount: quantityDiscountContext.percentDiscount,
+        priceDrop: quantityDiscountContext.priceDrop,
+        foundPatterns: quantityDiscountContext.foundPatterns,
+      })
+      console.log('[DISCOUNT CHECK] Page text (DOM) seen for detection — first ~2800 chars:\n', quantityDiscountContext.debugSnippet || '')
 
       // Get CTA context for shipping rules
       const ctaContext = await page.evaluate(() => {
@@ -767,89 +730,139 @@ export async function POST(request: NextRequest) {
         return text.substring(0, 500)
       })
 
-      // Get shipping time context for shipping time visibility rule
-      const shippingTimeContext = await page.evaluate(() => {
-        const ctaSelectors = ["button", "a", "[role='button']", "input[type='submit']"]
-        let ctaElement: HTMLElement | null = null
-        let ctaText = "N/A"
-        let ctaRect: DOMRect | null = null
+      // Get shipping time context: find ALL Add to Cart on page, then for each get text in zone above/below (full DOM, visual zone)
+      shippingTimeContext = await page.evaluate(() => {
         const viewportHeight = window.innerHeight
+        const deliveryDatePatterns = [
+          /get\s+it\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /delivered\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /arrives\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /get\s+it\s+on\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /delivery\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /get\s+it\s+by\s+[A-Za-z]+\s+\d+/i,
+          /delivered\s+by\s+[A-Za-z]+\s+\d+/i,
+          /delivered\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
+          /get\s+it\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
+          /delivery\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
+          /arrives\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
+          /get\s+it\s+between\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
+          /order\s+now\s+and\s+get\s+it\s+between\s+.+?\s+and\s+.+?/i,
+          /get\s+it\s+between\s+.+?\s+and\s+.+?/i,
+          /between\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i
+        ]
+        const countdownPatterns = [
+          /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
+          /order\s+by\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
+          /order\s+before\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
+          /cutoff\s+time/i,
+          /order\s+in\s+the\s+next\s+[\d\s]+(?:hours?|hrs?)/i
+        ]
 
-        // Find CTA button
-        for (const selector of ctaSelectors) {
-          const potentialCtas = Array.from(document.querySelectorAll(selector)) as HTMLElement[]
-          const foundCTA = potentialCtas.find(el => {
-            const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').toLowerCase()
-            return text.includes("add to cart") || text.includes("add to bag") || text.includes("buy now") || text.includes("checkout")
-          })
-          if (foundCTA) {
-            ctaElement = foundCTA
-            ctaText = (ctaElement.textContent || ctaElement.getAttribute('aria-label') || ctaElement.getAttribute('value') || '').trim()
-            ctaRect = ctaElement.getBoundingClientRect()
-            break
-          }
+        function isHeaderCta(el: HTMLElement, rect: DOMRect): boolean {
+          if (el.closest('header') || el.closest('[role="banner"]') || el.closest('nav')) return true
+          if (rect.top < 120 && rect.height < 60) return true
+          return false
         }
 
+        // Get text visually in zone above and below a rect (sample points, get topmost element text at each)
+        function getTextInZoneAroundRect(rect: DOMRect): string {
+          const centerX = rect.left + rect.width / 2
+          const minY = Math.max(0, rect.top - 250)
+          const maxY = Math.min(viewportHeight, rect.bottom + 550)
+          const step = 30
+          const seen = new Set<string>()
+          const parts: string[] = []
+          for (let y = minY; y <= maxY; y += step) {
+            const els = document.elementsFromPoint(centerX, y)
+            const topmost = els.find(el => {
+              if (el === document.body || el === document.documentElement) return false
+              const t = (el as HTMLElement).innerText || el.textContent || ''
+              return t && t.trim().length > 0
+            })
+            if (topmost) {
+              const t = ((topmost as HTMLElement).innerText || topmost.textContent || '').trim()
+              if (t.length > 0 && t.length < 1200 && !seen.has(t)) {
+                seen.add(t)
+                parts.push(t)
+              }
+            }
+          }
+          return parts.join(' ')
+        }
+
+        // Find ALL Add to Cart / Buy Now in full DOM
+        const allCtas: { el: HTMLElement; rect: DOMRect; text: string }[] = []
+        for (const selector of ["button", "a", "[role='button']", "input[type='submit']"]) {
+          const nodes = document.querySelectorAll(selector) as NodeListOf<HTMLElement>
+          nodes.forEach(el => {
+            const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').toLowerCase()
+            if (text.includes("add to cart") || text.includes("add to bag") || text.includes("buy now") || text.includes("checkout")) {
+              const rect = el.getBoundingClientRect()
+              if (rect.width > 0 && rect.height > 0) allCtas.push({ el, rect, text: text.trim() })
+            }
+          })
+        }
+
+        // Prefer main product CTA: skip header, prefer one with larger area or in middle of viewport
+        const mainCtas = allCtas.filter(({ el, rect }) => !isHeaderCta(el, rect))
+        const ctasToCheck = mainCtas.length > 0 ? mainCtas : allCtas
+        let ctaElement: HTMLElement | null = ctasToCheck[0]?.el ?? allCtas[0]?.el ?? null
+        let ctaRect: DOMRect | null = ctasToCheck[0]?.rect ?? allCtas[0]?.rect ?? null
+        const ctaText = ctaElement ? (ctaElement.textContent || ctaElement.getAttribute('aria-label') || ctaElement.getAttribute('value') || '').trim() : "N/A"
         const ctaFound = !!ctaElement
         const ctaVisibleWithoutScrolling = ctaRect ? (ctaRect.top >= 0 && ctaRect.bottom <= viewportHeight) : false
 
-        // Find shipping time information near CTA
         let shippingInfoNearCTA = ""
         let hasCountdown = false
         let hasDeliveryDate = false
         let shippingText = ""
 
-        if (ctaRect && ctaElement) {
-          // Get parent container of CTA
-          const parent = ctaElement.closest("form, div, section, [class*='cart'], [class*='checkout'], [class*='product']")
-          if (parent) {
-            const parentText = (parent as HTMLElement).innerText || parent.textContent || ''
-
-            // Check for countdown/cutoff time patterns
-            const countdownPatterns = [
-              /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
-              /order\s+by\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
-              /order\s+before\s+[\d\s]+(?:am|pm|hours?|hrs?)/i,
-              /cutoff\s+time/i,
-              /order\s+in\s+the\s+next\s+[\d\s]+(?:hours?|hrs?)/i
-            ]
-
-            // Check for delivery date patterns
-            const deliveryDatePatterns = [
-              /get\s+it\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
-              /delivered\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
-              /arrives\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
-              /get\s+it\s+on\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
-              /delivery\s+by\s+[A-Za-z]+\s*,\s*[A-Za-z]+\s+\d+/i,
-              /get\s+it\s+by\s+[A-Za-z]+\s+\d+/i,
-              /delivered\s+by\s+[A-Za-z]+\s+\d+/i
-            ]
-
-            // Check for countdown
-            for (const pattern of countdownPatterns) {
-              if (pattern.test(parentText)) {
-                hasCountdown = true
-                const match = parentText.match(pattern)
-                if (match) shippingText += match[0] + " "
-                break
-              }
-            }
-
-            // Check for delivery date
-            for (const pattern of deliveryDatePatterns) {
-              if (pattern.test(parentText)) {
-                hasDeliveryDate = true
-                const match = parentText.match(pattern)
-                if (match) shippingText += match[0] + " "
-                break
-              }
-            }
-
-            // Extract shipping info from parent container (first 300 chars)
-            if (parentText) {
-              shippingInfoNearCTA = parentText.substring(0, 300)
+        // For each CTA (main first), get zone text; if any has delivery date/range, pass
+        const toCheck = ctaElement && ctaRect ? [{ el: ctaElement, rect: ctaRect }] : []
+        for (const { el, rect } of toCheck) {
+          const zoneText = getTextInZoneAroundRect(rect)
+          if (!zoneText) continue
+          for (const pattern of deliveryDatePatterns) {
+            if (pattern.test(zoneText)) {
+              hasDeliveryDate = true
+              const m = zoneText.match(pattern)
+              if (m) shippingText += m[0] + " "
+              shippingInfoNearCTA = zoneText.substring(0, 500)
+              break
             }
           }
+          if (hasDeliveryDate) break
+          for (const pattern of countdownPatterns) {
+            if (pattern.test(zoneText)) {
+              hasCountdown = true
+              const m = zoneText.match(pattern)
+              if (m) shippingText += m[0] + " "
+              break
+            }
+          }
+        }
+
+        // If main CTA zone had no date, try every other CTA's zone (full site check)
+        if (!hasDeliveryDate && allCtas.length > 1) {
+          for (const { el, rect } of allCtas) {
+            if (el === ctaElement) continue
+            const zoneText = getTextInZoneAroundRect(rect)
+            if (!zoneText) continue
+            for (const pattern of deliveryDatePatterns) {
+              if (pattern.test(zoneText)) {
+                hasDeliveryDate = true
+                const m = zoneText.match(pattern)
+                if (m) shippingText += m[0] + " "
+                if (!shippingInfoNearCTA) shippingInfoNearCTA = zoneText.substring(0, 500)
+                break
+              }
+            }
+            if (hasDeliveryDate) break
+          }
+        }
+
+        if (!shippingInfoNearCTA && ctaElement && ctaRect) {
+          shippingInfoNearCTA = getTextInZoneAroundRect(ctaRect).substring(0, 500) || "N/A"
         }
 
         return {
@@ -860,7 +873,7 @@ export async function POST(request: NextRequest) {
           hasCountdown,
           hasDeliveryDate,
           shippingText: shippingText.trim() || "None",
-          allRequirementsMet: hasCountdown && hasDeliveryDate
+          allRequirementsMet: ctaFound && hasDeliveryDate
         }
       })
 
@@ -986,6 +999,7 @@ export async function POST(request: NextRequest) {
             : `No trust badges found within ${NEAR_CTA_PX}px of CTA`
         }
       })
+
       // preselect
       const selectedVariant = await page.evaluate(() => {
         // Method 1: Check actual checked input (radio buttons)
@@ -1056,14 +1070,13 @@ export async function POST(request: NextRequest) {
         return null
       })
 
-
-      // Combine visible text and key elements (token-efficient)
+      // Combine visible text and key elements (DOM only, no image/OCR reading)
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\nSelected Variant: ${selectedVariant || 'None'}` +
-        `\n\n--- QUANTITY DISCOUNT & PROMOTION CHECK ---\nPatterns Found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nBulk/Quantity Discount Detected: ${quantityDiscountContext.hasBulkDiscount ? "YES" : "NO"}\nDiscount Percentage: ${quantityDiscountContext.discountPercentage}\nPrice Drop: ${quantityDiscountContext.priceDrop}\nCoupon Code: ${quantityDiscountContext.couponCode}\nHas Free Shipping Only: ${quantityDiscountContext.hasOnlyFreeShipping ? "YES" : "NO"}\nAny Discount/Promotion Detected: ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n` +
+        `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
-        `\n\n--- SHIPPING TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nShipping Info Near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time: ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date: ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nShipping Text Found: ${shippingTimeContext.shippingText}\nAll Requirements Met: ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
+        `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
         `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
 
 
@@ -1180,19 +1193,39 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Fallback to simple fetch if Puppeteer fails
+      // Fallback to simple fetch if Puppeteer fails - use plain text so AI sees full page content, not raw HTML
       try {
         const response = await fetch(validUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           },
         })
-        websiteContent = await response.text()
+        const rawHtml = await response.text()
+        websiteContent = htmlToPlainText(rawHtml)
+        console.log('[FALLBACK] Using fetch + HTML-to-text. Content length:', websiteContent.length)
 
-        // Limit content for fallback fetch too
-        if (websiteContent.length > 6000) {
-          websiteContent = websiteContent.substring(0, 6000) + '... [truncated]'
+        // Run discount detection on plain text so quantity rule can still pass
+        const bodyText = websiteContent
+        const foundPatterns: string[] = []
+        const tieredPricing = /\b(1x\s*item|2x\s*items|3x\s*items|\d+x\s*items?)\b/i.test(bodyText) || (/\b1x\b/i.test(bodyText) && /\b2x\b/i.test(bodyText) && /item/i.test(bodyText))
+        if (tieredPricing) foundPatterns.push('Tiered quantity pricing (e.g. 1x item, 2x items)')
+        const percentDiscount = /(?:save\s+)?\d+%\s*(?:off)?/i.test(bodyText) || /\d+\s*%\s*off/i.test(bodyText) || /\(\s*\d+\s*%\s*\)/.test(bodyText) || /save\s+[€$£]?[\d.,]+\s*\(\s*\d+\s*%\)/i.test(bodyText) || (/\bsave\b/i.test(bodyText) && /\d+\s*%/.test(bodyText)) || /\d+\s*%/.test(bodyText)
+        if (percentDiscount) foundPatterns.push('Percentage discount (e.g. Save 16%, 20% off)')
+        const priceDrop = /[€$£]\s*\d+[.,]\d+\s*(?:→|–|-|to)\s*[€$£]?\s*\d+[.,]?\d*/i.test(bodyText) || /(?:was|from|original)\s*[€$£]?\s*\d+[.,]?\d*\s*(?:now|to)\s*[€$£]?\s*\d+[.,]?\d*/i.test(bodyText) || (/[€$£]\s*\d+,\d+/.test(bodyText) && /save\s+[€$£]?[\d.,]+/i.test(bodyText)) || (bodyText.match(/[€$£]\s*\d+[.,]\d+/g) || []).length >= 2
+        if (priceDrop) foundPatterns.push('Price drop (original → discounted)')
+        const anyDiscountSignal = /\b(?:save|discount|off|sale|reduced|compare\s*at)\b/i.test(bodyText) && (/\d+%/.test(bodyText) || /[€$£]\s*\d+/.test(bodyText))
+        if (anyDiscountSignal && foundPatterns.length === 0) foundPatterns.push('Discount/save/sale text on page')
+        const hasAnyDiscount = tieredPricing || percentDiscount || priceDrop || anyDiscountSignal
+        quantityDiscountContext = { foundPatterns, tieredPricing, percentDiscount, priceDrop, hasAnyDiscount, debugSnippet: websiteContent.substring(0, 2800) }
+        if (hasAnyDiscount) console.log('[FALLBACK] Discount detected in fetched text:', foundPatterns)
+
+        // Append a synthetic QUANTITY / DISCOUNT CHECK so AI sees it (keep under 6000 total)
+        const discountBlock = `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${priceDrop ? "YES" : "NO"}\nPatterns found: ${foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n`
+        const maxBody = 5600
+        if (websiteContent.length > maxBody) {
+          websiteContent = websiteContent.substring(0, maxBody) + '... [truncated]'
         }
+        websiteContent += discountBlock
       } catch (fetchError) {
         // Even on fetch error, return early screenshot if available
         if (earlyScreenshot) {
@@ -1227,6 +1260,13 @@ export async function POST(request: NextRequest) {
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     console.log('Website already loaded, now processing all rules...')
 
+    // Lazy loading rule = DOM only (keyElements); all other rules = DOM/content via OpenRouter (no image)
+    const isLazyRule = (r: Rule): boolean =>
+      r.id === 'images-lazy-loading' ||
+      r.title.toLowerCase().includes('lazy') ||
+      r.description.toLowerCase().includes('lazy') ||
+      r.description.toLowerCase().includes('lazy loading')
+
     // Minimal delay for API rate limiting only
     const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
     let lastRequestTime = 0
@@ -1258,13 +1298,43 @@ export async function POST(request: NextRequest) {
         }
         lastRequestTime = Date.now()
 
+        // Lazy loading rule = DOM only (no OpenRouter)
+        if (isLazyRule(rule)) {
+          const passed = keyElements != null && keyElements.includes('Lazy loading status: PASS')
+          const missingMatch = keyElements?.match(/Missing lazy loading: ([^\n]+)/)
+          const reason = passed
+            ? 'Below-the-fold images and videos use lazy loading.'
+            : missingMatch
+              ? `Below-the-fold media missing lazy loading: ${missingMatch[1].trim()}.`
+              : keyElements != null
+                ? 'Lazy loading status: FAIL or unable to parse.'
+                : 'Lazy loading could not be evaluated (no DOM from page).'
+          results.push({ ruleId: rule.id, ruleTitle: rule.title, passed, reason })
+          continue
+        }
+
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
         const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
 
         try {
 
-          // Reduce content for token savings - OpenRouter model optimized
-          const contentForAI = websiteContent.substring(0, 2000) // Reduced from 3000
+          // Reduce content for token savings - OpenRouter model optimized. Reserve space for OCR (per-image + page screenshot) so image text is always visible to AI.
+          const MAX_AI_CONTENT = 2000
+          const OCR_RESERVE = 1200
+          const ocrMarker = '\n\n--- TEXT IN IMAGES (OCR) ---\n'
+          const pageScreenshotMarker = '\n\n--- TEXT FROM PAGE SCREENSHOT (OCR) ---\n'
+          const ocrIdx = websiteContent.indexOf(ocrMarker)
+          const pageScreenshotIdx = websiteContent.indexOf(pageScreenshotMarker)
+          const firstOcrIdx = [ocrIdx, pageScreenshotIdx].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? -1
+          let contentForAI: string
+          if (firstOcrIdx >= 0) {
+            const mainPart = websiteContent.substring(0, firstOcrIdx)
+            const ocrBlock = websiteContent.substring(firstOcrIdx)
+            const ocrBlockTrimmed = ocrBlock.length > OCR_RESERVE ? ocrBlock.substring(0, OCR_RESERVE) + '...' : ocrBlock
+            contentForAI = mainPart.substring(0, MAX_AI_CONTENT - ocrBlockTrimmed.length) + ocrBlockTrimmed
+          } else {
+            contentForAI = websiteContent.substring(0, MAX_AI_CONTENT)
+          }
 
           // Determine rule type for targeted instructions
           const isBreadcrumbRule = rule.title.toLowerCase().includes('breadcrumb') || rule.description.toLowerCase().includes('breadcrumb')
@@ -1292,12 +1362,18 @@ export async function POST(request: NextRequest) {
           const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
           const isFreeShippingThresholdRule = rule.id === 'free-shipping-threshold' || (rule.title.toLowerCase().includes('free shipping') && rule.title.toLowerCase().includes('threshold'))
           const isQuantityDiscountRule =
+            rule.id === 'quantity-discounts' ||
             rule.title.toLowerCase().includes("quantity") ||
-            rule.title.toLowerCase().includes("bulk") ||
-            rule.description.toLowerCase().includes("bulk pricing")
+            rule.title.toLowerCase().includes("discount") ||
+            rule.description.toLowerCase().includes("quantity") ||
+            rule.description.toLowerCase().includes("tiered") ||
+            rule.description.toLowerCase().includes("price drop")
           const isShippingRule =
+            rule.id === 'shipping-time-visibility' ||
+            rule.title.toLowerCase().includes("delivery estimate") ||
             rule.title.toLowerCase().includes("shipping time") ||
-            rule.description.toLowerCase().includes("delivered by")
+            rule.description.toLowerCase().includes("delivered by") ||
+            rule.description.toLowerCase().includes("delivery estimate")
           const isVariantRule =
             rule.title.toLowerCase().includes("variant") ||
             rule.title.toLowerCase().includes("preselect") ||
@@ -1581,172 +1657,42 @@ CRITICAL INSTRUCTIONS:
 
           } else if (isQuantityDiscountRule) {
             specialInstructions = `
-QUANTITY DISCOUNT & PROMOTION RULE - STEP-BY-STEP CHECK:
+QUANTITY / DISCOUNT CHECK:
 
-This rule checks if the product page displays ANY discount or promotional offer (quantity discounts, bulk discounts, OR general product discounts).
+PASS if ANY of the following appear on the product page:
+• Tiered quantity pricing – e.g. "1x item", "2x items", "3x items"
+• Percentage discount – e.g. "Save 16%", "20% off"
+• Price drop – e.g. "€46.10 → €39.18"
 
-STEP 1: Check "QUANTITY DISCOUNT & PROMOTION CHECK" section in KEY ELEMENTS
-- Look for "Any Discount/Promotion Detected: YES" or "Any Discount/Promotion Detected: NO"
+FAIL if none of these appear.
 
-STEP 2: If "Any Discount/Promotion Detected: YES", check which type of discount is present:
+Check "QUANTITY / DISCOUNT CHECK" in KEY ELEMENTS. If "Rule passes (any of above): YES" → PASS. If "Rule passes: NO" → FAIL.
 
-A. QUANTITY/BULK DISCOUNTS (Check "Bulk/Quantity Discount Detected"):
-- "Buy 2 Get 1 Free", "Buy 3 save 10%", "Save 10% when you buy 3"
-- Tiered pricing (e.g., "$10 each for 5+ units")
-- Volume discounts, bundle offers
-- If "Bulk/Quantity Discount Detected: YES" → PASS
-
-B. GENERAL DISCOUNTS (Check individual fields):
-- Discount Percentage: Check if value is NOT "None" (e.g., "20% off", "10% discount")
-- Price Drop: Check if value is NOT "None" (e.g., "Was $50, Now $40", "Original $100, Now $80")
-- Coupon Code: Check if value is NOT "None" (e.g., "Use code SAVE20", "Coupon: DISCOUNT10")
-- If ANY of these is NOT "None" → PASS
-
-STEP 3: Exclude free shipping alone
-- If "Has Free Shipping Only: YES" → This means ONLY free shipping exists, NO price discount → FAIL
-- If "Has Free Shipping Only: NO" and discount exists → PASS
-
-STEP 4: Determine result
-- PASS if ANY discount type is present (quantity/bulk discount OR general discount with price reduction)
-- FAIL if NO discount is present OR only free shipping exists without price reduction
-
-EXAMPLES:
-
-Example 1 - PASS (Price Drop):
-Input: "Buy this iPhone for $999, original price $1200."
-QUANTITY DISCOUNT & PROMOTION CHECK shows:
-- Price Drop: "original price $1200" (or similar)
-- Any Discount/Promotion Detected: YES
-Output: { "passed": true, "reason": "Price drop detected: Product shows original price $1200, now $999, indicating a discount." }
-
-Example 2 - FAIL (No Discount):
-Input: "Fresh organic apples at $5 per kg."
-QUANTITY DISCOUNT & PROMOTION CHECK shows:
-- Discount Percentage: None
-- Price Drop: None
-- Coupon Code: None
-- Bulk/Quantity Discount Detected: NO
-- Any Discount/Promotion Detected: NO
-            Output: { "passed": false, "reason": "No discount or promotional offer detected. Product shows standard pricing without any discount percentage, price drop, coupon code, or bulk discount." }
-
-Example 3 - PASS (Coupon Code):
-Input: "Get 20% off on all Nike shoes using code NIKE20."
-QUANTITY DISCOUNT & PROMOTION CHECK shows:
-- Discount Percentage: "20% off"
-- Coupon Code: "code NIKE20" (or similar)
-- Any Discount/Promotion Detected: YES
-Output: { "passed": true, "reason": "Discount detected: 20% off discount with coupon code NIKE20 available." }`
+Important: Ignore coupon codes. Ignore free shipping. Only tiered pricing, percentage discount, or price drop count.`
 
           } else if (isShippingRule) {
             specialInstructions = `
-SHIPPING TIME VISIBILITY RULE - STEP-BY-STEP AUDIT:
+DELIVERY ESTIMATE NEAR CTA RULE - Display delivery estimate near CTA
 
-You are an expert E-commerce UX Auditor. Your task is to analyze the Product Page based on the rule: 'Display shipping time near CTA'.
+Rule: A delivery estimate must be shown near the primary CTA (Add to Cart / Buy Now). Delivery info must be directly above or below the CTA. A delivery DATE or delivery RANGE is required (e.g. "Get it by Tuesday", "Order now and get it between Wed, Mar 11 and Thu, Mar 12"). Countdown/cutoff time is OPTIONAL.
 
-Please follow these steps strictly:
+Check "DELIVERY TIME CHECK" in KEY ELEMENTS:
 
-STEP 1 (Locate CTA):
-- Check "SHIPPING TIME CHECK" section in KEY ELEMENTS
-              - Look for "CTA Found: YES" or "CTA Found: NO"
-                - If "CTA Found: NO" → FAIL(Cannot evaluate without CTA)
-                  - If "CTA Found: YES", note the "CTA Text"(e.g., "Add to Cart", "Buy Now")
+STEP 1 - CTA: If "CTA Found: NO" → FAIL. If "CTA Found: YES" continue.
 
-STEP 2(Check Proximity):
-            - Check "Shipping Info Near CTA" in SHIPPING TIME CHECK section
-              - Verify that shipping information is located directly above or below the CTA button
-                - Check "CTA Visible Without Scrolling: YES" - CTA must be visible without scrolling
-                  - If shipping info is NOT near CTA(e.g., in footer, far from button) → FAIL
+STEP 2 - Proximity: Delivery information must be near the CTA (directly above or below). If delivery info is only in header/footer or far from button → FAIL.
 
-STEP 3(Verify Dynamic Logic - Countdown / Cutoff Time):
-            - Check "Has Countdown/Cutoff Time: YES" or "Has Countdown/Cutoff Time: NO"
-              - Look for patterns like:
-  * "Order within X hours"(e.g., "Order within 3 hrs 20 mins")
-                  * "Order by [Time]"(e.g., "Order by 3 PM")
-                  * "Order before [Time]"(e.g., "Order before 5 PM")
-                  * "Cutoff time" mentions
-                    - If "Has Countdown/Cutoff Time: NO" → FAIL(Missing countdown / cutoff time requirement)
+STEP 3 - Delivery date or range (REQUIRED): Check "Has Delivery Date or Range (required): YES/NO".
+- PASS when you see a specific date or range near the CTA, e.g. "Get it by Tuesday, Oct 12", "Order now and get it between Wed, Mar 11 and Thu, Mar 12".
+- If "Has Delivery Date or Range: YES" and delivery text is near CTA → PASS (countdown is optional; ignore "Has Countdown/Cutoff Time").
 
-STEP 4(Verify Delivery Date):
-            - Check "Has Delivery Date: YES" or "Has Delivery Date: NO"
-              - Look for specific delivery date or range patterns like:
-  * "Get it by [Day], [Month] [Date]"(e.g., "Get it by Thursday, Oct 12th")
-              * "Delivered by [Day], [Month] [Date]"(e.g., "Delivered by Tuesday, Oct 10th")
-              * "Arrives by [Day], [Month] [Date]"
-              * "Get it on [Day], [Month] [Date]"
-              - If "Has Delivery Date: NO" → FAIL(Missing specific delivery date requirement)
+STEP 4 - Countdown/cutoff (OPTIONAL): "Has Countdown/Cutoff Time" is optional. Do NOT fail if it is NO. Only delivery date or range is required.
 
-STEP 5(Final Verdict):
-            - Check "All Requirements Met: YES" or "All Requirements Met: NO"
-              - PASS if ALL of the following are met:
-            1. CTA found and visible without scrolling
-            2. Shipping info is near CTA(directly above or below)
-            3. Countdown / cutoff time is present
-            4. Specific delivery date is present
-              - FAIL if ANY requirement is missing
+FINAL: PASS if CTA found + delivery info near CTA + delivery date or range present. FAIL if CTA missing, or delivery not near CTA, or no delivery date/range.
 
-EXAMPLES FOR AI TRAINING:
-
-✅ GOOD EXAMPLE(PASS):
-SHIPPING TIME CHECK shows:
-            - CTA Found: YES
-              - CTA Text: Add to Cart
-                - CTA Visible Without Scrolling: YES
-                  - Shipping Info Near CTA: "Order within 3 hrs 20 mins, get it by Thursday, Oct 12th."
-                    - Has Countdown / Cutoff Time: YES
-                      - Has Delivery Date: YES
-                        - Shipping Text Found: "Order within 3 hrs 20 mins get it by Thursday, Oct 12th"
-                          - All Requirements Met: YES
-
-            Reason: "Dynamic delivery estimate is displayed near the 'Add to Cart' button. The message 'Order within 3 hrs 20 mins, get it by Thursday, Oct 12th' includes both a countdown (3 hrs 20 mins) and a specific delivery date (Thursday, Oct 12th), positioned directly below the CTA button. This reduces purchase friction by managing expectations upfront."
-
-❌ BAD EXAMPLE(FAIL - Missing Countdown):
-SHIPPING TIME CHECK shows:
-            - CTA Found: YES
-              - CTA Text: Buy Now
-                - CTA Visible Without Scrolling: YES
-                  - Shipping Info Near CTA: "Fast shipping available. Get it by Thursday."
-                    - Has Countdown / Cutoff Time: NO
-                      - Has Delivery Date: YES
-                        - Shipping Text Found: "Get it by Thursday"
-                          - All Requirements Met: NO
-
-            Reason: "Shipping information 'Get it by Thursday' is displayed near the 'Buy Now' button and includes a delivery date, but it is missing the countdown or specific cutoff time requirement (e.g., 'Order within X hours' or 'Order by X PM'). The rule requires both a countdown/cutoff time AND a delivery date to be present."
-
-❌ BAD EXAMPLE(FAIL - Missing Delivery Date):
-SHIPPING TIME CHECK shows:
-            - CTA Found: YES
-              - CTA Text: Add to Cart
-                - CTA Visible Without Scrolling: YES
-                  - Shipping Info Near CTA: "Order within 2 hours for fast delivery."
-                    - Has Countdown / Cutoff Time: YES
-                      - Has Delivery Date: NO
-                        - Shipping Text Found: "Order within 2 hours"
-                          - All Requirements Met: NO
-
-            Reason: "Shipping information 'Order within 2 hours for fast delivery' is displayed near the 'Add to Cart' button and includes a countdown (2 hours), but it is missing the specific delivery date requirement (e.g., 'Get it by Tuesday, Oct 12th'). The rule requires both a countdown/cutoff time AND a specific delivery date to be present."
-
-❌ BAD EXAMPLE(FAIL - Not Near CTA):
-SHIPPING TIME CHECK shows:
-            - CTA Found: YES
-              - CTA Text: Add to Cart
-                - CTA Visible Without Scrolling: YES
-                  - Shipping Info Near CTA: "Fast shipping available nationwide"(but this is in footer, not near CTA)
-                    - Has Countdown / Cutoff Time: NO
-                      - Has Delivery Date: NO
-                        - Shipping Text Found: None
-                          - All Requirements Met: NO
-
-            Reason: "Shipping information 'Fast shipping available nationwide' exists on the page but is located in the footer, far from the 'Add to Cart' button. The rule requires shipping time information to be placed in immediate proximity (directly above or below) the primary CTA. Additionally, the message lacks both a countdown/cutoff time and a specific delivery date."
-
-CRITICAL INSTRUCTIONS:
-            1. You MUST check the "SHIPPING TIME CHECK" section in KEY ELEMENTS
-            2. Follow the 5 - step process above precisely
-            3. Check BOTH countdown / cutoff time AND delivery date - BOTH are required
-            4. Verify proximity - shipping info must be directly above or below CTA
-            5. If ANY requirement is missing → FAIL
-            6. Be SPECIFIC about which requirement is missing in your reason
-            7. Quote the exact shipping text from "Shipping Text Found" if available
-8. Do NOT mention currency symbols, prices, or amounts in the reason
+✅ PASS example: "Order now and get it between Wed, Mar 11 and Thu, Mar 12" or "Get it by Thursday" near Add to Cart.
+❌ FAIL example: Only "Order within 2 hours" with no delivery date. Or delivery info only in header/footer.
+Be specific. Do not mention currency/prices. Reason only for this rule.
               `
           } else if (isVariantRule) {
             specialInstructions = `
@@ -2147,116 +2093,7 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isFreeShippingThresholdRule) {
             specialInstructions = `
-FREE SHIPPING THRESHOLD RULE - STEP - BY - STEP AUDIT:
-
-            Task: Audit the "Free Shipping Threshold" visibility on this product page.
-
-You are an expert E - commerce UX Auditor.Follow these steps strictly:
-
-STEP 1(Locate - Find CTA Button):
-            - Identify the main "Add to Cart" button
-              - Check "CTA CONTEXT" section in KEY ELEMENTS for CTA location
-                - Note the button's position on the page
-
-STEP 2(Verify Proximity - Within 50 - 100 pixels):
-            - Look at the area immediately surrounding the main "Add to Cart" button
-              - Check if free shipping message is within 50 - 100 pixels of the button
-                - Check if message is directly above or below the button
-                  - Check "CTA CONTEXT" section for shipping information near CTA
-                    - If shipping info is in header banner or footer(far from button) → FAIL
-                      - If shipping info is within 50 - 100px of button → PASS this step
-
-STEP 3(Check Language - Threshold Language):
-            - Verify if the message uses "Threshold Language"
-              - Look for phrases like:
-  * "Add $X more for Free Shipping"
-                  * "Free shipping over $50"
-                  * "You are $X away from FREE shipping"
-                  * "Spend $X more to get free shipping"
-                  - Generic messages like "Free shipping available" or "Free shipping on all orders" do NOT count
-                    - Must include specific threshold amount or "add X more" language
-                      - If threshold language is present → PASS this step
-                        - If only generic shipping info → FAIL
-
-STEP 4(Visual Check - Clear and Readable):
-            - Verify if the text is clear and easy to read
-              - Check if text is not more distracting than the main CTA
-                - Text should be visible but not compete with CTA for attention
-                  - Text should be readable(good font size, contrast)
-                    - If text is too small or hard to read → FAIL
-                      - If text is clear and readable without distracting from CTA → PASS this step
-
-STEP 5(Final Verdict):
-            - PASS if ALL 4 steps pass:
-            1. CTA button located ✓
-            2. Free shipping message within 50 - 100px of CTA ✓
-            3. Threshold language used(e.g., "Add $X more") ✓
-            4. Text is clear and readable without distracting from CTA ✓
-            - FAIL if ANY step fails
-
-EXAMPLES FOR AI TRAINING:
-
-✅ Example 1 - PASS(Good - Threshold Language Near CTA):
-            Analysis:
-            - STEP 1: Found "Add to Cart" button in product section
-              - STEP 2: Free shipping message "You are $12 away from FREE shipping" is placed directly above the Add to Cart button, within 50 - 100px
-                - STEP 3: Message uses threshold language("$12 away from FREE shipping") - specific amount mentioned
-                  - STEP 4: Text is clear, readable, and doesn't distract from the main CTA
-                    - STEP 5: All requirements met
-
-            Output: { "passed": true, "reason": "Free shipping threshold message 'You are $12 away from FREE shipping' is displayed directly above the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount and is clear and readable without distracting from the main CTA." }
-
-❌ Example 2 - FAIL(Bad - Only in Header Banner):
-            Analysis:
-            - STEP 1: Found "Add to Cart" button in product section
-              - STEP 2: Free shipping information "Free shipping on orders over $50" is only mentioned in the header banner at the top of the page, far from the CTA button
-                - STEP 3: Message uses threshold language but location is wrong
-                  - STEP 4: Text is readable but not near CTA
-                    - STEP 5: Proximity requirement failed
-
-            Output: { "passed": false, "reason": "Free shipping information 'Free shipping on orders over $50' is only mentioned in the header banner at the top of the page, far from the 'Add to Cart' button. The message must be located within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and increase Average Order Value." }
-
-❌ Example 3 - FAIL(Bad - Generic Language):
-            Analysis:
-            - STEP 1: Found "Add to Cart" button
-              - STEP 2: Shipping message "Free shipping available" is near the button, within 50 - 100px
-                - STEP 3: Message does NOT use threshold language - it's generic ("Free shipping available" instead of "Add $X more for Free Shipping")
-                  - STEP 4: Text is readable
-                    - STEP 5: Language requirement failed
-
-            Output: { "passed": false, "reason": "Shipping message 'Free shipping available' is located near the 'Add to Cart' button but does not use threshold language. The message should use persuasive language like 'Add $X more for Free Shipping' or 'You are $X away from FREE shipping' with a specific amount to encourage higher order values." }
-
-✅ Example 4 - PASS(Good - Below CTA with Threshold):
-            Analysis:
-            - STEP 1: Found "Add to Cart" button
-              - STEP 2: Free shipping message "Spend $25 more to get free shipping" is placed directly below the Add to Cart button, within 50 - 100px
-                - STEP 3: Message uses threshold language("Spend $25 more") with specific amount
-                  - STEP 4: Text is clear, readable, and appropriately sized
-                    - STEP 5: All requirements met
-
-            Output: { "passed": true, "reason": "Free shipping threshold message 'Spend $25 more to get free shipping' is displayed directly below the 'Add to Cart' button within 50-100px. The message uses persuasive threshold language with a specific amount ($25) and is clear and readable, effectively encouraging higher order values." }
-
-❌ Example 4 - FAIL(Bad - Too Far from CTA):
-            Analysis:
-            - STEP 1: Found "Add to Cart" button in product section
-              - STEP 2: Free shipping message "Free shipping over $50" is in the page footer, more than 100px away from the CTA button
-                - STEP 3: Message uses threshold language
-                  - STEP 4: Text is readable but location is wrong
-                    - STEP 5: Proximity requirement failed
-
-            Output: { "passed": false, "reason": "Free shipping message 'Free shipping over $50' is located in the page footer, more than 100px away from the 'Add to Cart' button. The message must be within 50-100 pixels of the CTA button (directly above or below) to be in the immediate eye-path and effectively increase Average Order Value." }
-
-CRITICAL INSTRUCTIONS:
-            1. You MUST check ALL 4 steps: Locate CTA → Verify Proximity → Check Language → Visual Check
-            2. Proximity means within 50 - 100 pixels, directly above or below the CTA button
-            3. Threshold language means specific phrases like "Add $X more" or "Free shipping over $X"
-            4. Generic messages like "Free shipping available" do NOT count as threshold language
-            5. Message must be in immediate eye - path of CTA, not in header banners or footers
-            6. If PASSED: Mention proximity(within 50 - 100px), threshold language used, and location
-            7. If FAILED: Specify which step failed(proximity, language, or visibility) and suggest exact text to use
-            8. Do NOT mention currency symbols in the reason unless necessary for clarity
-9. Focus on proximity, language, and visibility requirements
-            10. Suggest specific threshold language if missing(e.g., "Add $X more for Free Shipping")
+FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold language is within 50-100px of the main Add to Cart button (directly above or below). Valid phrases: "Add $X more for Free Shipping", "Free shipping over $50", "You are $X away from FREE shipping". Generic "Free shipping available" does NOT count. Message only in header/footer (far from CTA) → FAIL.
               `
           }
 
@@ -2269,25 +2106,30 @@ CRITICAL INSTRUCTIONS:
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE. You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\n === RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          // Debug: log what DOM/content the AI gets for delivery rule (so user can see why it failed)
+          if (rule.id === 'shipping-time-visibility') {
+            const deliveryBlockStart = contentForAI.indexOf('--- DELIVERY TIME CHECK ---')
+            const deliveryBlock = deliveryBlockStart >= 0
+              ? contentForAI.substring(deliveryBlockStart, deliveryBlockStart + 900)
+              : '(DELIVERY TIME CHECK block not found in content)'
+            console.log('[DELIVERY RULE] DOM context used for this rule:', {
+              ctaFound: shippingTimeContext?.ctaFound,
+              hasDeliveryDate: shippingTimeContext?.hasDeliveryDate,
+              allRequirementsMet: shippingTimeContext?.allRequirementsMet,
+              deliveryInfoNearCTA_preview: (shippingTimeContext?.shippingInfoNearCTA || '').substring(0, 300),
+            })
+            console.log('[DELIVERY RULE] Content sent to AI (DELIVERY TIME CHECK section):\n', deliveryBlock)
+          }
 
-          // Call OpenRouter API directly with image support
-          // Build content array with text and optional image
-          // OpenRouter format: content can be string or array of content parts
-          let messageContent: string | any[] = prompt
-          console.log(messageContent, "messageContent")
-          // Add screenshot if available (for AI vision analysis)
-          // For video testimonial / customer photos: prefer reviews-section close-up so AI can see review videos/photos
-          const screenshotToUse =
-            (isVideoTestimonialRule && reviewsSectionScreenshotDataUrl) || (isCustomerPhotoRule && reviewsSectionScreenshotDataUrl)
-              ? reviewsSectionScreenshotDataUrl
-              : screenshotDataUrl
-          if (screenshotToUse && (isCustomerPhotoRule || isVideoTestimonialRule || isProductTabsRule || isTrustBadgesRule || isBenefitsNearTitleRule || isThumbnailsRule || isBeforeAfterRule || isCTAProminenceRule || isFreeShippingThresholdRule || isVariantRule)) {
-            let imageUrl = screenshotToUse
-            if (!screenshotToUse.startsWith('data:')) {
-              imageUrl = toProtocolRelativeUrl(screenshotToUse, validUrl)
+          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\nYou ALSO receive a SCREENSHOT IMAGE of this same page (when available). You have TWO sources of truth: (1) the DOM/content in "Content" above, and (2) the screenshot image you see. For this single rule, mark "passed": true if the requirement is clearly satisfied in EITHER the DOM/content OR the screenshot. Only mark "passed": false when BOTH sources show that the requirement is NOT satisfied. If one source shows the rule is met and the other is unclear or missing, you MUST treat the rule as PASSED.\n\n=== RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+
+          // Call OpenRouter with BOTH DOM/content and screenshot image (when available)
+          let messageContent: any = prompt
+          if (screenshotDataUrl) {
+            let imageUrl = screenshotDataUrl
+            if (!screenshotDataUrl.startsWith('data:')) {
+              imageUrl = toProtocolRelativeUrl(screenshotDataUrl, validUrl)
             }
-
             messageContent = [
               {
                 type: 'text',
@@ -2300,19 +2142,7 @@ CRITICAL INSTRUCTIONS:
                 },
               },
             ]
-            console.log(`Including screenshot for ${rule.id} rule(visual analysis required)`)
-            if ((isVideoTestimonialRule || isCustomerPhotoRule) && reviewsSectionScreenshotDataUrl) {
-              console.log(`Using reviews section close - up for ${rule.id}(reviews visible clearly)`)
-            }
-            if (isCustomerPhotoRule) {
-              console.log(`⚠️ CUSTOMER PHOTOS RULE: Screenshot included - AI must check for "Reviews with images" section`)
-            }
-            if (isVideoTestimonialRule) {
-              console.log(`⚠️ VIDEO TESTIMONIALS RULE: Screenshot included - AI must check for videos in review sections`)
-            }
           }
-
-
 
           const chatCompletion = await openRouter.chat.send({
             model: modelName,
@@ -2321,8 +2151,9 @@ CRITICAL INSTRUCTIONS:
               { role: 'user', content: messageContent },
             ],
             temperature: 0.0,
-            maxTokens: 1024,
-            topP: 1.0,
+            maxTokens: 700,
+            topP: 0.1,
+            seed: 42,
             stream: false,
             // No reasoning for consistent results; reasoning causes same URL to get different pass/fail counts
           });
@@ -2700,6 +2531,18 @@ CRITICAL INSTRUCTIONS:
             if (analysis.passed && (!mentionsAlternatives || !mentionsAttributes || !mentionsTable)) {
               console.warn(`Warning: Product comparison rule passed but missing key requirements. Alternatives: ${mentionsAlternatives}, Attributes: ${mentionsAttributes}, Table: ${mentionsTable}`)
             }
+          } else if (isQuantityDiscountRule && quantityDiscountContext?.hasAnyDiscount) {
+            console.log(`Quantity/discount rule: Tiered pricing, percentage discount, or price drop detected. Forcing PASS.`)
+            analysis.passed = true
+            analysis.reason = quantityDiscountContext.foundPatterns?.length
+              ? `Product page shows discount: ${quantityDiscountContext.foundPatterns.join('; ')}. Rule passes.`
+              : `Product page shows tiered quantity pricing, percentage discount, or price drop. Rule passes.`
+          } else if (isShippingRule && shippingTimeContext?.allRequirementsMet) {
+            console.log(`Delivery estimate rule: DOM found CTA and delivery date/range near CTA. Forcing PASS.`)
+            analysis.passed = true
+            analysis.reason = shippingTimeContext.shippingText
+              ? `Delivery estimate near the '${shippingTimeContext.ctaText}' button: ${shippingTimeContext.shippingText.trim()}. Rule passes.`
+              : `Delivery date or range is displayed near the Add to Cart button. Rule passes.`
           } else if (isVariantRule) {
             // Variant rule must mention variant/preselect/selected
             const hasVariantMention = reasonLower.includes('variant') || reasonLower.includes('preselect') || reasonLower.includes('selected') || reasonLower.includes('default')

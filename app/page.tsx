@@ -81,7 +81,6 @@ export default function Home() {
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
-  const [loadingDots, setLoadingDots] = useState('')
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -295,11 +294,7 @@ export default function Home() {
 
       } catch (err) {
         console.error(`Error processing batch ${i + 1}:`, err)
-        // Add detailed error info for batch 4 specifically
-        if (i === 3) {
-          console.error('Batch 4 failed - adding longer delay before next retry')
-          toast.error(`Batch ${i + 1} failed. Retrying with extended delay...`)
-        }
+        // If any batch fails, mark its rules as failed with the error message
         batch.rules.forEach(rule => {
           allResults.push({
             ruleId: rule.id,
@@ -308,15 +303,6 @@ export default function Home() {
             reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
           })
         })
-      }
-
-      // Add delay between batches to avoid rate limits (except for last batch)
-      if (i < batches.length - 1) {
-        // Wait longer between batches - 20 seconds for batch 3->4, 15 seconds for others
-        // This helps prevent rate limit issues, especially for batch 4
-        const delayMs = i === 2 ? 20000 : 15000
-        console.log(`Waiting ${delayMs / 1000}s before batch ${i + 2}...`)
-        await new Promise(resolve => setTimeout(resolve, delayMs))
       }
     }
 
