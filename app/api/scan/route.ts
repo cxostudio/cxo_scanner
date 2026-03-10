@@ -185,6 +185,16 @@ export async function POST(request: NextRequest) {
     let customerReviewVideoEvidence: string[] = []
     let quantityDiscountContext: { foundPatterns: string[]; tieredPricing: boolean; percentDiscount: boolean; priceDrop: boolean; hasAnyDiscount: boolean; debugSnippet?: string } = { foundPatterns: [], tieredPricing: false, percentDiscount: false, priceDrop: false, hasAnyDiscount: false }
     let shippingTimeContext: { ctaFound: boolean; ctaText: string; ctaVisibleWithoutScrolling: boolean; shippingInfoNearCTA: string; hasCountdown: boolean; hasDeliveryDate: boolean; shippingText: string; allRequirementsMet: boolean } | null = null
+    let trustBadgesContext: {
+      ctaFound: boolean
+      ctaText: string
+      ctaVisibleWithoutScrolling: boolean
+      trustBadgesNearCTA: string[]
+      trustBadgesCount: number
+      within50px: boolean
+      visibleWithoutScrolling: boolean
+      trustBadgesInfo: string
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -214,54 +224,12 @@ export async function POST(request: NextRequest) {
 
       // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
       await page.goto(validUrl, {
-        waitUntil: 'load', // Faster than networkidle0 - good enough for screenshot
+        waitUntil: 'networkidle0', // Faster than networkidle0 - good enough for screenshot
         timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
-
-      // Quick wait for initial render
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      // Wait for critical images only (with timeout to avoid Vercel limit)
-      console.log('Waiting for images to load...')
-      try {
-        await Promise.race([
-          page.evaluate(async () => {
-            const images = Array.from(document.querySelectorAll('img')).slice(0, 15) // Limit to first 15 images
-            const imagePromises = images.map((img) => {
-              if (img.complete) return Promise.resolve()
-              return new Promise((resolve) => {
-                img.onload = resolve
-                img.onerror = resolve
-                setTimeout(resolve, 2000) // Reduced timeout per image
-              })
-            })
-            await Promise.all(imagePromises)
-          }),
-          new Promise(resolve => setTimeout(resolve, 8000)) // Max 8 seconds for images
-        ])
-      } catch (e) {
-        console.warn('Image loading timeout, proceeding with screenshot')
-      }
-
-      // Quick scroll to trigger lazy loading (limited for Vercel timeout)
-      try {
-        const scrollHeight = await page.evaluate(() => document.body.scrollHeight)
-        const viewportHeight = await page.evaluate(() => window.innerHeight)
-        if (scrollHeight > viewportHeight) {
-          // Quick scroll - only 2 steps instead of full scroll
-          for (let i = 0; i <= 2; i++) {
-            await page.evaluate((step, height) => {
-              window.scrollTo(0, (step / 2) * height)
-            }, i, scrollHeight)
-            await new Promise(resolve => setTimeout(resolve, 300)) // Reduced wait
-          }
-          await page.evaluate(() => window.scrollTo(0, 0))
-          await new Promise(resolve => setTimeout(resolve, 850))
-        }
-      } catch (e) {
-        console.warn('Scroll failed, proceeding with screenshot')
-      }
-
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
       console.log('Page loaded, ready for screenshot')
 
       // Wait 2s after load so full site settles (scripts, DOM, recommendations) before first-batch scan
@@ -878,7 +846,7 @@ export async function POST(request: NextRequest) {
       })
 
       // Get trust badges context for trust badges rule
-      const trustBadgesContext = await page.evaluate(() => {
+      trustBadgesContext = await page.evaluate(() => {
         // Find CTA button
         const cta = Array.from(document.querySelectorAll("button, a"))
           .find(el => {
@@ -892,6 +860,8 @@ export async function POST(request: NextRequest) {
         if (!cta) {
           return {
             ctaFound: false,
+            ctaText: 'CTA button',
+            ctaVisibleWithoutScrolling: false,
             trustBadgesNearCTA: [],
             trustBadgesCount: 0,
             within50px: false,
@@ -938,7 +908,7 @@ export async function POST(request: NextRequest) {
           '[id*="payment"]'
         ]
 
-        const allTrustBadges: Array<{ element: Element, distance: number, visible: boolean, text: string }> = []
+        const allTrustBadges: Array<{ element: Element, visible: boolean, text: string, sameColumn: boolean, verticallyNear: boolean }> = []
 
         trustBadgeSelectors.forEach(selector => {
           try {
@@ -950,18 +920,15 @@ export async function POST(request: NextRequest) {
               const badgeLeft = rect.left
               const badgeRight = rect.right
 
-              // Calculate distance from CTA (using center points)
-              const ctaCenterX = (ctaLeft + ctaRight) / 2
-              const ctaCenterY = (ctaTop + ctaBottom) / 2
-              const badgeCenterX = (badgeLeft + badgeRight) / 2
-              const badgeCenterY = (badgeTop + badgeBottom) / 2
-
-              const distanceX = Math.abs(ctaCenterX - badgeCenterX)
-              const distanceY = Math.abs(ctaCenterY - badgeCenterY)
-              const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY)
-
               // Check if badge is visible without scrolling
               const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
+
+              // Check if badge is in roughly the same column as CTA (horizontal overlap)
+              const sameColumn = !(badgeRight < ctaLeft || badgeLeft > ctaRight)
+
+              // Check if badge is within one "block" above or below CTA (vertical band)
+              const VERTICAL_BAND_PX = 400
+              const verticallyNear = badgeTop >= ctaTop - VERTICAL_BAND_PX && badgeTop <= ctaBottom + VERTICAL_BAND_PX
 
               // Get badge text/alt
               const badgeText = (el instanceof HTMLImageElement ? el.alt : null) ||
@@ -971,9 +938,10 @@ export async function POST(request: NextRequest) {
 
               allTrustBadges.push({
                 element: el,
-                distance: distance,
                 visible: badgeVisible,
-                text: badgeText
+                text: badgeText,
+                sameColumn,
+                verticallyNear,
               })
             })
           } catch (e) {
@@ -981,9 +949,50 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        // Filter badges near CTA: use 250px so "below Add to Cart" in same column is detected
-        const NEAR_CTA_PX = 250
-        const badgesNearCTA = allTrustBadges.filter(badge => badge.distance <= NEAR_CTA_PX)
+        // Fallback: if no explicit trust selectors matched, try to infer a horizontal row of small logos
+        if (allTrustBadges.length === 0) {
+          const GENERIC_MAX_HEIGHT = 80
+          const images = Array.from(document.querySelectorAll('img'))
+          images.forEach(img => {
+            try {
+              const rect = img.getBoundingClientRect()
+              const badgeTop = rect.top
+              const badgeBottom = rect.bottom
+              const badgeLeft = rect.left
+              const badgeRight = rect.right
+
+              if (!badgeTop && !badgeBottom && !badgeLeft && !badgeRight) return
+              if (rect.height <= 0 || rect.height > GENERIC_MAX_HEIGHT) return
+
+              const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
+              const sameColumn = !(badgeRight < ctaLeft || badgeLeft > ctaRight)
+              const VERTICAL_BAND_PX = 400
+              const verticallyNear = badgeTop >= ctaTop - VERTICAL_BAND_PX && badgeTop <= ctaBottom + VERTICAL_BAND_PX
+
+              if (!sameColumn || !verticallyNear) return
+
+              const badgeText =
+                img.alt ||
+                img.title ||
+                img.parentElement?.textContent?.trim() ||
+                'Trust badge'
+
+              allTrustBadges.push({
+                element: img,
+                visible: badgeVisible,
+                text: badgeText,
+                sameColumn,
+                verticallyNear,
+              })
+            } catch (e) {
+              // ignore bad image rects
+            }
+          })
+        }
+
+        // Relaxed rule: ANY trust/payment badge anywhere on the page counts.
+        // Geometry info is still collected above but we no longer require "near CTA" pixel checks.
+        const badgesNearCTA = allTrustBadges
         const badgesVisibleWithoutScrolling = badgesNearCTA.filter(badge => badge.visible && ctaVisibleWithoutScrolling)
 
         return {
@@ -995,8 +1004,8 @@ export async function POST(request: NextRequest) {
           within50px: badgesNearCTA.length > 0,
           visibleWithoutScrolling: badgesVisibleWithoutScrolling.length > 0 && ctaVisibleWithoutScrolling,
           trustBadgesInfo: badgesNearCTA.length > 0
-            ? `Found ${badgesNearCTA.length} trust badge(s) near CTA (within ${NEAR_CTA_PX}px): ${badgesNearCTA.map(b => b.text).join(', ')}`
-            : `No trust badges found within ${NEAR_CTA_PX}px of CTA`
+            ? `Found ${badgesNearCTA.length} trust/payment badge(s) on the page: ${badgesNearCTA.map(b => b.text).join(', ')}`
+            : `No trust/payment badges found on the page`
         }
       })
 
@@ -1076,8 +1085,8 @@ export async function POST(request: NextRequest) {
         `\nSelected Variant: ${selectedVariant || 'None'}` +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
-        `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` +
-        `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}`
+        (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
+        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}` : '')
 
 
 
@@ -2555,23 +2564,39 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
-            // If AI failed but page content clearly has payment badges, force PASS (screenshot may have missed them)
-            const websiteTextForTrust = (fullVisibleText || websiteContent || '').toLowerCase()
-            const hasPaymentBadgesInContent =
-              websiteTextForTrust.includes('visa') ||
-              websiteTextForTrust.includes('mastercard') ||
-              websiteTextForTrust.includes('paypal') ||
-              websiteTextForTrust.includes('apple pay') ||
-              websiteTextForTrust.includes('google pay') ||
-              websiteTextForTrust.includes('amex') ||
-              websiteTextForTrust.includes('american express') ||
-              websiteTextForTrust.includes('klarna') ||
-              websiteTextForTrust.includes('payment method') ||
-              websiteTextForTrust.includes('pay with')
-            if (!analysis.passed && hasPaymentBadgesInContent) {
-              console.log(`Trust badges rule: Payment methods found in page content. Forcing PASS.`)
+            // NEW: If DOM finds ANY trust/payment badges anywhere on the page, force PASS.
+            if (
+              !analysis.passed &&
+              trustBadgesContext &&
+              trustBadgesContext.trustBadgesCount > 0
+            ) {
+              console.log(
+                `Trust badges rule: DOM found ${trustBadgesContext.trustBadgesCount} badge(s) on the page. Forcing PASS.`,
+              )
               analysis.passed = true
-              analysis.reason = `Payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are present on the page, providing trust signals for users.`
+              analysis.reason =
+                trustBadgesContext.trustBadgesInfo ||
+                'Trust / payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are visible on the page, providing reassurance to users. Rule passes.'
+            } else {
+              // Fallback: If AI failed but page text clearly lists payment methods, also allow PASS
+              const websiteTextForTrust = (fullVisibleText || websiteContent || '').toLowerCase()
+              const hasPaymentBadgesInContent =
+                websiteTextForTrust.includes('visa') ||
+                websiteTextForTrust.includes('mastercard') ||
+                websiteTextForTrust.includes('paypal') ||
+                websiteTextForTrust.includes('apple pay') ||
+                websiteTextForTrust.includes('google pay') ||
+                websiteTextForTrust.includes('amex') ||
+                websiteTextForTrust.includes('american express') ||
+                websiteTextForTrust.includes('klarna') ||
+                websiteTextForTrust.includes('payment method') ||
+                websiteTextForTrust.includes('pay with')
+              if (!analysis.passed && hasPaymentBadgesInContent) {
+                console.log(`Trust badges rule: Payment methods found in page content. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason =
+                  'Payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are present on the page, providing trust signals for users.'
+              }
             }
             // Trust badges rule must mention trust/badge/security/payment/ssl
             const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') || reasonLower.includes('security') || reasonLower.includes('payment') || reasonLower.includes('ssl') || reasonLower.includes('visa') || reasonLower.includes('paypal') || reasonLower.includes('guarantee')

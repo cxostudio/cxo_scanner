@@ -7,7 +7,7 @@
   {
     "id": "images-lazy-loading",
     "title": "Lazy loading required for below-the-fold media",
-    "description": "Check all images and videos that appear below the fold. If they use lazy loading (e.g., loading=\"lazy\", lazyload class, intersection observer, or delayed source loading), the rule passes. If any below-the-fold media loads eagerly without lazy loading, the rule fails. Above-the-fold media is allowed to load eagerly."
+    "description": "Check images and videos that appear below the fold (not visible in the initial viewport). These media elements must use lazy loading such as loading=\"lazy\", lazyload classes, intersection observer loading, or delayed source loading. If any below-the-fold image or video does not use lazy loading, the rule fails."
   },
   {
     "id": "navigation-breadcrumbs",
@@ -96,8 +96,8 @@
   },
   {
     "id": "variant-preselection",
-    "title": "Preselect the most common variant",
-    "description": "Ensure the most popular size, color, or configuration is selected by default when the page loads. The preselected variant must be clearly highlighted visually (e.g., bold border, darker color, selected state) and allow users to click 'Add to Cart' immediately without selecting a variant first. If 'Add to Cart' button is disabled until a variant is selected, or all variant options look the same on page load, the rule fails."
+    "title": "Preselect a variant by default",
+    "description": "Ensure one variant (size, color, flavor, or configuration) is selected by default when the page loads. The selected variant must have a clear visual state such as a highlighted border, background change, or selected styling that distinguishes it from other options. If no variant is selected on page load or if all variant options appear visually identical without a clear selected state, the rule fails."
   },
   {
     "id": "cta-prominence",

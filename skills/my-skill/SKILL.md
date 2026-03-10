@@ -57,25 +57,22 @@ Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "N
 ### Lazy Loading
 
 Rule: Images and videos that appear below the fold must use lazy loading.
-Media visible in the first screen (above the fold) may load eagerly.
 
 Check in KEY ELEMENTS:
 
-Identify media listed as appearing below the fold or after scrolling.
+Identify images and videos that appear below the fold (media that loads after scrolling or appears later in the page structure).
 
-If any below-the-fold image/video loads without lazy loading → FAIL.
+If any below-the-fold image or video loads without lazy loading → FAIL.
 
-If all below-the-fold media uses lazy loading → PASS.
+If all below-the-fold images and videos use lazy loading → PASS.
 
 If FAILED:
 
-Clearly mention which image/video is missing lazy loading
+Mention which image or video is missing lazy loading.
 
-Mention where it appears on the page (section, position, or content area)
+Mention where it appears on the page (section name or approximate location such as product gallery, recommendation section, etc.).
 
-Explain that below-the-fold media should load lazily for performance.
-
-Do not mention currency or prices.
+Explain that below-the-fold media should use lazy loading to improve page performance.
 
 ### Image Annotations
 
@@ -147,7 +144,22 @@ Be specific about which requirement is missing.
 
 ### Variant Preselection
 
-Check "Selected Variant:" in KEY ELEMENTS. If "None" → FAIL. Variant must be preselected; "Add to Cart" enabled immediately; selected variant clearly highlighted. CSS-based selection counts.
+Check "Selected Variant:" in KEY ELEMENTS.
+
+If "None" → FAIL.
+
+If a variant (size, color, flavor, configuration) is already selected when the page loads → PASS.
+
+A variant counts as selected if ANY of the following are true:
+
+• The variant option is visually highlighted (border, background change, active styling, or selected state).
+• The page content or KEY ELEMENTS explicitly indicates a selected or preselected variant (e.g., "selected", "preselected", "default variant").
+
+If FAILED:
+
+Explain that no variant appears selected by default and users must manually choose an option.
+
+Mention where the variant selector appears (e.g., flavor selection grid, size options, color selector).
 
 ### Trust Badges Near CTA
 
