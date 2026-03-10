@@ -100,6 +100,21 @@ const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
   }
 }
 
+// Helper: detect lazy loading usage on the current page.
+// Counts elements with loading="lazy" and logs the result to the server console.
+async function logLazyLoadingUsage(page: any): Promise<number> {
+  try {
+    const count = await page.evaluate(() => {
+      return document.querySelectorAll('[loading="lazy"]').length
+    })
+    console.log('[LAZY LOADING] Elements with loading=\"lazy\":', count)
+    return count
+  } catch (e) {
+    console.warn('[LAZY LOADING] Failed to check loading=\"lazy\" elements:', e)
+    return 0
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -178,7 +193,7 @@ export async function POST(request: NextRequest) {
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
-    let keyElements: string | undefined // DOM-derived string including lazy loading status (used for lazy rule when screenshot path is active)
+    let keyElements: string | undefined
     // Deterministic detection for "customer video testimonials" (review videos).
     // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
     let customerReviewVideoFound = false
@@ -227,10 +242,13 @@ export async function POST(request: NextRequest) {
         waitUntil: 'networkidle0', // Faster than networkidle0 - good enough for screenshot
         timeout: 30000, // 30 second timeout (reduced for Vercel)
       })
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight)
+      })
       console.log('Page loaded, ready for screenshot')
+
+      // Log lazy-loading usage (purely for debugging/visibility; does not affect rules)
+      await logLazyLoadingUsage(page)
 
       // Wait 2s after load so full site settles (scripts, DOM, recommendations) before first-batch scan
       await new Promise((r) => setTimeout(r, 2000))
@@ -542,89 +560,9 @@ export async function POST(request: NextRequest) {
           tabsInfo.push('Tabs/Accordions detection: Unable to extract')
         }
 
-        // Lazy loading: only below-the-fold check. Above the fold is not checked.
-        const lazyLoadingInfo = []
-        try {
-          const images = Array.from(document.querySelectorAll('img'))
-          const videos = Array.from(document.querySelectorAll('video'))
-          const viewportHeight = window.innerHeight
-          let belowFoldWithoutLazy: string[] = []
-          let belowFoldWithLazy = 0
-        
-          const hasLazy = (el: Element) => {
-            const loading = el.getAttribute('loading')
-            const preload = el.getAttribute('preload')
-            return (
-              loading === 'lazy' ||
-              preload === 'none' ||
-              el.hasAttribute('data-src') ||
-              el.hasAttribute('data-lazy') ||
-              el.hasAttribute('data-original') ||
-              el.classList.contains('lazy') ||
-              el.classList.contains('lazyload')
-            )
-          }
-        
-          const getShortSrc = (src: string | null, i: number, type: string) => {
-            if (!src) return `${type}-${i + 1}`
-            return src.length > 60 ? src.substring(0, 60) + '...' : src
-          }
-        
-          // Check images
-          images.forEach((img, i) => {
-            const rect = img.getBoundingClientRect()
-            const src = img.getAttribute('src') || img.getAttribute('data-src')
-            const short = getShortSrc(src, i, 'image')
-        
-            if (rect.top >= viewportHeight) {
-              // BELOW FOLD
-              if (hasLazy(img)) {
-                belowFoldWithLazy++
-              } else {
-                belowFoldWithoutLazy.push(short)
-              }
-            }
-          })
-        
-          // Check videos
-          videos.forEach((video, i) => {
-            const rect = video.getBoundingClientRect()
-            const src =
-              video.getAttribute('src') ||
-              video.querySelector('source')?.getAttribute('src')
-            const short = getShortSrc(src || null, i, 'video')
-        
-            if (rect.top >= viewportHeight) {
-              if (hasLazy(video)) {
-                belowFoldWithLazy++
-              } else {
-                belowFoldWithoutLazy.push(short)
-              }
-            }
-          })
-        
-          if (belowFoldWithoutLazy.length === 0) {
-            lazyLoadingInfo.push(
-              `Lazy loading status: PASS - All below-the-fold media uses lazy loading`
-            )
-          } else {
-            lazyLoadingInfo.push(
-              `Lazy loading status: FAIL - Some below-the-fold media missing lazy loading`
-            )
-            lazyLoadingInfo.push(
-              `Missing lazy loading: ${belowFoldWithoutLazy.slice(0, 5).join(', ')}${
-                belowFoldWithoutLazy.length > 5
-                  ? ` (+${belowFoldWithoutLazy.length - 5} more)`
-                  : ''
-              }`
-            )
-          }
-        
-        } catch (e) {
-          lazyLoadingInfo.push('Lazy loading detection: Unable to extract')
-        }
-
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${lazyLoadingInfo.join('\n')}\n${tabsInfo.join('\n')}`
+        // Return consolidated key elements (no special lazy-loading block here;
+        // lazy-loading rule is handled like any other AI rule).
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}`
       })
 
       // QUANTITY / DISCOUNT CHECK: PASS if discount-type content appears ANYWHERE on the page. Log snippet to console for debugging.
@@ -1269,13 +1207,6 @@ export async function POST(request: NextRequest) {
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     console.log('Website already loaded, now processing all rules...')
 
-    // Lazy loading rule = DOM only (keyElements); all other rules = DOM/content via OpenRouter (no image)
-    const isLazyRule = (r: Rule): boolean =>
-      r.id === 'images-lazy-loading' ||
-      r.title.toLowerCase().includes('lazy') ||
-      r.description.toLowerCase().includes('lazy') ||
-      r.description.toLowerCase().includes('lazy loading')
-
     // Minimal delay for API rate limiting only
     const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
     let lastRequestTime = 0
@@ -1306,21 +1237,6 @@ export async function POST(request: NextRequest) {
           }
         }
         lastRequestTime = Date.now()
-
-        // Lazy loading rule = DOM only (no OpenRouter)
-        if (isLazyRule(rule)) {
-          const passed = keyElements != null && keyElements.includes('Lazy loading status: PASS')
-          const missingMatch = keyElements?.match(/Missing lazy loading: ([^\n]+)/)
-          const reason = passed
-            ? 'Below-the-fold images and videos use lazy loading.'
-            : missingMatch
-              ? `Below-the-fold media missing lazy loading: ${missingMatch[1].trim()}.`
-              : keyElements != null
-                ? 'Lazy loading status: FAIL or unable to parse.'
-                : 'Lazy loading could not be evaluated (no DOM from page).'
-          results.push({ ruleId: rule.id, ruleTitle: rule.title, passed, reason })
-          continue
-        }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
         const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
@@ -1359,9 +1275,6 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes('customer video') ||
             rule.description.toLowerCase().includes('video review') ||
             rule.description.toLowerCase().includes('real customer video');
-
-
-          const isLazyRule = rule.title.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy') || rule.description.toLowerCase().includes('lazy loading')
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
 
@@ -1420,8 +1333,6 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nBREADCRUMB RULE: Check "Breadcrumbs:" in KEY ELEMENTS. If "Not found" → FAIL, else → PASS.`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
-          } else if (isLazyRule) {
-            specialInstructions = `\nLAZY LOADING RULE - BELOW THE FOLD ONLY (no eager check):\n- Only BELOW THE FOLD images and videos are checked. Above the fold is not checked; do not fail for above-the-fold.\n- Check "Lazy loading status:" and "Missing lazy loading:" in KEY ELEMENTS. If "Lazy loading status: PASS" → PASS. If "Lazy loading status: FAIL" → FAIL.\n- If FAILED: Your reason MUST say WHERE lazy loading was not found: use the list from "Missing lazy loading:" (those are the below-the-fold images/videos missing lazy) and mention section/position (e.g. product gallery, description section, thumbnails). Do NOT mention currency or prices. Do NOT mention first image eager or above-the-fold.`
           } else if (isImageAnnotationsRule) {
             specialInstructions = `\nANNOTATIONS IN PRODUCT IMAGES RULE - YOUR REASON MUST INCLUDE BOTH:\n\n1. WHAT BADGES/ANNOTATIONS ARE CURRENTLY ON THE IMAGES (required in every response):\n- List exactly which annotations or badges you see on the product images (e.g. "Current badges: none", or "Present: 'vitamin C' on main image, 'hydrating' on second image", or "Only a 'new' tag on one thumbnail").\n- If there are no badges/annotations, say clearly "Current badges on product images: none" or "No annotations present on product images".\n\n2. WHAT IS MISSING (if FAILED) OR WHY IT PASSES (if PASSED):\n- If FAILED: After stating what is present, say what should be added (e.g. "Add badges like 'dark spot correction', 'radiance boosting' to communicate key benefits").\n- If PASSED: List the specific annotations/badges found and where they appear.\n\nExample FAIL reason: "Current badges on product images: none. Product images are missing annotations or badges that highlight key benefits like 'dark spot correction' or 'radiance boosting'. Adding these visual cues would help users quickly understand the product's value."\n\nExample PASS reason: "Product images include annotations: 'vitamin C' and 'brightening' on the main image, 'hydrating' on the second. These badges communicate key benefits clearly."`
           } else if (isThumbnailsRule) {
@@ -2387,9 +2298,6 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
             }
           } else if (isBreadcrumbRule && !reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation')) {
             console.warn(`Warning: Breadcrumb rule but reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 50)}`)
-            isRelevant = false
-          } else if (isLazyRule && !reasonLower.includes('lazy') && !reasonLower.includes('loading')) {
-            console.warn(`Warning: Lazy loading rule but reason doesn't mention lazy loading: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
