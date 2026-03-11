@@ -764,22 +764,28 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // If main CTA zone had no date, try every other CTA's zone (full site check)
-        if (!hasDeliveryDate && allCtas.length > 1) {
-          for (const { el, rect } of allCtas) {
-            if (el === ctaElement) continue
-            const zoneText = getTextInZoneAroundRect(rect)
-            if (!zoneText) continue
-            for (const pattern of deliveryDatePatterns) {
-              if (pattern.test(zoneText)) {
-                hasDeliveryDate = true
-                const m = zoneText.match(pattern)
-                if (m) shippingText += m[0] + " "
-                if (!shippingInfoNearCTA) shippingInfoNearCTA = zoneText.substring(0, 500)
+        // ── Fallback: scan FULL PAGE text for date/time patterns (no CTA required) ──
+        // This catches cases where JS renders the date and CTA zone scan missed it,
+        // or where the page layout doesn't place the date directly near the button.
+        if (!hasDeliveryDate && !hasCountdown) {
+          const fullText = (document.body.innerText || document.body.textContent || '')
+          for (const pattern of deliveryDatePatterns) {
+            if (pattern.test(fullText)) {
+              hasDeliveryDate = true
+              const m = fullText.match(pattern)
+              if (m) shippingText = m[0]
+              break
+            }
+          }
+          if (!hasDeliveryDate) {
+            for (const pattern of countdownPatterns) {
+              if (pattern.test(fullText)) {
+                hasCountdown = true
+                const m = fullText.match(pattern)
+                if (m) shippingText = m[0]
                 break
               }
             }
-            if (hasDeliveryDate) break
           }
         }
 
@@ -795,7 +801,8 @@ export async function POST(request: NextRequest) {
           hasCountdown,
           hasDeliveryDate,
           shippingText: shippingText.trim() || "None",
-          allRequirementsMet: ctaFound && hasDeliveryDate
+          // PASS if date range OR countdown found anywhere on page — no CTA required
+          allRequirementsMet: hasDeliveryDate || hasCountdown
         }
       })
 
@@ -1570,27 +1577,36 @@ Important: Ignore coupon codes. Ignore free shipping. Only tiered pricing, perce
 
           } else if (isShippingRule) {
             specialInstructions = `
-DELIVERY ESTIMATE NEAR CTA RULE - Display delivery estimate near CTA
+DELIVERY ESTIMATE RULE — "Display delivery estimate near CTA"
 
-Rule: A delivery estimate must be shown near the primary CTA (Add to Cart / Buy Now). Delivery info must be directly above or below the CTA. A delivery DATE or delivery RANGE is required (e.g. "Get it by Tuesday", "Order now and get it between Wed, Mar 11 and Thu, Mar 12"). Countdown/cutoff time is OPTIONAL.
+IMPORTANT: Do NOT require an Add to Cart button. Do NOT check for CTA proximity. ONLY check whether the page shows a delivery DATE RANGE or a delivery TIME anywhere on the page.
 
-Check "DELIVERY TIME CHECK" in KEY ELEMENTS:
+━━━━ WHAT TO LOOK FOR ━━━━
 
-STEP 1 - CTA: If "CTA Found: NO" → FAIL. If "CTA Found: YES" continue.
+✅ PASS if the page shows ANY of these (anywhere on page):
+  • A delivery DATE RANGE: "Order now and get it between Tue, Mar 17 and Wed, Mar 18"
+  • A delivery date: "Get it by Thursday, Mar 20" / "Delivered by Fri, Oct 12"
+  • A delivery window: "Delivered between Mon 10 and Wed 12"
+  • A countdown/cutoff time: "Order within 2 hours 30 mins" / "Order before 3pm"
+  • A delivery date with shipping method: "Delivered on Tuesday, 22 Oct with Express Shipping"
+  • Any specific date or date range indicating when delivery will arrive
 
-STEP 2 - Proximity: Delivery information must be near the CTA (directly above or below). If delivery info is only in header/footer or far from button → FAIL.
+❌ FAIL only if:
+  • The page shows NO delivery date, NO delivery range, NO countdown, NO cutoff time anywhere
+  • Only generic text like "Fast shipping" / "Ships within 3-5 days" with no specific date or range
 
-STEP 3 - Delivery date or range (REQUIRED): Check "Has Delivery Date or Range (required): YES/NO".
-- PASS when you see a specific date or range near the CTA, e.g. "Get it by Tuesday, Oct 12", "Order now and get it between Wed, Mar 11 and Thu, Mar 12".
-- If "Has Delivery Date or Range: YES" and delivery text is near CTA → PASS (countdown is optional; ignore "Has Countdown/Cutoff Time").
+━━━━ HOW TO DECIDE ━━━━
 
-STEP 4 - Countdown/cutoff (OPTIONAL): "Has Countdown/Cutoff Time" is optional. Do NOT fail if it is NO. Only delivery date or range is required.
+1. Check the screenshot first — scan the ENTIRE page for any date range or delivery time
+2. Check "DELIVERY TIME CHECK" in KEY ELEMENTS — if "Has Delivery Date or Range: YES" → PASS immediately
+3. If you see any delivery date range visible in the product section → PASS
 
-FINAL: PASS if CTA found + delivery info near CTA + delivery date or range present. FAIL if CTA missing, or delivery not near CTA, or no delivery date/range.
+Do NOT fail because of CTA position. Do NOT fail because delivery info is not "near" a button.
+PASS = delivery date or time exists anywhere on the page.
+FAIL = no delivery date or time visible anywhere on the page.
 
-✅ PASS example: "Order now and get it between Wed, Mar 11 and Thu, Mar 12" or "Get it by Thursday" near Add to Cart.
-❌ FAIL example: Only "Order within 2 hours" with no delivery date. Or delivery info only in header/footer.
-Be specific. Do not mention currency/prices. Reason only for this rule.
+Be specific in your reason. Example PASS reason: "The page shows delivery between Tue, Mar 17 and Wed, Mar 18 in the product section."
+Example FAIL reason: "No specific delivery date, date range, or countdown timer is shown anywhere on the page."
               `
           } else if (isVariantRule) {
             specialInstructions = `
@@ -2408,12 +2424,40 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             analysis.reason = quantityDiscountContext.foundPatterns?.length
               ? `Product page shows discount: ${quantityDiscountContext.foundPatterns.join('; ')}. Rule passes.`
               : `Product page shows tiered quantity pricing, percentage discount, or price drop. Rule passes.`
-          } else if (isShippingRule && shippingTimeContext?.allRequirementsMet) {
-            console.log(`Delivery estimate rule: DOM found CTA and delivery date/range near CTA. Forcing PASS.`)
-            analysis.passed = true
-            analysis.reason = shippingTimeContext.shippingText
-              ? `Delivery estimate near the '${shippingTimeContext.ctaText}' button: ${shippingTimeContext.shippingText.trim()}. Rule passes.`
-              : `Delivery date or range is displayed near the Add to Cart button. Rule passes.`
+          } else if (isShippingRule) {
+            // Override 1: DOM page.evaluate found a date range or countdown anywhere on page
+            if (shippingTimeContext?.allRequirementsMet) {
+              console.log(`Delivery estimate rule: Date/time found on page via DOM. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = shippingTimeContext.shippingText && shippingTimeContext.shippingText !== 'None'
+                ? `Delivery estimate is displayed on the product page: "${shippingTimeContext.shippingText.trim()}". Rule passes.`
+                : `A delivery date range or time estimate is shown on the product page. Rule passes.`
+            }
+            // Override 2: Full visible text contains a delivery date pattern (safety net for dynamic content)
+            if (!analysis.passed) {
+              const deliveryTextPatterns = [
+                /get\s+it\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
+                /delivered\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
+                /arrives\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
+                /order\s+now\s+and\s+get\s+it\s+between\s+.+?\s+and\s+.+/i,
+                /get\s+it\s+between\s+.+?\s+and\s+.+/i,
+                /between\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
+                /delivered\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
+                /delivered\s+on\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
+                /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
+                /order\s+before\s+[\d\s]+(?:am|pm)/i,
+                /estimated\s+delivery\s*:\s*[A-Za-z]+\s+\d+/i,
+              ]
+              const matchedPattern = deliveryTextPatterns.find(p => p.test(fullVisibleText))
+              if (matchedPattern) {
+                const matchedText = fullVisibleText.match(matchedPattern)?.[0] || ''
+                console.log(`Delivery estimate rule: Date/time found in full page text: "${matchedText}". Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = matchedText
+                  ? `Delivery estimate shown on the page: "${matchedText}". Rule passes.`
+                  : `A delivery date range or time estimate is shown on the product page. Rule passes.`
+              }
+            }
           } else if (isVariantRule) {
             // Variant rule must mention variant/preselect/selected
             const hasVariantMention = reasonLower.includes('variant') || reasonLower.includes('preselect') || reasonLower.includes('selected') || reasonLower.includes('default')
