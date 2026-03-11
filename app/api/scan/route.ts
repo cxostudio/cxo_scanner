@@ -233,6 +233,11 @@ export async function POST(request: NextRequest) {
       found: boolean
       evidence: string[]
     } | null = null
+    let ratingContext: {
+      found: boolean
+      evidence: string[]
+      ratingText: string
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1592,6 +1597,119 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Product Rating DOM check ──────────────────────────────────────────
+      const needsRatingCheck = rules.some(r =>
+        r.id === 'social-proof-product-ratings' ||
+        r.title.toLowerCase().includes('rating') ||
+        (r.description?.toLowerCase().includes('rating') && !r.title.toLowerCase().includes('customer photo'))
+      )
+      if (needsRatingCheck && page) {
+        try {
+          const ratingResult = await page.evaluate(() => {
+            const evidence: string[] = []
+            let found = false
+            let ratingText = ''
+
+            // Helper: visible text of element
+            const visText = (el: Element) => (el as HTMLElement).innerText?.trim() || el.textContent?.trim() || ''
+
+            // 1. Dedicated rating/review widget selectors (Trustpilot, Yotpo, Stamped, Junip, etc.)
+            const widgetSels = [
+              '[class*="trustpilot"]', '[data-testid*="trustpilot"]', 'trustpilot-widget',
+              '[class*="yotpo"]', '[class*="stamped"]', '[class*="loox"]', '[class*="junip"]',
+              '[class*="review-widget"]', '[class*="rating-widget"]',
+              '[class*="star-rating"]', '[class*="star-review"]',
+              '[class*="review-stars"]', '[class*="rating-stars"]',
+              '[class*="product-rating"]', '[class*="product-review"]',
+              '[class*="review-score"]', '[class*="average-rating"]',
+              '[class*="review-summary"]', '[data-rating]', '[data-review-count]',
+              '[itemprop="ratingValue"]', '[itemprop="reviewCount"]', '[itemprop="aggregateRating"]',
+            ]
+            for (const sel of widgetSels) {
+              try {
+                const el = document.querySelector(sel)
+                if (el) {
+                  const txt = visText(el).substring(0, 100)
+                  evidence.push(`Rating widget (${sel}): "${txt || '(element present)'}"`)
+                  found = true
+                  ratingText = txt
+                  break
+                }
+              } catch { /* ignore invalid selector */ }
+            }
+
+            // 2. Star unicode characters anywhere in the page
+            if (!found) {
+              const starPattern = /[★☆⭐✩✭]/
+              const allText = document.body.innerText || ''
+              if (starPattern.test(allText)) {
+                const match = allText.match(/[★☆⭐✩✭].{0,60}/) || []
+                evidence.push(`Star characters found: "${match[0]?.trim().substring(0, 80) || ''}"`)
+                found = true
+                ratingText = match[0]?.trim() || 'star icons'
+              }
+            }
+
+            // 3. Numeric rating patterns: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5 (203)"
+            if (!found) {
+              const ratingNumPattern = /\b[1-5](\.\d)?\s*(out of\s*5|\/\s*5|stars?|\s+star)/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(ratingNumPattern)
+              if (m) {
+                evidence.push(`Numeric rating: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 4. Review count text: "203 reviews", "1.2k reviews", "150 ratings"
+            if (!found) {
+              const reviewCountPattern = /\b(\d[\d,.]*k?)\s+(reviews?|ratings?|customers?|opinions?)/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(reviewCountPattern)
+              if (m) {
+                evidence.push(`Review count: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 5. Trustpilot-specific keywords: "Excellent", "TrustScore", "Trustpilot"
+            if (!found) {
+              const tpPattern = /\b(trustpilot|trustscore|excellent|great|average|bad)\b/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(tpPattern)
+              if (m) {
+                evidence.push(`Trustpilot/review keyword: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 6. SVG-based star icons (many modern sites use SVG stars)
+            if (!found) {
+              const svgStars = document.querySelectorAll('svg[class*="star"], svg[class*="rating"], [class*="star"] svg, [class*="rating"] svg')
+              if (svgStars.length > 0) {
+                evidence.push(`SVG star icons found (${svgStars.length})`)
+                found = true
+                ratingText = `${svgStars.length} SVG star icon(s)`
+              }
+            }
+
+            return { found, evidence, ratingText }
+          })
+
+          ratingContext = { found: ratingResult.found, evidence: ratingResult.evidence, ratingText: ratingResult.ratingText }
+          websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
+            `\nRating found: ${ratingResult.found ? 'YES' : 'NO'}` +
+            (ratingResult.ratingText ? `\nRating text: "${ratingResult.ratingText}"` : '') +
+            (ratingResult.evidence.length > 0 ? `\nEvidence: ${ratingResult.evidence.slice(0, 3).join('; ')}` : '')
+          console.log(`Product rating DOM check: found=${ratingResult.found}, text="${ratingResult.ratingText}"`)
+        } catch (e) {
+          console.warn('Product rating DOM detection failed:', e)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -1965,7 +2083,40 @@ Scan the page (or screenshot) and decide: is this video part of a customer revie
           }
 
           else if (isRatingRule) {
-            specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
+            specialInstructions = `
+PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
+
+⚠️ CRITICAL: Look at the SCREENSHOT FIRST. This is a visual rule.
+
+━━━━ STEP 1: Analyze the SCREENSHOT ━━━━
+
+PASS immediately if you see ANY of the following on the page (near the product OR anywhere visible):
+
+✅ Star icons of any kind: ★★★★★, ☆, ⭐, filled/empty SVG stars
+✅ Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5"
+✅ Review count: "203 reviews", "1.2k ratings", "150 customers"
+✅ Trustpilot widget: "Excellent", "TrustScore 4.7", Trustpilot bar/badge
+✅ Any rating badge or widget (Yotpo, Loox, Stamped, Judge.me, etc.)
+✅ Text like "Rated 4.5", "4.8 ★", "Excellent ★★★★★"
+
+→ PASS if ANY one of these is visible in the screenshot.
+→ Do NOT require all three (score + count + link). Any single rating indicator is enough.
+
+━━━━ STEP 2: Check PRODUCT RATING DOM CHECK in KEY ELEMENTS ━━━━
+
+- "Rating found: YES" → PASS immediately
+- "Rating found: NO" → check screenshot more carefully before failing
+
+━━━━ FAIL CONDITION ━━━━
+
+❌ FAIL only if: No stars, no rating numbers, no review count, no rating widget of any kind is visible anywhere on the page.
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
+✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
+❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected on the page. Add star ratings and review counts near the product title."
+`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
 CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
@@ -2646,7 +2797,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
+          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -2832,24 +2984,46 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           let isRelevant = true
 
           if (isRatingRule) {
-            // Rating rule must mention rating/review/star AND check all requirements
-            const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
-            const mentionsNearTitle = reasonLower.includes('near') || reasonLower.includes('title') || reasonLower.includes('close')
-            const mentionsScore = reasonLower.includes('score') || reasonLower.includes('star') || reasonLower.includes('/5') || reasonLower.includes('out of')
-            const mentionsCount = reasonLower.includes('review') || reasonLower.includes('rating') || reasonLower.includes('people')
+            let ratingForcedPass = false
 
-            if (!hasRatingMention) {
-              console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
-              isRelevant = false
+            // Override 1: DOM found rating → force PASS
+            if (ratingContext?.found && !analysis.passed) {
+              console.log(`Rating rule: DOM found rating ("${ratingContext.ratingText}"). Forcing PASS.`)
+              analysis.passed = true
+              ratingForcedPass = true
+              const ev = ratingContext.evidence[0] || ratingContext.ratingText || 'rating element detected'
+              analysis.reason = `Product ratings detected by DOM scan: ${ev}. Star ratings or review indicators are present near the product section.`
             }
 
-            // If passed=true but missing requirements, it's wrong
-            if (analysis.passed && (!mentionsScore || !mentionsCount || !mentionsNearTitle)) {
-              console.warn(`Warning: Rating rule passed but missing requirements. Score: ${mentionsScore}, Count: ${mentionsCount}, Near title: ${mentionsNearTitle}`)
-              // Force re-evaluation - mark as failed if requirements not met
-              if (!mentionsScore || !mentionsCount) {
-                analysis.passed = false
-                analysis.reason = `Rating rule failed: Missing required elements. ${analysis.reason}`
+            // Override 2: Page text safety net — catch any rating-related text
+            if (!analysis.passed) {
+              const pageText = fullVisibleText || websiteContent || ''
+              const RATING_TEXT_PATTERNS = [
+                /[★☆⭐✩✭]/,                                        // star unicode
+                /\b[1-5]\.\d\s*(out of\s*5|\/\s*5|stars?)/i,      // "4.5 out of 5", "4.5/5"
+                /\b[1-5](\.\d)?\s+stars?\b/i,                     // "4 stars", "4.5 stars"
+                /\b\d[\d,]*\s+(reviews?|ratings?|customers?)\b/i, // "203 reviews"
+                /trustpilot/i,                                     // Trustpilot mention
+                /\bexcellent\b.*(?:trustpilot|review|rating)/i,   // "Excellent" near review
+                /trustscore/i,                                     // TrustScore widget
+                /rated\s+[1-5]/i,                                  // "Rated 4.5"
+                /average\s+rating/i,                              // "Average rating"
+              ]
+              const matched = RATING_TEXT_PATTERNS.find(p => p.test(pageText))
+              if (matched) {
+                const matchedText = (pageText.match(matched) || [''])[0]
+                console.log(`Rating rule: Page text contains rating signal "${matchedText}". Forcing PASS.`)
+                analysis.passed = true
+                ratingForcedPass = true
+                analysis.reason = `Product rating indicators detected: "${matchedText.trim()}" — star ratings or review counts are present on this page.`
+              }
+            }
+
+            // Sanity warning (never force fail based on missing count or link)
+            if (!ratingForcedPass && !analysis.passed) {
+              const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
+              if (!hasRatingMention) {
+                console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
               }
             }
           } else if (isColorRule) {

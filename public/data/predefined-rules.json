@@ -22,7 +22,7 @@
   {
     "id": "social-proof-product-ratings",
     "title": "Show product ratings near title",
-    "description": "Product ratings should appear close to the product title and include both the average rating and total number of reviews. Clicking the rating should scroll users to the reviews section."
+    "description": "Product ratings should be visible near the product title. PASS if ANY rating indicator is visible: star icons (★★★★★), numeric rating (4.5/5), review count (203 reviews), Trustpilot widget (Excellent), or any rating badge/widget. Any single indicator is sufficient — do NOT require score + count + clickable link all together. Screenshot detection is the primary source."
   },
   {
     "id": "product-title-clarity",

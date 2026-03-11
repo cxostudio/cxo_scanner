@@ -71,6 +71,31 @@ Failure reasons must be **easy for normal users** to understand. Each failure re
 
 When the user message indicates which rule is being checked, apply the matching section below.
 
+### Product Ratings (screenshot is the PRIMARY source)
+
+**CRITICAL: Look at the screenshot FIRST.** This is a visual rule. DOM signals are secondary.
+
+**PASS immediately if the screenshot shows ANY of the following:**
+- Star icons of any kind: ★★★★★, ☆, ⭐, SVG stars (filled or empty)
+- Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "Rated 4.5"
+- Review count: "203 reviews", "1.2k ratings", "150 customers"
+- Trustpilot widget: "Excellent", "TrustScore 4.7", green star bar/badge
+- Any rating widget (Yotpo, Loox, Stamped, Okendo, Judge.me, etc.)
+
+**ONE indicator is enough.** Do NOT require score + count + clickable link all together.
+
+**FAIL only if** the page shows NO stars, NO rating numbers, NO review counts, and NO rating widgets anywhere.
+
+**Dual-source logic:**
+- `screenshotShowsRating == true` → **PASS**
+- `domRatingFound == true` (PRODUCT RATING DOM CHECK shows YES) → **PASS**
+- Both fail → **FAIL**
+
+**PASS reason example:** "A Trustpilot rating widget showing 'Excellent ★★★★★' and a score of 4.7 out of 5 is visible near the product title."
+**FAIL reason example:** "No star ratings, review counts, or rating widgets were detected on the product page. Add star ratings and review counts near the product title."
+
+---
+
 ### Breadcrumb (deterministic)
 
 Check "Breadcrumbs:" in KEY ELEMENTS.
