@@ -214,6 +214,14 @@ export async function POST(request: NextRequest) {
       containerDescription: string
     } | null = null
     let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
+    let squareImageContext: {
+      squareContainersFound: number
+      totalGalleryImages: number
+      visuallySquare: boolean
+      cssEnforced: boolean
+      sampleRatios: number[]
+      summary: string
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -311,72 +319,203 @@ export async function POST(request: NextRequest) {
           .slice(0, 15) // Increased limit
           .join(' | ')
 
-        // Get breadcrumb information - multiple selectors to catch all breadcrumb formats
+        // ── Breadcrumb detection ─────────────────────────────────────────────
+        // Priority 1: structured/semantic selectors (most reliable)
         const breadcrumbSelectors = [
+          // Class-based
           '[class*="breadcrumb"]',
-          'nav[aria-label*="breadcrumb"]',
-          '.breadcrumb',
+          '[class*="Breadcrumb"]',
+          '[class*="bread-crumb"]',
+          '[class*="crumbs"]',
+          // ARIA / role
+          'nav[aria-label*="breadcrumb" i]',
+          'nav[aria-label*="you are here" i]',
+          '[role="navigation"][aria-label*="breadcrumb" i]',
+          // Schema.org structured data in HTML
           '[itemtype*="BreadcrumbList"]',
-          '[role="navigation"][aria-label*="breadcrumb"]',
+          '[itemtype="https://schema.org/BreadcrumbList"]',
+          '[itemtype="http://schema.org/BreadcrumbList"]',
+          '[itemprop="breadcrumb"]',
+          // List-based
           'ol[class*="breadcrumb"]',
-          'ul[class*="breadcrumb"]'
+          'ul[class*="breadcrumb"]',
+          'ol[aria-label*="breadcrumb" i]',
+          // data-* attributes
+          '[data-testid*="breadcrumb" i]',
+          '[data-test*="breadcrumb" i]',
+          '[data-qa*="breadcrumb" i]',
+          '[data-cy*="breadcrumb" i]',
+          '[data-component*="breadcrumb" i]',
+          '[data-section*="breadcrumb" i]',
+          // Common ecommerce patterns
+          '.bc-sf-filter-breadcrumb',
+          '[class*="path-nav"]',
+          '[class*="page-path"]',
         ]
 
+        // Separators that indicate a breadcrumb trail
+        const BREADCRUMB_SEPARATORS = /[/›>»·\|]/
+
+        function cleanBreadcrumbText(text: string): string {
+          return text
+            .replace(/\s+/g, ' ')
+            .replace(/\n/g, ' ')
+            .trim()
+            .substring(0, 150)
+        }
+
+        function looksLikeBreadcrumb(text: string): boolean {
+          const t = text.trim()
+          if (!t || t.length < 3 || t.length > 300) return false
+          // Must have at least one separator character
+          return BREADCRUMB_SEPARATORS.test(t)
+        }
+
         let breadcrumbs = ''
+
+        // Priority 1: semantic selectors
         for (const selector of breadcrumbSelectors) {
-          const breadcrumbElements = Array.from(document.querySelectorAll(selector))
-          if (breadcrumbElements.length > 0) {
-            breadcrumbElements.forEach(bc => {
-              const text = bc.textContent?.trim() || ''
-              if (text && text.length > 0) {
-                // Check if it looks like a breadcrumb (contains "Home", "/", or navigation path)
-                if (text.includes('Home') || text.includes('/') || text.match(/\d+\./)) {
-                  breadcrumbs = text
+          try {
+            const els = Array.from(document.querySelectorAll(selector)) as HTMLElement[]
+            for (const el of els) {
+              const text = el.innerText || el.textContent || ''
+              const cleaned = cleanBreadcrumbText(text)
+              if (cleaned && looksLikeBreadcrumb(cleaned)) {
+                breadcrumbs = cleaned
+                break
+              }
+              // Even without a separator, if it's a short nav with 2+ links, accept it
+              const links = el.querySelectorAll('a')
+              if (links.length >= 2) {
+                const linkTexts = Array.from(links).map(a => (a.textContent || '').trim()).filter(Boolean)
+                if (linkTexts.length >= 2) {
+                  breadcrumbs = linkTexts.join(' › ')
+                  break
                 }
               }
-            })
+            }
+            if (breadcrumbs) break
+          } catch { /* ignore invalid selectors */ }
+        }
+
+        // Priority 2: JSON-LD structured data (BreadcrumbList)
+        if (!breadcrumbs) {
+          const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+          for (const script of scripts) {
+            try {
+              const data = JSON.parse(script.textContent || '{}')
+              const checkForBreadcrumb = (obj: any): string => {
+                if (!obj) return ''
+                if (obj['@type'] === 'BreadcrumbList' && Array.isArray(obj.itemListElement)) {
+                  const names = obj.itemListElement
+                    .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+                    .map((item: any) => item.name || item.item?.name || '')
+                    .filter(Boolean)
+                  if (names.length >= 2) return names.join(' › ')
+                }
+                // Check @graph array
+                if (Array.isArray(obj['@graph'])) {
+                  for (const node of obj['@graph']) {
+                    const result = checkForBreadcrumb(node)
+                    if (result) return result
+                  }
+                }
+                return ''
+              }
+              const found = checkForBreadcrumb(data)
+              if (found) { breadcrumbs = found; break }
+            } catch { /* invalid JSON */ }
+          }
+        }
+
+        // Priority 3a: nav elements with list structure (ol/ul/li)
+        if (!breadcrumbs) {
+          const navEls = Array.from(document.querySelectorAll('nav, [role="navigation"]')) as HTMLElement[]
+          for (const nav of navEls) {
+            const lists = nav.querySelectorAll('ol, ul')
+            for (const list of lists) {
+              const items = list.querySelectorAll('li')
+              if (items.length >= 2 && items.length <= 10) {
+                const texts = Array.from(items)
+                  .map(li => (li.textContent || '').trim().replace(/\s+/g, ' '))
+                  .filter(t => t.length > 0 && t.length < 60)
+                if (texts.length >= 2) {
+                  const joined = texts.join(' › ')
+                  if (joined.length < 200 && texts.every(t => t.length < 50)) {
+                    breadcrumbs = joined
+                    break
+                  }
+                }
+              }
+            }
             if (breadcrumbs) break
           }
         }
 
-        // Also check for numbered breadcrumbs (like "1. Home 2. / mens 3. / New Arrivals")
-        // Handle both single-line and multi-line formats
+        // Priority 3b: ANY nav / div / span element with 2+ short direct links — catches
+        // "Home / Mens" style breadcrumbs that use plain <a> tags without list markup.
         if (!breadcrumbs) {
-          const allText = document.body.innerText || ''
+          const containers = Array.from(document.querySelectorAll(
+            'nav a, [role="navigation"] a, ' +
+            '[class*="breadcrumb"] a, [class*="crumb"] a, ' +
+            '[class*="path"] a, [class*="trail"] a'
+          )) as HTMLAnchorElement[]
 
-          // Try multi-line numbered format first (1. Home\n2. / mens\n3. / New Arrivals)
-          const multiLinePattern = /(\d+\.\s*[^\n]+\s*\n\s*\d+\.\s*[^\n]+(?:\s*\n\s*\d+\.\s*[^\n]+)*)/i
-          const multiLineMatch = allText.match(multiLinePattern)
-          if (multiLineMatch) {
-            // Clean up the match - remove extra whitespace and newlines, join with spaces
-            breadcrumbs = multiLineMatch[0]
-              .replace(/\s*\n\s*/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim()
-          } else {
-            // Try single-line numbered format (1. Home 2. / mens 3. / New Arrivals)
-            const singleLinePattern = /(\d+\.\s*[^\n]+(?:\s*\/\s*[^\n]+)*)/i
-            const singleLineMatch = allText.match(singleLinePattern)
-            if (singleLineMatch) {
-              breadcrumbs = singleLineMatch[0].trim()
+          if (containers.length >= 2) {
+            // Group consecutive <a> tags that share a common ancestor (within 3 DOM levels)
+            const getAncestor = (el: Element, levels: number): Element => {
+              let cur: Element | null = el
+              for (let i = 0; i < levels; i++) { if (cur?.parentElement) cur = cur.parentElement }
+              return cur || el
+            }
+
+            // Find the shallowest common ancestor that contains 2-6 short links
+            const seen = new Set<Element>()
+            for (const a of containers) {
+              for (let levels = 1; levels <= 4; levels++) {
+                const ancestor = getAncestor(a, levels)
+                if (seen.has(ancestor)) continue
+                seen.add(ancestor)
+                const links = Array.from(ancestor.querySelectorAll('a')) as HTMLAnchorElement[]
+                if (links.length < 2 || links.length > 8) continue
+                const texts = links
+                  .map(l => (l.textContent || '').trim().replace(/\s+/g, ' '))
+                  .filter(t => t.length >= 2 && t.length <= 40)
+                if (texts.length < 2) continue
+                // Accept if the container itself is short (not a full menu)
+                const containerText = (ancestor.textContent || '').replace(/\s+/g, ' ').trim()
+                if (containerText.length > 300) continue
+                // Accept any separator character in the container text, OR if ancestor is small
+                if (BREADCRUMB_SEPARATORS.test(containerText) || containerText.length < 80) {
+                  breadcrumbs = texts.join(' / ')
+                  break
+                }
+              }
+              if (breadcrumbs) break
             }
           }
         }
 
-        // Additional check: Look for breadcrumb-like patterns in visible text near the top
+        // Priority 4: full page text pattern matching — scan entire body text for breadcrumb patterns.
+        // Do NOT limit to first 3000 chars — "Home / Mens" can appear anywhere in innerText ordering.
         if (!breadcrumbs) {
-          // Check first 2000 characters of visible text for breadcrumb patterns
-          const topText = document.body.innerText?.substring(0, 2000) || ''
-          const breadcrumbLikePatterns = [
-            /(Home\s*[/>]\s*[^\n]+)/i,
-            /(\d+\.\s*Home\s*[/>]?\s*[^\n]+)/i,
-            /(Home\s*[/>]\s*\w+\s*[/>]\s*[^\n]+)/i
+          const fullText = document.body.innerText || ''
+          const breadcrumbPatterns = [
+            // "Home / X" or "Home › X" or "Home > X" (the most common simple breadcrumb)
+            /\bHome\s+[\/›>»]\s+\S[^\n]{1,60}/i,
+            // "Home / Category / Product"
+            /\bHome\s*[\/›>\|»]\s*[^\n]{2,40}[\/›>\|»]\s*[^\n]{2,60}/i,
+            // "Home / Mens" — space around slash (most common style)
+            /\bHome\s+\/\s+\w[^\n]{1,50}/i,
+            // Category › Subcategory (with › specifically, no "Home" needed)
+            /\b\w{2,25}\s*›\s*\w{2,25}(?:\s*›\s*\w{2,40})?/,
+            // Category > Subcategory
+            /\b\w{2,25}\s*>\s*\w{2,25}(?:\s*>\s*\w{2,40})?/,
           ]
-
-          for (const pattern of breadcrumbLikePatterns) {
-            const match = topText.match(pattern)
-            if (match && match[0].length < 100) { // Reasonable breadcrumb length
-              breadcrumbs = match[0].trim()
+          for (const pattern of breadcrumbPatterns) {
+            const match = fullText.match(pattern)
+            if (match && match[0].length >= 5 && match[0].length <= 200) {
+              breadcrumbs = cleanBreadcrumbText(match[0])
               break
             }
           }
@@ -975,6 +1114,123 @@ export async function POST(request: NextRequest) {
         return null
       })
 
+      // Detect square image containers — check rendered CSS dimensions, not raw file dimensions.
+      // Many Shopify/ecommerce sites use square CSS containers even though the source image is rectangular.
+      squareImageContext = await page.evaluate(() => {
+        // Tolerance: container is "square" if abs(w-h)/max(w,h) <= 12%
+        const SQUARE_TOLERANCE = 0.12
+
+        // Candidates: images inside product gallery selectors
+        const GALLERY_SELECTORS = [
+          '[class*="product-gallery"] img',
+          '[class*="product-image"] img',
+          '[class*="product__image"] img',
+          '[class*="product__media"] img',
+          '[id*="product-image"] img',
+          '[class*="gallery"] img',
+          '[class*="swiper"] img',
+          '[class*="slider"] img',
+          '[class*="carousel"] img',
+          'figure img',
+          '.product img',
+        ]
+
+        const seen = new Set<Element>()
+        const candidates: HTMLImageElement[] = []
+
+        for (const sel of GALLERY_SELECTORS) {
+          try {
+            document.querySelectorAll<HTMLImageElement>(sel).forEach(img => {
+              if (!seen.has(img)) {
+                seen.add(img)
+                candidates.push(img)
+              }
+            })
+          } catch { /* ignore bad selector */ }
+        }
+
+        // If no gallery images, fall back to all page images > 80px
+        if (candidates.length === 0) {
+          document.querySelectorAll<HTMLImageElement>('img').forEach(img => {
+            const r = img.getBoundingClientRect()
+            if (r.width > 80 && r.height > 80) candidates.push(img)
+          })
+        }
+
+        let squareContainersFound = 0
+        let cssEnforced = false
+        const sampleRatios: number[] = []
+
+        for (const img of candidates.slice(0, 20)) {
+          // Prefer checking the immediate parent container (the wrapper div/figure), not the img itself
+          const container = (img.parentElement as HTMLElement) || img
+          const rect = container.getBoundingClientRect()
+          const cs = window.getComputedStyle(container)
+
+          // Skip hidden or zero-size
+          if (rect.width < 20 || rect.height < 20) continue
+
+          // Check explicit aspect-ratio CSS
+          const ar = cs.aspectRatio || cs.getPropertyValue('aspect-ratio') || ''
+          if (ar === '1 / 1' || ar === '1' || ar === '1/1') {
+            cssEnforced = true
+            squareContainersFound++
+            sampleRatios.push(1.0)
+            continue
+          }
+
+          // Check object-fit: the image inside is cropped to container shape
+          const imgCs = window.getComputedStyle(img)
+          const objectFit = imgCs.objectFit
+          const imgRect = img.getBoundingClientRect()
+
+          // Use rendered container size (most reliable)
+          const w = rect.width
+          const h = rect.height
+          if (w > 0 && h > 0) {
+            const ratio = w / h
+            sampleRatios.push(Math.round(ratio * 100) / 100)
+            const diff = Math.abs(w - h) / Math.max(w, h)
+            if (diff <= SQUARE_TOLERANCE) {
+              squareContainersFound++
+              // CSS object-fit cover/fill inside a square container = CSS-enforced square
+              if (objectFit === 'cover' || objectFit === 'fill' || objectFit === 'contain') {
+                cssEnforced = true
+              }
+            } else if (objectFit === 'cover' || objectFit === 'fill') {
+              // image is cropped by object-fit inside the container — check container itself
+              const cw = rect.width
+              const ch = rect.height
+              if (cw > 0 && ch > 0 && Math.abs(cw - ch) / Math.max(cw, ch) <= SQUARE_TOLERANCE) {
+                squareContainersFound++
+                cssEnforced = true
+              }
+            }
+          }
+        }
+
+        const totalGalleryImages = Math.min(candidates.length, 20)
+        // Majority vote: if ≥ 60% of checked containers are square → visuallySquare = true
+        const visuallySquare = totalGalleryImages > 0
+          ? (squareContainersFound / totalGalleryImages) >= 0.6 || cssEnforced
+          : false
+
+        const avgRatio = sampleRatios.length > 0
+          ? (sampleRatios.reduce((a, b) => a + b, 0) / sampleRatios.length).toFixed(2)
+          : 'N/A'
+
+        const summary = [
+          `Total gallery images checked: ${totalGalleryImages}`,
+          `Square containers (w≈h within 12%): ${squareContainersFound}`,
+          `CSS aspect-ratio / object-fit enforces square: ${cssEnforced ? 'YES' : 'NO'}`,
+          `Visually square: ${visuallySquare ? 'YES' : 'NO'}`,
+          `Average rendered aspect ratio (w/h): ${avgRatio}`,
+          `Sample ratios: ${sampleRatios.slice(0, 6).join(', ')}`,
+        ].join('\n')
+
+        return { squareContainersFound, totalGalleryImages, visuallySquare, cssEnforced, sampleRatios, summary }
+      })
+
       // Combine visible text and key elements (DOM only, no image/OCR reading)
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
@@ -982,7 +1238,8 @@ export async function POST(request: NextRequest) {
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
-        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaText || "N/A"}\nDOM Structure Found (same container/sibling as CTA): ${trustBadgesContext.domStructureFound ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(", ") : "None"}\nPurchase Container: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}` : '')
+        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaText || "N/A"}\nDOM Structure Found (same container/sibling as CTA): ${trustBadgesContext.domStructureFound ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(", ") : "None"}\nPurchase Container: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}` : '') +
+        (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
 
 
@@ -1311,11 +1568,43 @@ export async function POST(request: NextRequest) {
             rule.id === 'image-before-after' ||
             (rule.title.toLowerCase().includes('before') && rule.title.toLowerCase().includes('after')) ||
             (rule.description.toLowerCase().includes('before-and-after') || rule.description.toLowerCase().includes('before and after'))
+          const isSquareImageRule =
+            rule.id === 'image-square-format' ||
+            (rule.title.toLowerCase().includes('square') && rule.title.toLowerCase().includes('image')) ||
+            (rule.description.toLowerCase().includes('square') && (rule.description.toLowerCase().includes('aspect') || rule.description.toLowerCase().includes('1:1')))
 
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
           if (isBreadcrumbRule) {
-            specialInstructions = `\nBREADCRUMB RULE: Check "Breadcrumbs:" in KEY ELEMENTS. If "Not found" → FAIL, else → PASS.`
+            specialInstructions = `
+BREADCRUMB NAVIGATION RULE
+
+The DOM scanner could not find breadcrumbs in the HTML structure. You must now check the SCREENSHOT.
+
+━━━━ WHAT TO LOOK FOR ━━━━
+
+Breadcrumbs are a navigation trail near the TOP of the page, usually just below the header or above the product title.
+
+✅ PASS if you see ANY of these in the screenshot:
+• A trail with slash separator:      Home / Mens / New Arrivals
+• A trail with arrow separator:      Home > Category > Product
+• A trail with chevron separator:    Electronics › Mobiles › Smartphones
+• Any short navigation path near the top showing page hierarchy
+• Even just "Home / [ProductName]" counts
+
+❌ FAIL only if:
+• No breadcrumb trail is visible anywhere near the top of the page
+• No navigation path text is present (only a logo and header)
+
+━━━━ DECISION ━━━━
+
+1. Look at the screenshot — scan the area near the TOP of the page
+2. If you see a path-style navigation → PASS
+3. If no navigation trail visible → FAIL
+
+✅ PASS reason: "Breadcrumb navigation ('Home / Mens / New Arrivals') is visible near the top of the page, helping users understand site hierarchy."
+❌ FAIL reason: "No breadcrumb navigation was detected in the page header or top section. Add breadcrumb navigation (e.g. Home > Category > Product) to help users navigate."
+`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isImageAnnotationsRule) {
@@ -1324,6 +1613,39 @@ export async function POST(request: NextRequest) {
             specialInstructions = `\nTHUMBNAILS IN PRODUCT GALLERY RULE - LENIENT CHECK:\n\nThe rule asks for thumbnails in the product image gallery. CRITICAL: If thumbnails EXIST on the page (a row of small images below or beside the main product image, a carousel with arrows to scroll, or multiple selectable small images), you MUST PASS—even if the user would need to scroll to see them or some thumbnails are off-screen.\n\nPASS when:\n- There is a thumbnail strip/carousel below or next to the main product image (with or without scroll arrows).\n- Multiple small images are shown that let users browse gallery images (even if scrolling is needed to see all).\n- Any small preview images in the product gallery area count as thumbnails.\n\nFAIL only when:\n- The product gallery has NO thumbnails at all (e.g. only one main image with no way to see other images as small previews).\n\nDo NOT fail just because thumbnails require scrolling to be visible. Thumbnails present = PASS.`
           } else if (isBeforeAfterRule) {
             specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE - CHECK SCREENSHOT AND CONTENT:\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
+          } else if (isSquareImageRule) {
+            specialInstructions = `
+SQUARE IMAGES RULE — "Use square images for consistency"
+
+CRITICAL: Do NOT check raw image file dimensions. Many ecommerce sites (Shopify etc.) use rectangular source images but display them in square CSS containers. The rule checks VISUAL appearance, not file dimensions.
+
+━━━━ DECISION LOGIC ━━━━
+
+Check the SQUARE IMAGE CHECK section in KEY ELEMENTS first:
+
+1. If "Visually square: YES" → PASS immediately (DOM confirms square containers)
+2. If "CSS aspect-ratio / object-fit enforces square: YES" → PASS immediately
+3. If "Square containers (w≈h within 12%): X" and X > 0 → PASS
+
+Then check the screenshot:
+4. If gallery thumbnails/images appear visually square (grid items with equal height and width) → PASS
+5. If the main product image appears square or nearly square in the layout → PASS
+
+━━━━ FAIL CONDITION ━━━━
+
+FAIL only when ALL of these are true:
+- SQUARE IMAGE CHECK shows "Visually square: NO" AND "Square containers: 0"
+- AND screenshot clearly shows gallery images are tall/portrait or wide/landscape rectangles with noticeably unequal dimensions
+
+━━━━ IMPORTANT ━━━━
+
+- Do NOT fail because the source image file is rectangular — CSS can crop/display it as square
+- PASS if containers appear square in the rendered UI
+- Many Shopify product galleries are visually square even with rectangular source images
+
+✅ PASS reason: "Product gallery images appear square in the UI layout (CSS containers enforce 1:1 aspect ratio), maintaining consistent visual alignment."
+❌ FAIL reason: "Product gallery images appear clearly rectangular (portrait/landscape) in the UI, causing inconsistent visual alignment. Use square containers or add aspect-ratio: 1/1 with object-fit: cover."
+`
           }
 
           else if (isVideoTestimonialRule) {
@@ -2266,9 +2588,47 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = true
               analysis.reason = `Before-and-after or result imagery is present on the page (e.g. in product gallery or thumbnails with clinically proven results, percentage improvement, or comparison imagery). This meets the requirement for demonstrating product effectiveness.`
             }
-          } else if (isBreadcrumbRule && !reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation')) {
-            console.warn(`Warning: Breadcrumb rule but reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 50)}`)
-            isRelevant = false
+          } else if (isBreadcrumbRule) {
+            // Override 1: DOM found breadcrumbs in KEY ELEMENTS → force PASS
+            const breadcrumbLine = (keyElements || '').split('\n').find(l => /^Breadcrumbs:/i.test(l))
+            const breadcrumbValue = breadcrumbLine?.replace(/^Breadcrumbs:\s*/i, '').trim() || ''
+            const domFoundBreadcrumbs = !!breadcrumbLine
+              && breadcrumbValue.toLowerCase() !== 'not found'
+              && breadcrumbValue !== ''
+              && breadcrumbValue.toLowerCase() !== 'n/a'
+
+            if (!analysis.passed && domFoundBreadcrumbs) {
+              console.log(`Breadcrumb rule: DOM found breadcrumbs ("${breadcrumbValue}") but AI failed. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Breadcrumb navigation found: "${breadcrumbValue}". Rule passes.`
+            }
+
+            // Override 2: fullVisibleText contains a breadcrumb-style path → force PASS
+            // Catches "Home / Mens", "Home › Category", etc. missed by DOM selector scan
+            if (!analysis.passed) {
+              const pageText = fullVisibleText || websiteContent || ''
+              const breadcrumbTextPatterns = [
+                /\bHome\s+\/\s+\S/i,           // "Home / Mens" (most common)
+                /\bHome\s+›\s+\S/i,            // "Home › Category"
+                /\bHome\s+>\s+\S/i,            // "Home > Category"
+                /\bHome\s*[\/›>»]\s*\w/i,      // "Home/Mens" or "Home›Mens"
+                /\w+\s*›\s*\w+\s*›\s*\w+/,    // "X › Y › Z" (3-part with ›)
+                /\w+\s+\/\s+\w+\s+\/\s+\w+/,  // "X / Y / Z" (3-part with /)
+              ]
+              const matchedCrumb = breadcrumbTextPatterns.find(p => p.test(pageText))
+              if (matchedCrumb) {
+                const matchedText = (pageText.match(matchedCrumb) || [''])[0]
+                console.log(`Breadcrumb rule: Found breadcrumb pattern "${matchedText}" in page text. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = `Breadcrumb navigation ("${matchedText.trim()}") is visible on the page, helping users understand site hierarchy. Rule passes.`
+              }
+            }
+
+            // Sanity check: warn if reason doesn't mention breadcrumbs (but never force fail)
+            if (!reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation') && !reasonLower.includes('trail')) {
+              console.warn(`Warning: Breadcrumb rule reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 60)}`)
+              isRelevant = false
+            }
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
             // Only pass if AI explicitly says videos ARE present (not just mentions "video" in general)
@@ -2530,6 +2890,22 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.log(`Free shipping threshold rule: Specific free shipping/delivery phrase found in page DOM. Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Free express delivery or free express shipping is clearly shown on the product page, meeting the requirement to highlight a free shipping incentive near the purchase area.`
+            }
+          } else if (isSquareImageRule) {
+            // Hard override: DOM measured square containers → always PASS, even if AI disagreed
+            if (!analysis.passed && squareImageContext?.visuallySquare) {
+              const sqCount = squareImageContext.squareContainersFound
+              const total = squareImageContext.totalGalleryImages
+              const cssNote = squareImageContext.cssEnforced ? ' (CSS aspect-ratio or object-fit enforces square)' : ''
+              console.log(`Square image rule: DOM found ${sqCount}/${total} square containers${cssNote}. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Product gallery images appear square in the rendered UI (${sqCount} of ${total} containers have equal width and height${cssNote}), maintaining consistent visual layout.`
+            }
+            // Secondary override: CSS explicitly enforces 1:1 aspect ratio → PASS
+            if (!analysis.passed && squareImageContext?.cssEnforced) {
+              console.log(`Square image rule: CSS aspect-ratio/object-fit enforces square containers. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `CSS enforces a square (1:1) aspect ratio on product gallery image containers, ensuring consistent visual appearance regardless of source image dimensions.`
             }
           }
 
