@@ -733,6 +733,23 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Debug: View full screenshot the AI is receiving */}
+                {websiteScreenshot && (
+                  <div className="mb-4 flex justify-center">
+                    <button
+                      onClick={() => {
+                        const win = window.open()
+                        if (win) {
+                          win.document.write(`<html><body style="margin:0;background:#000"><img src="${websiteScreenshot}" style="max-width:100%;display:block" /></body></html>`)
+                        }
+                      }}
+                      className="text-xs text-purple-400 underline hover:text-purple-300"
+                    >
+                      🔍 View full screenshot AI is seeing
+                    </button>
+                  </div>
+                )}
+
                 {/* Steps - loading strips (visible dark cards with white text) */}
                 <p className="text-sm font-medium text-white mb-3">Website URL:</p>
                 <div className="space-y-3">

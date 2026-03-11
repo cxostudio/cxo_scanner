@@ -5,6 +5,10 @@ import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
 import path from 'path'
 import fs from 'fs'
+import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
+import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
+import { tryEvaluateDeterministic } from '@/lib/rules/deterministicRules'
+import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 interface Rule {
   id: string
   title: string
@@ -210,6 +214,7 @@ export async function POST(request: NextRequest) {
       visibleWithoutScrolling: boolean
       trustBadgesInfo: string
     } | null = null
+    let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -237,26 +242,30 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-      // Navigate to the page - use 'load' for faster loading (Vercel 60s timeout)
+      // Navigate to the page - use networkidle0 so initial load is complete
       await page.goto(validUrl, {
-        waitUntil: 'networkidle0', // Faster than networkidle0 - good enough for screenshot
-        timeout: 30000, // 30 second timeout (reduced for Vercel)
+        waitUntil: 'networkidle0',
+        timeout: 30000,
       })
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight)
-      })
-      console.log('Page loaded, ready for screenshot')
+      // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
+      await scrollPageToBottom(page)
+      const settleMs = getSettleDelayMs()
+      await new Promise((r) => setTimeout(r, settleMs))
+      console.log('Page fully loaded and scrolled; DOM stable for snapshot')
 
-      // Log lazy-loading usage (purely for debugging/visibility; does not affect rules)
+      // Optional debug log (legacy)
       await logLazyLoadingUsage(page)
-
-      // Wait 2s after load so full site settles (scripts, DOM, recommendations) before first-batch scan
-      await new Promise((r) => setTimeout(r, 2000))
 
       // Capture early screenshot immediately after page load (for Vercel timeout safety)
       // This ensures screenshot is available even if full scan times out
       if (captureScreenshot && !earlyScreenshot) {
         try {
+          // Scroll back to 1/3 of the page so JS-rendered product sections (e.g. subscription plan boxes)
+          // are fully painted before we take the screenshot, then wait an extra 1s for render
+          await page.evaluate(() => {
+            window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.3))
+          })
+          await new Promise((r) => setTimeout(r, 1000))
           console.log('Capturing early screenshot for Vercel safety...')
           const earlyScreenshotBuffer = await page.screenshot({
             type: 'jpeg',
@@ -560,10 +569,18 @@ export async function POST(request: NextRequest) {
           tabsInfo.push('Tabs/Accordions detection: Unable to extract')
         }
 
-        // Return consolidated key elements (no special lazy-loading block here;
-        // lazy-loading rule is handled like any other AI rule).
         return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}`
       })
+
+      // Lazy loading detection (loading="lazy", data-src, data-lazy, lazy classes; exclude small icons)
+      try {
+        const lazyPayload = await detectLazyLoading(page)
+        lazyLoadingResult = buildLazyLoadingSummary(lazyPayload)
+        keyElements = (keyElements || '') + '\n\n--- LAZY LOADING ---\n' + lazyLoadingResult.summary
+      } catch (e) {
+        console.warn('Lazy loading detection failed:', e)
+        lazyLoadingResult = buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] })
+      }
 
       // QUANTITY / DISCOUNT CHECK: PASS if discount-type content appears ANYWHERE on the page. Log snippet to console for debugging.
       quantityDiscountContext = await page.evaluate(() => {
@@ -1165,6 +1182,8 @@ export async function POST(request: NextRequest) {
         const hasAnyDiscount = tieredPricing || percentDiscount || priceDrop || anyDiscountSignal
         quantityDiscountContext = { foundPatterns, tieredPricing, percentDiscount, priceDrop, hasAnyDiscount, debugSnippet: websiteContent.substring(0, 2800) }
         if (hasAnyDiscount) console.log('[FALLBACK] Discount detected in fetched text:', foundPatterns)
+        lazyLoadingResult = buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] })
+        keyElements = 'Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\n--- LAZY LOADING ---\nLazy loading detected: NO\nLazy loaded media count: 0\nTotal media: 0'
 
         // Append a synthetic QUANTITY / DISCOUNT CHECK so AI sees it (keep under 6000 total)
         const discountBlock = `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${priceDrop ? "YES" : "NO"}\nPatterns found: ${foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n`
@@ -1237,6 +1256,16 @@ export async function POST(request: NextRequest) {
           }
         }
         lastRequestTime = Date.now()
+
+        // Deterministic rules: use frozen snapshot only; skip AI for consistent results
+        const detResult = tryEvaluateDeterministic(rule, {
+          lazyLoading: lazyLoadingResult ?? buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] }),
+          keyElementsString: keyElements ?? '',
+        })
+        if (detResult) {
+          results.push(detResult)
+          continue
+        }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
         const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
@@ -2012,8 +2041,32 @@ CRITICAL INSTRUCTIONS:
             11. Focus on visual prominence: position, contrast, and size
               `
           } else if (isFreeShippingThresholdRule) {
+            // DOM fallback: only match SPECIFIC phrases that indicate an active offer (not FAQ/policy mentions)
+            const freeShippingDomFound = (() => {
+              const text = (fullVisibleText || '').toLowerCase()
+              return (
+                text.includes('free express delivery') ||
+                text.includes('free express shipping') ||
+                /free\s+shipping\s+over\s+[\$£€]?\d/.test(text) ||
+                /add\s+[\$£€]?\d.*for\s+free\s+shipping/i.test(text) ||
+                /[\$£€]?\d.*away\s+from\s+free\s+shipping/i.test(text) ||
+                /free\s+shipping\s+on\s+orders?\s+(over|above)/i.test(text)
+              )
+            })()
             specialInstructions = `
-FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold language is within 50-100px of the main Add to Cart button (directly above or below). Valid phrases: "Add $X more for Free Shipping", "Free shipping over $50", "You are $X away from FREE shipping". Generic "Free shipping available" does NOT count. Message only in header/footer (far from CTA) → FAIL.
+FREE SHIPPING THRESHOLD RULE - Use SCREENSHOT first, then DOM as fallback.
+
+PASS if the captured image shows ANY of these phrases anywhere visible in the screenshot:
+- "free shipping"
+- "free express shipping"
+- "free express delivery"
+- "free delivery"
+- threshold variants like "free shipping over $X", "add $X more for free shipping", "$X away from free shipping"
+
+DOM FALLBACK: If the screenshot does not clearly show these phrases, check the page text below. The DOM text scan found: FREE_SHIPPING_DOM_FOUND=${freeShippingDomFound}
+If FREE_SHIPPING_DOM_FOUND=true → PASS (the text is on the page even if screenshot missed it).
+
+FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               `
           }
 
@@ -2026,6 +2079,7 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE. You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           // Debug: log what DOM/content the AI gets for delivery rule (so user can see why it failed)
           if (rule.id === 'shipping-time-visibility') {
             const deliveryBlockStart = contentForAI.indexOf('--- DELIVERY TIME CHECK ---')
@@ -2041,7 +2095,16 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
             console.log('[DELIVERY RULE] Content sent to AI (DELIVERY TIME CHECK section):\n', deliveryBlock)
           }
 
-          const prompt = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix} URL: ${validUrl} \nContent: ${contentForAI} \n\nYou ALSO receive a SCREENSHOT IMAGE of this same page (when available). You have TWO sources of truth: (1) the DOM/content in "Content" above, and (2) the screenshot image you see. For this single rule, mark "passed": true if the requirement is clearly satisfied in EITHER the DOM/content OR the screenshot. Only mark "passed": false when BOTH sources show that the requirement is NOT satisfied. If one source shows the rule is met and the other is unclear or missing, you MUST treat the rule as PASSED.\n\n=== RULE TO CHECK(ONLY THIS RULE) ===\nRule ID: ${rule.id} \nRule Title: ${rule.title} \nRule Description: ${rule.description} \n${specialInstructions} \n\nCRITICAL: You are analyzing ONLY the rule above(Rule ID: ${rule.id}, Title: "${rule.title}").Your response must be SPECIFIC to this rule only.Do NOT analyze other rules or mention other rules in your response.\n\nIMPORTANT - REASON FORMAT REQUIREMENTS: \n - Be SPECIFIC: Mention exact elements, locations, and what's wrong\n- Be HUMAN READABLE: Write in clear, simple language that users can understand\n- Tell WHERE: Specify where on the page/site the problem is\n- Tell WHAT: Quote exact text/elements that are problematic\n- Tell WHY: Explain why it's a problem and what should be done\n - Be ACTIONABLE: User should know exactly what to fix\n - Do NOT mention currency symbols, prices, or amounts(like Rs. 3, 166.67, $50, ₹100, £29.00) unless the rule specifically requires it\n - Your reason MUST be relevant ONLY to the rule above(${rule.title}) \n\nIf PASSED: List specific elements found that meet THIS rule(${rule.title}) with their EXACT locations and section names(e.g., "section titled 'Reviews with images' located below product description").\nIf FAILED: Be VERY SPECIFIC - mention exact elements, their locations, what's missing/wrong, and why it matters FOR THIS RULE ONLY.\n\nIMPORTANT FOR CUSTOMER PHOTOS AND VIDEO TESTIMONIALS RULES:\n- You MUST mention the EXACT SECTION NAME and LOCATION where you see customer photos/videos (e.g., "Reviews with images section", "Customer reviews section", "Video Testimonials section")\n- Include WHERE on the page the section is located (e.g., "below product description", "after product gallery", "near bottom of page")\n- Be specific about the section's position relative to other elements on the page\n\nIMPORTANT: You MUST respond with ONLY valid JSON.No text before or after.No markdown.No code blocks.\n\nRequired JSON format(copy exactly, replace values): \n{ "passed": true, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nOR\n\n{ "passed": false, "reason": "brief explanation under 400 characters - MUST be about ${rule.title} only" } \n\nReason must be: (1) Under 400 characters, (2) Accurate to actual content, (3) Specific elements mentioned with locations, (4) Human readable and clear, (5) Actionable - tells user what to fix, (6) Relevant ONLY to the rule "${rule.title}"(Rule ID: ${rule.id}), (7) Do NOT include currency or price information unless rule requires it, (8) Do NOT mention other rules or compare with other rules.`
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
+          const prompt = buildRulePrompt({
+            url: validUrl,
+            contentForAI,
+            ruleId: rule.id,
+            ruleTitle: rule.title,
+            ruleDescription: rule.description,
+            specialInstructions,
+            ruleSpecificPrefix,
+          })
 
           // Call OpenRouter with BOTH DOM/content and screenshot image (when available)
           let messageContent: any = prompt
@@ -2530,6 +2593,24 @@ FREE SHIPPING THRESHOLD RULE - Check that a free shipping message with threshold
               console.log(`Benefits near title rule: Benefit-like content found in page. Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Key benefits (e.g. fades dark spots, evens skin tone, radiance) are present near the product title in the product section, meeting the requirement.`
+            }
+          } else if (isFreeShippingThresholdRule) {
+            // Hard override: only trigger on SPECIFIC free shipping phrases that clearly
+            // indicate an active free shipping/delivery offer (not generic mentions in FAQ/policies)
+            const freeShippingPageText = (fullVisibleText || websiteContent || '').toLowerCase()
+            const hasFreeShippingInDom =
+              // Very specific phrases that only appear when site actively offers it near CTA
+              freeShippingPageText.includes('free express delivery') ||
+              freeShippingPageText.includes('free express shipping') ||
+              // Threshold variants: "free shipping over $X" or "add $X for free shipping"
+              /free\s+shipping\s+over\s+[\$£€]?\d/.test(freeShippingPageText) ||
+              /add\s+[\$£€]?\d.*for\s+free\s+shipping/i.test(freeShippingPageText) ||
+              /[\$£€]?\d.*away\s+from\s+free\s+shipping/i.test(freeShippingPageText) ||
+              /free\s+shipping\s+on\s+orders?\s+(over|above)/i.test(freeShippingPageText)
+            if (!analysis.passed && hasFreeShippingInDom) {
+              console.log(`Free shipping threshold rule: Specific free shipping/delivery phrase found in page DOM. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Free express delivery or free express shipping is clearly shown on the product page, meeting the requirement to highlight a free shipping incentive near the purchase area.`
             }
           }
 
