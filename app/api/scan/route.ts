@@ -222,6 +222,13 @@ export async function POST(request: NextRequest) {
       sampleRatios: number[]
       summary: string
     } | null = null
+    let stickyCTAContext: {
+      desktopSticky: boolean
+      mobileSticky: boolean
+      desktopEvidence: string
+      mobileEvidence: string
+      anySticky: boolean
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1332,6 +1339,125 @@ export async function POST(request: NextRequest) {
         screenshotDataUrl = null
       }
 
+      // ── Sticky Add to Cart detection — desktop + mobile viewports ──────────
+      // Run AFTER screenshots so viewport changes don't affect screenshot capture.
+      // PASS if sticky CTA found on either desktop or mobile.
+      const needsStickyCheck = rules.some(r =>
+        r.id === 'cta-sticky-add-to-cart' ||
+        (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
+      )
+      if (needsStickyCheck && page) {
+        try {
+          // Inner evaluate helper (inlined per viewport)
+          const evalSticky = async (): Promise<{ found: boolean; evidence: string }> => {
+            return page.evaluate(() => {
+              const ATC_KEYWORDS = ['add to cart', 'add to bag', 'buy now', 'shop now', 'purchase']
+              const isCtaText = (t: string) => ATC_KEYWORDS.some(k => t.toLowerCase().includes(k))
+
+              // Walk up DOM to check if any ancestor has position:fixed or position:sticky
+              const hasFixedOrSticky = (el: Element): { yes: boolean; pos: string } => {
+                let cur: Element | null = el
+                while (cur && cur !== document.body) {
+                  const cs = window.getComputedStyle(cur as HTMLElement)
+                  if (cs.position === 'fixed' || cs.position === 'sticky') return { yes: true, pos: cs.position }
+                  cur = cur.parentElement
+                }
+                return { yes: false, pos: '' }
+              }
+
+              // 1. Check all ATC buttons/links for fixed/sticky ancestors
+              const interactives = Array.from(document.querySelectorAll(
+                'button, a, [role="button"], input[type="submit"], input[type="button"]'
+              )) as HTMLElement[]
+
+              for (const el of interactives) {
+                const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim()
+                if (!isCtaText(text)) continue
+                const rect = el.getBoundingClientRect()
+                if (rect.width < 30 || rect.height < 10) continue
+                const { yes, pos } = hasFixedOrSticky(el)
+                if (yes) {
+                  return { found: true, evidence: `"${text.substring(0, 40)}" CTA has position:${pos}` }
+                }
+              }
+
+              // 2. Check sticky/floating containers that contain ATC-related text
+              const stickySels = [
+                '[class*="sticky" i]', '[class*="floating" i]', '[class*="fixed-bar" i]',
+                '[class*="bottom-bar" i]', '[class*="mobile-cart" i]', '[class*="add-to-cart-bar" i]',
+                '[class*="buy-bar" i]', '[class*="sticky-atc" i]', '[class*="persistent" i]',
+                '[id*="sticky" i]', '[id*="floating" i]', '[id*="sticky-atc" i]',
+              ]
+              for (const sel of stickySels) {
+                try {
+                  const containers = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+                  for (const c of containers) {
+                    const cs = window.getComputedStyle(c)
+                    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue
+                    const rect = c.getBoundingClientRect()
+                    if (rect.width < 50 || rect.height < 20) continue
+                    const text = c.innerText || c.textContent || ''
+                    if (isCtaText(text)) {
+                      return { found: true, evidence: `Sticky container [${sel}] with ATC text visible (${cs.position})` }
+                    }
+                  }
+                } catch { /* skip invalid selector */ }
+              }
+
+              // 3. Any fixed-positioned element at bottom of viewport suggesting a sticky bar
+              const allEls = Array.from(document.querySelectorAll('*')) as HTMLElement[]
+              for (const el of allEls) {
+                const cs = window.getComputedStyle(el)
+                if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
+                const rect = el.getBoundingClientRect()
+                // Must be near the bottom of viewport (bottom sticky bar) or large enough to be a CTA bar
+                const isBottomBar = rect.bottom >= window.innerHeight * 0.7 && rect.height >= 40 && rect.height <= 160
+                const isTopBar = rect.top <= window.innerHeight * 0.2 && rect.height >= 40
+                if (!isBottomBar && !isTopBar) continue
+                const text = el.innerText || el.textContent || ''
+                if (isCtaText(text)) {
+                  return { found: true, evidence: `Fixed/sticky bar (${cs.position}, ${isBottomBar ? 'bottom' : 'top'}) with ATC text` }
+                }
+              }
+
+              return { found: false, evidence: '' }
+            })
+          }
+
+          // ── Desktop check (current viewport, 1280×800 default) ────────────
+          await page.evaluate(() => { window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)) })
+          await new Promise(r => setTimeout(r, 600))
+          const desktopResult = await evalSticky()
+
+          // ── Mobile check (375×812) ────────────────────────────────────────
+          await page.setViewport({ width: 375, height: 812, isMobile: true, hasTouch: true })
+          await new Promise(r => setTimeout(r, 900)) // CSS media queries + JS re-layout
+          await page.evaluate(() => { window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)) })
+          await new Promise(r => setTimeout(r, 500))
+          const mobileResult = await evalSticky()
+
+          // Restore desktop viewport so any remaining work uses desktop layout
+          await page.setViewport({ width: 1280, height: 800 })
+
+          stickyCTAContext = {
+            desktopSticky: desktopResult.found,
+            mobileSticky: mobileResult.found,
+            desktopEvidence: desktopResult.evidence,
+            mobileEvidence: mobileResult.evidence,
+            anySticky: desktopResult.found || mobileResult.found,
+          }
+          // Append to websiteContent here (after assignment) to avoid TypeScript narrowing issues
+          websiteContent += `\n\n--- STICKY CTA CHECK ---` +
+            `\nDesktop sticky CTA detected: ${stickyCTAContext.desktopSticky ? 'YES' : 'NO'}${stickyCTAContext.desktopEvidence ? ` (${stickyCTAContext.desktopEvidence})` : ''}` +
+            `\nMobile sticky CTA detected: ${stickyCTAContext.mobileSticky ? 'YES' : 'NO'}${stickyCTAContext.mobileEvidence ? ` (${stickyCTAContext.mobileEvidence})` : ''}` +
+            `\nSticky CTA on either device: ${stickyCTAContext.anySticky ? 'YES' : 'NO'}`
+          console.log(`Sticky CTA: desktop=${desktopResult.found} (${desktopResult.evidence || 'none'}), mobile=${mobileResult.found} (${mobileResult.evidence || 'none'})`)
+        } catch (e) {
+          console.warn('Sticky CTA detection failed:', e)
+          stickyCTAContext = null
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -1796,7 +1922,36 @@ VERDICT:
 MANDATORY in reason: mention WHERE you see the customer video (e.g. "video embedded inside a review card with reviewer name and Verified Purchase, in Customer reviews section").
 `
           } else if (isStickyCartRule) {
-            specialInstructions = `\nSTICKY ADD TO CART RULE - DETAILED CHECK:\nThe page MUST have a sticky/floating "Add to Cart" button that remains visible when scrolling.\n\nIf FAILED: You MUST specify:\n1. WHICH button is the "Add to Cart" button (mention button text/label, but DO NOT include currency/price in the reason)\n2. WHERE it is located (e.g., "main product section", "product details area")\n3. WHY it fails (e.g., "button disappears when scrolling", "only visible at bottom of page", "not sticky/floating")\n\nIMPORTANT: Do NOT mention currency symbols, prices, or amounts (like £29.00, $50, Rs. 3,166) in the failure reason. Only mention the button text/label without price.\n\nExample: "The 'Add to Cart' button found in the main product section disappears when user scrolls down. It only becomes visible again when scrolled to the bottom of the page, but does not remain sticky/floating as required."`
+            specialInstructions = `
+STICKY ADD TO CART RULE
+
+IMPORTANT: The rule passes if a sticky/floating Add to Cart button exists on EITHER desktop OR mobile. Many ecommerce sites show the sticky CTA only on mobile.
+
+━━━━ CHECK STICKY CTA CHECK IN KEY ELEMENTS FIRST ━━━━
+
+1. "Sticky CTA on either device: YES" → PASS immediately
+2. "Desktop sticky CTA detected: YES" → PASS
+3. "Mobile sticky CTA detected: YES" → PASS
+4. Only if BOTH are NO → proceed to screenshot analysis
+
+━━━━ SCREENSHOT CHECK ━━━━
+
+Look for:
+- A floating/sticky bar at the bottom or top of the screen with "Add to Cart" / "Buy Now"
+- A CTA button that remains visible when the page is scrolled (position:fixed or sticky)
+- On mobile: a bottom bar with ATC button and optionally price
+- On desktop: a fixed header or sidebar with ATC button
+
+━━━━ DECISION ━━━━
+
+✅ PASS if STICKY CTA CHECK shows YES on either device, OR screenshot shows a floating CTA bar
+❌ FAIL only if both desktop AND mobile sticky detection = NO, AND screenshot shows no sticky/floating CTA
+
+Do NOT mention prices or currency. Do NOT mention specific amounts.
+
+✅ PASS reason: "A sticky Add to Cart button is detected on mobile as a floating CTA bar at the bottom of the screen, remaining visible while scrolling."
+❌ FAIL reason: "No sticky Add to Cart button was detected on either desktop or mobile. The Add to Cart button disappears when scrolling and does not remain fixed or floating."
+`
           } else if (isProductTitleRule) {
             specialInstructions = `\nPRODUCT TITLE RULE - DETAILED CHECK:\nThe PRODUCT TITLE itself (not the description section) must be descriptive, specific, and include key attributes.\n\nCRITICAL: This rule checks the TITLE only. A product description section existing on the page does NOT make a generic title acceptable. The title must be descriptive on its own.\n\nTitle should include: brand, size, color, key characteristics, or specific benefits. Should be under 65 characters for SEO.\n\nIf FAILED: You MUST specify:\n1. WHAT the current title is (quote it exactly)\n2. WHAT is missing from the TITLE (e.g., size, color, brand, key characteristics, specific benefits)\n3. WHY it's a problem (e.g., "too generic", "lacks SEO keywords", "doesn't describe product clearly on its own")\n4. WHERE the title is located (e.g., "product page header", "product title section")\n5. NOTE if description exists but explain that title should still be descriptive independently\n\nIf PASSED: Title must be descriptive and clear on its own, even if description section also exists.\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' located in the product page header is too generic. While a product description section exists with benefits, the title itself lacks key attributes like size (e.g., '50g', '100ml'), flavor/variant details, or specific benefits. The title should be descriptive on its own for SEO and clarity, regardless of description content."\n\nExample PASS: "The product title 'Spacegoods Rainbow Dust - Coffee Flavor Starter Kit (50g)' is descriptive and clear. It includes brand name, product name, flavor variant, and size, making it SEO-friendly and informative."`
           } else if (isBenefitsNearTitleRule) {
@@ -2569,6 +2724,18 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = true
               analysis.reason = `The 'Add to Cart' button is present and is the main CTA. It may render with full styling (e.g. solid color) after page load or refresh. Ensure it uses a solid, high-contrast color and stays above the fold.`
             }
+          } else if (isStickyCartRule) {
+            // Hard override: DOM scan found sticky/fixed CTA on either viewport → force PASS
+            if (!analysis.passed && stickyCTAContext?.anySticky) {
+              const device = stickyCTAContext.mobileSticky ? 'mobile' : 'desktop'
+              const evidence = stickyCTAContext.mobileEvidence || stickyCTAContext.desktopEvidence || ''
+              console.log(`Sticky CTA rule: DOM confirmed sticky CTA on ${device}. Forcing PASS. (${evidence})`)
+              analysis.passed = true
+              analysis.reason = stickyCTAContext.mobileSticky
+                ? `A sticky Add to Cart button is present on mobile as a floating CTA bar, remaining visible while scrolling. Rule passes.`
+                : `A sticky Add to Cart button is present on desktop, remaining fixed/sticky while scrolling. Rule passes.`
+            }
+            // If both viewports detected no sticky but AI passed — accept AI's result (screenshot may have caught it)
           } else if (isBeforeAfterRule) {
             // Before-and-after rule: if page content has before/after signals (even in thumbnails or image alt text), force pass
             const beforeAfterContent = (fullVisibleText || websiteContent || '').toLowerCase()
