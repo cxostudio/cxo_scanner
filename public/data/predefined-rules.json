@@ -82,7 +82,7 @@
   {
     "id": "product-comparison",
     "title": "Include a product comparison section",
-    "description": "The product page must include a comparison section that compares the primary product with 2-3 similar alternatives. The comparison must: 1. Identify 2-3 similar alternatives. 2. Compare 4+ technical or functional attributes (e.g., RAM, Battery, Price, Features). 3. Use a scannable table format. 4. Explicitly highlight the 'Winner' or 'Unique Value' for the primary product. 5. Be objective yet persuasive to reduce decision fatigue. The comparison should show why the primary product is the best choice while being honest about alternatives."
+    "description": "The product page should include a comparison section. PASS if ANY comparison format is visible: feature rows with checkmarks (✓) and crosses (✕), a VS/versus layout, side-by-side comparison cards, 'Top Comparisons' or 'Recent Comparisons' sections, or any comparison grid. Do NOT require strict table format, 2-3 alternatives, or 4+ attributes. Screenshot detection is the primary source."
   },
   {
     "id": "ugc-customer-photos",
