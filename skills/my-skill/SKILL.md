@@ -197,17 +197,24 @@ Important: Ignore coupon codes. Ignore free shipping. Only tiered pricing, perce
 
 ### Delivery estimate near CTA (Display delivery estimate near CTA)
 
-Check "DELIVERY TIME CHECK" in KEY ELEMENTS.
+**IMPORTANT: Do NOT require an Add to Cart button. Do NOT check CTA proximity.**
 
-Required:
-1. CTA found (Add to Cart / Buy Now).
-2. Delivery information directly above or below the CTA.
-3. Delivery date or delivery range present (e.g. "Get it by Tuesday, Oct 12", "Order now and get it between Wed, Mar 11 and Thu, Mar 12").
+PASS if the page shows ANY of the following **anywhere** on the page:
+- A delivery date range: "Order now and get it between Tue, Mar 17 and Wed, Mar 18"
+- A delivery date: "Get it by Thursday, Mar 20" / "Delivered by Fri, Oct 12"
+- A delivery window: "Delivered between Mon 10 and Wed 12"
+- A countdown/cutoff time: "Order within 2 hours 30 mins" / "Order before 3pm"
+- A delivery date with shipping method: "Delivered on Tuesday, 22 Oct with Express Shipping"
+- Any specific date or date range showing when delivery will arrive
 
-Optional: Countdown/cutoff time (e.g. "Order within 2 hours", "Order by 3 PM") is NOT required. Do not fail if "Has Countdown/Cutoff Time (optional): NO".
+FAIL only if the page shows NO delivery date, NO delivery range, and NO countdown/cutoff time anywhere. Generic text like "Ships within 3–5 days" without a specific date or range = FAIL.
 
-PASS if CTA + shipping near CTA + delivery date or range. FAIL if any of these is missing or shipping is only in footer.
-Be specific about which requirement is missing.
+Check "DELIVERY TIME CHECK" in KEY ELEMENTS — if "Has Delivery Date or Range: YES" → PASS immediately.
+
+Also check the screenshot — scan the ENTIRE page. If any delivery date or date range is visible anywhere → PASS.
+
+**PASS example reason:** "The page shows delivery between Tue, Mar 17 and Wed, Mar 18 in the product section."
+**FAIL example reason:** "No specific delivery date, date range, or countdown timer is shown anywhere on the page. Add a delivery estimate near the product."
 
 ### Variant Preselection
 
@@ -265,9 +272,9 @@ Primary CTA (Add to Cart/Buy Now) must be: (1) Above the fold (visible without s
 
 ---
 
-## Screenshot Rules (Customer Photos, Video Testimonials, Tabs, Trust Badges, Benefits, Thumbnails, Before-After, CTA Prominence, Free Shipping Threshold, Variant)
+## Screenshot Rules (Customer Photos, Video Testimonials, Tabs, Trust Badges, Benefits, Thumbnails, Before-After, CTA Prominence, Free Shipping Threshold, Variant, Delivery Estimate)
 
-When a screenshot is provided, look at the image FIRST. For customer photos: if you see "Reviews with images" or images in review sections → PASS. For video testimonials: if you see videos with play buttons (▶️) in review sections → PASS. For trust badges: if you see payment logos below Add to Cart in the image → PASS. When in doubt, trust the SCREENSHOT over KEY ELEMENTS alone.
+When a screenshot is provided, look at the image FIRST. For customer photos: if you see "Reviews with images" or images in review sections → PASS. For video testimonials: if you see videos with play buttons (▶️) in review sections → PASS. For trust badges: if you see payment logos below Add to Cart in the image → PASS. For delivery estimate: if you see any delivery date, date range, or countdown timer **anywhere** in the screenshot → PASS (no CTA proximity needed). When in doubt, trust the SCREENSHOT over KEY ELEMENTS alone.
 
 ---
 

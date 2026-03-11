@@ -122,6 +122,6 @@
   {
     "id": "shipping-time-visibility",
     "title": "Display delivery estimate near CTA",
-    "description": "Ensure a delivery estimate is shown near the primary CTA (Add to Cart / Buy Now). CRITERIA: 1. Delivery information must be located directly above or below the CTA. 2. Must include a delivery date or delivery range (e.g. 'Get it by Tuesday, Oct 12', 'Order now and get it between Wed, Mar 11 and Thu, Mar 12'). Order cutoff time or countdown is optional. If delivery date or range is present near the CTA, the rule passes."
+    "description": "Ensure a delivery estimate is shown on the product page. CRITERIA: The page must show a delivery date, delivery date range, or countdown/cutoff time anywhere on the page (e.g. 'Get it by Tuesday, Oct 12', 'Order now and get it between Tue, Mar 17 and Wed, Mar 18', 'Order within 2 hours'). No Add to Cart button is required. No proximity to CTA is required. PASS if any delivery date, range, or countdown is visible anywhere on the page. FAIL if no specific delivery date, range, or time estimate is shown anywhere."
   }
 ]
