@@ -93,9 +93,24 @@ Check "--- LAZY LOADING ---" in KEY ELEMENTS.
 - **Lazy loading detected: NO** and **Total media: 0** → FAIL (page should have images/videos with lazy loading).
 - **Lazy loading detected: NO** and **Total media: > 0** → FAIL (add lazy loading for below-the-fold media).
 
-### Image Annotations
+### Image Annotations (screenshot is the PRIMARY source)
 
-Your reason must include: (1) What badges/annotations are currently on the images (or "none"), (2) What is missing (if FAILED) or why it passes (if PASSED). Example FAIL: "Current badges on product images: none. Add badges like 'dark spot correction', 'radiance boosting'."
+**CRITICAL: Look at the screenshot FIRST.** This is a visual rule. DOM signals are secondary.
+
+**PASS immediately if the screenshot shows ANY of the following on or near a product image:**
+- Text overlaid on a product image: percentage claims (e.g. "-63%", "+30%"), clinical claims ("Clinically proven results")
+- Benefit badges or labels (e.g. "Dermatologically tested", "Award winning", "Hypoallergenic")
+- Baked-in text that is part of the image file itself (counts as an annotation — no separate HTML element needed)
+- Any callout, sticker, ribbon, or benefit text adjacent to a product photo
+
+**FAIL only if** product images are completely plain with zero annotations, badges, or benefit text anywhere near them.
+
+**Dual-source logic:**
+- `screenshotShowsAnnotations == true` → **PASS**
+- `domAnnotationsFound == true` → **PASS**
+- Both fail → **FAIL**
+
+Your reason must include: (1) What annotations/badges are visible (or "none"), (2) Why it passes or fails.
 
 ### Square Images (dual-source: DOM container first, then screenshot)
 
