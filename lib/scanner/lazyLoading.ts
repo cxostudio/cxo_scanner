@@ -46,7 +46,7 @@ export async function detectLazyLoading(
 
     function hasLazyLoading(el: HTMLImageElement | Element): boolean {
       if (el instanceof HTMLImageElement && el.getAttribute('loading') === 'lazy') return true
-      const dataSrc = el.getAttribute('data-src') || el.getAttribute('data-lazy') || el.getAttribute('data-original')
+      const dataSrc = el.getAttribute('data-src') || el.getAttribute('data-lazy') || el.getAttribute('data-original') || el.getAttribute('data-srcset')
       if (dataSrc) return true
       const cls = (el.className && typeof el.className === 'string' ? el.className : '') || ''
       if (/lazyload|lazy\b|js-lazy|blur-up/i.test(cls)) return true

@@ -1116,8 +1116,23 @@ export async function POST(request: NextRequest) {
         const hasAnyDiscount = tieredPricing || percentDiscount || priceDrop || anyDiscountSignal
         quantityDiscountContext = { foundPatterns, tieredPricing, percentDiscount, priceDrop, hasAnyDiscount, debugSnippet: websiteContent.substring(0, 2800) }
         if (hasAnyDiscount) console.log('[FALLBACK] Discount detected in fetched text:', foundPatterns)
-        lazyLoadingResult = buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] })
-        keyElements = 'Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\n--- LAZY LOADING ---\nLazy loading detected: NO\nLazy loaded media count: 0\nTotal media: 0'
+        // Detect lazy loading from raw HTML source (DOM unavailable in fallback)
+        const htmlLazyAttrCount = (rawHtml.match(/loading\s*=\s*["']lazy["']/gi) || []).length
+        const htmlDataSrcCount = (rawHtml.match(/\bdata-src\s*=/gi) || []).length
+        const htmlDataSrcsetCount = (rawHtml.match(/\bdata-srcset\s*=/gi) || []).length
+        const htmlDataLazyCount = (rawHtml.match(/\bdata-lazy\s*=/gi) || []).length
+        const htmlLazyClassCount = (rawHtml.match(/class\s*=\s*["'][^"']*(?:lazyload|js-lazy|blur-up)[^"']*["']/gi) || []).length
+        const htmlTotalImgs = (rawHtml.match(/<img\b/gi) || []).length
+        const htmlTotalVideos = (rawHtml.match(/<video\b/gi) || []).length
+        const htmlLazyCount = htmlLazyAttrCount + htmlDataSrcCount + htmlDataSrcsetCount + htmlDataLazyCount + htmlLazyClassCount
+        lazyLoadingResult = buildLazyLoadingSummary({
+          detected: htmlLazyCount > 0,
+          lazyLoadedCount: htmlLazyCount,
+          totalMediaCount: htmlTotalImgs + htmlTotalVideos,
+          examples: [],
+        })
+        const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
+        keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\n--- LAZY LOADING ---\n${lazyKeyLine}`
 
         // Append a synthetic QUANTITY / DISCOUNT CHECK so AI sees it (keep under 6000 total)
         const discountBlock = `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${priceDrop ? "YES" : "NO"}\nPatterns found: ${foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n`
