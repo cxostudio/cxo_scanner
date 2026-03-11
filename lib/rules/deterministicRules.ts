@@ -61,19 +61,32 @@ export function evaluateLazyLoadingRule(
 
 /**
  * Evaluate breadcrumb rule from key elements string.
- * Looks for "Breadcrumbs: ..." and "Not found".
+ *
+ * - DOM found breadcrumbs → deterministic PASS (no AI needed)
+ * - DOM did NOT find breadcrumbs → return null so AI can check the screenshot
  */
-export function evaluateBreadcrumbRule(rule: ScanRule, keyElementsString: string): ScanResult {
+export function evaluateBreadcrumbRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
   const notFound = /Breadcrumbs:\s*Not found/i.test(keyElementsString)
-  const passed = !notFound && keyElementsString.includes('Breadcrumbs:') && !keyElementsString.includes('Breadcrumbs: Not found')
-  const reason = passed
-    ? 'Breadcrumb navigation is present on the page.'
-    : 'Breadcrumbs: Not found. Add breadcrumb navigation near the top of the product page.'
+  const hasLine = keyElementsString.includes('Breadcrumbs:')
+
+  if (!hasLine) {
+    // KEY ELEMENTS block missing entirely — let AI decide
+    return null
+  }
+
+  if (notFound) {
+    // DOM didn't find breadcrumbs — fall through to AI so screenshot can still save it
+    return null
+  }
+
+  // DOM found breadcrumbs — extract the text and deterministically PASS
+  const match = keyElementsString.match(/Breadcrumbs:\s*(.+?)(?:\n|$)/)
+  const breadcrumbText = match?.[1]?.trim() || 'present'
   return {
     ruleId: rule.id,
     ruleTitle: rule.title,
-    passed,
-    reason,
+    passed: true,
+    reason: `Breadcrumb navigation found: "${breadcrumbText}". Rule passes.`,
   }
 }
 
@@ -108,7 +121,10 @@ export function tryEvaluateDeterministic(
     return evaluateLazyLoadingRule(rule, context.lazyLoading)
   }
   if (isBreadcrumbRule(rule)) {
-    return evaluateBreadcrumbRule(rule, context.keyElementsString)
+    // Returns null when DOM didn't find breadcrumbs → falls through to AI for screenshot check
+    const breadcrumbResult = evaluateBreadcrumbRule(rule, context.keyElementsString)
+    if (breadcrumbResult !== null) return breadcrumbResult
+    // Fall through to AI
   }
   if (isColorRule(rule)) {
     return evaluateColorRule(rule, context.keyElementsString)

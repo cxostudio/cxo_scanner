@@ -97,6 +97,26 @@ Check "--- LAZY LOADING ---" in KEY ELEMENTS.
 
 Your reason must include: (1) What badges/annotations are currently on the images (or "none"), (2) What is missing (if FAILED) or why it passes (if PASSED). Example FAIL: "Current badges on product images: none. Add badges like 'dark spot correction', 'radiance boosting'."
 
+### Square Images (dual-source: DOM container first, then screenshot)
+
+**CRITICAL: Do NOT check raw image file dimensions. Check the rendered visual appearance.**
+
+Many ecommerce sites (Shopify etc.) use rectangular source images but display them in square CSS containers using `aspect-ratio: 1/1`, `object-fit: cover`, or equal width/height containers. The rule checks whether images **appear visually square** in the UI.
+
+Check "SQUARE IMAGE CHECK" in KEY ELEMENTS first:
+- "Visually square: YES" → **PASS immediately**
+- "CSS aspect-ratio / object-fit enforces square: YES" → **PASS immediately**
+- "Square containers (w≈h within 12%): X" where X > 0 → **PASS**
+
+Then check the screenshot:
+- Gallery thumbnails appear in an equal-width/height grid → **PASS**
+- Main product image appears square or nearly square → **PASS**
+
+**FAIL only if:** DOM shows "Visually square: NO" AND "Square containers: 0" AND screenshot clearly shows portrait/landscape images with noticeably unequal dimensions.
+
+**PASS reason:** "Product gallery images appear square in the rendered UI layout (CSS containers enforce 1:1 aspect ratio), maintaining consistent visual alignment."
+**FAIL reason:** "Product gallery images appear clearly rectangular in the UI, causing inconsistent visual alignment. Add aspect-ratio: 1/1 with object-fit: cover to image containers."
+
 ### Thumbnails in Gallery (dual-source: screenshot first, then DOM)
 
 **DOM signal:** KEY ELEMENTS or content indicating multiple images in product gallery; carousel or thumbnail strip.
