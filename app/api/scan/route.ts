@@ -207,12 +207,11 @@ export async function POST(request: NextRequest) {
     let trustBadgesContext: {
       ctaFound: boolean
       ctaText: string
-      ctaVisibleWithoutScrolling: boolean
-      trustBadgesNearCTA: string[]
+      domStructureFound: boolean
+      paymentBrandsFound: string[]
       trustBadgesCount: number
-      within50px: boolean
-      visibleWithoutScrolling: boolean
       trustBadgesInfo: string
+      containerDescription: string
     } | null = null
     let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
     try {
@@ -800,167 +799,102 @@ export async function POST(request: NextRequest) {
         }
       })
 
-      // Get trust badges context for trust badges rule
+      // Get trust badges context — scans whole page for payment badge elements (no CTA dependency)
       trustBadgesContext = await page.evaluate(() => {
-        // Find CTA button
-        const cta = Array.from(document.querySelectorAll("button, a"))
-          .find(el => {
-            const text = el.textContent?.toLowerCase() || ''
-            return text.includes("add to bag") ||
-              text.includes("add to cart") ||
-              text.includes("checkout") ||
-              text.includes("buy now")
-          })
+        const PAYMENT_BRANDS = ['visa', 'mastercard', 'master card', 'amex', 'american express',
+          'paypal', 'apple pay', 'google pay', 'maestro', 'discover', 'diners', 'klarna',
+          'afterpay', 'shop pay', 'union pay', 'stripe', 'clearpay', 'wero', 'ideal', 'bancontact']
+        const TRUST_KEYWORDS = ['ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
+          'money back guarantee', '100% safe', 'protected checkout', 'secure payment']
 
-        if (!cta) {
-          return {
-            ctaFound: false,
-            ctaText: 'CTA button',
-            ctaVisibleWithoutScrolling: false,
-            trustBadgesNearCTA: [],
-            trustBadgesCount: 0,
-            within50px: false,
-            visibleWithoutScrolling: false,
-            trustBadgesInfo: "CTA not found"
-          }
+        // ── Helper: match an element against payment/trust keywords ───────────
+        function elementMatchesTrust(el: Element): string | null {
+          const texts = [
+            (el as HTMLImageElement).alt || '',
+            (el as HTMLElement).title || '',
+            (el as HTMLElement).getAttribute?.('aria-label') || '',
+            (el as HTMLElement).getAttribute?.('data-payment') || '',
+            (el as HTMLElement).getAttribute?.('data-icon') || '',
+            el.tagName === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
+            (el as HTMLElement).className || '',
+            el.id || '',
+          ].map(t => t.toLowerCase())
+          const combined = texts.join(' ')
+
+          // Payment brand names
+          const brandMatch = PAYMENT_BRANDS.find(b => combined.includes(b))
+          if (brandMatch) return brandMatch
+
+          // SVG <title> inside payment icons
+          const svgTitle = (el.querySelector?.('title')?.textContent || '').toLowerCase()
+          const svgBrand = PAYMENT_BRANDS.find(b => svgTitle.includes(b))
+          if (svgBrand) return svgBrand
+
+          // Trust keywords (only specific phrases, not lone "secure")
+          const trustMatch = TRUST_KEYWORDS.find(k => combined.includes(k))
+          if (trustMatch) return trustMatch
+
+          return null
         }
 
-        const ctaRect = cta.getBoundingClientRect()
-        const ctaTop = ctaRect.top
-        const ctaBottom = ctaRect.bottom
-        const ctaLeft = ctaRect.left
-        const ctaRight = ctaRect.right
-        const viewportHeight = window.innerHeight
+        // ── Try to find CTA (optional — not required for rule to pass) ─────────
+        const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
+        const cta = Array.from(document.querySelectorAll<HTMLElement>(
+          'button, [type="submit"]'
+        )).find(el => {
+          const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
+          return ctaPatterns.some(p => text.includes(p))
+        }) || null
 
-        // Check if CTA is visible without scrolling
-        const ctaVisibleWithoutScrolling = ctaTop >= 0 && ctaTop < viewportHeight
+        const ctaText = cta
+          ? (cta.textContent || cta.getAttribute('aria-label') || 'CTA').trim()
+          : 'not found'
 
-        // Find trust badges (payment logos, SSL badges, security badges)
-        const trustBadgeSelectors = [
-          'img[alt*="ssl"]',
-          'img[alt*="SSL"]',
-          'img[alt*="secure"]',
-          'img[alt*="Secure"]',
-          'img[alt*="visa"]',
-          'img[alt*="Visa"]',
-          'img[alt*="mastercard"]',
-          'img[alt*="Mastercard"]',
-          'img[alt*="paypal"]',
-          'img[alt*="PayPal"]',
-          'img[alt*="payment"]',
-          'img[alt*="Payment"]',
-          'img[alt*="guarantee"]',
-          'img[alt*="Guarantee"]',
-          'img[alt*="money-back"]',
-          'img[alt*="Money-back"]',
-          '[class*="trust"]',
-          '[class*="badge"]',
-          '[class*="payment"]',
-          '[class*="ssl"]',
-          '[class*="secure"]',
-          '[id*="trust"]',
-          '[id*="badge"]',
-          '[id*="payment"]'
-        ]
+        // ── Scan entire page for payment badge elements ───────────────────────
+        // Covers: img[alt], svg icons, elements with class/id containing brand names
+        const found = new Map<string, string>()
 
-        const allTrustBadges: Array<{ element: Element, visible: boolean, text: string, sameColumn: boolean, verticallyNear: boolean }> = []
+        const allElements = Array.from(document.querySelectorAll(
+          'img, svg, [class*="payment"], [class*="badge"], [class*="trust"], [class*="visa"], ' +
+          '[class*="paypal"], [class*="mastercard"], [class*="amex"], [class*="apple-pay"], ' +
+          '[class*="google-pay"], [class*="klarna"], [id*="payment"], [id*="badge"], [id*="trust"]'
+        ))
 
-        trustBadgeSelectors.forEach(selector => {
-          try {
-            const elements = document.querySelectorAll(selector)
-            elements.forEach(el => {
-              const rect = el.getBoundingClientRect()
-              const badgeTop = rect.top
-              const badgeBottom = rect.bottom
-              const badgeLeft = rect.left
-              const badgeRight = rect.right
-
-              // Check if badge is visible without scrolling
-              const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
-
-              // Check if badge is in roughly the same column as CTA (horizontal overlap)
-              const sameColumn = !(badgeRight < ctaLeft || badgeLeft > ctaRight)
-
-              // Check if badge is within one "block" above or below CTA (vertical band)
-              const VERTICAL_BAND_PX = 400
-              const verticallyNear = badgeTop >= ctaTop - VERTICAL_BAND_PX && badgeTop <= ctaBottom + VERTICAL_BAND_PX
-
-              // Get badge text/alt
-              const badgeText = (el instanceof HTMLImageElement ? el.alt : null) ||
-                (el as HTMLElement).title ||
-                el.textContent?.trim() ||
-                'Trust badge'
-
-              allTrustBadges.push({
-                element: el,
-                visible: badgeVisible,
-                text: badgeText,
-                sameColumn,
-                verticallyNear,
-              })
-            })
-          } catch (e) {
-            // Ignore selector errors
+        for (const el of allElements) {
+          const label = elementMatchesTrust(el)
+          if (label && !found.has(label)) {
+            const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
+            found.set(label, desc)
           }
-        })
+          if (found.size >= 12) break
+        }
 
-        // Fallback: if no explicit trust selectors matched, try to infer a horizontal row of small logos
-        if (allTrustBadges.length === 0) {
-          const GENERIC_MAX_HEIGHT = 80
-          const images = Array.from(document.querySelectorAll('img'))
-          images.forEach(img => {
-            try {
-              const rect = img.getBoundingClientRect()
-              const badgeTop = rect.top
-              const badgeBottom = rect.bottom
-              const badgeLeft = rect.left
-              const badgeRight = rect.right
-
-              if (!badgeTop && !badgeBottom && !badgeLeft && !badgeRight) return
-              if (rect.height <= 0 || rect.height > GENERIC_MAX_HEIGHT) return
-
-              const badgeVisible = badgeTop >= 0 && badgeTop < viewportHeight
-              const sameColumn = !(badgeRight < ctaLeft || badgeLeft > ctaRight)
-              const VERTICAL_BAND_PX = 400
-              const verticallyNear = badgeTop >= ctaTop - VERTICAL_BAND_PX && badgeTop <= ctaBottom + VERTICAL_BAND_PX
-
-              if (!sameColumn || !verticallyNear) return
-
-              const badgeText =
-                img.alt ||
-                img.title ||
-                img.parentElement?.textContent?.trim() ||
-                'Trust badge'
-
-              allTrustBadges.push({
-                element: img,
-                visible: badgeVisible,
-                text: badgeText,
-                sameColumn,
-                verticallyNear,
-              })
-            } catch (e) {
-              // ignore bad image rects
+        // ── Fallback: scan ALL page elements (catches custom icon fonts, etc.) ─
+        if (found.size === 0) {
+          const everything = Array.from(document.querySelectorAll('*'))
+          for (const el of everything) {
+            const label = elementMatchesTrust(el)
+            if (label && !found.has(label)) {
+              found.set(label, el.tagName)
             }
-          })
+            if (found.size >= 12) break
+          }
         }
 
-        // Relaxed rule: ANY trust/payment badge anywhere on the page counts.
-        // Geometry info is still collected above but we no longer require "near CTA" pixel checks.
-        const badgesNearCTA = allTrustBadges
-        const badgesVisibleWithoutScrolling = badgesNearCTA.filter(badge => badge.visible && ctaVisibleWithoutScrolling)
+        const brands = Array.from(found.keys())
+        const count = brands.length
+        const domStructureFound = count > 0
 
         return {
-          ctaFound: true,
-          ctaText: (cta as HTMLElement).textContent?.trim() || 'CTA button',
-          ctaVisibleWithoutScrolling: ctaVisibleWithoutScrolling,
-          trustBadgesNearCTA: badgesNearCTA.map(b => b.text),
-          trustBadgesCount: badgesNearCTA.length,
-          within50px: badgesNearCTA.length > 0,
-          visibleWithoutScrolling: badgesVisibleWithoutScrolling.length > 0 && ctaVisibleWithoutScrolling,
-          trustBadgesInfo: badgesNearCTA.length > 0
-            ? `Found ${badgesNearCTA.length} trust/payment badge(s) on the page: ${badgesNearCTA.map(b => b.text).join(', ')}`
-            : `No trust/payment badges found on the page`
+          ctaFound: !!cta,
+          ctaText,
+          domStructureFound,
+          paymentBrandsFound: brands,
+          trustBadgesCount: count,
+          trustBadgesInfo: domStructureFound
+            ? `Found ${count} payment/trust badge(s) on page: ${brands.join(', ')}`
+            : 'No payment/trust badges detected on page',
+          containerDescription: 'full page scan',
         }
       })
 
@@ -1041,7 +975,7 @@ export async function POST(request: NextRequest) {
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
-        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaFound ? trustBadgesContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${trustBadgesContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Near CTA (within 250px): ${trustBadgesContext.within50px ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nTrust Badges Visible Without Scrolling: ${trustBadgesContext.visibleWithoutScrolling ? "YES" : "NO"}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}\nTrust Badges List: ${trustBadgesContext.trustBadgesNearCTA.length > 0 ? trustBadgesContext.trustBadgesNearCTA.join(", ") : "None"}` : '')
+        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaText || "N/A"}\nDOM Structure Found (same container/sibling as CTA): ${trustBadgesContext.domStructureFound ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(", ") : "None"}\nPurchase Container: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}` : '')
 
 
 
@@ -1748,94 +1682,36 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST BADGES NEAR CTA RULE - STEP-BY-STEP CHECK:
+TRUST SIGNALS / PAYMENT BADGES RULE
 
-STEP 0 - SCREENSHOT CHECK (HIGHEST PRIORITY): You will receive a SCREENSHOT. Look at it FIRST.
-- If the screenshot shows payment/trust badges (Visa, Mastercard, PayPal, Apple Pay, Google Pay, SSL, etc.) in the product section (e.g. below Add to Cart, below shipping, row of payment icons) → you MUST PASS. Do NOT fail based on "Trust Badges Within 200px: NO" in KEY ELEMENTS. Visual presence of payment badges in the image = PASS.
-- Only if the screenshot clearly shows NO payment or trust icons anywhere in the product/CTA area → then use KEY ELEMENTS and steps below.
+Simple rule: Does the page show payment method logos or security/trust badges? If YES → PASS. If NO → FAIL.
 
-              STEP 1: Identify CTA
-                - Check "TRUST BADGES CHECK" section in KEY ELEMENTS
-                  - Look for "CTA Found: YES" or "CTA Found: NO"
-                    - If "CTA Found: NO" → FAIL(cannot check proximity without CTA)
-                      - Note the "CTA Text" value(e.g., "Add to Cart", "Checkout", "Buy Now")
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCREENSHOT CHECK (primary)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Look at the screenshot. PASS immediately if you see ANY of:
+- Payment logos anywhere on the product page: Visa, Mastercard, Amex/American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe
+- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon
+- Trust icons: money-back guarantee badge, "100% Safe", certified badge
+- A row of small payment icons (even in footer or below Add to Cart)
 
-STEP 2: Check Proximity(50px constraint)
-              - Check "Trust Badges Within 50px: YES" or "Trust Badges Within 50px: NO"
-                - If "Trust Badges Within 50px: NO" → FAIL
-                  - Check "Trust Badges Count" - must be > 0
-                    - Check "Trust Badges List" to see which badges are found(SSL, Visa, PayPal, Money - back Guarantee, etc.)
+Do NOT require the CTA to be found. If payment logos exist anywhere visible on the page → PASS.
 
-STEP 3: Check Visibility(without scrolling)
-              - Check "CTA Visible Without Scrolling: YES" or "CTA Visible Without Scrolling: NO"
-                - Check "Trust Badges Visible Without Scrolling: YES" or "Trust Badges Visible Without Scrolling: NO"
-                  - If CTA requires scrolling → FAIL(CTA must be visible without scrolling)
-                    - If trust badges require scrolling → FAIL(badges must be visible without scrolling)
-                      - BOTH CTA and badges must be visible without scrolling → PASS this step
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOM CHECK (from KEY ELEMENTS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Check TRUST BADGES CHECK section:
+- "DOM Structure Found: YES" → PASS
+- "Payment Brands Found:" lists any brand → PASS
 
-STEP 4: Check Design(muted / monochromatic, less prominent than CTA)
-              - This step requires visual analysis of the page content
-                - Trust badges should use muted colors or monochromatic design
-                  - Badges should have lower visual weight than the main CTA button
-                    - If badges are too bright, colorful, or distracting → FAIL
-                      - If badges compete with CTA for attention → FAIL
-                        - If badges are subtle and don't distract from CTA → PASS this step
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESULT LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PASS if screenshot shows payment logos OR DOM Structure Found = YES
+FAIL only if screenshot shows zero payment/trust badges AND DOM Structure Found = NO
 
-DETERMINE RESULT:
-            - PASS only if ALL 4 steps pass:
-            1. CTA is found ✓
-            2. Trust badges are within 50px of CTA ✓
-            3. Both CTA and badges are visible without scrolling ✓
-            4. Badges are muted / monochromatic and less prominent than CTA ✓
-            - FAIL if ANY step fails
-
-            EXAMPLES:
-
-Example 1 - PASS(All requirements met):
-TRUST BADGES CHECK shows:
-            - CTA Found: YES
-              - CTA Text: "Add to Cart"
-                - CTA Visible Without Scrolling: YES
-                  - Trust Badges Within 50px: YES
-                    - Trust Badges Count: 3
-                      - Trust Badges Visible Without Scrolling: YES
-                        - Trust Badges List: "SSL Secure, Visa, PayPal"
-            Output: { "passed": true, "reason": "Trust signals (SSL Secure, Visa, PayPal) are positioned within 50px of the 'Add to Cart' button, visible without scrolling, and use muted design that doesn't distract from the CTA." }
-
-Example 2 - FAIL(No badges within 50px):
-TRUST BADGES CHECK shows:
-            - CTA Found: YES
-              - CTA Text: "Add to Cart"
-                - CTA Visible Without Scrolling: YES
-                  - Trust Badges Within 50px: NO
-                    - Trust Badges Count: 0
-            Output: { "passed": false, "reason": "No trust signals (SSL, payment logos, security badges) are positioned within 50px of the 'Add to Cart' button. Trust badges must be within 50px of the CTA to reassure users and reduce hesitation." }
-
-Example 3 - FAIL(Badges require scrolling):
-TRUST BADGES CHECK shows:
-            - CTA Found: YES
-              - CTA Visible Without Scrolling: YES
-                - Trust Badges Within 50px: YES
-                  - Trust Badges Visible Without Scrolling: NO
-            Output: { "passed": false, "reason": "Trust badges are within 50px of the CTA but are not visible without scrolling. Both the CTA and trust badges must be visible without scrolling to meet the requirement." }
-
-Example 4 - FAIL(Badges too prominent / distracting):
-TRUST BADGES CHECK shows:
-            - CTA Found: YES
-              - Trust Badges Within 50px: YES
-                - Trust Badges Visible Without Scrolling: YES
-                  - (Visual analysis: Badges are bright, colorful, and compete with CTA for attention)
-                    Output: { "passed": false, "reason": "Trust badges are within 50px of the CTA and visible without scrolling, but they use bright, colorful designs that compete with the main CTA for attention. Badges should use muted or monochromatic designs with lower visual weight than the CTA." }
-
-CRITICAL INSTRUCTIONS:
-            1. You MUST check the "TRUST BADGES CHECK" section in KEY ELEMENTS
-            2. Follow the step - by - step process above(Identify CTA → Check Proximity → Check Visibility → Check Design)
-            3. Be SPECIFIC about which trust badges are found(SSL, Visa, PayPal, Money - back Guarantee, etc.)
-            4. If FAILED: Specify which step failed(proximity, visibility, or design)
-            5. If PASSED: Confirm all 4 steps passed
-            6. Quote exact badge names from "Trust Badges List" if available
-7. Mention the CTA text from "CTA Text" field
-            8. For design check, analyze if badges are muted / monochromatic based on content description
+PASS reason: "Payment trust badges (Visa, Mastercard, Amex, Apple Pay, Google Pay, PayPal) are displayed on the product page, providing trust signals to users at the point of purchase."
+FAIL reason: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal) were found on the product page. Add payment method logos near the Add to Cart button to build trust."
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
@@ -2075,7 +1951,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
           const productTabsPrefix = isProductTabsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT TABS/ACCORDIONS RULE ⚠️⚠️⚠️\n\nTHIS IS THE ACCORDIONS RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nIn the screenshot, look for ACCORDION-LIKE UI:\n- Rows or labels such as "Product Details", "Ingredients", "How to Use", "Shipping & Delivery", "Return & Refund Policy"\n- Chevron icons (>, ▼, ▶) or arrows next to each label\n- Vertical list of section headers that look expandable/collapsible\n\nCRITICAL: If you SEE this pattern in the screenshot → you MUST output passed: true. Do NOT fail based on "Tabs/Accordions Found: None" in KEY ELEMENTS. Many sites build accordions with divs (no <details>), so KEY ELEMENTS miss them but the screenshot clearly shows accordions. When in doubt, trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR TRUST/PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST BADGES RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST and decide based on what you SEE.\n\nIn the screenshot, look for PAYMENT or TRUST badges:\n- A row of payment icons BELOW the "Add to Cart" or "Add to cart" button (Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay)\n- Security/trust icons: SSL, lock icon, secure payment, money-back guarantee\n- Payment logos in the product/checkout area (same column as the CTA, below shipping/return info)\n\nCRITICAL - IF YOU SEE PAYMENT BADGES BELOW ADD TO CART → PASS:\n- If the IMAGE shows a row of payment method logos (Visa, Mastercard, PayPal, etc.) directly below or near the Add to Cart button / below shipping info → you MUST output passed: true.\n- This is the most common layout: payment badges right under Add to Cart. When you SEE this in the screenshot, the rule PASSES.\n- Do NOT fail based on KEY ELEMENTS. Trust the SCREENSHOT. Payment badges visible below Add to Cart in image = rule PASSES.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nSimple check: Does the page show payment logos or trust badges?\n\nLook at the SCREENSHOT. PASS immediately if you see ANY payment logos ANYWHERE on the product page:\n- Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Maestro, Shop Pay, Discover\n- SSL badge, padlock, "Secure Checkout", shield, money-back guarantee\n\nNO CTA required. Payment logos visible anywhere on the product page = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK → "DOM Structure Found: YES" = PASS.\n\nFAIL only if ZERO payment logos or trust icons are visible anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE. You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
@@ -2535,51 +2411,35 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
-            // NEW: If DOM finds ANY trust/payment badges anywhere on the page, force PASS.
-            if (
-              !analysis.passed &&
-              trustBadgesContext &&
-              trustBadgesContext.trustBadgesCount > 0
-            ) {
-              console.log(
-                `Trust badges rule: DOM found ${trustBadgesContext.trustBadgesCount} badge(s) on the page. Forcing PASS.`,
-              )
+            // Hard override 1: DOM scan found ANY payment badge on page → PASS
+            if (!analysis.passed && trustBadgesContext?.domStructureFound) {
+              const brands = trustBadgesContext.paymentBrandsFound.join(', ')
+              console.log(`Trust badges rule: DOM found payment badges (${brands}). Forcing PASS.`)
               analysis.passed = true
-              analysis.reason =
-                trustBadgesContext.trustBadgesInfo ||
-                'Trust / payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are visible on the page, providing reassurance to users. Rule passes.'
-            } else {
-              // Fallback: If AI failed but page text clearly lists payment methods, also allow PASS
-              const websiteTextForTrust = (fullVisibleText || websiteContent || '').toLowerCase()
-              const hasPaymentBadgesInContent =
-                websiteTextForTrust.includes('visa') ||
-                websiteTextForTrust.includes('mastercard') ||
-                websiteTextForTrust.includes('paypal') ||
-                websiteTextForTrust.includes('apple pay') ||
-                websiteTextForTrust.includes('google pay') ||
-                websiteTextForTrust.includes('amex') ||
-                websiteTextForTrust.includes('american express') ||
-                websiteTextForTrust.includes('klarna') ||
-                websiteTextForTrust.includes('payment method') ||
-                websiteTextForTrust.includes('pay with')
-              if (!analysis.passed && hasPaymentBadgesInContent) {
-                console.log(`Trust badges rule: Payment methods found in page content. Forcing PASS.`)
+              analysis.reason = `Payment trust badges (${brands}) are displayed on the product page, providing trust signals to users at the point of purchase.`
+            }
+
+            // Hard override 2: page text contains ANY known payment brand name
+            if (!analysis.passed) {
+              const trustText = (fullVisibleText || websiteContent || '').toLowerCase()
+              const BRAND_LIST = ['visa', 'mastercard', 'paypal', 'apple pay', 'google pay',
+                'amex', 'american express', 'klarna', 'shop pay', 'maestro', 'afterpay', 'clearpay', 'stripe']
+              const brandsInText = BRAND_LIST.filter(b => trustText.includes(b))
+              if (brandsInText.length >= 1) {
+                console.log(`Trust badges rule: Found payment brand "${brandsInText[0]}" in page text. Forcing PASS.`)
                 analysis.passed = true
-                analysis.reason =
-                  'Payment badges (e.g. Visa, Mastercard, PayPal, Apple Pay, Google Pay) are present on the page, providing trust signals for users.'
+                analysis.reason = `Payment trust badges (${brandsInText.slice(0, 5).join(', ')}) are present on the product page, providing trust signals to users.`
               }
             }
-            // Trust badges rule must mention trust/badge/security/payment/ssl
-            const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') || reasonLower.includes('security') || reasonLower.includes('payment') || reasonLower.includes('ssl') || reasonLower.includes('visa') || reasonLower.includes('paypal') || reasonLower.includes('guarantee')
+
+            // Sanity check: warn only, never force a false FAIL
+            const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') ||
+              reasonLower.includes('payment') || reasonLower.includes('ssl') ||
+              reasonLower.includes('visa') || reasonLower.includes('paypal') ||
+              reasonLower.includes('secure') || reasonLower.includes('guarantee')
             if (!hasTrustMention) {
-              console.warn(`Warning: Trust badges rule but reason doesn't mention trust/badge/security: ${analysis.reason.substring(0, 50)}`)
+              console.warn(`Warning: Trust badges rule reason doesn't mention payment/trust: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
-            }
-            // Check if response mentions proximity (50px) or CTA
-            const mentionsProximity = reasonLower.includes('50px') || reasonLower.includes('proximity') || reasonLower.includes('near') || reasonLower.includes('within')
-            const mentionsCTA = reasonLower.includes('cta') || reasonLower.includes('add to cart') || reasonLower.includes('checkout') || reasonLower.includes('button')
-            if (!mentionsProximity && !mentionsCTA) {
-              console.warn(`Warning: Trust badges rule response should mention proximity to CTA`)
             }
           } else if (isBenefitsNearTitleRule) {
             // If AI failed but page content has benefit-like text near start (title area), force PASS
