@@ -229,6 +229,10 @@ export async function POST(request: NextRequest) {
       mobileEvidence: string
       anySticky: boolean
     } | null = null
+    let annotationContext: {
+      found: boolean
+      evidence: string[]
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1458,6 +1462,136 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Image Annotations DOM Detection ──────────────────────────────────────
+      // Detect overlay text, badges, labels on/near product images.
+      const needsAnnotationCheck = rules.some(r =>
+        r.id === 'image-annotations' ||
+        (r.title.toLowerCase().includes('annotation') && r.title.toLowerCase().includes('image')) ||
+        (r.description?.toLowerCase().includes('annotations') && r.description?.toLowerCase().includes('product images'))
+      )
+      if (needsAnnotationCheck && page) {
+        try {
+          const annoResult = await page.evaluate(() => {
+            const evidence: string[] = []
+            let found = false
+
+            // ── 1. Elements absolutely positioned inside image containers ──────
+            // Overlays are typically position:absolute children of a relative container
+            const IMAGE_CONTAINERS = Array.from(document.querySelectorAll(
+              '[class*="gallery" i],[class*="product-image" i],[class*="product-media" i],' +
+              '[class*="image-wrap" i],[class*="img-wrap" i],[class*="photo" i],' +
+              'figure, [class*="swiper-slide" i], [class*="carousel" i]'
+            ))
+            for (const container of IMAGE_CONTAINERS) {
+              const imgs = container.querySelectorAll('img')
+              if (imgs.length === 0) continue
+              const overlays = Array.from(container.querySelectorAll('*')).filter(el => {
+                if (el.tagName === 'IMG') return false
+                const cs = window.getComputedStyle(el as HTMLElement)
+                return cs.position === 'absolute'
+              })
+              for (const ov of overlays) {
+                const text = (ov.textContent || '').trim()
+                if (text.length >= 2 && text.length <= 120) {
+                  evidence.push(`Overlay on image: "${text.substring(0, 80)}"`)
+                  found = true
+                  break
+                }
+              }
+              if (found) break
+            }
+
+            // ── 2. Badge / label / tag class names anywhere near images ─────────
+            if (!found) {
+              const BADGE_SELECTORS = [
+                '[class*="badge" i]', '[class*="label" i]', '[class*="tag" i]',
+                '[class*="overlay" i]', '[class*="sticker" i]', '[class*="annotation" i]',
+                '[class*="callout" i]', '[class*="flag" i]', '[class*="ribbon" i]',
+                '[class*="stamp" i]', '[class*="chip" i]', '[class*="highlight" i]',
+              ]
+              for (const sel of BADGE_SELECTORS) {
+                try {
+                  const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+                  for (const el of els) {
+                    const cs = window.getComputedStyle(el)
+                    if (cs.display === 'none' || cs.visibility === 'hidden') continue
+                    const rect = el.getBoundingClientRect()
+                    if (rect.width < 5 || rect.height < 5) continue
+                    const text = (el.textContent || '').trim()
+                    if (text.length >= 2) {
+                      evidence.push(`Badge/label [${sel}]: "${text.substring(0, 80)}"`)
+                      found = true
+                      break
+                    }
+                  }
+                } catch { /* skip invalid selector */ }
+                if (found) break
+              }
+            }
+
+            // ── 3. Full page text scan for annotation-type phrases ───────────────
+            // Catches annotations baked into image alt text or visible text near images
+            if (!found) {
+              const ANNOTATION_PATTERNS = [
+                /-\d+\s*%/,                                    // "-63%", "-25%"
+                /\+\d+\s*%/,                                   // "+30%"
+                /\d+\s*%\s+(?:improvement|reduction|increase|less|more)/i,
+                /dermatologically\s+tested/i,
+                /clinically\s+proven/i,
+                /ophthalmologist\s+tested/i,
+                /allergy\s+tested/i,
+                /hypoallergenic/i,
+                /certified/i,
+                /award.winning/i,
+                /best\s+seller/i,
+                /new\s+arrival/i,
+                /\bsale\b/i,
+                /\bnew\b/i,
+              ]
+              // Check image alt attributes
+              const imgs = Array.from(document.querySelectorAll('img'))
+              for (const img of imgs) {
+                const alt = img.getAttribute('alt') || ''
+                const matching = ANNOTATION_PATTERNS.find(p => p.test(alt))
+                if (matching) {
+                  evidence.push(`Image alt annotation: "${alt.substring(0, 80)}"`)
+                  found = true
+                  break
+                }
+              }
+              // Check visible text near images (up to 3 ancestor levels)
+              if (!found) {
+                for (const img of imgs) {
+                  let ancestor: Element | null = img.parentElement
+                  for (let i = 0; i < 3; i++) {
+                    if (!ancestor) break
+                    const text = ancestor.textContent || ''
+                    const matching = ANNOTATION_PATTERNS.find(p => p.test(text))
+                    if (matching) {
+                      evidence.push(`Annotation text near image: "${text.trim().substring(0, 80)}"`)
+                      found = true
+                      break
+                    }
+                    ancestor = ancestor.parentElement
+                  }
+                  if (found) break
+                }
+              }
+            }
+
+            return { found, evidence }
+          })
+
+          annotationContext = { found: annoResult.found, evidence: annoResult.evidence }
+          websiteContent += `\n\n--- IMAGE ANNOTATION DOM CHECK ---` +
+            `\nAnnotations found: ${annoResult.found ? 'YES' : 'NO'}` +
+            (annoResult.evidence.length > 0 ? `\nEvidence: ${annoResult.evidence.slice(0, 3).join('; ')}` : '')
+          console.log(`Image annotation DOM check: found=${annoResult.found}, evidence=${annoResult.evidence.slice(0, 2).join(' | ')}`)
+        } catch (e) {
+          console.warn('Image annotation DOM detection failed:', e)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -1734,7 +1868,39 @@ Breadcrumbs are a navigation trail near the TOP of the page, usually just below 
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
           } else if (isImageAnnotationsRule) {
-            specialInstructions = `\nANNOTATIONS IN PRODUCT IMAGES RULE - YOUR REASON MUST INCLUDE BOTH:\n\n1. WHAT BADGES/ANNOTATIONS ARE CURRENTLY ON THE IMAGES (required in every response):\n- List exactly which annotations or badges you see on the product images (e.g. "Current badges: none", or "Present: 'vitamin C' on main image, 'hydrating' on second image", or "Only a 'new' tag on one thumbnail").\n- If there are no badges/annotations, say clearly "Current badges on product images: none" or "No annotations present on product images".\n\n2. WHAT IS MISSING (if FAILED) OR WHY IT PASSES (if PASSED):\n- If FAILED: After stating what is present, say what should be added (e.g. "Add badges like 'dark spot correction', 'radiance boosting' to communicate key benefits").\n- If PASSED: List the specific annotations/badges found and where they appear.\n\nExample FAIL reason: "Current badges on product images: none. Product images are missing annotations or badges that highlight key benefits like 'dark spot correction' or 'radiance boosting'. Adding these visual cues would help users quickly understand the product's value."\n\nExample PASS reason: "Product images include annotations: 'vitamin C' and 'brightening' on the main image, 'hydrating' on the second. These badges communicate key benefits clearly."`
+            specialInstructions = `
+PRODUCT IMAGE ANNOTATIONS RULE — SCREENSHOT IS THE PRIMARY SOURCE
+
+⚠️ CRITICAL INSTRUCTION: Look at the SCREENSHOT FIRST. This rule is almost entirely visual.
+
+━━━━ STEP 1: Analyze the SCREENSHOT (PRIMARY CHECK) ━━━━
+
+Carefully look at the screenshot. PASS immediately if you can see ANY of these ON or NEAR any product image:
+
+✅ Text directly overlaid on a product image (e.g. "Dermatologically tested", "Clinically proven")
+✅ Percentage improvement text (e.g. "-63%", "-81%", "+30%")
+✅ Clinical or benefit claims near/on an image (e.g. "colour intensity of dark spots", "award winning")
+✅ Badges, stickers, or labels on product images (e.g. "Best Seller", "New", "Sale", "Cruelty Free")
+✅ Any floating callout, ribbon, banner, or label overlaying a product image
+✅ Text that appears AS PART OF the image (baked-in text counts — it does NOT need to be a separate HTML element)
+
+⚠️ If the screenshot shows ANY benefit text or badge near/on an image → PASS. Do NOT look for HTML overlay elements. Visual presence is enough.
+
+━━━━ STEP 2: Check IMAGE ANNOTATION DOM CHECK in KEY ELEMENTS (SECONDARY) ━━━━
+
+If the screenshot shows nothing:
+- "Annotations found: YES" → PASS
+- "Annotations found: NO" → check screenshot again before failing
+
+━━━━ FAIL CONDITION ━━━━
+
+❌ FAIL only if product images are COMPLETELY PLAIN — no text anywhere on or adjacent to the images, no badges, no labels, no callouts at all.
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS reason: "Product images include annotations: '-63% colour intensity of dark spots' and 'Dermatologically tested' badge are visible on the product image."
+❌ FAIL reason: "No annotations or badges were found on product images. Add benefit labels, percentage claims, or overlays on product images to highlight key advantages."
+`
           } else if (isThumbnailsRule) {
             specialInstructions = `\nTHUMBNAILS IN PRODUCT GALLERY RULE - LENIENT CHECK:\n\nThe rule asks for thumbnails in the product image gallery. CRITICAL: If thumbnails EXIST on the page (a row of small images below or beside the main product image, a carousel with arrows to scroll, or multiple selectable small images), you MUST PASS—even if the user would need to scroll to see them or some thumbnails are off-screen.\n\nPASS when:\n- There is a thumbnail strip/carousel below or next to the main product image (with or without scroll arrows).\n- Multiple small images are shown that let users browse gallery images (even if scrolling is needed to see all).\n- Any small preview images in the product gallery area count as thumbnails.\n\nFAIL only when:\n- The product gallery has NO thumbnails at all (e.g. only one main image with no way to see other images as small previews).\n\nDo NOT fail just because thumbnails require scrolling to be visible. Thumbnails present = PASS.`
           } else if (isBeforeAfterRule) {
@@ -2479,7 +2645,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             console.log('[DELIVERY RULE] Content sent to AI (DELIVERY TIME CHECK section):\n', deliveryBlock)
           }
 
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
+          const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -2736,6 +2903,58 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 : `A sticky Add to Cart button is present on desktop, remaining fixed/sticky while scrolling. Rule passes.`
             }
             // If both viewports detected no sticky but AI passed — accept AI's result (screenshot may have caught it)
+          } else if (isImageAnnotationsRule) {
+            let annotationForcedPass = false
+
+            // Override 1: DOM confirmed annotations → force PASS
+            if (annotationContext?.found && !analysis.passed) {
+              console.log(`Image annotation rule: DOM found annotations. Forcing PASS.`)
+              analysis.passed = true
+              annotationForcedPass = true
+              const ev = annotationContext.evidence[0] || 'annotation/badge on product image'
+              analysis.reason = `Product images include annotations detected by DOM scan (${ev}). These visual labels help communicate key product benefits.`
+            }
+
+            // Override 2: Full page text safety net — catch annotation phrases visible anywhere on page
+            // NOTE: must set annotationForcedPass = true to prevent Override 3 from undoing this
+            if (!analysis.passed) {
+              const pageText = fullVisibleText || websiteContent || ''
+              const ANNOTATION_TEXT_PATTERNS = [
+                /-\d+\s*%/,
+                /\+\d+\s*%/,
+                /dermatologically\s+tested/i,
+                /clinically\s+proven/i,
+                /ophthalmologist\s+tested/i,
+                /allergy\s+tested/i,
+                /award[\s-]winning/i,
+                /best\s+seller/i,
+                /hypoallergenic/i,
+                /\d+\s*%\s+(?:improvement|reduction|less|more|effective)/i,
+                /colour\s+intensity/i,
+                /dark\s+spot/i,
+                /radiance[\s-]boosting/i,
+                /skin[\s-]brightening/i,
+              ]
+              const matchedAnno = ANNOTATION_TEXT_PATTERNS.find(p => p.test(pageText))
+              if (matchedAnno) {
+                const matchedText = (pageText.match(matchedAnno) || [''])[0]
+                console.log(`Image annotation rule: Page text contains annotation signal "${matchedText}". Forcing PASS.`)
+                analysis.passed = true
+                annotationForcedPass = true
+                analysis.reason = `Product image annotations detected: "${matchedText}" — benefit labels or clinical claims are present on this page, qualifying as product image annotations.`
+              }
+            }
+
+            // Override 3: False-positive guard — ONLY fires if nothing above forced a PASS.
+            // Catches edge case where AI incorrectly passed but its own reason admits "no badges".
+            // Uses reasonLower (the AI's original reason) since analysis.reason may have been updated above.
+            if (!annotationForcedPass && analysis.passed && (reasonLower.includes('current badges: none') || reasonLower.includes('no annotations') || reasonLower.includes('no badges'))) {
+              if (!annotationContext?.found) {
+                console.log(`Image annotation rule: AI passed but says no badges and DOM also found none. Forcing FAIL.`)
+                analysis.passed = false
+                analysis.reason = `No annotations or badges were found on product images. Add benefit labels, percentage claims, or overlays on product images to highlight key product advantages.`
+              }
+            }
           } else if (isBeforeAfterRule) {
             // Before-and-after rule: if page content has before/after signals (even in thumbnails or image alt text), force pass
             const beforeAfterContent = (fullVisibleText || websiteContent || '').toLowerCase()

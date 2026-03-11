@@ -42,7 +42,7 @@
   {
     "id": "image-annotations",
     "title": "Include annotations in product images",
-    "description": "Product images should include annotations or badges highlighting key benefits or differentiators to visually communicate value faster than text alone."
+    "description": "Product images should include annotations or badges highlighting key benefits or differentiators. PASS if any annotation, badge, percentage claim (e.g. -63%), clinical claim (e.g. Dermatologically tested, Clinically proven), or benefit label is visible on or near product images — whether as a DOM element OR baked into the image. Screenshot detection is the primary source."
   },
   {
     "id": "image-thumbnails",
