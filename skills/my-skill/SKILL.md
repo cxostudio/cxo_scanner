@@ -295,17 +295,23 @@ Explain that no variant appears selected by default and users must manually choo
 
 Mention where the variant selector appears (e.g., flavor selection grid, size options, color selector).
 
-### Trust Badges Near CTA (dual-source: screenshot first, then DOM)
+### Trust Badges / Display Trust Signals Near CTA (screenshot is the PRIMARY source)
 
-**DOM signal:** KEY ELEMENTS "Trust Badges Near CTA" / "Trust Badges Count" indicating badges within 50px of CTA; list of payment/trust badges.
+**CRITICAL: Look at the SCREENSHOT FIRST.** Do NOT require badges to be strictly near the CTA.
 
-**Screenshot signal:** In the image, look for payment/trust badges (Visa, Mastercard, PayPal, SSL, lock) below or near the Add to Cart button; row of payment logos in the product/checkout area.
+**PASS immediately if the screenshot shows ANY of the following ANYWHERE on the page:**
+- Payment logos: Visa, Mastercard, Amex / American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, iDEAL, Revolut
+- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon, "Norton Secured", "McAfee Secure"
+- Trust icons: money-back guarantee badge, "100% Safe", "Guaranteed Safe", certified badge
+- Any row of payment icons — even in the footer, below the CTA, or in the product description
 
-**PASS if:** Screenshot shows payment/trust badges below or near Add to Cart OR DOM indicates trust badges near CTA.
+**DOM signal (from KEY ELEMENTS TRUST BADGES CHECK):** `DOM Structure Found: YES`, or `Payment Brands Found` lists any brand, or `iframe:payment` / `iframe:shopify` listed (embedded payment widget).
 
-**FAIL if:** Neither screenshot nor DOM shows trust badges near the CTA.
+**PASS if:** Screenshot shows ANY payment/trust logo/icon OR DOM Structure Found = YES OR any brand listed in Payment Brands Found.
 
-**Failure reason must include:** Section (e.g. near Add to Cart), what is missing (payment/trust badges), what to add (e.g. add payment logos or trust badges below the Add to Cart button). Do not fail based on KEY ELEMENTS alone when the screenshot clearly shows badges.
+**FAIL ONLY if:** Screenshot shows ZERO payment/trust badges AND DOM Structure Found = NO AND Payment Brands Found = None.
+
+**Failure reason must include:** What is missing (payment/trust badges), where to add them (near or below Add to Cart button), and what to add (payment method logos like Visa, Mastercard, PayPal, SSL badge). Do not fail based on KEY ELEMENTS alone when the screenshot clearly shows badges.
 
 ### Product Comparison (screenshot is the PRIMARY source)
 

@@ -966,24 +966,43 @@ export async function POST(request: NextRequest) {
         }
       })
 
+      // Scroll back toward the CTA/purchase area before scanning for trust badges
+      // (ensures lazy-loaded payment icons near the ATC button are rendered)
+      await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.4)))
+      await new Promise(r => setTimeout(r, 1500))
+
       // Get trust badges context — scans whole page for payment badge elements (no CTA dependency)
       trustBadgesContext = await page.evaluate(() => {
-        const PAYMENT_BRANDS = ['visa', 'mastercard', 'master card', 'amex', 'american express',
-          'paypal', 'apple pay', 'google pay', 'maestro', 'discover', 'diners', 'klarna',
-          'afterpay', 'shop pay', 'union pay', 'stripe', 'clearpay', 'wero', 'ideal', 'bancontact']
-        const TRUST_KEYWORDS = ['ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-          'money back guarantee', '100% safe', 'protected checkout', 'secure payment']
+        const PAYMENT_BRANDS = [
+          'visa', 'mastercard', 'master card', 'amex', 'american express',
+          'paypal', 'apple pay', 'google pay', 'maestro', 'discover', 'diners',
+          'klarna', 'afterpay', 'shop pay', 'union pay', 'stripe', 'clearpay',
+          'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'giropay', 'jcb',
+          'revolut', 'twint', 'przelewy24', 'eps', 'blik', 'pay later',
+        ]
+        const TRUST_KEYWORDS = [
+          'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
+          'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
+          'guaranteed safe', 'safe & secure', 'encrypted', 'norton secured',
+          'mcafee secure', 'trusted shop', 'comodo', 'security badge',
+        ]
 
         // ── Helper: match an element against payment/trust keywords ───────────
         function elementMatchesTrust(el: Element): string | null {
+          const img = el as HTMLImageElement
+          const hel = el as HTMLElement
           const texts = [
-            (el as HTMLImageElement).alt || '',
-            (el as HTMLElement).title || '',
-            (el as HTMLElement).getAttribute?.('aria-label') || '',
-            (el as HTMLElement).getAttribute?.('data-payment') || '',
-            (el as HTMLElement).getAttribute?.('data-icon') || '',
+            img.alt || '',
+            hel.title || '',
+            hel.getAttribute?.('aria-label') || '',
+            hel.getAttribute?.('data-payment') || '',
+            hel.getAttribute?.('data-icon') || '',
+            hel.getAttribute?.('data-brand') || '',
+            hel.getAttribute?.('data-method') || '',
+            // ✅ NEW: check src/href URL — payment logos often have brand in filename
+            img.src || img.getAttribute?.('data-src') || img.getAttribute?.('data-lazy-src') || '',
             el.tagName === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
-            (el as HTMLElement).className || '',
+            hel.className?.toString() || '',
             el.id || '',
           ].map(t => t.toLowerCase())
           const combined = texts.join(' ')
@@ -1000,6 +1019,15 @@ export async function POST(request: NextRequest) {
           // Trust keywords (only specific phrases, not lone "secure")
           const trustMatch = TRUST_KEYWORDS.find(k => combined.includes(k))
           if (trustMatch) return trustMatch
+
+          // ✅ NEW: check direct text content for short elements (payment brand labels)
+          const directText = (hel.childElementCount === 0 ? hel.textContent?.trim() : '')?.toLowerCase() || ''
+          if (directText && directText.length < 40) {
+            const textBrand = PAYMENT_BRANDS.find(b => directText.includes(b))
+            if (textBrand) return textBrand
+            const textTrust = TRUST_KEYWORDS.find(k => directText.includes(k))
+            if (textTrust) return textTrust
+          }
 
           return null
         }
@@ -1018,13 +1046,15 @@ export async function POST(request: NextRequest) {
           : 'not found'
 
         // ── Scan entire page for payment badge elements ───────────────────────
-        // Covers: img[alt], svg icons, elements with class/id containing brand names
         const found = new Map<string, string>()
 
         const allElements = Array.from(document.querySelectorAll(
-          'img, svg, [class*="payment"], [class*="badge"], [class*="trust"], [class*="visa"], ' +
-          '[class*="paypal"], [class*="mastercard"], [class*="amex"], [class*="apple-pay"], ' +
-          '[class*="google-pay"], [class*="klarna"], [id*="payment"], [id*="badge"], [id*="trust"]'
+          'img, svg, use, [class*="payment" i], [class*="badge" i], [class*="trust" i], ' +
+          '[class*="visa" i], [class*="paypal" i], [class*="mastercard" i], [class*="amex" i], ' +
+          '[class*="apple-pay" i], [class*="google-pay" i], [class*="klarna" i], ' +
+          '[class*="shop-pay" i], [class*="stripe" i], [class*="secure" i], ' +
+          '[id*="payment" i], [id*="badge" i], [id*="trust" i], ' +
+          '[data-payment], [data-brand], [data-method]'
         ))
 
         for (const el of allElements) {
@@ -1034,6 +1064,40 @@ export async function POST(request: NextRequest) {
             found.set(label, desc)
           }
           if (found.size >= 12) break
+        }
+
+        // ── ✅ NEW: Scan page body text for payment brand names (catches text-only badges) ─
+        if (found.size === 0) {
+          const bodyText = document.body.innerText?.toLowerCase() || ''
+          const BRAND_SCAN = [
+            'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
+            'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
+            'clearpay', 'stripe', 'discover',
+          ]
+          for (const brand of BRAND_SCAN) {
+            if (bodyText.includes(brand)) {
+              found.set(brand, 'text')
+              if (found.size >= 5) break
+            }
+          }
+        }
+
+        // ── ✅ NEW: Check iframes src URLs for payment/trust widget patterns ──
+        // (can't execute inside cross-origin iframes, but src URL reveals the provider)
+        const PAYMENT_IFRAME_PATTERNS = [
+          'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
+          'payment', 'checkout', 'trust', 'badge', 'secure',
+        ]
+        const iframes = Array.from(document.querySelectorAll('iframe'))
+        for (const iframe of iframes) {
+          const src = (iframe.getAttribute('src') || iframe.getAttribute('data-src') || '').toLowerCase()
+          const title = (iframe.getAttribute('title') || '').toLowerCase()
+          const combined = src + ' ' + title
+          const match = PAYMENT_IFRAME_PATTERNS.find(p => combined.includes(p))
+          if (match && !found.has(`iframe:${match}`)) {
+            found.set(`iframe:${match}`, `iframe[src*="${match}"]`)
+            if (found.size >= 12) break
+          }
         }
 
         // ── Fallback: scan ALL page elements (catches custom icon fonts, etc.) ─
@@ -1915,6 +1979,93 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Second-pass trust badges scan ─────────────────────────────────────
+      // Runs after all other DOM checks are done. Gives dynamic/lazy-loaded payment
+      // widgets extra time to render, then re-checks. Only runs if first pass found nothing.
+      const needsTrustReScan = rules.some(r =>
+        r.id === 'trust-badges-near-cta' ||
+        (r.title.toLowerCase().includes('trust') && r.title.toLowerCase().includes('signal'))
+      )
+      if (needsTrustReScan && page && !trustBadgesContext?.domStructureFound) {
+        try {
+          // Scroll to 30-50% of page (where CTA / payment section usually lives)
+          await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)))
+          await new Promise(r => setTimeout(r, 2000))
+
+          const reScanResult = await page.evaluate(() => {
+            const PAYMENT_BRANDS = [
+              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
+              'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
+              'clearpay', 'stripe', 'discover', 'union pay', 'wero', 'ideal',
+            ]
+            const TRUST_KEYWORDS = [
+              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
+              'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
+              'guaranteed safe', 'safe & secure', 'encrypted',
+            ]
+            const found = new Map<string, string>()
+
+            // Scan all elements including dynamically added ones
+            const allEls = Array.from(document.querySelectorAll('*'))
+            for (const el of allEls) {
+              const hel = el as HTMLElement
+              const img = el as HTMLImageElement
+              const texts = [
+                img.alt || '', hel.title || '',
+                hel.getAttribute?.('aria-label') || '',
+                img.src || img.getAttribute?.('data-src') || '',
+                hel.className?.toString() || '',
+                el.id || '',
+                hel.childElementCount === 0 ? (hel.textContent?.trim().substring(0, 40) || '') : '',
+              ].join(' ').toLowerCase()
+
+              // Check SVG title
+              const svgT = el.querySelector?.('title')?.textContent?.toLowerCase() || ''
+              const combined = texts + ' ' + svgT
+
+              const brand = PAYMENT_BRANDS.find(b => combined.includes(b))
+              const trust = TRUST_KEYWORDS.find(k => combined.includes(k))
+              const label = brand || trust
+              if (label && !found.has(label)) {
+                found.set(label, el.tagName)
+              }
+              if (found.size >= 8) break
+            }
+
+            // Check iframes
+            for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
+              const src = (iframe.getAttribute('src') || '').toLowerCase()
+              const IFRAME_PAY = ['shopify', 'paypal', 'stripe', 'klarna', 'payment', 'checkout', 'trust']
+              const match = IFRAME_PAY.find(p => src.includes(p))
+              if (match) found.set(`iframe:${match}`, 'iframe')
+            }
+
+            return {
+              found: found.size > 0,
+              brands: Array.from(found.keys()),
+            }
+          })
+
+          if (reScanResult.found && trustBadgesContext) {
+            console.log(`Trust badges second-pass: found ${reScanResult.brands.join(', ')}. Updating context.`)
+            trustBadgesContext = {
+              ...trustBadgesContext,
+              domStructureFound: true,
+              paymentBrandsFound: [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brands])],
+              trustBadgesCount: reScanResult.brands.length,
+              trustBadgesInfo: `Second-pass found: ${reScanResult.brands.join(', ')}`,
+            }
+            // Also update websiteContent so AI sees the updated result
+            websiteContent = websiteContent.replace(
+              /--- TRUST BADGES CHECK ---[\s\S]*?(?=\n\n---|$)/,
+              `--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nDOM Structure Found (same container/sibling as CTA): YES\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nPurchase Container: second-pass scan\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            )
+          }
+        } catch (e) {
+          console.warn('Trust badges second-pass scan failed:', e)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -2714,34 +2865,43 @@ CRITICAL INSTRUCTIONS:
             specialInstructions = `
 TRUST SIGNALS / PAYMENT BADGES RULE
 
-Simple rule: Does the page show payment method logos or security/trust badges? If YES → PASS. If NO → FAIL.
+Simple rule: Does the page show ANY payment method logos OR security/trust badges? If YES → PASS. If NO → FAIL.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCREENSHOT CHECK (primary)
+SCREENSHOT CHECK (primary source)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Look at the screenshot. PASS immediately if you see ANY of:
-- Payment logos anywhere on the product page: Visa, Mastercard, Amex/American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe
-- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon
-- Trust icons: money-back guarantee badge, "100% Safe", certified badge
-- A row of small payment icons (even in footer or below Add to Cart)
+Look at the SCREENSHOT carefully. PASS immediately if you see ANY of the following ANYWHERE on the page:
+- Payment logos: Visa, Mastercard, Amex / American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL
+- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon, "Norton Secured", "McAfee Secure"
+- Trust icons: money-back guarantee badge, "100% Safe", "Guaranteed Safe", certified badge, "Safe & Secure"
+- A row of small payment icons anywhere (near CTA, below checkout, in footer, in product description)
+- Payment icons inside or below an Add to Cart / Buy Now button area
 
-Do NOT require the CTA to be found. If payment logos exist anywhere visible on the page → PASS.
+IMPORTANT: Do NOT require payment logos to be near the CTA. If they appear ANYWHERE on the page → PASS.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOM CHECK (from KEY ELEMENTS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Check TRUST BADGES CHECK section:
-- "DOM Structure Found: YES" → PASS
-- "Payment Brands Found:" lists any brand → PASS
+Check the TRUST BADGES CHECK section in KEY ELEMENTS:
+- "DOM Structure Found: YES" → PASS immediately
+- "Payment Brands Found:" lists any brand name → PASS immediately
+- Even "iframe:payment" or "iframe:shopify" in the brands list → PASS (payment widget detected)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RESULT LOGIC
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PASS if screenshot shows payment logos OR DOM Structure Found = YES
-FAIL only if screenshot shows zero payment/trust badges AND DOM Structure Found = NO
+PASS if:
+  screenshot shows ANY payment/trust logo/icon
+  OR DOM Structure Found = YES
+  OR Payment Brands Found contains any brand
 
-PASS reason: "Payment trust badges (Visa, Mastercard, Amex, Apple Pay, Google Pay, PayPal) are displayed on the product page, providing trust signals to users at the point of purchase."
-FAIL reason: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal) were found on the product page. Add payment method logos near the Add to Cart button to build trust."
+FAIL ONLY if:
+  screenshot shows ZERO payment/trust badges
+  AND DOM Structure Found = NO
+  AND Payment Brands Found = None
+
+PASS reason example: "Payment trust badges (Visa, Mastercard, PayPal, Apple Pay) are visible on the product page, providing payment trust signals to users."
+FAIL reason example: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal) were detected anywhere on the product page. Add payment method icons near the Add to Cart button to build trust."
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
@@ -2919,7 +3079,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
           const productTabsPrefix = isProductTabsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT TABS/ACCORDIONS RULE ⚠️⚠️⚠️\n\nTHIS IS THE ACCORDIONS RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nIn the screenshot, look for ACCORDION-LIKE UI:\n- Rows or labels such as "Product Details", "Ingredients", "How to Use", "Shipping & Delivery", "Return & Refund Policy"\n- Chevron icons (>, ▼, ▶) or arrows next to each label\n- Vertical list of section headers that look expandable/collapsible\n\nCRITICAL: If you SEE this pattern in the screenshot → you MUST output passed: true. Do NOT fail based on "Tabs/Accordions Found: None" in KEY ELEMENTS. Many sites build accordions with divs (no <details>), so KEY ELEMENTS miss them but the screenshot clearly shows accordions. When in doubt, trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nSimple check: Does the page show payment logos or trust badges?\n\nLook at the SCREENSHOT. PASS immediately if you see ANY payment logos ANYWHERE on the product page:\n- Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Maestro, Shop Pay, Discover\n- SSL badge, padlock, "Secure Checkout", shield, money-back guarantee\n\nNO CTA required. Payment logos visible anywhere on the product page = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK → "DOM Structure Found: YES" = PASS.\n\nFAIL only if ZERO payment logos or trust icons are visible anywhere.\n\nNow analyze the screenshot:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST SIGNALS RULE. Look at the SCREENSHOT FIRST.\n\nPASS immediately if you see ANY of the following ANYWHERE on the product page:\n- Payment logos: Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL\n- Security icons: SSL badge, padlock, "Secure Checkout", shield icon, "Norton Secured"\n- Trust icons: money-back guarantee, "100% Safe", "Guaranteed Safe", certified badge\n- ANY row of payment icons (near CTA, below checkout button, in footer, anywhere)\n\nNO CTA required. Payment logos visible ANYWHERE on the page = PASS.\nPayment icons in footer = PASS. Below the cart button = PASS. Anywhere = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK:\n- "DOM Structure Found: YES" → PASS\n- "Payment Brands Found:" lists any name → PASS\n- "iframe:payment" or "iframe:shopify" → PASS (payment widget embedded)\n\nFAIL only if ZERO payment/trust logos are visible in screenshot AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE. You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
@@ -3557,24 +3717,40 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
-            // Hard override 1: DOM scan found ANY payment badge on page → PASS
+            const FULL_BRAND_LIST = [
+              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay',
+              'amex', 'american express', 'klarna', 'shop pay', 'maestro',
+              'afterpay', 'clearpay', 'stripe', 'discover', 'union pay',
+              'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'jcb',
+              'revolut', 'twint', 'pay later',
+            ]
+            const TRUST_SIGNAL_LIST = [
+              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
+              'money back guarantee', '100% safe', 'protected checkout',
+              'secure payment', 'guaranteed safe', 'safe & secure', 'encrypted',
+            ]
+
+            // Hard override 1: DOM scan (first or second pass) found payment badge → PASS
             if (!analysis.passed && trustBadgesContext?.domStructureFound) {
-              const brands = trustBadgesContext.paymentBrandsFound.join(', ')
+              const brands = trustBadgesContext.paymentBrandsFound
+                .filter(b => !b.startsWith('iframe:'))
+                .concat(trustBadgesContext.paymentBrandsFound.filter(b => b.startsWith('iframe:')).map(b => b.replace('iframe:', 'payment widget (')+')'))
+                .join(', ')
               console.log(`Trust badges rule: DOM found payment badges (${brands}). Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Payment trust badges (${brands}) are displayed on the product page, providing trust signals to users at the point of purchase.`
             }
 
-            // Hard override 2: page text contains ANY known payment brand name
+            // Hard override 2: full page text contains ANY payment brand or trust keyword
             if (!analysis.passed) {
               const trustText = (fullVisibleText || websiteContent || '').toLowerCase()
-              const BRAND_LIST = ['visa', 'mastercard', 'paypal', 'apple pay', 'google pay',
-                'amex', 'american express', 'klarna', 'shop pay', 'maestro', 'afterpay', 'clearpay', 'stripe']
-              const brandsInText = BRAND_LIST.filter(b => trustText.includes(b))
-              if (brandsInText.length >= 1) {
-                console.log(`Trust badges rule: Found payment brand "${brandsInText[0]}" in page text. Forcing PASS.`)
+              const brandsInText = FULL_BRAND_LIST.filter(b => trustText.includes(b))
+              const trustsInText = TRUST_SIGNAL_LIST.filter(k => trustText.includes(k))
+              const allFound = [...brandsInText, ...trustsInText]
+              if (allFound.length >= 1) {
+                console.log(`Trust badges rule: Found trust signal "${allFound[0]}" in page text. Forcing PASS.`)
                 analysis.passed = true
-                analysis.reason = `Payment trust badges (${brandsInText.slice(0, 5).join(', ')}) are present on the product page, providing trust signals to users.`
+                analysis.reason = `Trust signals (${allFound.slice(0, 5).join(', ')}) are present on the product page, providing payment trust indicators to users.`
               }
             }
 
@@ -3582,7 +3758,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') ||
               reasonLower.includes('payment') || reasonLower.includes('ssl') ||
               reasonLower.includes('visa') || reasonLower.includes('paypal') ||
-              reasonLower.includes('secure') || reasonLower.includes('guarantee')
+              reasonLower.includes('secure') || reasonLower.includes('guarantee') ||
+              reasonLower.includes('mastercard') || reasonLower.includes('klarna')
             if (!hasTrustMention) {
               console.warn(`Warning: Trust badges rule reason doesn't mention payment/trust: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
