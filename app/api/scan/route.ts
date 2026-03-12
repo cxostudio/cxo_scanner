@@ -243,6 +243,8 @@ export async function POST(request: NextRequest) {
       format: string
       evidence: string[]
     } | null = null
+    let galleryNavDOMFound = false
+    let galleryNavDOMEvidence = ''
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1979,6 +1981,108 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Gallery arrows / swipe navigation DOM check ────────────────────────
+      // Detects prev/next navigation elements in the product image gallery.
+      const needsGalleryNavCheck = rules.some(r =>
+        r.id === 'image-mobile-navigation' ||
+        (r.title.toLowerCase().includes('swipe') && r.title.toLowerCase().includes('arrow')) ||
+        (r.title.toLowerCase().includes('swipe') && r.title.toLowerCase().includes('mobile')) ||
+        (r.description.toLowerCase().includes('swipe') && r.description.toLowerCase().includes('navigation'))
+      )
+      if (needsGalleryNavCheck && page) {
+        try {
+          // Scroll back to top so product gallery is in the viewport
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise(r => setTimeout(r, 400))
+
+          const galleryNavResult = await page.evaluate(() => {
+            const evidence: string[] = []
+
+            // ── Pass 1: Exact nav selectors (existence in DOM is enough — no visibility check needed)
+            // On desktop, Shopify prev/next buttons are often display:none or opacity:0 but still in DOM.
+            // Presence in DOM = navigation IS supported for mobile/hover.
+            const NAV_SELECTORS = [
+              '.slideshow-button--prev', '.slideshow-button--next',
+              '.slideshow-thumbnails-prev', '.slideshow-thumbnails-next',
+              '.slideshow-button',
+              '.swiper-button-prev', '.swiper-button-next',
+              '.slider-prev', '.slider-next',
+              '.carousel-prev', '.carousel-next',
+              '.gallery-arrow', '.gallery-nav',
+              '.slick-prev', '.slick-next',
+              '.flickity-prev-next-button',
+              '.media-gallery__nav', '.product-gallery__nav',
+              '[class*="media__prev"]', '[class*="media__next"]',
+            ]
+            for (const sel of NAV_SELECTORS) {
+              try {
+                const el = document.querySelector(sel)
+                if (el) {
+                  evidence.push(`Nav selector in DOM: ${sel} (class="${(el as HTMLElement).className?.toString().substring(0, 60)}")`)
+                  return { found: true, evidence }
+                }
+              } catch { /* ignore invalid selector */ }
+            }
+
+            // ── Pass 2: Any button/link/element with prev/next/arrow in class, aria-label, or id
+            // No visibility check — just DOM presence
+            const allInteractives = Array.from(document.querySelectorAll('button, [role="button"], a, svg, div, span'))
+            for (const el of allInteractives) {
+              const cls = (el.className?.toString() || '').toLowerCase()
+              const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+              const id = (el.id || '').toLowerCase()
+              const name = (el.getAttribute('name') || '').toLowerCase()
+              if (
+                cls.includes('prev') || cls.includes('next') || cls.includes('arrow') ||
+                cls.includes('gallery-btn') || cls.includes('carousel-btn') ||
+                aria.includes('prev') || aria.includes('next') || aria.includes('previous') || aria.includes('arrow') ||
+                id.includes('prev') || id.includes('next') || id.includes('arrow') ||
+                name.includes('prev') || name.includes('next')
+              ) {
+                evidence.push(`Nav element in DOM: tag=${el.tagName} class="${cls.substring(0, 60)}" aria="${aria.substring(0, 40)}"`)
+                return { found: true, evidence }
+              }
+            }
+
+            // ── Pass 3: Swipe/slider library class on any container
+            const SLIDER_CLASSES = ['swiper', 'slick', 'flickity', 'splide', 'slideshow', 'keen-slider', 'embla']
+            for (const lib of SLIDER_CLASSES) {
+              const el = document.querySelector(`[class*="${lib}"]`)
+              if (el) {
+                evidence.push(`Slider library detected: "${lib}" class on ${el.tagName}`)
+                return { found: true, evidence }
+              }
+            }
+
+            // ── Pass 4: Scan raw body HTML for nav class patterns
+            const bodyHTML = document.body.innerHTML
+            const NAV_HTML_PATTERNS = [
+              /class="[^"]*(?:slideshow-button|swiper-button|slick-arrow|flickity-prev|carousel-arrow|gallery-arrow|prev-btn|next-btn|slider-prev|slider-next)[^"]*"/i,
+              /aria-label="(?:Previous|Next|Prev|prev|next|previous)"/i,
+              /class="[^"]*(?:prev|next)[^"]*(?:button|btn|arrow|nav)[^"]*"/i,
+            ]
+            for (const pat of NAV_HTML_PATTERNS) {
+              const m = bodyHTML.match(pat)
+              if (m) {
+                evidence.push(`HTML pattern: ${m[0].substring(0, 80)}`)
+                return { found: true, evidence }
+              }
+            }
+
+            return { found: false, evidence: [] }
+          })
+
+          galleryNavDOMFound = galleryNavResult.found
+          galleryNavDOMEvidence = galleryNavResult.evidence.join('; ')
+          websiteContent += `\n\n--- GALLERY NAVIGATION DOM CHECK ---` +
+            `\nNavigation arrows/swipe found: ${galleryNavResult.found ? 'YES' : 'NO'}` +
+            (galleryNavResult.evidence.length > 0 ? `\nEvidence: ${galleryNavResult.evidence.slice(0, 3).join('; ')}` : '')
+          console.log(`Gallery navigation DOM check: found=${galleryNavResult.found}, evidence="${galleryNavDOMEvidence}"`)
+        } catch (e) {
+          console.warn('Gallery navigation DOM detection failed:', e)
+        }
+      }
+
       // ── Second-pass trust badges scan ─────────────────────────────────────
       // Runs after all other DOM checks are done. Gives dynamic/lazy-loaded payment
       // widgets extra time to render, then re-checks. Only runs if first pass found nothing.
@@ -2302,6 +2406,11 @@ export async function POST(request: NextRequest) {
             rule.id === 'image-before-after' ||
             (rule.title.toLowerCase().includes('before') && rule.title.toLowerCase().includes('after')) ||
             (rule.description.toLowerCase().includes('before-and-after') || rule.description.toLowerCase().includes('before and after'))
+          const isMobileGalleryRule =
+            rule.id === 'image-mobile-navigation' ||
+            (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('arrow')) ||
+            (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('mobile')) ||
+            (rule.description.toLowerCase().includes('swipe') && rule.description.toLowerCase().includes('navigation'))
           const isSquareImageRule =
             rule.id === 'image-square-format' ||
             (rule.title.toLowerCase().includes('square') && rule.title.toLowerCase().includes('image')) ||
@@ -2377,6 +2486,39 @@ If the screenshot shows nothing:
 `
           } else if (isThumbnailsRule) {
             specialInstructions = `\nTHUMBNAILS IN PRODUCT GALLERY RULE - LENIENT CHECK:\n\nThe rule asks for thumbnails in the product image gallery. CRITICAL: If thumbnails EXIST on the page (a row of small images below or beside the main product image, a carousel with arrows to scroll, or multiple selectable small images), you MUST PASS—even if the user would need to scroll to see them or some thumbnails are off-screen.\n\nPASS when:\n- There is a thumbnail strip/carousel below or next to the main product image (with or without scroll arrows).\n- Multiple small images are shown that let users browse gallery images (even if scrolling is needed to see all).\n- Any small preview images in the product gallery area count as thumbnails.\n\nFAIL only when:\n- The product gallery has NO thumbnails at all (e.g. only one main image with no way to see other images as small previews).\n\nDo NOT fail just because thumbnails require scrolling to be visible. Thumbnails present = PASS.`
+          } else if (isMobileGalleryRule) {
+            specialInstructions = `
+GALLERY NAVIGATION RULE — "Enable swipe or arrows on mobile galleries"
+
+CRITICAL: You are receiving a SCREENSHOT image. Analyze the screenshot FIRST.
+
+━━━━ STEP 1 — SCREENSHOT CHECK (preferred) ━━━━
+
+Look at the product image gallery area in the screenshot. PASS immediately if you see ANY of:
+- Left/right arrow buttons (◀ ▶, ‹ ›, <  >) on the sides of the main product image
+- Circular or square navigation buttons beside the gallery images
+- Slider navigation controls (prev/next buttons)
+- Any icon or button indicating "previous" or "next" image navigation
+- A carousel slider with directional arrows
+- Small thumbnail dots or navigation indicators below the gallery
+
+━━━━ STEP 2 — DOM CHECK ━━━━
+
+Also check the "GALLERY NAVIGATION DOM CHECK" section in KEY ELEMENTS:
+- If "Navigation arrows/swipe found: YES" → PASS
+
+━━━━ DECISION LOGIC ━━━━
+
+✅ PASS if: screenshot shows arrows/navigation buttons OR DOM found navigation elements
+❌ FAIL only if: screenshot shows no arrows AND DOM found nothing
+
+━━━━ REASON EXAMPLES ━━━━
+
+✅ PASS: "Navigation arrows are visible on the product image gallery, allowing users to browse between images."
+❌ FAIL: "No swipe gestures or navigation arrows were detected in the product image gallery. Add swipe support or visible navigation arrows."
+
+IMPORTANT: This rule is ONLY about gallery navigation arrows or swipe support. Do NOT evaluate other rules.
+`
           } else if (isBeforeAfterRule) {
             specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE - CHECK SCREENSHOT AND CONTENT:\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
           } else if (isSquareImageRule) {
@@ -3102,7 +3244,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
+          const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -3431,6 +3574,47 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 console.log(`Image annotation rule: AI passed but says no badges and DOM also found none. Forcing FAIL.`)
                 analysis.passed = false
                 analysis.reason = `No annotations or badges were found on product images. Add benefit labels, percentage claims, or overlays on product images to highlight key product advantages.`
+              }
+            }
+          } else if (isMobileGalleryRule) {
+            // Override 1: DOM check found navigation elements → force PASS
+            if (!analysis.passed && galleryNavDOMFound) {
+              console.log(`Gallery navigation rule: DOM found navigation arrows/swipe. Forcing PASS. Evidence: ${galleryNavDOMEvidence}`)
+              analysis.passed = true
+              analysis.reason = `Navigation arrows/controls are present in the product image gallery (${galleryNavDOMEvidence.substring(0, 160)}), allowing users to browse between product images.`
+            }
+            // Override 2: Scan websiteContent (the raw HTML/DOM dump) for nav class patterns
+            if (!analysis.passed) {
+              const rawContent = websiteContent || ''
+              const NAV_CONTENT_PATTERNS = [
+                /slideshow-button(?:--|__)?(?:prev|next)/i,
+                /slideshow-thumbnails-(?:prev|next)/i,
+                /swiper-button-(?:prev|next)/i,
+                /slick-(?:prev|next|arrow)/i,
+                /flickity-prev-next/i,
+                /carousel-(?:prev|next|arrow)/i,
+                /gallery-(?:arrow|nav|prev|next)/i,
+                /slider-(?:prev|next|btn)/i,
+                /aria-label="(?:Previous|Next|Prev|prev|next)"/i,
+                /class="[^"]*(?:prev|next)[^"]*(?:btn|button|arrow)[^"]*"/i,
+              ]
+              const matchedPat = NAV_CONTENT_PATTERNS.find(p => p.test(rawContent))
+              if (matchedPat) {
+                const matchedText = (rawContent.match(matchedPat) || [''])[0]
+                console.log(`Gallery navigation rule: Raw content contains nav pattern "${matchedText}". Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = `Gallery navigation controls detected in page HTML ("${matchedText.substring(0, 80)}"), confirming the product gallery supports navigation between images.`
+              }
+            }
+            // Override 3: Slider library keywords in page content
+            if (!analysis.passed) {
+              const pageText = (fullVisibleText || websiteContent || '').toLowerCase()
+              const SLIDER_LIBS = ['swiper', 'slick', 'flickity', 'splide', 'slideshow', 'keen-slider', 'embla']
+              const foundLib = SLIDER_LIBS.find(lib => pageText.includes(lib))
+              if (foundLib) {
+                console.log(`Gallery navigation rule: Slider library "${foundLib}" detected in page content. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = `A gallery slider component ("${foundLib}") is present on the page, providing swipe gesture or arrow navigation support for the product image gallery.`
               }
             }
           } else if (isBeforeAfterRule) {

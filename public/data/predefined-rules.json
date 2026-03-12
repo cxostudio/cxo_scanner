@@ -62,7 +62,7 @@
   {
     "id": "image-mobile-navigation",
     "title": "Enable swipe or arrows on mobile galleries",
-    "description": "On mobile devices, product image galleries should support swipe gestures or clear navigation arrows to ensure smooth browsing and engagement."
+    "description": "Product image galleries should support swipe gestures or clear navigation arrows (prev/next buttons). Detection: screenshot-first (look for visible arrow buttons on gallery), then DOM check (slideshow-button--prev/next, swiper-button-prev/next, slider-prev/next, carousel-prev/next, aria-label prev/next, or slider library classes). PASS if screenshot shows navigation arrows OR DOM finds prev/next elements OR slider library (swiper, slick, flickity, splide) detected. FAIL only if both screenshot and DOM show no navigation."
   },
   {
     "id": "image-background-consistency",
