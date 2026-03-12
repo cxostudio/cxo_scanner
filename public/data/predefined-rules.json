@@ -77,7 +77,7 @@
   {
     "id": "description-benefits-over-features",
     "title": "Focus on benefits in product descriptions",
-    "description": "Product descriptions should emphasize how features translate into customer benefits, helping users understand how the product improves their life or solves a problem."
+    "description": "Product descriptions should emphasise how features translate into customer benefits. Detection: screenshot-first (benefit bullets near title/description like 'Fades dark spots', 'Evens skin tone'), then DOM check (benefit keywords: fades, reduces, improves, boosts, radiance, hydrates, corrects, dark spot, etc. — 2+ keywords = PASS). PASS if screenshot shows benefit statements OR DOM finds 2+ benefit keywords. Features/ingredients alone do not cause failure — only fail if zero benefit statements exist anywhere."
   },
   {
     "id": "product-comparison",
