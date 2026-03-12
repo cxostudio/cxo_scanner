@@ -169,6 +169,21 @@ Then check the screenshot:
 
 **Failure reason must include:** Section (product gallery), what is missing (thumbnail strip or carousel), what to add (e.g. add a row of thumbnail images below the main product image).
 
+### Enable Swipe or Arrows on Mobile Galleries (dual-source: screenshot first, then DOM)
+
+**Rule ID:** `image-mobile-navigation`
+
+**DOM signal:** KEY ELEMENTS section "GALLERY NAVIGATION DOM CHECK". Check for `Navigation arrows/swipe found: YES`. Also check for elements with classes like `.swiper-button-prev/next`, `.slideshow-button--prev/next`, `.slider-prev/next`, `.carousel-prev/next`, `[class*="prev"]`, `[class*="next"]`, `[class*="arrow"]`, or `[aria-label*="previous"]`.
+
+**Screenshot signal:** Look at the product image gallery. PASS if you see left/right arrow buttons (◀ ▶, ‹ ›, < >), circular navigation controls on the sides of the gallery, carousel navigation dots, or any slider navigation buttons near the product image.
+
+**PASS if:** Screenshot shows navigation arrows or controls on the gallery OR DOM "GALLERY NAVIGATION DOM CHECK" shows "Navigation arrows/swipe found: YES" OR page content includes slider library references (swiper, slick, flickity, splide).
+
+**FAIL only if:** Screenshot shows no arrows/navigation controls AND DOM found no prev/next navigation elements AND no slider library detected.
+
+**PASS reason:** "Navigation arrows are visible on the product image gallery, allowing users to move between images."
+**FAIL reason:** "No swipe gestures or navigation arrows were detected in the product image gallery. Add swipe support or visible navigation arrows."
+
 ### Before-and-After Images (dual-source: screenshot first, then DOM)
 
 **DOM signal:** Content or KEY ELEMENTS suggesting comparison/result imagery; "Clinically proven", percentages on images.
