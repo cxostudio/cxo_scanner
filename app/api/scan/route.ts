@@ -245,6 +245,9 @@ export async function POST(request: NextRequest) {
     } | null = null
     let galleryNavDOMFound = false
     let galleryNavDOMEvidence = ''
+    let descriptionBenefitsDOMFound = false
+    let descriptionBenefitsDOMText = ''
+    let descriptionBenefitsMatchedKeywords: string[] = []
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1981,6 +1984,134 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Description benefits DOM/text check ───────────────────────────────
+      // Scans product description sections for benefit-focused statements.
+      const needsDescriptionBenefitsCheck = rules.some(r =>
+        r.id === 'description-benefits-over-features' ||
+        (r.title.toLowerCase().includes('benefit') && r.title.toLowerCase().includes('description')) ||
+        (r.title.toLowerCase().includes('focus') && r.title.toLowerCase().includes('benefit'))
+      )
+      if (needsDescriptionBenefitsCheck && page) {
+        try {
+          const benefitsResult = await page.evaluate(() => {
+            const BENEFIT_KEYWORDS = [
+              'fades', 'fade', 'brightens', 'brighten', 'brightening',
+              'reduces', 'reduce', 'reduction',
+              'improves', 'improve', 'improvement',
+              'boosts', 'boost', 'boosting',
+              'restores', 'restore', 'restoring',
+              'repairs', 'repair', 'repairing',
+              'protects', 'protect', 'protection',
+              'smooths', 'smooth', 'smoothing',
+              'hydrates', 'hydrate', 'hydrating', 'hydration',
+              'soothes', 'soothe', 'soothing',
+              'strengthens', 'strengthen', 'strengthening',
+              'evens', 'even skin tone', 'even out',
+              'glowing', 'radiance', 'radiant',
+              'clears', 'clear skin', 'clearing',
+              'helps', 'helps with',
+              'anti-aging', 'anti aging', 'antiaging',
+              'anti-wrinkle', 'anti wrinkle',
+              'dark spot', 'dark spots',
+              'skin tone', 'complexion',
+              'luminous', 'luminosity',
+              'nourishes', 'nourish', 'nourishing',
+              'softens', 'soften', 'softening',
+              'visibly', 'visible result',
+              'corrects', 'correct', 'correcting',
+              'unifies', 'unify',
+              'illuminates', 'illuminate',
+            ]
+
+            const DESCRIPTION_SELECTORS = [
+              '.product-description', '.product__description',
+              '.product-details', '.product__details',
+              '.product-info', '.product__info',
+              '#description', '[class*="description" i]',
+              '[class*="product-detail" i]',
+              '.rte', '.product-single__description',
+              '[itemprop="description"]',
+              '.description',
+            ]
+
+            const evidence: string[] = []
+            const matchedKws: string[] = []
+
+            // Check structured description sections first
+            for (const sel of DESCRIPTION_SELECTORS) {
+              try {
+                const el = document.querySelector(sel)
+                if (el) {
+                  const text = ((el as HTMLElement).innerText || '').toLowerCase()
+                  if (text.length > 20) {
+                    for (const kw of BENEFIT_KEYWORDS) {
+                      if (text.includes(kw) && !matchedKws.includes(kw)) {
+                        matchedKws.push(kw)
+                        evidence.push(`"${kw}" in ${sel}`)
+                        if (matchedKws.length >= 3) break
+                      }
+                    }
+                    if (matchedKws.length >= 2) {
+                      return { found: true, matchedKws, evidence, source: sel }
+                    }
+                  }
+                }
+              } catch { /* ignore */ }
+            }
+
+            // Scan bullet lists near product area (li elements in product section)
+            const productArea = document.querySelector(
+              '.product, .product-page, #product, [class*="product-container"],' +
+              '[class*="product-section"], main'
+            )
+            if (productArea) {
+              const bullets = Array.from((productArea as HTMLElement).querySelectorAll('li, p'))
+              for (const item of bullets.slice(0, 60)) {
+                const text = ((item as HTMLElement).innerText || '').trim().toLowerCase()
+                if (text.length < 5 || text.length > 300) continue
+                for (const kw of BENEFIT_KEYWORDS) {
+                  if (text.includes(kw) && !matchedKws.includes(kw)) {
+                    matchedKws.push(kw)
+                    evidence.push(`"${kw}" in bullet/para: "${text.substring(0, 60)}"`)
+                    if (matchedKws.length >= 3) break
+                  }
+                }
+                if (matchedKws.length >= 2) {
+                  return { found: true, matchedKws, evidence, source: 'bullets/paragraphs' }
+                }
+              }
+            }
+
+            // Full page body scan as final fallback
+            const bodyText = (document.body.innerText || '').toLowerCase()
+            const bodyMatches: string[] = []
+            for (const kw of BENEFIT_KEYWORDS) {
+              if (bodyText.includes(kw) && !bodyMatches.includes(kw)) {
+                bodyMatches.push(kw)
+                if (bodyMatches.length >= 2) break
+              }
+            }
+            if (bodyMatches.length >= 2) {
+              return { found: true, matchedKws: bodyMatches, evidence: bodyMatches.map(k => `"${k}" in page body`), source: 'page body' }
+            }
+
+            return { found: false, matchedKws: [], evidence: [], source: '' }
+          })
+
+          descriptionBenefitsDOMFound = benefitsResult.found
+          descriptionBenefitsMatchedKeywords = benefitsResult.matchedKws
+          descriptionBenefitsDOMText = benefitsResult.evidence.slice(0, 4).join('; ')
+          websiteContent += `\n\n--- DESCRIPTION BENEFITS CHECK ---` +
+            `\nBenefit keywords found: ${benefitsResult.found ? 'YES' : 'NO'}` +
+            (benefitsResult.matchedKws.length > 0 ? `\nMatched keywords: ${benefitsResult.matchedKws.join(', ')}` : '') +
+            (benefitsResult.evidence.length > 0 ? `\nEvidence: ${benefitsResult.evidence.slice(0, 3).join('; ')}` : '') +
+            (benefitsResult.source ? `\nSource: ${benefitsResult.source}` : '')
+          console.log(`Description benefits check: found=${benefitsResult.found}, keywords=[${benefitsResult.matchedKws.join(', ')}]`)
+        } catch (e) {
+          console.warn('Description benefits DOM check failed:', e)
+        }
+      }
+
       // ── Gallery arrows / swipe navigation DOM check ────────────────────────
       // Detects prev/next navigation elements in the product image gallery.
       const needsGalleryNavCheck = rules.some(r =>
@@ -2361,6 +2492,11 @@ export async function POST(request: NextRequest) {
           const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
+          const isDescriptionBenefitsRule =
+            rule.id === 'description-benefits-over-features' ||
+            (rule.title.toLowerCase().includes('benefit') && rule.title.toLowerCase().includes('description')) ||
+            (rule.title.toLowerCase().includes('focus') && rule.title.toLowerCase().includes('benefit')) ||
+            (rule.description.toLowerCase().includes('benefits') && rule.description.toLowerCase().includes('description'))
           const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
           const isFreeShippingThresholdRule = rule.id === 'free-shipping-threshold' || (rule.title.toLowerCase().includes('free shipping') && rule.title.toLowerCase().includes('threshold'))
           const isQuantityDiscountRule =
@@ -2518,6 +2654,43 @@ Also check the "GALLERY NAVIGATION DOM CHECK" section in KEY ELEMENTS:
 ❌ FAIL: "No swipe gestures or navigation arrows were detected in the product image gallery. Add swipe support or visible navigation arrows."
 
 IMPORTANT: This rule is ONLY about gallery navigation arrows or swipe support. Do NOT evaluate other rules.
+`
+          } else if (isDescriptionBenefitsRule) {
+            specialInstructions = `
+DESCRIPTION BENEFITS RULE — "Focus on benefits in product descriptions"
+
+CRITICAL: You are receiving a SCREENSHOT image. Analyze the screenshot FIRST for benefit statements.
+
+━━━━ STEP 1 — SCREENSHOT CHECK (preferred) ━━━━
+
+Look at the product description area (below the title, near price/CTA). PASS immediately if you see ANY of:
+- Bullet points describing outcomes or results for the user (e.g. "Fades dark spots", "Evens skin tone", "Glows with natural radiance")
+- Short benefit statements like "Improves hydration", "Reduces wrinkles", "Helps brighten skin"
+- Any text explaining HOW the product helps the user (results, improvements, outcomes)
+- Phrases like "visibly reduces", "fades dark spots fast", "corrects blemishes", "illuminates", "radiance"
+
+━━━━ STEP 2 — DOM/TEXT CHECK ━━━━
+
+Check the "DESCRIPTION BENEFITS CHECK" section in KEY ELEMENTS:
+- If "Benefit keywords found: YES" → PASS
+- Look at Matched keywords — if 2 or more benefit words are found → PASS
+
+━━━━ IMPORTANT — DO NOT FAIL FOR FEATURES ━━━━
+
+Features like ingredients, formulas, or certificates (e.g. "contains Viniferine", "98% natural origin") are NOT reasons to fail.
+FAIL only if the page describes ONLY what the product IS (attributes) with ZERO explanation of what it DOES for the user.
+
+━━━━ DECISION LOGIC ━━━━
+
+✅ PASS if: screenshot shows benefit bullets/statements OR description has 2+ benefit keywords
+❌ FAIL only if: no user benefits are described anywhere — only pure ingredient/feature lists with no outcomes
+
+━━━━ REASON EXAMPLES ━━━━
+
+✅ PASS: "The product description highlights benefits such as fading dark spots, improving skin tone, and boosting radiance, explaining how the product improves the user's skin."
+❌ FAIL: "The product description mainly lists ingredients or product attributes but does not explain how the product benefits the user or solves a problem."
+
+IMPORTANT: This rule is ONLY about benefits in product descriptions. Do NOT evaluate other rules.
 `
           } else if (isBeforeAfterRule) {
             specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE - CHECK SCREENSHOT AND CONTENT:\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
@@ -3245,7 +3418,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}`
+          const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -3615,6 +3789,53 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 console.log(`Gallery navigation rule: Slider library "${foundLib}" detected in page content. Forcing PASS.`)
                 analysis.passed = true
                 analysis.reason = `A gallery slider component ("${foundLib}") is present on the page, providing swipe gesture or arrow navigation support for the product image gallery.`
+              }
+            }
+          } else if (isDescriptionBenefitsRule) {
+            // Override 1: DOM/text check found benefit keywords → force PASS
+            if (!analysis.passed && descriptionBenefitsDOMFound) {
+              const kwList = descriptionBenefitsMatchedKeywords.slice(0, 4).join(', ')
+              console.log(`Description benefits rule: DOM found benefit keywords [${kwList}]. Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `The product description contains benefit-focused statements (${kwList}), explaining how the product helps the user and meets the requirement.`
+            }
+            // Override 2: Scan fullVisibleText directly for benefit keywords (catches server-rendered text)
+            if (!analysis.passed) {
+              const pageText = (fullVisibleText || websiteContent || '').toLowerCase()
+              const BENEFIT_OVERRIDES = [
+                'fades', 'fade dark spot', 'brightens', 'brightening',
+                'reduces', 'reduction', 'improves', 'improvement',
+                'boosts', 'restores', 'repairs', 'protects',
+                'smooths', 'hydrates', 'hydration', 'soothes',
+                'evens skin tone', 'even skin tone', 'skin tone',
+                'radiance', 'radiant', 'glowing', 'luminous',
+                'dark spot', 'complexion', 'corrects', 'correcting',
+                'illuminates', 'nourishes', 'visibly',
+                'anti-aging', 'anti-wrinkle',
+              ]
+              const matched = BENEFIT_OVERRIDES.filter(kw => pageText.includes(kw))
+              if (matched.length >= 2) {
+                const kwSample = matched.slice(0, 4).join(', ')
+                console.log(`Description benefits rule: Page text has ${matched.length} benefit signals [${kwSample}]. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = `The product description emphasises user benefits (${kwSample}), demonstrating how the product improves the customer's skin/health and meeting the rule requirement.`
+              }
+            }
+            // Override 3: Guard against AI passing with feature-only reason when no benefits detected
+            if (analysis.passed) {
+              const reasonL = analysis.reason.toLowerCase()
+              const looksLikeFeatureOnly =
+                (reasonL.includes('ingredient') || reasonL.includes('formula') || reasonL.includes('contains')) &&
+                !descriptionBenefitsDOMFound &&
+                !reasonL.includes('benefit') && !reasonL.includes('fades') && !reasonL.includes('reduces') &&
+                !reasonL.includes('improve') && !reasonL.includes('radiance') && !reasonL.includes('skin tone')
+              if (looksLikeFeatureOnly) {
+                const pageText = (fullVisibleText || websiteContent || '').toLowerCase()
+                const hasBenefit = ['fades', 'reduces', 'improves', 'brightens', 'hydrates', 'radiance', 'dark spot', 'evens skin tone', 'smooths', 'corrects', 'visibly'].some(k => pageText.includes(k))
+                if (!hasBenefit) {
+                  analysis.passed = false
+                  analysis.reason = `The product description mainly lists ingredients or product attributes but does not explain how the product benefits the user or solves a problem.`
+                }
               }
             }
           } else if (isBeforeAfterRule) {

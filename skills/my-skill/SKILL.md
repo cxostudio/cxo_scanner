@@ -232,6 +232,21 @@ Page must have a sticky/floating "Add to Cart" that remains visible when scrolli
 
 The TITLE itself (not description) must be descriptive, specific, include key attributes (brand, size, color, benefits). Under ~65 characters for SEO. Description existing does NOT make a generic title acceptable. If FAILED: quote current title, what is missing, why it's a problem, where the title is.
 
+### Focus on Benefits in Product Descriptions (dual-source: screenshot first, then DOM)
+
+**Rule ID:** `description-benefits-over-features`
+
+**DOM signal:** KEY ELEMENTS section "DESCRIPTION BENEFITS CHECK". Check for `Benefit keywords found: YES` and `Matched keywords` list. Benefit keywords include: fades, brightens, reduces, improves, boosts, restores, repairs, hydrates, smooths, evens skin tone, radiance, corrects, illuminates, dark spot, visibly, anti-aging, nourishes.
+
+**Screenshot signal:** Look at the product description area (below the title). PASS if you see benefit bullet points (e.g. "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance") or any short statements describing RESULTS or IMPROVEMENTS for the user.
+
+**PASS if:** Screenshot shows benefit bullets/statements OR DOM "DESCRIPTION BENEFITS CHECK" shows "Benefit keywords found: YES" (2+ matched keywords). Features like ingredients or formulas are NOT a reason to fail — only fail if there are ZERO benefit statements anywhere.
+
+**FAIL only if:** The page contains ONLY ingredient lists, product attributes, or features with NO explanation of user benefits, outcomes, or results.
+
+**PASS reason:** "The product description highlights benefits such as fading dark spots, improving skin tone, and boosting radiance, explaining how the product improves the user's skin."
+**FAIL reason:** "The product description mainly lists ingredients or product attributes but does not explain how the product benefits the user or solves a problem."
+
 ### Benefits Near Title (dual-source: screenshot first, then DOM)
 
 **DOM signal:** KEY ELEMENTS or content showing benefit-like text (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product/title area.
