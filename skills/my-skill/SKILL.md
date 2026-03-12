@@ -71,6 +71,31 @@ Failure reasons must be **easy for normal users** to understand. Each failure re
 
 When the user message indicates which rule is being checked, apply the matching section below.
 
+### Product Ratings (screenshot is the PRIMARY source)
+
+**CRITICAL: Look at the screenshot FIRST.** This is a visual rule. DOM signals are secondary.
+
+**PASS immediately if the screenshot shows ANY of the following:**
+- Star icons of any kind: ★★★★★, ☆, ⭐, SVG stars (filled or empty)
+- Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "Rated 4.5"
+- Review count: "203 reviews", "1.2k ratings", "150 customers"
+- Trustpilot widget: "Excellent", "TrustScore 4.7", green star bar/badge
+- Any rating widget (Yotpo, Loox, Stamped, Okendo, Judge.me, etc.)
+
+**ONE indicator is enough.** Do NOT require score + count + clickable link all together.
+
+**FAIL only if** the page shows NO stars, NO rating numbers, NO review counts, and NO rating widgets anywhere.
+
+**Dual-source logic:**
+- `screenshotShowsRating == true` → **PASS**
+- `domRatingFound == true` (PRODUCT RATING DOM CHECK shows YES) → **PASS**
+- Both fail → **FAIL**
+
+**PASS reason example:** "A Trustpilot rating widget showing 'Excellent ★★★★★' and a score of 4.7 out of 5 is visible near the product title."
+**FAIL reason example:** "No star ratings, review counts, or rating widgets were detected on the product page. Add star ratings and review counts near the product title."
+
+---
+
 ### Breadcrumb (deterministic)
 
 Check "Breadcrumbs:" in KEY ELEMENTS.
@@ -282,9 +307,28 @@ Mention where the variant selector appears (e.g., flavor selection grid, size op
 
 **Failure reason must include:** Section (e.g. near Add to Cart), what is missing (payment/trust badges), what to add (e.g. add payment logos or trust badges below the Add to Cart button). Do not fail based on KEY ELEMENTS alone when the screenshot clearly shows badges.
 
-### Product Comparison
+### Product Comparison (screenshot is the PRIMARY source)
 
-Requires: (1) 2–3 alternatives compared, (2) At least 4 meaningful attributes (not just Name/Image), (3) Side-by-side table format (not paragraph). All 4 required. If any step fails → FAIL.
+**CRITICAL: Look at the screenshot FIRST.** Do NOT require strict table format or specific attribute counts.
+
+**PASS immediately if the screenshot shows ANY of the following:**
+- Feature comparison rows with checkmarks (✓) and crosses (✕) — e.g. "Zero crashes ✓ ✕"
+- A VS / versus layout — e.g. "Our product vs Competitor" or "Rainbow Dust vs Coffee"
+- Side-by-side product comparison cards or columns
+- A section labelled "Top Comparisons", "Recent Comparisons", "Compare", "How we compare"
+- Any comparison grid, table, or list showing product differences
+
+**ONE format is enough.** Do NOT require 2–3 alternatives + 4 attributes + table format all together.
+
+**FAIL only if** no comparison section of any kind is visible on the page.
+
+**Dual-source logic:**
+- `comparisonDetectedInDOM == true` (PRODUCT COMPARISON DOM CHECK shows YES) → **PASS**
+- `comparisonDetectedInScreenshot == true` → **PASS**
+- Both fail → **FAIL**
+
+**PASS reason example:** "A comparison section shows feature rows with checkmarks (✓) and crosses (✕) comparing the product with an alternative."
+**FAIL reason example:** "No product comparison section was detected. Add a comparison section showing feature differences (checkmark/cross rows, VS layout, or comparison cards)."
 
 ### CTA Prominence
 

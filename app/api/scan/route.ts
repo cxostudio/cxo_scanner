@@ -233,6 +233,16 @@ export async function POST(request: NextRequest) {
       found: boolean
       evidence: string[]
     } | null = null
+    let ratingContext: {
+      found: boolean
+      evidence: string[]
+      ratingText: string
+    } | null = null
+    let comparisonContext: {
+      found: boolean
+      format: string
+      evidence: string[]
+    } | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1592,6 +1602,319 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Product Rating DOM check ──────────────────────────────────────────
+      const needsRatingCheck = rules.some(r =>
+        r.id === 'social-proof-product-ratings' ||
+        r.title.toLowerCase().includes('rating') ||
+        (r.description?.toLowerCase().includes('rating') && !r.title.toLowerCase().includes('customer photo'))
+      )
+      if (needsRatingCheck && page) {
+        try {
+          const ratingResult = await page.evaluate(() => {
+            const evidence: string[] = []
+            let found = false
+            let ratingText = ''
+
+            // Helper: visible text of element
+            const visText = (el: Element) => (el as HTMLElement).innerText?.trim() || el.textContent?.trim() || ''
+
+            // 1. Dedicated rating/review widget selectors (Trustpilot, Yotpo, Stamped, Junip, etc.)
+            const widgetSels = [
+              '[class*="trustpilot"]', '[data-testid*="trustpilot"]', 'trustpilot-widget',
+              '[class*="yotpo"]', '[class*="stamped"]', '[class*="loox"]', '[class*="junip"]',
+              '[class*="review-widget"]', '[class*="rating-widget"]',
+              '[class*="star-rating"]', '[class*="star-review"]',
+              '[class*="review-stars"]', '[class*="rating-stars"]',
+              '[class*="product-rating"]', '[class*="product-review"]',
+              '[class*="review-score"]', '[class*="average-rating"]',
+              '[class*="review-summary"]', '[data-rating]', '[data-review-count]',
+              '[itemprop="ratingValue"]', '[itemprop="reviewCount"]', '[itemprop="aggregateRating"]',
+            ]
+            for (const sel of widgetSels) {
+              try {
+                const el = document.querySelector(sel)
+                if (el) {
+                  const txt = visText(el).substring(0, 100)
+                  evidence.push(`Rating widget (${sel}): "${txt || '(element present)'}"`)
+                  found = true
+                  ratingText = txt
+                  break
+                }
+              } catch { /* ignore invalid selector */ }
+            }
+
+            // 2. Star unicode characters anywhere in the page
+            if (!found) {
+              const starPattern = /[★☆⭐✩✭]/
+              const allText = document.body.innerText || ''
+              if (starPattern.test(allText)) {
+                const match = allText.match(/[★☆⭐✩✭].{0,60}/) || []
+                evidence.push(`Star characters found: "${match[0]?.trim().substring(0, 80) || ''}"`)
+                found = true
+                ratingText = match[0]?.trim() || 'star icons'
+              }
+            }
+
+            // 3. Numeric rating patterns: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5 (203)"
+            if (!found) {
+              const ratingNumPattern = /\b[1-5](\.\d)?\s*(out of\s*5|\/\s*5|stars?|\s+star)/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(ratingNumPattern)
+              if (m) {
+                evidence.push(`Numeric rating: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 4. Review count text: "203 reviews", "1.2k reviews", "150 ratings"
+            if (!found) {
+              const reviewCountPattern = /\b(\d[\d,.]*k?)\s+(reviews?|ratings?|customers?|opinions?)/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(reviewCountPattern)
+              if (m) {
+                evidence.push(`Review count: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 5. Trustpilot-specific keywords: "Excellent", "TrustScore", "Trustpilot"
+            if (!found) {
+              const tpPattern = /\b(trustpilot|trustscore|excellent|great|average|bad)\b/i
+              const allText = document.body.innerText || ''
+              const m = allText.match(tpPattern)
+              if (m) {
+                evidence.push(`Trustpilot/review keyword: "${m[0].trim()}"`)
+                found = true
+                ratingText = m[0].trim()
+              }
+            }
+
+            // 6. SVG-based star icons (many modern sites use SVG stars)
+            if (!found) {
+              const svgStars = document.querySelectorAll('svg[class*="star"], svg[class*="rating"], [class*="star"] svg, [class*="rating"] svg')
+              if (svgStars.length > 0) {
+                evidence.push(`SVG star icons found (${svgStars.length})`)
+                found = true
+                ratingText = `${svgStars.length} SVG star icon(s)`
+              }
+            }
+
+            return { found, evidence, ratingText }
+          })
+
+          ratingContext = { found: ratingResult.found, evidence: ratingResult.evidence, ratingText: ratingResult.ratingText }
+          websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
+            `\nRating found: ${ratingResult.found ? 'YES' : 'NO'}` +
+            (ratingResult.ratingText ? `\nRating text: "${ratingResult.ratingText}"` : '') +
+            (ratingResult.evidence.length > 0 ? `\nEvidence: ${ratingResult.evidence.slice(0, 3).join('; ')}` : '')
+          console.log(`Product rating DOM check: found=${ratingResult.found}, text="${ratingResult.ratingText}"`)
+        } catch (e) {
+          console.warn('Product rating DOM detection failed:', e)
+        }
+      }
+
+      // ── Product Comparison DOM check ──────────────────────────────────────
+      const needsComparisonCheck = rules.some(r =>
+        r.id === 'product-comparison' ||
+        r.title.toLowerCase().includes('comparison') ||
+        (r.description?.toLowerCase().includes('comparison') && !r.title.toLowerCase().includes('customer'))
+      )
+      if (needsComparisonCheck && page) {
+        try {
+          // Scroll to bottom first so lazy-loaded comparison sections render
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+          await new Promise(r => setTimeout(r, 1500))
+
+          const compResult = await page.evaluate(() => {
+            const evidence: string[] = []
+            let found = false
+            let format = ''
+
+            // Include × (U+00D7 multiplication sign) — used by spacegoods and many sites as the "no" mark
+            const CHECK_SYMBOLS = /[✓✔✅☑]/
+            const CROSS_SYMBOLS = /[✗✘❌☒✕×]/   // × = U+00D7
+            const CHECK_OR_CROSS = /[✓✔✅☑✗✘❌☒✕×]/
+            const bodyText = document.body.innerText || ''
+
+            // 0a. SVG / CSS-icon based comparison detection
+            // Many sites (e.g. spacegoods.com) render ✓ and ✗ as SVG icons or CSS class names,
+            // which do NOT appear in textContent. Detect by class-name patterns on child elements.
+            if (!found) {
+              const CHECK_CLS = /\b(check|tick|yes|correct|included|true|icon-check|icon-tick)\b/i
+              const CROSS_CLS = /\b(cross|close|no|wrong|excluded|false|icon-cross|icon-no|icon-close)\b/i
+              // Count elements across the page with check-like and cross-like class names
+              const allEls = Array.from(document.querySelectorAll('[class]'))
+              let svgCheckCount = 0
+              let svgCrossCount = 0
+              for (const el of allEls) {
+                const cls = (el as HTMLElement).className?.toString() || ''
+                if (CHECK_CLS.test(cls)) svgCheckCount++
+                else if (CROSS_CLS.test(cls)) svgCrossCount++
+              }
+              if (svgCheckCount >= 2 && svgCrossCount >= 2) {
+                evidence.push(`SVG/CSS icon comparison: ${svgCheckCount} check icons + ${svgCrossCount} cross icons`)
+                found = true
+                format = 'icon-based comparison (SVG/CSS check and cross icons)'
+              }
+            }
+
+            // 0b. Structural grid detection — a container with ≥4 rows, each row having ≥2 columns
+            // where one column has a check-type child and another has a cross-type child
+            if (!found) {
+              const CHECK_CLS2 = /\b(check|tick|yes|correct|included)\b/i
+              const CROSS_CLS2 = /\b(cross|close|no|wrong|excluded)\b/i
+              const gridCandidates = Array.from(document.querySelectorAll('ul, ol, [class*="list" i], [class*="grid" i], [class*="table" i], [class*="comparison" i], [class*="compare" i]'))
+              for (const container of gridCandidates) {
+                const children = Array.from(container.children)
+                if (children.length < 3) continue
+                let checkCols = 0, crossCols = 0
+                for (const child of children) {
+                  const childText = child.textContent || ''
+                  const childCls = (child as HTMLElement).className?.toString() || ''
+                  const innerEls = Array.from(child.querySelectorAll('[class]'))
+                  const hasCheck = CHECK_SYMBOLS.test(childText) || CHECK_CLS2.test(childCls) || innerEls.some(e => CHECK_CLS2.test((e as HTMLElement).className?.toString() || ''))
+                  const hasCross = CROSS_SYMBOLS.test(childText) || CROSS_CLS2.test(childCls) || innerEls.some(e => CROSS_CLS2.test((e as HTMLElement).className?.toString() || ''))
+                  if (hasCheck) checkCols++
+                  if (hasCross) crossCols++
+                }
+                if (checkCols >= 2 && crossCols >= 2) {
+                  const t = (container as HTMLElement).innerText?.trim().substring(0, 80) || ''
+                  evidence.push(`Comparison grid structure found (${checkCols} check rows, ${crossCols} cross rows): "${t}"`)
+                  found = true
+                  format = 'comparison grid (structural detection)'
+                  break
+                }
+              }
+            }
+
+            // 1. Rows (tr, li, div) containing BOTH a check AND a cross symbol (Unicode)
+            if (!found) {
+              const rowSels = ['tr', 'li', 'div', 'span', 'p']
+              for (const sel of rowSels) {
+                const rows = Array.from(document.querySelectorAll(sel))
+                let checkRows = 0
+                let crossRows = 0
+                for (const row of rows) {
+                  const t = row.textContent || ''
+                  if (CHECK_SYMBOLS.test(t)) checkRows++
+                  if (CROSS_SYMBOLS.test(t)) crossRows++
+                }
+                if (checkRows >= 2 && crossRows >= 2) {
+                  evidence.push(`Check/cross comparison rows found (${checkRows} ✓ rows, ${crossRows} × rows via ${sel})`)
+                  found = true
+                  format = 'checkmark-cross comparison rows'
+                  break
+                }
+              }
+            }
+
+            // 2. Body text: multiple lines with checks AND multiple lines with crosses
+            if (!found) {
+              const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+              const checkLines = lines.filter(l => CHECK_SYMBOLS.test(l))
+              const crossLines = lines.filter(l => CROSS_SYMBOLS.test(l))
+              if (checkLines.length >= 2 && crossLines.length >= 2) {
+                evidence.push(`Page text has ${checkLines.length} lines with ✓ and ${crossLines.length} lines with ×/✕`)
+                found = true
+                format = 'feature comparison list (check vs cross)'
+              }
+            }
+
+            // 3. Tables with check/cross symbols and enough cells
+            if (!found) {
+              const tables = Array.from(document.querySelectorAll('table'))
+              for (const table of tables) {
+                const t = table.textContent || ''
+                if (CHECK_OR_CROSS.test(t) && table.rows.length >= 2) {
+                  evidence.push(`Table with comparison symbols found (${table.rows.length} rows)`)
+                  found = true
+                  format = 'comparison table'
+                  break
+                }
+              }
+            }
+
+            // 4. VS / compare keyword patterns in headings or text
+            if (!found) {
+              const VS_PATTERN = /\b(vs\.?|versus|compared?\s+(?:to|with))\b/i
+              const COMPARE_HEADING = /\b(compare|comparison|vs\.?|versus|top\s+comparisons?|recent\s+comparisons?|alternatives?)\b/i
+              const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+              for (const h of headings) {
+                const t = h.textContent?.trim() || ''
+                if (COMPARE_HEADING.test(t)) {
+                  evidence.push(`Comparison heading: "${t.substring(0, 80)}"`)
+                  found = true
+                  format = `comparison heading ("${t.substring(0, 40)}")`
+                  break
+                }
+              }
+              // Also scan body text for "X vs Y" pattern
+              if (!found) {
+                const vsMatch = bodyText.match(/\b\w[\w\s]{1,30}\s+vs\.?\s+\w[\w\s]{1,30}/i)
+                if (vsMatch) {
+                  evidence.push(`VS pattern in text: "${vsMatch[0].substring(0, 80)}"`)
+                  found = true
+                  format = `VS comparison ("${vsMatch[0].substring(0, 40)}")`
+                }
+              }
+            }
+
+            // 5. CSS class/ID selectors for comparison sections
+            if (!found) {
+              const compSels = [
+                '[class*="comparison" i]', '[id*="comparison" i]',
+                '[class*="compare" i]', '[id*="compare" i]',
+                '[class*="versus" i]', '[class*="vs-" i]',
+                '[class*="product-vs" i]', '[class*="competitor" i]',
+              ]
+              for (const sel of compSels) {
+                try {
+                  const el = document.querySelector(sel)
+                  if (el) {
+                    const t = (el as HTMLElement).innerText?.trim().substring(0, 80) || ''
+                    evidence.push(`Comparison element (${sel}): "${t}"`)
+                    found = true
+                    format = `comparison section (${sel})`
+                    break
+                  }
+                } catch { /* ignore invalid selector */ }
+              }
+            }
+
+            // 6. Exact label text patterns anywhere in page
+            if (!found) {
+              const LABEL_PATTERNS = [
+                /top\s+comparisons?/i, /recent\s+comparisons?/i,
+                /product\s+comparison/i, /compare\s+products?/i,
+                /see\s+how\s+(it\s+)?compares?/i, /how\s+(does\s+it\s+)?compare/i,
+              ]
+              for (const pat of LABEL_PATTERNS) {
+                const m = bodyText.match(pat)
+                if (m) {
+                  evidence.push(`Comparison label in text: "${m[0]}"`)
+                  found = true
+                  format = `comparison label ("${m[0]}")`
+                  break
+                }
+              }
+            }
+
+            return { found, format, evidence }
+          })
+
+          comparisonContext = { found: compResult.found, format: compResult.format, evidence: compResult.evidence }
+          websiteContent += `\n\n--- PRODUCT COMPARISON DOM CHECK ---` +
+            `\nComparison found: ${compResult.found ? 'YES' : 'NO'}` +
+            (compResult.format ? `\nFormat: ${compResult.format}` : '') +
+            (compResult.evidence.length > 0 ? `\nEvidence: ${compResult.evidence.slice(0, 3).join('; ')}` : '')
+          console.log(`Product comparison DOM check: found=${compResult.found}, format="${compResult.format}"`)
+        } catch (e) {
+          console.warn('Product comparison DOM detection failed:', e)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -1965,7 +2288,40 @@ Scan the page (or screenshot) and decide: is this video part of a customer revie
           }
 
           else if (isRatingRule) {
-            specialInstructions = `\nPRODUCT RATINGS RULE - STRICT CHECK:\nRatings MUST be displayed NEAR product title (within same section/area) and MUST include ALL of the following:\n\n1. REVIEW SCORE: Must show the rating score (e.g., "4.3/5", "4 stars", "4.5", "★★★★☆", "4.5 out of 5")\n2. REVIEW COUNT: Must show the total number of reviews/ratings (e.g., "203 reviews", "150 ratings", "1.2k reviews", "1,234 customer reviews")\n3. CLICKABLE LINK: Must be clickable/linkable to reviews section (anchor link like #reviews or scroll to reviews section)\n\nALL 3 requirements must be present to PASS. If ANY is missing → FAIL.\n\nIf FAILED, you MUST specify:\n- WHERE the rating is located (if it exists)\n- WHAT is present (review score, review count, or clickable link)\n- WHAT is MISSING (specifically mention if "review count is missing" or "review score is missing" or "clickable link to reviews is missing")\n- WHY it fails (e.g., "Rating shows '4.5 out of 5' but review count (like '203 reviews') is missing", or "Rating is not clickable to navigate to reviews section")\n\nIMPORTANT: Review score and review count are TWO SEPARATE requirements. If only score is shown without count → FAIL with reason "Review count is missing". If only count is shown without score → FAIL with reason "Review score is missing".\n\nExample FAIL reason: "Product ratings show '4.5 out of 5' and 'Excellent' near the product title, but the review count (e.g., '203 reviews') is missing. The rating is clickable and navigates to reviews section, but without the review count, users cannot see how many people have rated the product. Review count is required for social proof."`
+            specialInstructions = `
+PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
+
+⚠️ CRITICAL: Look at the SCREENSHOT FIRST. This is a visual rule.
+
+━━━━ STEP 1: Analyze the SCREENSHOT ━━━━
+
+PASS immediately if you see ANY of the following on the page (near the product OR anywhere visible):
+
+✅ Star icons of any kind: ★★★★★, ☆, ⭐, filled/empty SVG stars
+✅ Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5"
+✅ Review count: "203 reviews", "1.2k ratings", "150 customers"
+✅ Trustpilot widget: "Excellent", "TrustScore 4.7", Trustpilot bar/badge
+✅ Any rating badge or widget (Yotpo, Loox, Stamped, Judge.me, etc.)
+✅ Text like "Rated 4.5", "4.8 ★", "Excellent ★★★★★"
+
+→ PASS if ANY one of these is visible in the screenshot.
+→ Do NOT require all three (score + count + link). Any single rating indicator is enough.
+
+━━━━ STEP 2: Check PRODUCT RATING DOM CHECK in KEY ELEMENTS ━━━━
+
+- "Rating found: YES" → PASS immediately
+- "Rating found: NO" → check screenshot more carefully before failing
+
+━━━━ FAIL CONDITION ━━━━
+
+❌ FAIL only if: No stars, no rating numbers, no review count, no rating widget of any kind is visible anywhere on the page.
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
+✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
+❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected on the page. Add star ratings and review counts near the product title."
+`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
 CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
@@ -2389,109 +2745,47 @@ FAIL reason: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
-PRODUCT COMPARISON RULE - STEP - BY - STEP AUDIT:
+PRODUCT COMPARISON RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
-You are an expert E - commerce UX Auditor.Your task is to analyze if the product page includes a clear, scannable product comparison section.
+⚠️ CRITICAL: Look at the SCREENSHOT FIRST. This is a visual rule.
 
-CRITICAL REQUIREMENTS(ALL 4 must be met to PASS):
+━━━━ STEP 1: Check PRODUCT COMPARISON DOM CHECK in KEY ELEMENTS ━━━━
 
-STEP 1(Identify Alternatives - 2 - 3 Products):
-            - Check if the page compares the primary product with 2 - 3 similar alternatives
-              - Alternatives can be from the same store or competitors
-                - Look for sections titled: "Compare Products", "Product Comparison", "Compare with Similar Products", "vs", "Alternatives", "Which One to Choose"
-                  - If NO comparison section found OR less than 2 alternatives → FAIL this step
-                    - If 2 - 3 alternatives are compared → PASS this step
+- "Comparison found: YES" → PASS immediately (any format detected)
+- "Comparison found: NO" → analyze the screenshot carefully
 
-STEP 2(Compare 4 + Attributes):
-            - Check if at least 4 or more meaningful attributes are compared
-              - Look for technical / functional attributes like: RAM, Battery, Performance, Price, Features, Warranty, Storage, Speed, Quality, Size, Weight, Material, etc.
-- Generic attributes like "Name" or "Image" do NOT count as meaningful
-              - If less than 4 attributes compared → FAIL this step
-                - If 4 + meaningful attributes compared → PASS this step
+━━━━ STEP 2: Analyze the SCREENSHOT ━━━━
 
-STEP 3(Side - by - Side Table Format):
-            - Check if comparison uses a side - by - side, easy - to - scan table format
-              - Look for: Table layout, columns for each product, rows for attributes, grid format
-                - Text - only comparisons or paragraph format do NOT count
-                  - If NOT in table / grid format → FAIL this step
-                    - If in table / grid format → PASS this step
+PASS immediately if you see ANY of the following in the screenshot:
 
-STEP 4(Comparison Exists):
-            - Check if a comparison section actually exists on the page
-              - The comparison must be visible and accessible
-                - If NO comparison section found → FAIL this step
-                  - If comparison section exists → PASS this step
+✅ Feature comparison rows with checkmarks and crosses — the checkmarks can look like ✓ ✔ ✅ or thin tick icons; the crosses can look like ✗ ✕ × X or thin X icons — e.g. "Zero crashes ✓ ×"
+✅ A VS / versus layout — e.g. "Product A vs Coffee" or "Our product vs Competitor"
+✅ Side-by-side product comparison cards or columns
+✅ A section titled "Top Comparisons", "Recent Comparisons", "Compare", "Vs", "How we compare"
+✅ A comparison table OR comparison grid (any format, not just strict tables)
+✅ Any layout that visually compares this product to one or more alternatives using tick/cross icons
 
-FINAL VERDICT:
-            - PASS if ALL 4 steps pass(2 - 3 alternatives, 4 + attributes, table format, comparison exists)
-              - FAIL if ANY step fails
+→ ONE format is enough. Do NOT require 2-3 alternatives + 4 attributes + table format all together.
+→ Any comparison layout (checkmark rows, VS cards, feature grids, comparison lists) qualifies.
+→ Thin ✓ tick icons and thin × cross icons (like those on spacegoods.com) count as checkmarks/crosses.
 
-EXAMPLES FOR AI TRAINING:
+━━━━ FAIL CONDITION ━━━━
 
-✅ Example 1 - PASS(Complete Comparison):
-PRODUCT COMPARISON CHECK shows:
-            - Comparison Section Found: YES
-              - Section Title: "Compare Products"
-                - Number of Alternatives: 3(Product A, Product B, Product C)
-                  - Attributes Compared: 6(Price, RAM, Battery, Performance, Warranty, Features)
-                    - Format: Side - by - side table with columns for each product
-                      - All Requirements Met: YES
+❌ FAIL only if: No comparison section of any kind is visible anywhere on the page.
 
-            Output: { "passed": true, "reason": "Product comparison section found with 3 alternatives compared across 6 attributes (Price, RAM, Battery, Performance, Warranty, Features) in a side-by-side table format. The comparison is clear, scannable, and helps users make informed decisions." }
+━━━━ EXAMPLES ━━━━
 
-❌ Example 2 - FAIL(Missing Alternatives):
-PRODUCT COMPARISON CHECK shows:
-            - Comparison Section Found: YES
-              - Section Title: "Similar Products"
-                - Number of Alternatives: 1(only one alternative product)
-                  - Attributes Compared: 5(Price, Features, Warranty, Quality, Reviews)
-                    - Format: Side - by - side table
-                      - All Requirements Met: NO(only 1 alternative, need 2 - 3)
+✅ PASS reason: "A comparison section shows feature rows with checkmarks (✓) and crosses (✕) comparing the product with an alternative. The comparison is visible and helps users understand product advantages."
+✅ PASS reason: "A 'Top Comparisons' section shows this product vs a competitor with a VS layout and side-by-side feature list."
+❌ FAIL reason: "No product comparison section was detected on the page. Add a comparison section showing feature differences between products (e.g. checkmark/cross rows, VS layout, or comparison cards)."
 
-            Output: { "passed": false, "reason": "Product comparison section exists but only compares the primary product with 1 alternative. The rule requires 2-3 alternatives to be compared. While the comparison uses a table format, it fails because only 1 alternative is included instead of the required 2-3." }
+━━━━ IMPORTANT ━━━━
 
-❌ Example 3 - FAIL(Insufficient Attributes):
-PRODUCT COMPARISON CHECK shows:
-            - Comparison Section Found: YES
-              - Section Title: "Compare Products"
-                - Number of Alternatives: 3
-                  - Attributes Compared: 2(Price, Name only)
-                    - Format: Table format
-                      - All Requirements Met: NO(only 2 attributes, need 4 +)
-
-            Output: { "passed": false, "reason": "Product comparison section exists with 3 alternatives in table format, but only 2 attributes (Price and Name) are compared. The rule requires at least 4 meaningful technical or functional attributes (such as RAM, Battery, Performance, Features, Warranty) to be compared. The current comparison is too limited to help users make informed decisions." }
-
-❌ Example 4 - FAIL(No Table Format):
-PRODUCT COMPARISON CHECK shows:
-            - Comparison Section Found: YES
-              - Section Title: "Product Alternatives"
-                - Number of Alternatives: 3
-                  - Attributes Compared: 5
-                    - Format: Paragraph / text - only format(not table)
-                      - All Requirements Met: NO(not in table format)
-
-            Output: { "passed": false, "reason": "Product comparison section exists with 3 alternatives and 5 attributes compared, but the comparison is presented in paragraph/text format rather than a side-by-side table. The rule requires an easy-to-scan table format so differences can be understood at a glance. The current text-only format makes it difficult to quickly compare products." }
-
-❌ Example 5 - FAIL(No Comparison Section):
-PRODUCT COMPARISON CHECK shows:
-            - Comparison Section Found: NO
-              - No comparison section visible on the page
-                - All Requirements Met: NO(no comparison section found)
-
-            Output: { "passed": false, "reason": "No product comparison section found on the page. The rule requires a clear, scannable product comparison section that compares the primary product with 2-3 similar alternatives across at least 4 meaningful attributes in a side-by-side table format." }
-
-CRITICAL INSTRUCTIONS:
-            1. You MUST check ALL 4 steps: Alternatives(2 - 3) → Attributes(4 +) → Table Format → Comparison Exists
-            2. If ANY step fails → FAIL the entire rule
-            3. Be SPECIFIC about which step failed and why
-            4. Mention exact section title / location if comparison exists
-            5. Count meaningful attributes only(technical / functional, not generic like "Name")
-            6. Table format means side - by - side columns, not paragraph text
-            7. If PASSED: Confirm all 4 requirements are met with specific details(2 - 3 alternatives, 4 + attributes, table format)
-            8. If FAILED: Specify exactly which requirement(s) are missing
-            9. Do NOT mention currency symbols, prices, or amounts unless necessary for clarity
-10. Focus on checking if comparison exists and meets the format requirements, NOT on winner highlighting
-              `
+- Do NOT require strict table format
+- Do NOT require exactly 2-3 alternatives
+- Do NOT require exactly 4+ attributes
+- Any visible comparison layout = PASS
+`
           } else if (isCTAProminenceRule) {
             specialInstructions = `
 CTA PROMINENCE RULE - STEP - BY - STEP AUDIT:
@@ -2646,7 +2940,9 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
+          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
+          const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -2832,24 +3128,46 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           let isRelevant = true
 
           if (isRatingRule) {
-            // Rating rule must mention rating/review/star AND check all requirements
-            const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
-            const mentionsNearTitle = reasonLower.includes('near') || reasonLower.includes('title') || reasonLower.includes('close')
-            const mentionsScore = reasonLower.includes('score') || reasonLower.includes('star') || reasonLower.includes('/5') || reasonLower.includes('out of')
-            const mentionsCount = reasonLower.includes('review') || reasonLower.includes('rating') || reasonLower.includes('people')
+            let ratingForcedPass = false
 
-            if (!hasRatingMention) {
-              console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
-              isRelevant = false
+            // Override 1: DOM found rating → force PASS
+            if (ratingContext?.found && !analysis.passed) {
+              console.log(`Rating rule: DOM found rating ("${ratingContext.ratingText}"). Forcing PASS.`)
+              analysis.passed = true
+              ratingForcedPass = true
+              const ev = ratingContext.evidence[0] || ratingContext.ratingText || 'rating element detected'
+              analysis.reason = `Product ratings detected by DOM scan: ${ev}. Star ratings or review indicators are present near the product section.`
             }
 
-            // If passed=true but missing requirements, it's wrong
-            if (analysis.passed && (!mentionsScore || !mentionsCount || !mentionsNearTitle)) {
-              console.warn(`Warning: Rating rule passed but missing requirements. Score: ${mentionsScore}, Count: ${mentionsCount}, Near title: ${mentionsNearTitle}`)
-              // Force re-evaluation - mark as failed if requirements not met
-              if (!mentionsScore || !mentionsCount) {
-                analysis.passed = false
-                analysis.reason = `Rating rule failed: Missing required elements. ${analysis.reason}`
+            // Override 2: Page text safety net — catch any rating-related text
+            if (!analysis.passed) {
+              const pageText = fullVisibleText || websiteContent || ''
+              const RATING_TEXT_PATTERNS = [
+                /[★☆⭐✩✭]/,                                        // star unicode
+                /\b[1-5]\.\d\s*(out of\s*5|\/\s*5|stars?)/i,      // "4.5 out of 5", "4.5/5"
+                /\b[1-5](\.\d)?\s+stars?\b/i,                     // "4 stars", "4.5 stars"
+                /\b\d[\d,]*\s+(reviews?|ratings?|customers?)\b/i, // "203 reviews"
+                /trustpilot/i,                                     // Trustpilot mention
+                /\bexcellent\b.*(?:trustpilot|review|rating)/i,   // "Excellent" near review
+                /trustscore/i,                                     // TrustScore widget
+                /rated\s+[1-5]/i,                                  // "Rated 4.5"
+                /average\s+rating/i,                              // "Average rating"
+              ]
+              const matched = RATING_TEXT_PATTERNS.find(p => p.test(pageText))
+              if (matched) {
+                const matchedText = (pageText.match(matched) || [''])[0]
+                console.log(`Rating rule: Page text contains rating signal "${matchedText}". Forcing PASS.`)
+                analysis.passed = true
+                ratingForcedPass = true
+                analysis.reason = `Product rating indicators detected: "${matchedText.trim()}" — star ratings or review counts are present on this page.`
+              }
+            }
+
+            // Sanity warning (never force fail based on missing count or link)
+            if (!ratingForcedPass && !analysis.passed) {
+              const hasRatingMention = reasonLower.includes('rating') || reasonLower.includes('review') || reasonLower.includes('star')
+              if (!hasRatingMention) {
+                console.warn(`Warning: Rating rule but reason doesn't mention ratings: ${analysis.reason.substring(0, 50)}`)
               }
             }
           } else if (isColorRule) {
@@ -3143,26 +3461,49 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             console.warn(`Warning: Product title rule but reason doesn't mention title: ${analysis.reason.substring(0, 50)}`)
             isRelevant = false
           } else if (isProductComparisonRule) {
-            // Product comparison rule must mention comparison/alternatives/attributes
-            const hasComparisonMention = reasonLower.includes('comparison') ||
-              reasonLower.includes('compare') ||
-              reasonLower.includes('alternative') ||
-              reasonLower.includes('attribute') ||
-              reasonLower.includes('table') ||
-              reasonLower.includes('versus') ||
-              reasonLower.includes('vs')
-            if (!hasComparisonMention) {
-              console.warn(`Warning: Product comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
-              isRelevant = false
-            }
-            // Check if response mentions key requirements
-            const mentionsAlternatives = reasonLower.includes('alternative') || reasonLower.includes('product') && (reasonLower.includes('2') || reasonLower.includes('3'))
-            const mentionsAttributes = reasonLower.includes('attribute') || reasonLower.includes('4') || reasonLower.includes('feature') || reasonLower.includes('ram') || reasonLower.includes('battery')
-            const mentionsTable = reasonLower.includes('table') || reasonLower.includes('format') || reasonLower.includes('side-by-side')
+            let comparisonForcedPass = false
 
-            // If passed but missing key requirements, it might be wrong
-            if (analysis.passed && (!mentionsAlternatives || !mentionsAttributes || !mentionsTable)) {
-              console.warn(`Warning: Product comparison rule passed but missing key requirements. Alternatives: ${mentionsAlternatives}, Attributes: ${mentionsAttributes}, Table: ${mentionsTable}`)
+            // Override 1: DOM found comparison → force PASS
+            if (comparisonContext?.found && !analysis.passed) {
+              console.log(`Comparison rule: DOM found comparison (${comparisonContext.format}). Forcing PASS.`)
+              analysis.passed = true
+              comparisonForcedPass = true
+              const ev = comparisonContext.evidence[0] || comparisonContext.format || 'comparison section detected'
+              analysis.reason = `Product comparison section detected by DOM scan: ${ev}. This helps users understand product advantages at a glance.`
+            }
+
+            // Override 2: Page text safety net — catch comparison patterns in full visible text
+            if (!analysis.passed) {
+              const pageText = fullVisibleText || websiteContent || ''
+              const CHECK_SYMBOLS = /[✓✔✅☑]/
+              const CROSS_SYMBOLS = /[✗✘❌☒✕×]/   // × = U+00D7 multiplication sign (used on spacegoods etc.)
+              const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+              const checkLines = lines.filter(l => CHECK_SYMBOLS.test(l))
+              const crossLines = lines.filter(l => CROSS_SYMBOLS.test(l))
+              const hasCheckCross = checkLines.length >= 2 && crossLines.length >= 2
+
+              const VS_PATTERN = /\b\w[\w\s]{1,25}\s+vs\.?\s+\w[\w\s]{1,25}/i
+              const COMPARE_LABEL = /\b(top\s+comparisons?|recent\s+comparisons?|product\s+comparison|compare\s+products?|see\s+how\s+(it\s+)?compares?|how\s+we\s+compare)\b/i
+              const hasVS = VS_PATTERN.test(pageText)
+              const hasCompareLabel = COMPARE_LABEL.test(pageText)
+
+              if (hasCheckCross || hasVS || hasCompareLabel) {
+                const signal = hasCheckCross ? `checkmark/cross feature rows (${checkLines.length} ✓, ${crossLines.length} ✕)`
+                  : hasVS ? `VS comparison pattern "${(pageText.match(VS_PATTERN) || [''])[0].substring(0, 50)}"`
+                  : `comparison label "${(pageText.match(COMPARE_LABEL) || [''])[0]}"`
+                console.log(`Comparison rule: Page text contains comparison signal: ${signal}. Forcing PASS.`)
+                analysis.passed = true
+                comparisonForcedPass = true
+                analysis.reason = `Product comparison section detected: ${signal}. This helps users understand product advantages.`
+              }
+            }
+
+            // Sanity check — just warn, never force fail from missing requirements
+            if (!comparisonForcedPass) {
+              const hasComparisonMention = reasonLower.includes('comparison') || reasonLower.includes('compare') || reasonLower.includes('vs') || reasonLower.includes('versus') || reasonLower.includes('alternative')
+              if (!hasComparisonMention) {
+                console.warn(`Warning: Comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
+              }
             }
           } else if (isQuantityDiscountRule && quantityDiscountContext?.hasAnyDiscount) {
             console.log(`Quantity/discount rule: Tiered pricing, percentage discount, or price drop detected. Forcing PASS.`)
