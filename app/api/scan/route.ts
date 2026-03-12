@@ -1732,27 +1732,81 @@ export async function POST(request: NextRequest) {
             let found = false
             let format = ''
 
+            // Include × (U+00D7 multiplication sign) — used by spacegoods and many sites as the "no" mark
             const CHECK_SYMBOLS = /[✓✔✅☑]/
-            const CROSS_SYMBOLS = /[✗✘❌☒✕]/
-            const CHECK_OR_CROSS = /[✓✔✅☑✗✘❌☒✕]/
+            const CROSS_SYMBOLS = /[✗✘❌☒✕×]/   // × = U+00D7
+            const CHECK_OR_CROSS = /[✓✔✅☑✗✘❌☒✕×]/
             const bodyText = document.body.innerText || ''
 
-            // 1. Rows (tr, li, div) containing BOTH a check AND a cross symbol
-            const rowSels = ['tr', 'li', 'div', 'span', 'p']
-            for (const sel of rowSels) {
-              const rows = Array.from(document.querySelectorAll(sel))
-              let checkRows = 0
-              let crossRows = 0
-              for (const row of rows) {
-                const t = row.textContent || ''
-                if (CHECK_SYMBOLS.test(t)) checkRows++
-                if (CROSS_SYMBOLS.test(t)) crossRows++
+            // 0a. SVG / CSS-icon based comparison detection
+            // Many sites (e.g. spacegoods.com) render ✓ and ✗ as SVG icons or CSS class names,
+            // which do NOT appear in textContent. Detect by class-name patterns on child elements.
+            if (!found) {
+              const CHECK_CLS = /\b(check|tick|yes|correct|included|true|icon-check|icon-tick)\b/i
+              const CROSS_CLS = /\b(cross|close|no|wrong|excluded|false|icon-cross|icon-no|icon-close)\b/i
+              // Count elements across the page with check-like and cross-like class names
+              const allEls = Array.from(document.querySelectorAll('[class]'))
+              let svgCheckCount = 0
+              let svgCrossCount = 0
+              for (const el of allEls) {
+                const cls = (el as HTMLElement).className?.toString() || ''
+                if (CHECK_CLS.test(cls)) svgCheckCount++
+                else if (CROSS_CLS.test(cls)) svgCrossCount++
               }
-              if (checkRows >= 2 && crossRows >= 2) {
-                evidence.push(`Check/cross comparison rows found (${checkRows} ✓ rows, ${crossRows} ✕ rows via ${sel})`)
+              if (svgCheckCount >= 2 && svgCrossCount >= 2) {
+                evidence.push(`SVG/CSS icon comparison: ${svgCheckCount} check icons + ${svgCrossCount} cross icons`)
                 found = true
-                format = 'checkmark-cross comparison rows'
-                break
+                format = 'icon-based comparison (SVG/CSS check and cross icons)'
+              }
+            }
+
+            // 0b. Structural grid detection — a container with ≥4 rows, each row having ≥2 columns
+            // where one column has a check-type child and another has a cross-type child
+            if (!found) {
+              const CHECK_CLS2 = /\b(check|tick|yes|correct|included)\b/i
+              const CROSS_CLS2 = /\b(cross|close|no|wrong|excluded)\b/i
+              const gridCandidates = Array.from(document.querySelectorAll('ul, ol, [class*="list" i], [class*="grid" i], [class*="table" i], [class*="comparison" i], [class*="compare" i]'))
+              for (const container of gridCandidates) {
+                const children = Array.from(container.children)
+                if (children.length < 3) continue
+                let checkCols = 0, crossCols = 0
+                for (const child of children) {
+                  const childText = child.textContent || ''
+                  const childCls = (child as HTMLElement).className?.toString() || ''
+                  const innerEls = Array.from(child.querySelectorAll('[class]'))
+                  const hasCheck = CHECK_SYMBOLS.test(childText) || CHECK_CLS2.test(childCls) || innerEls.some(e => CHECK_CLS2.test((e as HTMLElement).className?.toString() || ''))
+                  const hasCross = CROSS_SYMBOLS.test(childText) || CROSS_CLS2.test(childCls) || innerEls.some(e => CROSS_CLS2.test((e as HTMLElement).className?.toString() || ''))
+                  if (hasCheck) checkCols++
+                  if (hasCross) crossCols++
+                }
+                if (checkCols >= 2 && crossCols >= 2) {
+                  const t = (container as HTMLElement).innerText?.trim().substring(0, 80) || ''
+                  evidence.push(`Comparison grid structure found (${checkCols} check rows, ${crossCols} cross rows): "${t}"`)
+                  found = true
+                  format = 'comparison grid (structural detection)'
+                  break
+                }
+              }
+            }
+
+            // 1. Rows (tr, li, div) containing BOTH a check AND a cross symbol (Unicode)
+            if (!found) {
+              const rowSels = ['tr', 'li', 'div', 'span', 'p']
+              for (const sel of rowSels) {
+                const rows = Array.from(document.querySelectorAll(sel))
+                let checkRows = 0
+                let crossRows = 0
+                for (const row of rows) {
+                  const t = row.textContent || ''
+                  if (CHECK_SYMBOLS.test(t)) checkRows++
+                  if (CROSS_SYMBOLS.test(t)) crossRows++
+                }
+                if (checkRows >= 2 && crossRows >= 2) {
+                  evidence.push(`Check/cross comparison rows found (${checkRows} ✓ rows, ${crossRows} × rows via ${sel})`)
+                  found = true
+                  format = 'checkmark-cross comparison rows'
+                  break
+                }
               }
             }
 
@@ -1762,7 +1816,7 @@ export async function POST(request: NextRequest) {
               const checkLines = lines.filter(l => CHECK_SYMBOLS.test(l))
               const crossLines = lines.filter(l => CROSS_SYMBOLS.test(l))
               if (checkLines.length >= 2 && crossLines.length >= 2) {
-                evidence.push(`Page text has ${checkLines.length} lines with ✓ and ${crossLines.length} lines with ✕`)
+                evidence.push(`Page text has ${checkLines.length} lines with ✓ and ${crossLines.length} lines with ×/✕`)
                 found = true
                 format = 'feature comparison list (check vs cross)'
               }
@@ -2704,15 +2758,16 @@ PRODUCT COMPARISON RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
 PASS immediately if you see ANY of the following in the screenshot:
 
-✅ Feature comparison rows with checkmarks (✓) and crosses (✕) — e.g. "Zero crashes ✓ ✕"
+✅ Feature comparison rows with checkmarks and crosses — the checkmarks can look like ✓ ✔ ✅ or thin tick icons; the crosses can look like ✗ ✕ × X or thin X icons — e.g. "Zero crashes ✓ ×"
 ✅ A VS / versus layout — e.g. "Product A vs Coffee" or "Our product vs Competitor"
 ✅ Side-by-side product comparison cards or columns
 ✅ A section titled "Top Comparisons", "Recent Comparisons", "Compare", "Vs", "How we compare"
 ✅ A comparison table OR comparison grid (any format, not just strict tables)
-✅ Any layout that visually compares this product to one or more alternatives
+✅ Any layout that visually compares this product to one or more alternatives using tick/cross icons
 
 → ONE format is enough. Do NOT require 2-3 alternatives + 4 attributes + table format all together.
 → Any comparison layout (checkmark rows, VS cards, feature grids, comparison lists) qualifies.
+→ Thin ✓ tick icons and thin × cross icons (like those on spacegoods.com) count as checkmarks/crosses.
 
 ━━━━ FAIL CONDITION ━━━━
 
@@ -2886,7 +2941,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
-          const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with checkmarks (✓) and crosses (✕)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with ✓ for this product and ✕ for alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
+          const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
@@ -3421,7 +3476,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!analysis.passed) {
               const pageText = fullVisibleText || websiteContent || ''
               const CHECK_SYMBOLS = /[✓✔✅☑]/
-              const CROSS_SYMBOLS = /[✗✘❌☒✕]/
+              const CROSS_SYMBOLS = /[✗✘❌☒✕×]/   // × = U+00D7 multiplication sign (used on spacegoods etc.)
               const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0)
               const checkLines = lines.filter(l => CHECK_SYMBOLS.test(l))
               const crossLines = lines.filter(l => CROSS_SYMBOLS.test(l))
