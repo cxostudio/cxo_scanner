@@ -838,6 +838,15 @@ export async function POST(request: NextRequest) {
         return text.substring(0, 500)
       })
 
+      // Wait for network to settle and JS hydration to complete before evaluating delivery estimate
+      // (Vercel cold-starts and Shopify hydration can delay delivery date injection by 1-2s)
+      try {
+        await (page as any).waitForNetworkIdle({ timeout: 3000 })
+      } catch {
+        // Not available or timed out — proceed with fixed delay
+      }
+      await new Promise(r => setTimeout(r, 1500))
+
       // Scroll to page bottom to trigger lazy-rendered delivery estimate content
       // (Shopify apps inject delivery dates after hydration; live environments need extra wait)
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
@@ -1022,7 +1031,7 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Simple phrase matching: catch "free shipping", "free delivery" etc. that don't match date patterns
+          // Simple phrase matching: catch "free shipping", "free delivery", "order now and get it between" etc.
           if (!hasDeliveryDate && !hasCountdown) {
             const lowerText = fullText.toLowerCase()
             const simpleDeliveryPhrases = [
@@ -1030,7 +1039,10 @@ export async function POST(request: NextRequest) {
               'free express shipping',
               'free delivery',
               'delivered between',
+              'delivered by',
+              'arrives by',
               'get it by',
+              'get it between',
               'order now and get it',
               'delivery by',
               'ships by',
@@ -4301,7 +4313,10 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 'free express shipping',
                 'free delivery',
                 'delivered between',
+                'delivered by',
+                'arrives by',
                 'get it by',
+                'get it between',
                 'order now and get it',
                 'delivery by',
                 'ships by',
