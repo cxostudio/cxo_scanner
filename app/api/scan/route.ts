@@ -838,6 +838,11 @@ export async function POST(request: NextRequest) {
         return text.substring(0, 500)
       })
 
+      // Scroll to page bottom to trigger lazy-rendered delivery estimate content
+      // (Shopify apps inject delivery dates after hydration; live environments need extra wait)
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+      await new Promise(r => setTimeout(r, 500))
+
       // Wait up to 5s for any async-rendered delivery estimate text to appear in the DOM
       // (e.g. Shopify apps that inject delivery dates via fetch/XHR after page load)
       try {
@@ -1014,6 +1019,29 @@ export async function POST(request: NextRequest) {
                 if (m) shippingText = m[0]
                 break
               }
+            }
+          }
+
+          // Simple phrase matching: catch "free shipping", "free delivery" etc. that don't match date patterns
+          if (!hasDeliveryDate && !hasCountdown) {
+            const lowerText = fullText.toLowerCase()
+            const simpleDeliveryPhrases = [
+              'free shipping',
+              'free express shipping',
+              'free delivery',
+              'delivered between',
+              'get it by',
+              'order now and get it',
+              'delivery by',
+              'ships by',
+              'delivery estimate',
+              'shipping over',
+              'delivery date',
+            ]
+            const matchedPhrase = simpleDeliveryPhrases.find(p => lowerText.includes(p))
+            if (matchedPhrase) {
+              hasDeliveryDate = true
+              shippingText = matchedPhrase
             }
           }
         }
@@ -4257,15 +4285,38 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               ? `Product page shows discount: ${quantityDiscountContext.foundPatterns.join('; ')}. Rule passes.`
               : `Product page shows tiered quantity pricing, percentage discount, or price drop. Rule passes.`
           } else if (isShippingRule) {
-            // Override 1: DOM page.evaluate found a date range or countdown anywhere on page
+            // Override 1: DOM page.evaluate found a date range, countdown, or shipping phrase anywhere on page
             if (shippingTimeContext?.allRequirementsMet) {
-              console.log(`Delivery estimate rule: Date/time found on page via DOM. Forcing PASS.`)
+              console.log(`Delivery estimate detected in DOM text: "${shippingTimeContext.shippingText}". Forcing PASS.`)
               analysis.passed = true
               analysis.reason = shippingTimeContext.shippingText && shippingTimeContext.shippingText !== 'None'
                 ? `Delivery estimate is displayed on the product page: "${shippingTimeContext.shippingText.trim()}". Rule passes.`
                 : `A delivery date range or time estimate is shown on the product page. Rule passes.`
             }
-            // Override 2: Full visible text contains a delivery date pattern (safety net for dynamic content)
+            // Override 2: Screenshot / visible page text contains simple delivery phrases (primary screenshot detection)
+            if (!analysis.passed) {
+              const pageTextLower = (fullVisibleText || '').toLowerCase()
+              const simpleDeliveryPhrases = [
+                'free shipping',
+                'free express shipping',
+                'free delivery',
+                'delivered between',
+                'get it by',
+                'order now and get it',
+                'delivery by',
+                'ships by',
+                'delivery estimate',
+                'shipping over',
+                'delivery date',
+              ]
+              const matchedPhrase = simpleDeliveryPhrases.find(p => pageTextLower.includes(p))
+              if (matchedPhrase) {
+                console.log(`Delivery estimate detected in screenshot/page text: "${matchedPhrase}". Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = `Delivery estimate detected on the product page: "${matchedPhrase}". Rule passes.`
+              }
+            }
+            // Override 3: Full visible text contains a delivery date pattern (regex-based safety net)
             if (!analysis.passed) {
               const deliveryTextPatterns = [
                 /get\s+it\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
@@ -4283,12 +4334,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               const matchedPattern = deliveryTextPatterns.find(p => p.test(fullVisibleText))
               if (matchedPattern) {
                 const matchedText = fullVisibleText.match(matchedPattern)?.[0] || ''
-                console.log(`Delivery estimate rule: Date/time found in full page text: "${matchedText}". Forcing PASS.`)
+                console.log(`Delivery estimate detected in screenshot/page text (regex): "${matchedText}". Forcing PASS.`)
                 analysis.passed = true
                 analysis.reason = matchedText
                   ? `Delivery estimate shown on the page: "${matchedText}". Rule passes.`
                   : `A delivery date range or time estimate is shown on the product page. Rule passes.`
               }
+            }
+            if (!analysis.passed) {
+              console.log(`Delivery estimate rule: No delivery estimate found in DOM or page text. AI decision: ${analysis.passed ? 'PASS' : 'FAIL'}.`)
             }
           } else if (isVariantRule) {
             // Variant rule must mention variant/preselect/selected
