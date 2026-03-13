@@ -1,0 +1,280 @@
+/**
+ * Customer Media Detection
+ * Detects customer video testimonials and customer photos directly from the DOM.
+ * Covers: Shopify UGC, Loox, Yotpo, Stamped, Okendo, Junip, Judge.me,
+ *         review section images, Instagram embeds, and generic patterns.
+ */
+
+export interface CustomerMediaResult {
+  // Video Testimonials
+  videoFound: boolean
+  videoCount: number
+  videoEvidence: string[]
+
+  // Customer Photos
+  photoFound: boolean
+  photoCount: number
+  photoEvidence: string[]
+
+  summary: string
+}
+
+export async function detectCustomerMedia(
+  page: import('puppeteer-core').Page
+): Promise<CustomerMediaResult> {
+  return page.evaluate(() => {
+    const videoEvidence: string[] = []
+    const photoEvidence: string[] = []
+
+    // ─────────────────────────────────────────────────────────────
+    // HELPER: check if an element is inside a review/testimonial section
+    // ─────────────────────────────────────────────────────────────
+    function isInsideReviewSection(el: Element): boolean {
+      let cur: Element | null = el
+      while (cur && cur !== document.body) {
+        const cls = (cur.className && typeof cur.className === 'string' ? cur.className : '').toLowerCase()
+        const id = (cur.id || '').toLowerCase()
+        const tag = cur.tagName.toLowerCase()
+        if (
+          /review|testimonial|ugc|customer|rating|feedback|loox|yotpo|stamped|okendo|junip|jdgm|judge/i.test(cls + id)
+        ) return true
+        // Check text heading nearby
+        if (tag === 'section' || tag === 'div') {
+          const firstHeading = cur.querySelector('h1,h2,h3,h4')
+          if (firstHeading) {
+            const ht = (firstHeading.textContent || '').toLowerCase()
+            if (/review|testimonial|customer|saying|fan|gram|photo|ugc/i.test(ht)) return true
+          }
+        }
+        cur = cur.parentElement
+      }
+      return false
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // VIDEO TESTIMONIAL DETECTION
+    // ─────────────────────────────────────────────────────────────
+
+    // 1. Explicit UGC video sections (Shopify themes)
+    const ugcVideoEls = document.querySelectorAll(
+      '[class*="ugc-video"], [class*="ugc_video"], [class*="ugcvideo"], ' +
+      '[class*="video-testimonial"], [class*="testimonial-video"], ' +
+      '[class*="customer-video"], [class*="review-video"], ' +
+      '[class*="video-review"], [class*="videoreview"]'
+    )
+    if (ugcVideoEls.length > 0) {
+      videoEvidence.push(`UGC video elements: ${ugcVideoEls.length} (classes: ${Array.from(ugcVideoEls).slice(0,3).map(e => (e.className||'').toString().substring(0,40)).join(', ')})`)
+    }
+
+    // 2. <video> tags inside review sections
+    const allVideos = Array.from(document.querySelectorAll('video'))
+    const reviewVideos = allVideos.filter(v => isInsideReviewSection(v))
+    if (reviewVideos.length > 0) {
+      videoEvidence.push(`<video> tags in review/testimonial sections: ${reviewVideos.length}`)
+    }
+
+    // 3. YouTube / Vimeo iframes inside review sections
+    const allIframes = Array.from(document.querySelectorAll('iframe'))
+    const videoIframes = allIframes.filter(f => {
+      const src = (f.src || f.getAttribute('data-src') || '').toLowerCase()
+      return /youtube|vimeo|loom|wistia/.test(src) && isInsideReviewSection(f)
+    })
+    if (videoIframes.length > 0) {
+      videoEvidence.push(`Video iframes (YouTube/Vimeo) in review sections: ${videoIframes.length}`)
+    }
+
+    // 4. Shopify preview_images (video thumbnails from UGC videos)
+    const previewImgs = Array.from(document.querySelectorAll('img')).filter(img =>
+      (img.src || '').includes('preview_images') && (img.src || '').includes('thumbnail')
+    )
+    if (previewImgs.length > 0) {
+      videoEvidence.push(`Shopify UGC video thumbnails (preview_images): ${previewImgs.length}`)
+    }
+
+    // 5. Play button elements inside review/testimonial containers
+    const playButtons = Array.from(document.querySelectorAll(
+      '[class*="play-button"], [class*="play_button"], [class*="playbutton"], ' +
+      '[class*="video-play"], [class*="play-icon"], button[aria-label*="play" i], ' +
+      '[class*="ugc-video-play"]'
+    )).filter(el => isInsideReviewSection(el))
+    if (playButtons.length > 0) {
+      videoEvidence.push(`Play buttons inside review/testimonial sections: ${playButtons.length}`)
+    }
+
+    // 6. Loox video widget
+    if (document.querySelector('[class*="loox"][class*="video"], [id*="loox"][class*="video"], loox-widget')) {
+      videoEvidence.push('Loox video review widget detected')
+    }
+
+    // 7. Swiper/carousel containing actual video content in review sections
+    // Requires real video elements or UGC video classes — NOT just carousel play/navigation buttons
+    const swiperInReview = Array.from(document.querySelectorAll('[class*="swiper"], [class*="carousel"], [class*="slider"]'))
+      .filter(el => {
+        if (!isInsideReviewSection(el)) return false
+        // Must contain actual video evidence, not just navigation arrows with "play" class
+        const hasVideo = !!el.querySelector('video')
+        const hasUgc = !!el.querySelector('[class*="ugc-video"], [class*="ugc_video"], [class*="video-testimonial"], [class*="review-video"]')
+        const hasVideoIframe = Array.from(el.querySelectorAll('iframe')).some(f => {
+          const src = (f.src || f.getAttribute('data-src') || '').toLowerCase()
+          return /youtube|vimeo|loom|wistia/.test(src)
+        })
+        // "play" class alone is not enough — must have actual video or UGC element
+        return hasVideo || hasUgc || hasVideoIframe
+      })
+    if (swiperInReview.length > 0) {
+      videoEvidence.push(`Video carousel/swiper in review section: ${swiperInReview.length}`)
+    }
+
+    // 8. Text-based detection: "video" near review headings
+    const allSectionHeadings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5'))
+    const videoHeadings = allSectionHeadings.filter(h => {
+      const t = (h.textContent || '').toLowerCase()
+      return /video\s*(testimonial|review|customer|from customer)|customer\s*(video|review.*video)/i.test(t)
+    })
+    if (videoHeadings.length > 0) {
+      videoEvidence.push(`Video testimonial headings: "${videoHeadings.map(h => h.textContent?.trim()).join('", "')}"`)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // CUSTOMER PHOTO DETECTION
+    // ─────────────────────────────────────────────────────────────
+
+    // 1. Loox review photos
+    const looxPhotos = document.querySelectorAll('[class*="loox"] img, [id*="loox"] img')
+    if (looxPhotos.length > 0) {
+      photoEvidence.push(`Loox review photos: ${looxPhotos.length}`)
+    }
+
+    // 2. Yotpo customer photos
+    const yotpoPhotos = document.querySelectorAll('[class*="yotpo"] img, [id*="yotpo"] img')
+    if (yotpoPhotos.length > 0) {
+      photoEvidence.push(`Yotpo review photos: ${yotpoPhotos.length}`)
+    }
+
+    // 3. Stamped.io photos
+    const stampedPhotos = document.querySelectorAll('[class*="stamped"] img, [id*="stamped"] img')
+    if (stampedPhotos.length > 0) {
+      photoEvidence.push(`Stamped.io review photos: ${stampedPhotos.length}`)
+    }
+
+    // 4. Okendo photos
+    const okendoPhotos = document.querySelectorAll('[class*="okendo"] img, [id*="okendo"] img')
+    if (okendoPhotos.length > 0) {
+      photoEvidence.push(`Okendo review photos: ${okendoPhotos.length}`)
+    }
+
+    // 5. Judge.me photos
+    const judgePhotos = document.querySelectorAll('[class*="jdgm"] img, [id*="jdgm"] img')
+    if (judgePhotos.length > 0) {
+      photoEvidence.push(`Judge.me review photos: ${judgePhotos.length}`)
+    }
+
+    // 6. Shopify preview_images used as customer photo thumbnails
+    const shopifyCustomerPhotos = Array.from(document.querySelectorAll('img')).filter(img =>
+      (img.src || '').includes('preview_images')
+    )
+    if (shopifyCustomerPhotos.length > 0) {
+      photoEvidence.push(`Shopify customer media thumbnails (preview_images): ${shopifyCustomerPhotos.length}`)
+    }
+
+    // 7. Images inside review/testimonial/UGC sections (>40px to exclude icons)
+    // Excludes: star/rating images, product images, decorative icons
+    const allImgs = Array.from(document.querySelectorAll('img'))
+    const reviewSectionImgs = allImgs.filter(img => {
+      const w = img.naturalWidth || img.width || 0
+      const h = img.naturalHeight || img.height || 0
+      const rect = img.getBoundingClientRect()
+      const size = Math.max(w, h, rect.width, rect.height)
+      if (size < 40) return false
+      if (!isInsideReviewSection(img)) return false
+      // Exclude star/rating icons, product thumbnails, and decorative images
+      const src = (img.src || img.getAttribute('data-src') || '').toLowerCase()
+      const alt = (img.alt || '').toLowerCase()
+      const cls = (img.className && typeof img.className === 'string' ? img.className : '').toLowerCase()
+      // Exclude SVG files — they are always icons/graphics, never customer photos
+      if (src.endsWith('.svg') || src.includes('.svg?')) return false
+      if (/star|rating|icon|logo|arrow|badge|check|tick|verified|sprite|banner|hero|product[-_]image|main[-_]image/i.test(src + alt + cls)) return false
+      // Exclude images that are clearly product images (very large, in product gallery)
+      const parentCls = (img.closest('[class*="product-image"], [class*="product_image"], [class*="gallery"], [class*="main-image"]') ? 'gallery' : '')
+      if (parentCls === 'gallery') return false
+      // Must look like a customer-uploaded photo: squarish and reasonably sized
+      const aspect = Math.max(w, rect.width) / Math.max(1, Math.max(h, rect.height))
+      const isSquarish = aspect >= 0.5 && aspect <= 2.0
+      return isSquarish
+    })
+    if (reviewSectionImgs.length > 0) {
+      photoEvidence.push(`Images inside review/testimonial sections: ${reviewSectionImgs.length}`)
+    }
+
+    // 8. Customer photo gallery sections (selfie-style galleries)
+    const customerGallerySections = document.querySelectorAll(
+      '[class*="customer-photo"], [class*="customer_photo"], ' +
+      '[class*="customer-gallery"], [class*="customer_gallery"], ' +
+      '[class*="biggest-fans"], [class*="biggest_fans"], ' +
+      '[class*="fan-gallery"], [class*="photo-wall"]'
+    )
+    if (customerGallerySections.length > 0) {
+      const imgs = Array.from(customerGallerySections).reduce((acc, sec) => acc + sec.querySelectorAll('img').length, 0)
+      if (imgs > 0) {
+        photoEvidence.push(`Customer photo gallery sections: ${customerGallerySections.length} sections, ${imgs} images`)
+      }
+    }
+
+    // 9. Instagram profile pictures (review embeds)
+    const instagramProfilePics = document.querySelectorAll('img.profile-picture, img[alt*="Instagram profile" i], img[alt*="profile picture" i]')
+    if (instagramProfilePics.length > 0) {
+      photoEvidence.push(`Instagram/review profile pictures: ${instagramProfilePics.length}`)
+    }
+
+    // 10. Sections with customer headings containing images
+    const customerHeadings = Array.from(document.querySelectorAll('h1,h2,h3,h4')).filter(h => {
+      const t = (h.textContent || '').toLowerCase()
+      return /customers?\s*(are\s*saying|photos?|picture|gallery|fan|love|review)|on\s+the\s+gram|biggest\s+fan|real\s+customer/i.test(t)
+    })
+    for (const heading of customerHeadings) {
+      const section = heading.closest('section, [class*="section"], [class*="block"]') || heading.parentElement
+      if (section) {
+        const imgs = section.querySelectorAll('img')
+        const validImgs = Array.from(imgs).filter(img => {
+          const rect = img.getBoundingClientRect()
+          return Math.max(rect.width, rect.height) >= 60
+        })
+        if (validImgs.length > 0) {
+          photoEvidence.push(`"${heading.textContent?.trim()}" section: ${validImgs.length} customer images`)
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // BUILD RESULT
+    // ─────────────────────────────────────────────────────────────
+    const videoFound = videoEvidence.length > 0
+    const photoFound = photoEvidence.length > 0
+
+    const videoCount = ugcVideoEls.length + reviewVideos.length + previewImgs.length + playButtons.length
+    const photoCount = looxPhotos.length + yotpoPhotos.length + stampedPhotos.length +
+      okendoPhotos.length + judgePhotos.length + shopifyCustomerPhotos.length + reviewSectionImgs.length
+
+    const summaryLines = [
+      `--- CUSTOMER VIDEO TESTIMONIALS ---`,
+      `Detected: ${videoFound ? 'YES' : 'NO'}`,
+      `Count: ${videoCount}`,
+      videoEvidence.length > 0 ? `Evidence: ${videoEvidence.join(' | ')}` : 'Evidence: none',
+      ``,
+      `--- CUSTOMER PHOTOS ---`,
+      `Detected: ${photoFound ? 'YES' : 'NO'}`,
+      `Count: ${photoCount}`,
+      photoEvidence.length > 0 ? `Evidence: ${photoEvidence.join(' | ')}` : 'Evidence: none',
+    ]
+
+    return {
+      videoFound,
+      videoCount,
+      videoEvidence,
+      photoFound,
+      photoCount,
+      photoEvidence,
+      summary: summaryLines.join('\n'),
+    }
+  })
+}
