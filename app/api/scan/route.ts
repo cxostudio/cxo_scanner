@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
       found: boolean
       evidence: string[]
       ratingText: string
+      nearTitle: boolean
     } | null = null
     let comparisonContext: {
       found: boolean
@@ -271,6 +272,7 @@ export async function POST(request: NextRequest) {
     let descriptionBenefitsDOMText = ''
     let descriptionBenefitsMatchedKeywords: string[] = []
     let selectedVariant: string | null = null
+    let fallbackRawHtml = ''
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1892,11 +1894,52 @@ export async function POST(request: NextRequest) {
             const evidence: string[] = []
             let found = false
             let ratingText = ''
+            let nearTitle = false
 
             // Helper: visible text of element
             const visText = (el: Element) => (el as HTMLElement).innerText?.trim() || el.textContent?.trim() || ''
+            const isVisible = (el: Element | null) => {
+              if (!el) return false
+              const node = el as HTMLElement
+              const style = window.getComputedStyle(node)
+              const rect = node.getBoundingClientRect()
+              return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 0 && rect.height > 0
+            }
 
-            // 1. Dedicated rating/review widget selectors (Trustpilot, Yotpo, Stamped, Junip, etc.)
+            const titleSelectors = [
+              'h1',
+              '[class*="product-title"]',
+              '[class*="product__title"]',
+              '[class*="title"][class*="product"]',
+              '[data-product-title]',
+            ]
+            const titleEl = titleSelectors
+              .map((sel) => document.querySelector(sel))
+              .find((el) => isVisible(el)) as HTMLElement | undefined
+            const titleRect = titleEl?.getBoundingClientRect() || null
+            const titleBlock = titleEl
+              ? (
+                  titleEl.closest('[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], section, article, form, main, div')
+                    || titleEl.parentElement
+                ) as HTMLElement | null
+              : null
+            const scopedText = titleBlock ? (titleBlock.innerText || titleBlock.textContent || '') : ''
+
+            const isNearTitle = (el: Element | null): boolean => {
+              if (!el || !titleRect || !isVisible(el)) return false
+              const rect = (el as HTMLElement).getBoundingClientRect()
+              const sameBlock = !!titleBlock && (titleBlock === el || titleBlock.contains(el))
+              const verticalGap = Math.min(
+                Math.abs(rect.top - titleRect.bottom),
+                Math.abs(titleRect.top - rect.bottom),
+                Math.abs(rect.top - titleRect.top)
+              )
+              const horizontalGap = Math.abs((rect.left + rect.width / 2) - (titleRect.left + titleRect.width / 2))
+              const overlapsVertically = rect.bottom >= titleRect.top - 40 && rect.top <= titleRect.bottom + 180
+              return sameBlock && (verticalGap <= 220 || overlapsVertically) && horizontalGap <= 900
+            }
+
+            // 1. Dedicated rating/review widget selectors near the title block
             const widgetSels = [
               '[class*="trustpilot"]', '[data-testid*="trustpilot"]', 'trustpilot-widget',
               '[class*="yotpo"]', '[class*="stamped"]', '[class*="loox"]', '[class*="junip"]',
@@ -1910,84 +1953,92 @@ export async function POST(request: NextRequest) {
             ]
             for (const sel of widgetSels) {
               try {
-                const el = document.querySelector(sel)
+                const el = Array.from(document.querySelectorAll(sel)).find((node) => isNearTitle(node))
                 if (el) {
                   const txt = visText(el).substring(0, 100)
-                  evidence.push(`Rating widget (${sel}): "${txt || '(element present)'}"`)
+                  evidence.push(`Rating widget near title (${sel}): "${txt || '(element present)'}"`)
                   found = true
+                  nearTitle = true
                   ratingText = txt
                   break
                 }
               } catch { /* ignore invalid selector */ }
             }
 
-            // 2. Star unicode characters anywhere in the page
+            // 2. Star unicode characters near the title block
             if (!found) {
               const starPattern = /[★☆⭐✩✭]/
-              const allText = document.body.innerText || ''
-              if (starPattern.test(allText)) {
-                const match = allText.match(/[★☆⭐✩✭].{0,60}/) || []
-                evidence.push(`Star characters found: "${match[0]?.trim().substring(0, 80) || ''}"`)
+              if (starPattern.test(scopedText)) {
+                const match = scopedText.match(/[★☆⭐✩✭].{0,60}/) || []
+                evidence.push(`Star characters found near title: "${match[0]?.trim().substring(0, 80) || ''}"`)
                 found = true
+                nearTitle = true
                 ratingText = match[0]?.trim() || 'star icons'
               }
             }
 
-            // 3. Numeric rating patterns: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5 (203)"
+            // 3. Numeric rating patterns near the title block
             if (!found) {
               const ratingNumPattern = /\b[1-5](\.\d)?\s*(out of\s*5|\/\s*5|stars?|\s+star)/i
-              const allText = document.body.innerText || ''
-              const m = allText.match(ratingNumPattern)
+              const m = scopedText.match(ratingNumPattern)
               if (m) {
-                evidence.push(`Numeric rating: "${m[0].trim()}"`)
+                evidence.push(`Numeric rating near title: "${m[0].trim()}"`)
                 found = true
+                nearTitle = true
                 ratingText = m[0].trim()
               }
             }
 
-            // 4. Review count text: "203 reviews", "1.2k reviews", "150 ratings"
+            // 4. Review count text near the title block
             if (!found) {
               const reviewCountPattern = /\b(\d[\d,.]*k?)\s+(reviews?|ratings?|customers?|opinions?)/i
-              const allText = document.body.innerText || ''
-              const m = allText.match(reviewCountPattern)
+              const m = scopedText.match(reviewCountPattern)
               if (m) {
-                evidence.push(`Review count: "${m[0].trim()}"`)
+                evidence.push(`Review count near title: "${m[0].trim()}"`)
                 found = true
+                nearTitle = true
                 ratingText = m[0].trim()
               }
             }
 
-            // 5. Trustpilot-specific keywords: "Excellent", "TrustScore", "Trustpilot"
+            // 5. Trustpilot-specific keywords near the title block
             if (!found) {
               const tpPattern = /\b(trustpilot|trustscore|excellent|great|average|bad)\b/i
-              const allText = document.body.innerText || ''
-              const m = allText.match(tpPattern)
+              const m = scopedText.match(tpPattern)
               if (m) {
-                evidence.push(`Trustpilot/review keyword: "${m[0].trim()}"`)
+                evidence.push(`Trustpilot/review keyword near title: "${m[0].trim()}"`)
                 found = true
+                nearTitle = true
                 ratingText = m[0].trim()
               }
             }
 
-            // 6. SVG-based star icons (many modern sites use SVG stars)
+            // 6. SVG-based star icons near the title block
             if (!found) {
-              const svgStars = document.querySelectorAll('svg[class*="star"], svg[class*="rating"], [class*="star"] svg, [class*="rating"] svg')
+              const svgStars = Array.from(document.querySelectorAll('svg[class*="star"], svg[class*="rating"], [class*="star"] svg, [class*="rating"] svg'))
+                .filter((node) => isNearTitle(node))
               if (svgStars.length > 0) {
-                evidence.push(`SVG star icons found (${svgStars.length})`)
+                evidence.push(`SVG star icons found near title (${svgStars.length})`)
                 found = true
+                nearTitle = true
                 ratingText = `${svgStars.length} SVG star icon(s)`
               }
             }
 
-            return { found, evidence, ratingText }
+            return { found, evidence, ratingText, nearTitle }
           })
 
-          ratingContext = { found: ratingResult.found, evidence: ratingResult.evidence, ratingText: ratingResult.ratingText }
+          ratingContext = {
+            found: ratingResult.found,
+            evidence: ratingResult.evidence,
+            ratingText: ratingResult.ratingText,
+            nearTitle: ratingResult.nearTitle,
+          }
           websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
-            `\nRating found: ${ratingResult.found ? 'YES' : 'NO'}` +
+            `\nRating found near title: ${ratingResult.found && ratingResult.nearTitle ? 'YES' : 'NO'}` +
             (ratingResult.ratingText ? `\nRating text: "${ratingResult.ratingText}"` : '') +
             (ratingResult.evidence.length > 0 ? `\nEvidence: ${ratingResult.evidence.slice(0, 3).join('; ')}` : '')
-          console.log(`Product rating DOM check: found=${ratingResult.found}, text="${ratingResult.ratingText}"`)
+          console.log(`Product rating DOM check: found=${ratingResult.found}, nearTitle=${ratingResult.nearTitle}, text="${ratingResult.ratingText}"`)
         } catch (e) {
           console.warn('Product rating DOM detection failed:', e)
         }
@@ -2541,6 +2592,7 @@ export async function POST(request: NextRequest) {
           },
         })
         const rawHtml = await response.text()
+        fallbackRawHtml = rawHtml
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
         selectedVariant = extractSelectedVariantFromHtml(rawHtml)
@@ -2575,8 +2627,60 @@ export async function POST(request: NextRequest) {
           totalMediaCount: htmlTotalImgs + htmlTotalVideos,
           examples: [],
         })
+
+        // Fallback HTML markers for sticky CTA and gallery navigation.
+        const stickyHtmlPatterns = [
+          /cxo-studio__sticky-atc/i,
+          /sticky-atc/i,
+          /add-to-cart-bar/i,
+          /mobile-cart/i,
+          /bottom-bar/i,
+          /floating.*add.?to.?cart/i,
+        ]
+        const stickyMatch = stickyHtmlPatterns.find((pattern) => pattern.test(rawHtml))
+        if (stickyMatch) {
+          const matchedText = rawHtml.match(stickyMatch)?.[0] || 'sticky CTA HTML marker'
+          stickyCTAContext = {
+            desktopSticky: false,
+            mobileSticky: true,
+            desktopEvidence: '',
+            mobileEvidence: `HTML pattern: ${matchedText}`,
+            anySticky: true,
+          }
+        }
+
+        const galleryHtmlPatterns = [
+          /swiper-button-(?:prev|next)/i,
+          /slideshow-button(?:--|__)?(?:prev|next)/i,
+          /slick-(?:prev|next|arrow)/i,
+          /flickity-prev-next/i,
+          /carousel-(?:prev|next|arrow)/i,
+          /gallery-(?:arrow|nav|prev|next)/i,
+          /slider-(?:prev|next|btn)/i,
+          /data-swiper/i,
+        ]
+        const galleryMatch = galleryHtmlPatterns.find((pattern) => pattern.test(rawHtml))
+        if (galleryMatch) {
+          const matchedText = rawHtml.match(galleryMatch)?.[0] || 'gallery navigation HTML marker'
+          galleryNavDOMFound = true
+          galleryNavDOMEvidence = `HTML pattern: ${matchedText}`
+        }
+
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
         keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\nSelected Variant: ${selectedVariant || 'None'}\n--- LAZY LOADING ---\n${lazyKeyLine}`
+
+        if (stickyCTAContext) {
+          websiteContent += `\n\n--- STICKY CTA CHECK ---` +
+            `\nDesktop sticky CTA detected: ${stickyCTAContext.desktopSticky ? 'YES' : 'NO'}` +
+            `\nMobile sticky CTA detected: ${stickyCTAContext.mobileSticky ? 'YES' : 'NO'}${stickyCTAContext.mobileEvidence ? ` (${stickyCTAContext.mobileEvidence})` : ''}` +
+            `\nSticky CTA on either device: ${stickyCTAContext.anySticky ? 'YES' : 'NO'}`
+        }
+
+        if (galleryNavDOMFound) {
+          websiteContent += `\n\n--- GALLERY NAVIGATION DOM CHECK ---` +
+            `\nNavigation arrows/swipe found: YES` +
+            `\nEvidence: ${galleryNavDOMEvidence}`
+        }
 
         // Append a synthetic QUANTITY / DISCOUNT CHECK so AI sees it (keep under 6000 total)
         const discountBlock = `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${priceDrop ? "YES" : "NO"}\nPatterns found: ${foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n`
@@ -3008,7 +3112,7 @@ PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
 ━━━━ STEP 1: Analyze the SCREENSHOT ━━━━
 
-PASS immediately if you see ANY of the following on the page (near the product OR anywhere visible):
+PASS only if you see a rating VERY CLOSE to the product title or in the same title/info block:
 
 ✅ Star icons of any kind: ★★★★★, ☆, ⭐, filled/empty SVG stars
 ✅ Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5"
@@ -3017,23 +3121,25 @@ PASS immediately if you see ANY of the following on the page (near the product O
 ✅ Any rating badge or widget (Yotpo, Loox, Stamped, Judge.me, etc.)
 ✅ Text like "Rated 4.5", "4.8 ★", "Excellent ★★★★★"
 
-→ PASS if ANY one of these is visible in the screenshot.
+→ "Near title" means directly above, below, or beside the product title in the same visible product header block.
+→ If the rating appears only lower on the page, inside a distant reviews section, or away from the title block, you MUST FAIL.
+→ PASS if ANY one of these is visible near the title in the screenshot.
 → Do NOT require all three (score + count + link). Any single rating indicator is enough.
 
 ━━━━ STEP 2: Check PRODUCT RATING DOM CHECK in KEY ELEMENTS ━━━━
 
-- "Rating found: YES" → PASS immediately
-- "Rating found: NO" → check screenshot more carefully before failing
+- "Rating found near title: YES" → PASS immediately
+- "Rating found near title: NO" → check screenshot more carefully before failing
 
 ━━━━ FAIL CONDITION ━━━━
 
-❌ FAIL only if: No stars, no rating numbers, no review count, no rating widget of any kind is visible anywhere on the page.
+❌ FAIL if: No stars, no rating numbers, no review count, and no rating widget are visible near the product title.
 
 ━━━━ EXAMPLES ━━━━
 
 ✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
 ✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
-❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected on the page. Add star ratings and review counts near the product title."
+❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
 `
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
@@ -3809,37 +3915,13 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           if (isRatingRule) {
             let ratingForcedPass = false
 
-            // Override 1: DOM found rating → force PASS
-            if (ratingContext?.found && !analysis.passed) {
-              console.log(`Rating rule: DOM found rating ("${ratingContext.ratingText}"). Forcing PASS.`)
+            // Override 1: DOM found rating near title → force PASS
+            if (ratingContext?.found && ratingContext?.nearTitle && !analysis.passed) {
+              console.log(`Rating rule: DOM found rating near title ("${ratingContext.ratingText}"). Forcing PASS.`)
               analysis.passed = true
               ratingForcedPass = true
               const ev = ratingContext.evidence[0] || ratingContext.ratingText || 'rating element detected'
-              analysis.reason = `Product ratings detected by DOM scan: ${ev}. Star ratings or review indicators are present near the product section.`
-            }
-
-            // Override 2: Page text safety net — catch any rating-related text
-            if (!analysis.passed) {
-              const pageText = fullVisibleText || websiteContent || ''
-              const RATING_TEXT_PATTERNS = [
-                /[★☆⭐✩✭]/,                                        // star unicode
-                /\b[1-5]\.\d\s*(out of\s*5|\/\s*5|stars?)/i,      // "4.5 out of 5", "4.5/5"
-                /\b[1-5](\.\d)?\s+stars?\b/i,                     // "4 stars", "4.5 stars"
-                /\b\d[\d,]*\s+(reviews?|ratings?|customers?)\b/i, // "203 reviews"
-                /trustpilot/i,                                     // Trustpilot mention
-                /\bexcellent\b.*(?:trustpilot|review|rating)/i,   // "Excellent" near review
-                /trustscore/i,                                     // TrustScore widget
-                /rated\s+[1-5]/i,                                  // "Rated 4.5"
-                /average\s+rating/i,                              // "Average rating"
-              ]
-              const matched = RATING_TEXT_PATTERNS.find(p => p.test(pageText))
-              if (matched) {
-                const matchedText = (pageText.match(matched) || [''])[0]
-                console.log(`Rating rule: Page text contains rating signal "${matchedText}". Forcing PASS.`)
-                analysis.passed = true
-                ratingForcedPass = true
-                analysis.reason = `Product rating indicators detected: "${matchedText.trim()}" — star ratings or review counts are present on this page.`
-              }
+              analysis.reason = `Product ratings detected by DOM scan near the title: ${ev}. Star ratings or review indicators are present in the product title block.`
             }
 
             // Sanity warning (never force fail based on missing count or link)
