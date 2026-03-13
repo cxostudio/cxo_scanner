@@ -245,6 +245,68 @@ export async function detectCustomerMedia(
       }
     }
 
+    // 11. Trusted Shops widget (common European review platform)
+    const trustedShopsEls = document.querySelectorAll(
+      '[class*="trusted-shops"], [class*="trustedshops"], [id*="trusted-shops"], [id*="trustedshops"], ' +
+      'ts-widget, ts-reviews, [data-trustbadge], [class*="ts-widget"], [class*="ts-review"]'
+    )
+    if (trustedShopsEls.length > 0) {
+      photoEvidence.push(`Trusted Shops review widget detected: ${trustedShopsEls.length} element(s)`)
+    }
+
+    // 12. Generic verified review section: 3+ review cards with star ratings + reviewer names
+    // Detects custom review implementations (not covered by named platforms)
+    const verifiedBadges = Array.from(document.querySelectorAll(
+      '[class*="verified"], [aria-label*="verified" i], [title*="verified" i], ' +
+      '[class*="review-card"], [class*="review_card"], [class*="reviewcard"]'
+    ))
+    const reviewCardsWithNames = Array.from(document.querySelectorAll(
+      '[class*="review"], [class*="testimonial"]'
+    )).filter(el => {
+      const text = (el.textContent || '').trim()
+      // Must have some text content (review body) and be reasonably sized
+      return text.length > 30 && el.querySelectorAll('*').length > 2
+    })
+    if (verifiedBadges.length >= 2 || reviewCardsWithNames.length >= 3) {
+      const count = Math.max(verifiedBadges.length, reviewCardsWithNames.length)
+      photoEvidence.push(`Verified customer review section: ${count} verified review cards detected`)
+    }
+
+    // 13. "Rated X.X / 5 based on N reviews" — strong signal of substantial customer reviews
+    const bodyText = (document.body.innerText || '').toLowerCase()
+    const ratedMatch = bodyText.match(/rated\s+[\d.]+\s*\/\s*5\s+based\s+on\s+([\d,]+)\s+reviews?/i)
+    if (ratedMatch) {
+      const reviewCount = parseInt((ratedMatch[1] || '0').replace(/,/g, ''), 10)
+      if (reviewCount >= 5) {
+        photoEvidence.push(`Verified reviews aggregate: "${ratedMatch[0].trim()}" (${reviewCount} customer reviews)`)
+      }
+    }
+    // Also match "X reviews" or "X+ reviews" near a rating pattern
+    const reviewCountMatch = bodyText.match(/(\d[\d,]*)\s*(?:verified\s+)?(?:customer\s+)?reviews?\b/)
+    if (reviewCountMatch && !ratedMatch) {
+      const count = parseInt((reviewCountMatch[1] || '0').replace(/,/g, ''), 10)
+      if (count >= 10) {
+        photoEvidence.push(`Customer review count detected: ${count} reviews`)
+      }
+    }
+
+    // 14. Gallery images showing model/lifestyle/results (alt text based)
+    // Catches cases where product gallery has people/results images
+    const galleryImgs = Array.from(document.querySelectorAll(
+      '[class*="product-gallery"] img, [class*="product_gallery"] img, ' +
+      '[class*="product-media"] img, [class*="product_media"] img, ' +
+      '[class*="gallery"] img, [data-media-type] img'
+    ))
+    const lifestyleGalleryImgs = galleryImgs.filter(img => {
+      const alt = ((img as HTMLImageElement).alt || '').toLowerCase()
+      const src = ((img as HTMLImageElement).src || '').toLowerCase()
+      return /model|lifestyle|result|texture|before|after|skin|face|person|woman|man|apply|use|wearing|showing/i.test(alt + src)
+    })
+    if (lifestyleGalleryImgs.length > 0) {
+      const alts = lifestyleGalleryImgs.slice(0, 3).map(i => (i as HTMLImageElement).alt || 'image').join('", "')
+      photoEvidence.push(`Lifestyle/model/results images in product gallery: ${lifestyleGalleryImgs.length} (e.g. "${alts}")`)
+    }
+
     // ─────────────────────────────────────────────────────────────
     // BUILD RESULT
     // ─────────────────────────────────────────────────────────────
@@ -253,7 +315,10 @@ export async function detectCustomerMedia(
 
     const videoCount = ugcVideoEls.length + reviewVideos.length + previewImgs.length + playButtons.length
     const photoCount = looxPhotos.length + yotpoPhotos.length + stampedPhotos.length +
-      okendoPhotos.length + judgePhotos.length + shopifyCustomerPhotos.length + reviewSectionImgs.length
+      okendoPhotos.length + judgePhotos.length + shopifyCustomerPhotos.length + reviewSectionImgs.length +
+      trustedShopsEls.length + lifestyleGalleryImgs.length +
+      (verifiedBadges.length >= 2 ? verifiedBadges.length : 0) +
+      (reviewCardsWithNames.length >= 3 ? reviewCardsWithNames.length : 0)
 
     const summaryLines = [
       `--- CUSTOMER VIDEO TESTIMONIALS ---`,
