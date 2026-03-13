@@ -67,7 +67,7 @@
   {
     "id": "image-background-consistency",
     "title": "Maintain consistent image backgrounds",
-    "description": "Product images should use consistent, clean backgrounds (e.g. white or light gray) to improve perceived professionalism and avoid visual distractions."
+    "description": "The primary/hero product image should use a clean, professional background (e.g. white or light gray). Lifestyle shots, model images, or before/after result images in additional gallery thumbnails are acceptable and do NOT count as inconsistency. PASS if the main product image has a clean background. FAIL only if the main product image itself has a distracting, cluttered, or random-colored background."
   },
   {
     "id": "image-before-after",
