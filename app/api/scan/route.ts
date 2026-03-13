@@ -105,6 +105,23 @@ const toProtocolRelativeUrl = (url: string, baseUrl: string): string => {
   }
 }
 
+function extractSelectedVariantFromHtml(rawHtml: string): string | null {
+  if (!rawHtml) return null
+
+  const quantityBreakMatch = rawHtml.match(/"quantity_breaks"\s*:\s*\[([\s\S]*?)\]\s*}/i)
+  const quantityBreakBlock = quantityBreakMatch?.[1] || rawHtml
+  const defaultQuantityMatch = quantityBreakBlock.match(/"title"\s*:\s*"([^"]+)"[\s\S]{0,250}?"isDefault"\s*:\s*true/i)
+  if (defaultQuantityMatch?.[1]) return defaultQuantityMatch[1].trim()
+
+  const reverseDefaultQuantityMatch = quantityBreakBlock.match(/"isDefault"\s*:\s*true[\s\S]{0,250}?"title"\s*:\s*"([^"]+)"/i)
+  if (reverseDefaultQuantityMatch?.[1]) return reverseDefaultQuantityMatch[1].trim()
+
+  const genericDefaultMatch = rawHtml.match(/"selected"\s*:\s*true[\s\S]{0,250}?"(?:title|name|label|value)"\s*:\s*"([^"]+)"/i)
+  if (genericDefaultMatch?.[1]) return genericDefaultMatch[1].trim()
+
+  return null
+}
+
 // Helper: detect lazy loading usage on the current page.
 // Counts elements with loading="lazy" and logs the result to the server console.
 async function logLazyLoadingUsage(page: any): Promise<number> {
@@ -253,6 +270,7 @@ export async function POST(request: NextRequest) {
     let descriptionBenefitsDOMFound = false
     let descriptionBenefitsDOMText = ''
     let descriptionBenefitsMatchedKeywords: string[] = []
+    let selectedVariant: string | null = null
     try {
       // Launch headless browser
       // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
@@ -1209,7 +1227,13 @@ export async function POST(request: NextRequest) {
       })
 
       // preselect
-      const selectedVariant = await page.evaluate(() => {
+      selectedVariant = await page.evaluate(() => {
+        function cleanText(text: string | null | undefined): string | null {
+          const normalized = (text || '').replace(/\s+/g, ' ').trim()
+          if (!normalized || normalized.length > 80) return null
+          return normalized
+        }
+
         // Method 1: Check actual checked input (radio buttons)
         const checkedInput = document.querySelector(
           'input[type="radio"]:checked'
@@ -1217,6 +1241,22 @@ export async function POST(request: NextRequest) {
         if (checkedInput) {
           const value = (checkedInput as HTMLInputElement).value
           if (value) return value
+        }
+
+        // Method 1b: common ARIA-selected states used by custom quantity/variant widgets
+        const ariaSelected = document.querySelector(
+          '[aria-checked="true"], [aria-selected="true"], [data-selected="true"], [data-state="checked"], [data-state="active"]'
+        ) as HTMLElement | null
+        if (ariaSelected) {
+          const ariaText = cleanText(
+            ariaSelected.getAttribute('data-flavour') ||
+            ariaSelected.getAttribute('data-flavor') ||
+            ariaSelected.getAttribute('data-variant') ||
+            ariaSelected.getAttribute('data-title') ||
+            ariaSelected.getAttribute('aria-label') ||
+            ariaSelected.textContent
+          )
+          if (ariaText) return ariaText
         }
 
         // Method 2: Check CSS-based visual selection (gradient borders, selected classes)
@@ -1232,7 +1272,12 @@ export async function POST(request: NextRequest) {
           '[class*="selected"][class*="option"]',
           '[class*="selected"][class*="variant"]',
           '[class*="selected"][class*="flavour"]',
-          '[class*="selected"][class*="flavor"]'
+          '[class*="selected"][class*="flavor"]',
+          '.xb_quantity_list_item input:checked',
+          '.xb_quantity_list_item [aria-checked="true"]',
+          '.xb_quantity_list_item [class*="selected"]',
+          '.xb_quantity_list_item [data-state="checked"]',
+          '.xb_quantity_list_item [data-state="active"]'
         ]
 
         for (const selector of cssSelectors) {
@@ -1243,32 +1288,49 @@ export async function POST(request: NextRequest) {
             if (dataFlavour) return dataFlavour
 
             // Fallback to text content
-            const text = element.textContent?.trim()
-            if (text && text.length > 0 && text.length < 50) {
+            const text = cleanText(element.textContent)
+            if (text) {
               return text
             }
           }
         }
 
+        // Method 2b: quantity-break widgets often mark the default option by checked input inside the tile
+        const checkedQuantityTile = document.querySelector('.xb_quantity_list_item input:checked') as HTMLInputElement | null
+        if (checkedQuantityTile) {
+          const tile = checkedQuantityTile.closest('.xb_quantity_list_item, label, [class*="quantity"]') as HTMLElement | null
+          const titleEl = tile?.querySelector('.xb_quantity_list_item_title, [class*="item_title"], [class*="title"]') as HTMLElement | null
+          const quantityText = cleanText(titleEl?.textContent || tile?.textContent || checkedQuantityTile.value)
+          if (quantityText) return quantityText
+        }
+
         // Method 3: Check visually selected elements (elements with distinct borders/backgrounds)
         // Look for elements in variant/flavor sections that have visual selection indicators
-        const variantSections = document.querySelectorAll('[class*="variant"], [class*="flavour"], [class*="flavor"], [class*="option"]')
+        const variantSections = document.querySelectorAll('[class*="variant"], [class*="flavour"], [class*="flavor"], [class*="option"], [class*="quantity"]')
         for (const section of Array.from(variantSections)) {
-          const options = section.querySelectorAll('label, button, [role="button"], .option, [class*="option"]')
+          const options = section.querySelectorAll('label, button, [role="button"], .option, [class*="option"], [class*="quantity_list_item"], [class*="quantity-item"]')
           for (const opt of Array.from(options)) {
             const styles = window.getComputedStyle(opt)
             const borderWidth = parseInt(styles.borderWidth) || 0
             const hasVisibleBorder = borderWidth > 1 // More than 1px border indicates selection
-            const bgColor = styles.backgroundColor
             const hasGradientBorder = styles.borderImageSource && styles.borderImageSource !== 'none'
+            const hasSelectedState =
+              opt.getAttribute('aria-checked') === 'true' ||
+              opt.getAttribute('aria-selected') === 'true' ||
+              opt.getAttribute('data-selected') === 'true' ||
+              (opt.className || '').toString().toLowerCase().includes('selected')
 
             // Check if element has visual selection indicators
-            if (hasVisibleBorder || hasGradientBorder) {
-              const dataFlavour = opt.getAttribute('data-flavour') || opt.getAttribute('data-flavor') || opt.getAttribute('data-variant')
+            if (hasVisibleBorder || hasGradientBorder || hasSelectedState) {
+              const dataFlavour =
+                opt.getAttribute('data-flavour') ||
+                opt.getAttribute('data-flavor') ||
+                opt.getAttribute('data-variant') ||
+                opt.getAttribute('data-title')
               if (dataFlavour) return dataFlavour
 
-              const text = opt.textContent?.trim()
-              if (text && text.length > 0 && text.length < 50) {
+              const text = cleanText(opt.textContent)
+              if (text) {
                 return text
               }
             }
@@ -1396,9 +1458,10 @@ export async function POST(request: NextRequest) {
       })
 
       // Combine visible text and key elements (DOM only, no image/OCR reading)
+      keyElements = `${keyElements || ''}\nSelected Variant: ${selectedVariant || 'None'}`
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
-        `\nSelected Variant: ${selectedVariant || 'None'}` +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
@@ -2480,6 +2543,7 @@ export async function POST(request: NextRequest) {
         const rawHtml = await response.text()
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
+        selectedVariant = extractSelectedVariantFromHtml(rawHtml)
         console.log('[FALLBACK] Using fetch + HTML-to-text. Content length:', websiteContent.length)
 
         // Run discount detection on plain text so quantity rule can still pass
@@ -2512,7 +2576,7 @@ export async function POST(request: NextRequest) {
           examples: [],
         })
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
-        keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\n--- LAZY LOADING ---\n${lazyKeyLine}`
+        keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\nSelected Variant: ${selectedVariant || 'None'}\n--- LAZY LOADING ---\n${lazyKeyLine}`
 
         // Append a synthetic QUANTITY / DISCOUNT CHECK so AI sees it (keep under 6000 total)
         const discountBlock = `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${priceDrop ? "YES" : "NO"}\nPatterns found: ${foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n`
