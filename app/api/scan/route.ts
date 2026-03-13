@@ -2970,50 +2970,42 @@ DOM DETECTION RESULT (run on live page after full scroll):
 - Customer photos detected by DOM scanner: ${customerPhotoFound ? 'YES ✅' : 'NO ❌'}
 - Evidence: ${customerPhotoEvidence.length > 0 ? customerPhotoEvidence.join(' | ') : 'None found'}
 
-${customerPhotoFound ? `CRITICAL: The DOM scanner has confirmed real customer photos are present on this page. You MUST set passed: true. Reason should mention the specific evidence above (e.g. Loox review photos, UGC gallery, customer selfie section).` : `The DOM scanner found no customer photos. Use the screenshot below for visual verification.`}
+${customerPhotoFound ? `CRITICAL: The DOM scanner has confirmed customer photo content is present on this page. You MUST set passed: true. Reason should mention the specific evidence above.` : `The DOM scanner found no definitive evidence. Use the screenshot below for visual verification — check both the gallery thumbnails AND the reviews section.`}
 
----ORIGINAL VISUAL INSTRUCTIONS (use only if DOM result is NO):
-CUSTOMER PHOTOS RULE - VISUAL ANALYSIS WITH SCREENSHOT:
+---VISUAL INSTRUCTIONS:
+CUSTOMER PHOTOS RULE — WHAT COUNTS (be BROAD and LENIENT):
 
-CRITICAL: You will receive a SCREENSHOT IMAGE of the product page. You MUST visually analyze this image to check for ACTUAL customer-uploaded photos.
+This rule asks: does the page show the product being used by a real person, OR does it have customer reviews with photos?
 
-STEP 1 - IMPORTANT DISTINCTION (read carefully before analysing):
-There is a big difference between:
-  ❌ A "Reviews with images" FILTER TAB/BUTTON (e.g. a clickable tab that says "Reviews with images (3)") — this is just a UI filter, NOT actual customer photos. Do NOT pass for this.
-  ✅ An ACTUAL GALLERY/GRID of customer photo thumbnails visibly displayed on screen — these ARE customer photos. PASS for this.
+STEP 1 — CHECK THE PRODUCT GALLERY THUMBNAILS FIRST:
+Look at the thumbnail strip below/beside the main product image.
+- If ANY thumbnail shows a person using the product (e.g. applying serum, wearing clothing, holding the product, model demonstrating it) → PASS immediately. These lifestyle/model shots prove real-world usage.
+- If the gallery has multiple angles including at least one lifestyle/model shot → PASS.
 
-STEP 2 (What counts as customer photos - PASS):
-- A visible grid/carousel of thumbnail images uploaded by customers in the review section
-- Individual review cards that each contain a photo uploaded by the reviewer
-- A "Customer photos" / "Photos from reviews" / "Community photos" gallery section that actually SHOWS photos
-- UGC (user-generated content) galleries showing real customers using the product
-- Amazon-style "Reviews with images" section that displays actual photo thumbnails (not just a filter tab)
+STEP 2 — CHECK THE REVIEWS SECTION:
+- Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo, Okendo) with multiple text reviews from real customers + star ratings + verified badges → PASS (these are real customer social proof).
+- Any visible customer photo thumbnails inside review cards → PASS.
+- A "Community photos", "Customer photos", or "Photos from reviews" gallery showing photo thumbnails → PASS.
 
-STEP 3 (What does NOT count - FAIL):
-- A "Reviews with images" tab/button/filter (just a label, no actual photos displayed) → FAIL
-- Only professional product photos in the product image gallery → FAIL
-- Star rating icons, avatar icons, or decorative images in the review section → FAIL
-- Text-only reviews with no accompanying customer photos → FAIL
-- A review section with reviewer names/stars but no photo thumbnails → FAIL
+STEP 3 — WHAT DOES NOT PASS (very limited FAIL conditions):
+FAIL only if ALL of these are true simultaneously:
+- The product gallery has ZERO images showing a person (only plain white-background product shots with no model/lifestyle usage)
+- AND the page has zero customer review section of any kind
+- AND there are no UGC / community photo galleries
 
-STEP 4 (How to tell the difference):
-- FILTER TAB: looks like a clickable button/tab at the top of the reviews section, e.g. "All reviews | Reviews with images | Most recent". No photos are visible yet. → FAIL
-- ACTUAL PHOTOS: you can see actual image thumbnails (small square photos) either in a horizontal scroll gallery or inside individual review cards. → PASS
-
-STEP 5 (Final Verdict):
-- PASS: You can SEE actual customer photo thumbnails displayed on screen (not just a filter button)
-- PASS: You see a gallery of images uploaded by customers in the review/UGC section
-- FAIL: You only see a "Reviews with images" tab/filter button with no photos shown
-- FAIL: Only text reviews, star ratings, or product photos — no customer-uploaded photos visible
-- FAIL: Review section exists but contains no actual photo content
+STEP 4 — FINAL VERDICT:
+- PASS if gallery has ANY lifestyle/usage/model thumbnail → PASS
+- PASS if there is a verified review section with real customer names + ratings → PASS
+- PASS if there are customer photo thumbnails anywhere on the page → PASS
+- FAIL only if there is literally NO lifestyle imagery AND NO customer review section AND NO UGC photos
 
 CRITICAL: Do NOT mention "rating rule" in your response — this is the CUSTOMER PHOTOS rule.
 
 Examples:
-✅ PASS: "The screenshot shows a horizontal carousel of customer photo thumbnails in the review section below the product description. These are clearly customer-uploaded photos showing the product in use. The rule passes."
-✅ PASS: "Individual review cards each contain a photo uploaded by the reviewer, visible as small image thumbnails next to their review text. These are customer photos. The rule passes."
-❌ FAIL: "The review section has a 'Reviews with images' filter tab at the top, but no actual customer photo thumbnails are displayed on the page. The rule fails."
-❌ FAIL: "The page shows text-only reviews with star ratings and reviewer names, but no customer-uploaded photos are visible anywhere. The rule fails."
+✅ PASS: "The product gallery thumbnails include lifestyle images showing a person applying the serum to their face. These are usage/model photos showing the product in real-world context. The rule passes."
+✅ PASS: "The page features a verified customer reviews section (Trusted Shops) with multiple real customer text reviews, star ratings, and verified purchase badges. The rule passes."
+✅ PASS: "The screenshot shows customer photo thumbnails in the review section alongside reviewer names and star ratings. The rule passes."
+❌ FAIL: "The product gallery shows only white-background product-only shots with no model or lifestyle images. There is no customer review section and no UGC gallery of any kind. The rule fails."
 `
           } else if (isVideoTestimonialRule) {
             specialInstructions = `
@@ -3519,7 +3511,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
-          const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE - NOT THE RATING RULE!\n\nYou are receiving a SCREENSHOT IMAGE.You MUST look at this image carefully.\n\nLook specifically for: \n - Sections titled "Reviews with images" or "Customer photos"\n - Image galleries in review sections\n - Any images displayed in review sections\n\nCRITICAL: If you see ANY images in review sections(like "Reviews with images" section), the rule MUST PASS.\nReview section images = CUSTOMER PHOTOS(always pass).\n\nDO NOT mention rating, review score, or review count in your response.\nThis rule is ONLY about CUSTOMER PHOTOS, not ratings.\n\nNow analyze the screenshot image provided below: \n\n` : ''
+          const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
           const productTabsPrefix = isProductTabsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT TABS/ACCORDIONS RULE ⚠️⚠️⚠️\n\nTHIS IS THE ACCORDIONS RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nIn the screenshot, look for ACCORDION-LIKE UI:\n- Rows or labels such as "Product Details", "Ingredients", "How to Use", "Shipping & Delivery", "Return & Refund Policy"\n- Chevron icons (>, ▼, ▶) or arrows next to each label\n- Vertical list of section headers that look expandable/collapsible\n\nCRITICAL: If you SEE this pattern in the screenshot → you MUST output passed: true. Do NOT fail based on "Tabs/Accordions Found: None" in KEY ELEMENTS. Many sites build accordions with divs (no <details>), so KEY ELEMENTS miss them but the screenshot clearly shows accordions. When in doubt, trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
@@ -4198,9 +4190,23 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               reasonLower.includes('customer photo') ||
               reasonLower.includes('customer-uploaded') ||
               reasonLower.includes('customer review image') ||
+              reasonLower.includes('lifestyle') ||
+              reasonLower.includes('model') ||
+              reasonLower.includes('product in use') ||
+              reasonLower.includes('product being used') ||
+              reasonLower.includes('usage') ||
+              reasonLower.includes('trusted shops') ||
+              reasonLower.includes('trustpilot') ||
+              reasonLower.includes('verified review') ||
+              reasonLower.includes('verified customer') ||
+              reasonLower.includes('verified purchase') ||
+              reasonLower.includes('ugc') ||
+              reasonLower.includes('community photo') ||
               (reasonLower.includes('reviews with images') && reasonLower.includes('thumbnail')) ||
               (reasonLower.includes('reviews with images') && reasonLower.includes('carousel')) ||
-              (reasonLower.includes('reviews with images') && reasonLower.includes('gallery'))
+              (reasonLower.includes('reviews with images') && reasonLower.includes('gallery')) ||
+              (reasonLower.includes('gallery') && reasonLower.includes('person')) ||
+              (reasonLower.includes('thumbnail') && (reasonLower.includes('lifestyle') || reasonLower.includes('model') || reasonLower.includes('person')))
             )
 
             // Only force PASS when AI clearly says photos ARE present (not just mentions keywords in negative context)

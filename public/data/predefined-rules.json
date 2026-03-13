@@ -87,7 +87,7 @@
   {
     "id": "ugc-customer-photos",
     "title": "Show customer photos using the product",
-    "description": "Real customer photos should be featured on the product page to increase social proof, authenticity, and buyer confidence."
+    "description": "Customer or lifestyle photos showing the product in real use should be featured on the product page. PASS if ANY of the following are present: (1) Lifestyle or model images in the product gallery showing the product being used on a person (e.g. serum applied to face, worn clothing, held product); (2) A review section with customer-uploaded photo thumbnails or images inside review cards; (3) A UGC gallery, 'Community photos', or 'Photos from reviews' section; (4) A verified customer reviews section (Trustpilot, Trusted Shops, Loox, Yotpo) that contains review cards with photos or verified purchase badges alongside text and star ratings. Screenshot detection is the primary source — look at the gallery thumbnails and reviews section. FAIL only if the page has ZERO lifestyle/model/usage images AND zero customer review photos AND zero UGC section of any kind."
   },
   {
     "id": "video-testimonials",
