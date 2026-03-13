@@ -150,7 +150,7 @@ export function evaluateLazyLoadingRule(
   const noMedia = lazyResult.totalMediaCount === 0
   const passedFinal = noMedia ? false : lazyResult.detected
   const reason = passedFinal
-    ? `Lazy loading detected: YES. Lazy loaded media count: ${lazyResult.lazyLoadedCount}, total media: ${lazyResult.totalMediaCount}. ${lazyResult.examples.length ? `Examples: ${lazyResult.examples.slice(0, 3).join(', ')}.` : ''}`
+    ? 'Lazy loading found below the fold.'
     : noMedia
       ? 'No images or videos were found on the page. Product pages should include media with lazy loading for below-the-fold content.'
       : `Lazy loading detected: NO. Total media: ${lazyResult.totalMediaCount}. Add loading="lazy" or use data-src/lazyload for below-the-fold images and videos.`
@@ -304,7 +304,7 @@ export function evaluateShippingRule(
       passed: true,
       reason: evidence === 'A delivery date range or cutoff time is shown on the product page.'
         ? evidence
-        : `Delivery estimate is displayed on the product page: "${evidence}". Rule passes.`,
+        : evidence,
     }
   }
 
@@ -321,7 +321,7 @@ export function evaluateShippingRule(
     ruleTitle: rule.title,
     passed: true,
     reason: matchedText
-      ? `Delivery estimate is displayed on the product page: "${matchedText}". Rule passes.`
+      ? matchedText
       : 'A delivery date range or cutoff time is shown on the product page.',
   }
 }
