@@ -285,6 +285,12 @@ export async function POST(request: NextRequest) {
         waitUntil: 'networkidle0',
         timeout: 30000,
       })
+      // Wait for full JS/CSS hydration to complete before any rule scanning
+      // This ensures dynamically injected content (delivery dates, Shopify apps) is in the DOM
+      // for ALL rules — local and live environments behave the same
+      await page.waitForFunction(() => document.readyState === 'complete')
+      await new Promise((r) => setTimeout(r, 2000))
+      console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
       const settleMs = getSettleDelayMs()
@@ -837,42 +843,6 @@ export async function POST(request: NextRequest) {
         const text = (parent as HTMLElement).innerText || parent.textContent || ''
         return text.substring(0, 500)
       })
-
-      // Wait for network to settle and JS hydration to complete before evaluating delivery estimate
-      // (Vercel cold-starts and Shopify hydration can delay delivery date injection by 1-2s)
-      try {
-        await (page as any).waitForNetworkIdle({ timeout: 3000 })
-      } catch {
-        // Not available or timed out — proceed with fixed delay
-      }
-      await new Promise(r => setTimeout(r, 1500))
-
-      // Scroll to page bottom to trigger lazy-rendered delivery estimate content
-      // (Shopify apps inject delivery dates after hydration; live environments need extra wait)
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-      await new Promise(r => setTimeout(r, 500))
-
-      // Wait up to 5s for any async-rendered delivery estimate text to appear in the DOM
-      // (e.g. Shopify apps that inject delivery dates via fetch/XHR after page load)
-      try {
-        await page.waitForFunction(
-          () => {
-            const deliveryKeywords = [
-              /get\s+it\s+(by|between|on)\s+/i,
-              /delivered\s+(by|between)\s+/i,
-              /order\s+now\s+and\s+get\s+it/i,
-              /\d+[-–]\d+\s+(business|working)\s+days?/i,
-              /estimated\s+delivery/i,
-              /ships?\s+(in|within)\s+\d+/i,
-            ]
-            const bodyText = document.body.innerText || ''
-            return deliveryKeywords.some(p => p.test(bodyText))
-          },
-          { timeout: 5000 }
-        )
-      } catch {
-        // Timeout is fine — page just doesn't have delivery text, proceed normally
-      }
 
       // Get shipping time context: find ALL Add to Cart on page, then for each get text in zone above/below (full DOM, visual zone)
       shippingTimeContext = await page.evaluate(() => {
