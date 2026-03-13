@@ -145,6 +145,39 @@ function extractCustomerPhotoSignalsFromHtml(rawHtml: string): { found: boolean;
   return { found: evidence.length > 0, evidence }
 }
 
+function addBusinessDays(start: Date, businessDays: number): Date {
+  const date = new Date(start)
+  let added = 0
+  while (added < businessDays) {
+    date.setDate(date.getDate() + 1)
+    const day = date.getDay()
+    if (day !== 0 && day !== 6) added += 1
+  }
+  return date
+}
+
+function extractDeliveryEstimateFromHtml(rawHtml: string): string | null {
+  if (!rawHtml) return null
+
+  const deliveryWindowMatch = rawHtml.match(/deliveryWindow\s*=\s*"(\d+)-(\d+)"/i)
+  if (!deliveryWindowMatch) return null
+
+  const minDays = parseInt(deliveryWindowMatch[1], 10)
+  const maxDays = parseInt(deliveryWindowMatch[2], 10)
+  if (!Number.isFinite(minDays) || !Number.isFinite(maxDays)) return null
+
+  const now = new Date()
+  const fromDate = addBusinessDays(now, minDays)
+  const toDate = addBusinessDays(now, maxDays)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+
+  return `Order now and get it between ${formatter.format(fromDate)} and ${formatter.format(toDate)}.`
+}
+
 // Helper: detect lazy loading usage on the current page.
 // Counts elements with loading="lazy" and logs the result to the server console.
 async function logLazyLoadingUsage(page: any): Promise<number> {
@@ -1044,13 +1077,10 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Simple phrase matching: catch "free shipping", "free delivery", "order now and get it between" etc.
+          // Simple phrase matching: catch delivery-estimate phrases only, not shipping promos/offers.
           if (!hasDeliveryDate && !hasCountdown) {
             const lowerText = fullText.toLowerCase()
             const simpleDeliveryPhrases = [
-              'free shipping',
-              'free express shipping',
-              'free delivery',
               'delivered between',
               'delivered by',
               'arrives by',
@@ -1059,8 +1089,6 @@ export async function POST(request: NextRequest) {
               'order now and get it',
               'delivery by',
               'ships by',
-              'delivery estimate',
-              'shipping over',
               'delivery date',
             ]
             const matchedPhrase = simpleDeliveryPhrases.find(p => lowerText.includes(p))
@@ -2619,6 +2647,7 @@ export async function POST(request: NextRequest) {
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
         selectedVariant = extractSelectedVariantFromHtml(rawHtml)
+        const fallbackDeliveryEstimate = extractDeliveryEstimateFromHtml(rawHtml)
         const fallbackCustomerPhotoSignals = extractCustomerPhotoSignalsFromHtml(rawHtml)
         if (fallbackCustomerPhotoSignals.found) {
           customerPhotoFound = true
@@ -2692,6 +2721,19 @@ export async function POST(request: NextRequest) {
           const matchedText = rawHtml.match(galleryMatch)?.[0] || 'gallery navigation HTML marker'
           galleryNavDOMFound = true
           galleryNavDOMEvidence = `HTML pattern: ${matchedText}`
+        }
+
+        if (fallbackDeliveryEstimate) {
+          shippingTimeContext = {
+            ctaFound: false,
+            ctaText: 'N/A',
+            ctaVisibleWithoutScrolling: false,
+            shippingInfoNearCTA: fallbackDeliveryEstimate,
+            hasCountdown: false,
+            hasDeliveryDate: true,
+            shippingText: fallbackDeliveryEstimate,
+            allRequirementsMet: true,
+          }
         }
 
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
@@ -4030,7 +4072,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!analysis.passed && hasAddToCartInPage && failedForProminenceOrContrast && didNotFailForPosition) {
               console.log(`CTA prominence rule: Page has Add to Cart; failure was prominence/contrast only (likely hydration). Forcing PASS.`)
               analysis.passed = true
-              analysis.reason = `The 'Add to Cart' button is present and is the main CTA. It may render with full styling (e.g. solid color) after page load or refresh. Ensure it uses a solid, high-contrast color and stays above the fold.`
+              analysis.reason = `The 'Add to Cart' button is present and is the main CTA. It may render with full styling (e.g. solid color) after page load or refresh.`
             }
             // Some false negatives mention "not visible above the fold" even when DOM confirms the CTA is in the initial viewport.
             if (!analysis.passed && hasAddToCartInPage && ctaVisibleWithoutScrolling && (failedForProminenceOrContrast || reasonLower.includes('not visible above the fold'))) {
@@ -4534,7 +4576,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.log(`Delivery estimate detected in DOM text: "${shippingTimeContext.shippingText}". Forcing PASS.`)
               analysis.passed = true
               analysis.reason = shippingTimeContext.shippingText && shippingTimeContext.shippingText !== 'None'
-                ? `Delivery estimate is displayed on the product page: "${shippingTimeContext.shippingText.trim()}". Rule passes.`
+                ? shippingTimeContext.shippingText.trim()
                 : `A delivery date range or time estimate is shown on the product page. Rule passes.`
             }
             // Override 2: Screenshot / visible page text contains simple delivery phrases (primary screenshot detection)
