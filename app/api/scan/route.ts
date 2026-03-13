@@ -2589,6 +2589,9 @@ export async function POST(request: NextRequest) {
         const detResult = tryEvaluateDeterministic(rule, {
           lazyLoading: lazyLoadingResult ?? buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] }),
           keyElementsString: keyElements ?? '',
+          fullVisibleText: fullVisibleText ?? '',
+          shippingTime: shippingTimeContext,
+          stickyCTA: stickyCTAContext,
         })
         if (detResult) {
           results.push(detResult)
@@ -4474,7 +4477,18 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           if (mentionedOtherRules.length > 0 && !currentRuleKeywords.some(ck => reasonLower.includes(ck))) {
             console.warn(`Warning: Rule ${rule.id} reason may be for another rule. Mentioned: ${mentionedOtherRules.join(', ')}`)
-            // Don't change the reason, just log - but ensure it's for the right rule
+            const repairedDetResult = tryEvaluateDeterministic(rule, {
+              lazyLoading: lazyLoadingResult ?? buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] }),
+              keyElementsString: keyElements ?? '',
+              fullVisibleText: fullVisibleText ?? '',
+              shippingTime: shippingTimeContext,
+              stickyCTA: stickyCTAContext,
+            })
+            if (repairedDetResult) {
+              analysis.passed = repairedDetResult.passed
+              analysis.reason = repairedDetResult.reason
+              console.log(`Repaired mixed reason for rule ${rule.id} using deterministic fallback.`)
+            }
           }
 
           // Create result object with explicit rule identification

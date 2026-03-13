@@ -63,6 +63,14 @@ export interface PageSnapshot {
   } | null
   /** CTA context string */
   ctaContext: string
+  /** Sticky Add to Cart context across desktop and mobile */
+  stickyCTA: {
+    desktopSticky: boolean
+    mobileSticky: boolean
+    desktopEvidence: string
+    mobileEvidence: string
+    anySticky: boolean
+  } | null
 }
 
 export interface ScanRule {
