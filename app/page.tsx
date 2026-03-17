@@ -81,6 +81,7 @@ export default function Home() {
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
+  const [removedSteps, setRemovedSteps] = useState<Set<number>>(new Set())
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -150,6 +151,19 @@ export default function Home() {
       setMounted(0)
     }
   }, [progress, showAnalyze])
+
+  // When a step completes (mounted advances), show checkmark briefly then remove it
+  useEffect(() => {
+    if (mounted > 0) {
+      const justCompleted = mounted - 1
+      if (!removedSteps.has(justCompleted)) {
+        const t = setTimeout(() => {
+          setRemovedSteps(prev => new Set([...prev, justCompleted]))
+        }, 700)
+        return () => clearTimeout(t)
+      }
+    }
+  }, [mounted])
 
   const loadRules = async () => {
     try {
@@ -750,28 +764,25 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Steps - loading strips (visible dark cards with white text) */}
+                {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
                 <p className="text-sm font-medium text-white mb-3">Website URL:</p>
                 <div className="space-y-3">
                   <AnimatePresence mode="popLayout">
                     {analysisSteps
                       .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
-                      .filter(({ index }) => {
-                        const isCompleted = index < mounted
-                        const shouldAnimateOut = isCompleted && mounted >= index + 2
-                        return !shouldAnimateOut
-                      })
+                      .filter(({ index }) => !removedSteps.has(index))
                       .map(({ title, index, id }) => {
                         const isCompleted = index < mounted
                         const isActive = index === mounted
+                        const isPending = index > mounted
 
                         return (
                           <motion.div
                             key={id}
                             initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
+                            animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
                             exit={{ x: 200, opacity: 0 }}
-                            transition={{ duration: 0.3 }}
+                            transition={{ duration: 0.35 }}
                             className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
                             {isCompleted ? (
@@ -779,12 +790,12 @@ export default function Home() {
                                 <Check className="w-3.5 h-3.5 text-white" />
                               </div>
                             ) : (
-                              <Cog className={`w-5 h-5 shrink-0 ${isActive ? 'text-gray-400  animate-spin' : 'text-gray-400'}`} />
+                              <Cog className={`w-5 h-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
                             )}
-                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
                               {title}
                             </span>
-                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
+                            {isCompleted && <span className="text-green-600 text-sm font-medium">✓ Done</span>}
                             {isActive && (
                               <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
                                 Analyzing...

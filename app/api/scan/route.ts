@@ -3840,6 +3840,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             topP: 0.1,
             seed: 42,
             stream: false,
+            responseFormat: { type: 'json_object' },
             // No reasoning for consistent results; reasoning causes same URL to get different pass/fail counts
           });
           const rawContent = (chatCompletion as any)?.choices?.[0]?.message?.content ?? (chatCompletion as any)?.message?.content ?? (chatCompletion as any)?.content
