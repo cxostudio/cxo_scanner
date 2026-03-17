@@ -56,14 +56,28 @@ export async function detectCustomerMedia(
     // ─────────────────────────────────────────────────────────────
 
     // 1. Explicit UGC video sections (Shopify themes)
-    const ugcVideoEls = document.querySelectorAll(
+    const ugcVideoEls = Array.from(document.querySelectorAll(
       '[class*="ugc-video"], [class*="ugc_video"], [class*="ugcvideo"], ' +
       '[class*="video-testimonial"], [class*="testimonial-video"], ' +
       '[class*="customer-video"], [class*="review-video"], ' +
       '[class*="video-review"], [class*="videoreview"]'
-    )
+    )).filter(el => {
+      const hasVideo = !!el.querySelector('video')
+      const hasPlayBtn = !!el.querySelector('[aria-label*="play" i], [class*="play-button"], [class*="play_button"], [class*="play-icon"]')
+      const isVideoEl = el.tagName.toLowerCase() === 'video'
+      return hasVideo || hasPlayBtn || isVideoEl
+    })
     if (ugcVideoEls.length > 0) {
-      videoEvidence.push(`UGC video elements: ${ugcVideoEls.length} (classes: ${Array.from(ugcVideoEls).slice(0,3).map(e => (e.className||'').toString().substring(0,40)).join(', ')})`)
+      videoEvidence.push(`UGC video elements: ${ugcVideoEls.length} (classes: ${ugcVideoEls.slice(0,3).map(e => (e.className||'').toString().substring(0,40)).join(', ')})`)
+    }
+
+    // 1b. <video> with poster URL indicating UGC/preview (Spacegoods-style)
+    const videosWithPreviewPoster = Array.from(document.querySelectorAll('video')).filter(v => {
+      const poster = (v.getAttribute('poster') || '').toLowerCase()
+      return poster.includes('preview_images') || poster.includes('thumbnail') || poster.includes('ugc')
+    })
+    if (videosWithPreviewPoster.length > 0) {
+      videoEvidence.push(`UGC video posters (preview_images/thumbnail): ${videosWithPreviewPoster.length}`)
     }
 
     // 2. <video> tags inside review sections
@@ -106,30 +120,43 @@ export async function detectCustomerMedia(
       videoEvidence.push('Loox video review widget detected')
     }
 
-    // 7. Swiper/carousel containing actual video content in review sections
-    // Requires real video elements or UGC video classes — NOT just carousel play/navigation buttons
+    // 7. Swiper/carousel containing video content — either inside review section OR sibling of "customers are saying" type heading
     const swiperInReview = Array.from(document.querySelectorAll('[class*="swiper"], [class*="carousel"], [class*="slider"]'))
       .filter(el => {
-        if (!isInsideReviewSection(el)) return false
-        // Must contain actual video evidence, not just navigation arrows with "play" class
         const hasVideo = !!el.querySelector('video')
         const hasUgc = !!el.querySelector('[class*="ugc-video"], [class*="ugc_video"], [class*="video-testimonial"], [class*="review-video"]')
         const hasVideoIframe = Array.from(el.querySelectorAll('iframe')).some(f => {
           const src = (f.src || f.getAttribute('data-src') || '').toLowerCase()
           return /youtube|vimeo|loom|wistia/.test(src)
         })
-        // "play" class alone is not enough — must have actual video or UGC element
-        return hasVideo || hasUgc || hasVideoIframe
+        if (!hasVideo && !hasUgc && !hasVideoIframe) return false
+        if (isInsideReviewSection(el)) return true
+        // Spacegoods pattern: swiper and "What over X customers are saying" heading are siblings in same parent
+        const parent = el.parentElement
+        if (parent) {
+          const siblings = Array.from(parent.children)
+          const hasSiblingHeading = siblings.some(sib => {
+            if (sib === el) return false
+            const cls = (sib.className && typeof sib.className === 'string' ? sib.className : '').toLowerCase()
+            const id = (sib.id || '').toLowerCase()
+            const text = (sib.textContent || '').toLowerCase().substring(0, 120)
+            return /ugc|review|testimonial|customer|saying/i.test(cls + id) ||
+              (/customer|review|testimonial|saying|what over/i.test(text) && sib.children.length < 15)
+          })
+          if (hasSiblingHeading) return true
+        }
+        return false
       })
     if (swiperInReview.length > 0) {
-      videoEvidence.push(`Video carousel/swiper in review section: ${swiperInReview.length}`)
+      videoEvidence.push(`Video carousel/swiper in customer section: ${swiperInReview.length}`)
     }
 
-    // 8. Text-based detection: "video" near review headings
+    // 8. Text-based detection: "video" or "customers are saying" near review headings
     const allSectionHeadings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5'))
     const videoHeadings = allSectionHeadings.filter(h => {
       const t = (h.textContent || '').toLowerCase()
-      return /video\s*(testimonial|review|customer|from customer)|customer\s*(video|review.*video)/i.test(t)
+      return /video\s*(testimonial|review|customer|from customer)|customer\s*(video|review.*video)/i.test(t) ||
+        /what over.*customers?\s+are\s+saying|customers?\s+are\s+saying/i.test(t)
     })
     if (videoHeadings.length > 0) {
       videoEvidence.push(`Video testimonial headings: "${videoHeadings.map(h => h.textContent?.trim()).join('", "')}"`)

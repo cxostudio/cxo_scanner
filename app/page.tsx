@@ -748,7 +748,7 @@ export default function Home() {
                 )}
 
                 {/* Debug: View full screenshot the AI is receiving */}
-                {websiteScreenshot && (
+                {/* {websiteScreenshot && (
                   <div className="mb-4 flex justify-center">
                     <button
                       onClick={() => {
@@ -762,7 +762,7 @@ export default function Home() {
                       🔍 View full screenshot AI is seeing
                     </button>
                   </div>
-                )}
+                )} */}
 
                 {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
                 <p className="text-sm font-medium text-white mb-3">Website URL:</p>
@@ -795,7 +795,7 @@ export default function Home() {
                             <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
                               {title}
                             </span>
-                            {isCompleted && <span className="text-green-600 text-sm font-medium">✓ Done</span>}
+                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
                             {isActive && (
                               <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
                                 Analyzing...
