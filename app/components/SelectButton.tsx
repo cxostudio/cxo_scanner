@@ -1,3 +1,7 @@
+'use client'
+
+import { motion } from 'framer-motion'
+
 interface SelectButtonProps {
   label: string
   value: string
@@ -14,18 +18,23 @@ export default function SelectButton({
   const isSelected = selectedValue === value
 
   return (
-    <button
+    <motion.button
+      type="button"
       onClick={() => onClick(value)}
-      className={`w-full bg-white rounded-4xl p-[18px] my-[13px] text-center border transition cursor-pointer ${
+      className={`w-full bg-white rounded-4xl  mt-[13px] text-center border h-[50px] cursor-pointer ${
         isSelected
-          ? 'border-black border-2'
+          ? 'border-[#09090B] border-2'
           : 'border-[#E4E4E7]'
       }`}
+      whileHover={{ scale: 1.015 }}
+      whileTap={{ scale: 0.985 }}
+      transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
     >
-      <p className="text-sm font-semibold text-black">
+      
+      <p className="text-[#09090B] text-center  text-[14.8px] font-semibold leading-[28px] space-x-[0.48px]">
         {label}
       </p>
-    </button>
+    </motion.button>
   )
 }
 
