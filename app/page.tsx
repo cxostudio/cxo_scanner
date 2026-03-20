@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
+import emailjs from '@emailjs/browser'
 
 interface Rule {
   id: string
@@ -29,6 +30,10 @@ interface BatchData {
   totalBatches: number
   timestamp: number
 }
+
+const EMAILJS_SERVICE_ID = 'service_j08d36o'
+const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
+const EMAILJS_PUBLIC_KEY = 'gnuaIRx_bs0IdMu7r'
 
 const RuleSchema = z.object({
   id: z.string().min(1, 'Rule ID is required'),
@@ -86,17 +91,17 @@ export default function Home() {
 
   // Step 1 buttons data
   const step1Buttons = [
-    { value: 'low-conversion-rates', label: 'Low conversion rates' },
-    { value: 'low-average-order-value', label: 'Low average order value' },
-    { value: 'both', label: 'Both' },
+    { value: 'Low Conversion Rates', label: 'Low conversion rates' },
+    { value: 'Low Average Order Value', label: 'Low average order value' },
+    { value: 'Both', label: 'Both' },
   ]
 
   // Step 2 buttons data
   const step2Buttons = [
-    { value: 'under-10k', label: 'Under €10,000 / month' },
-    { value: '10k-50k', label: '€10,000–€50,000 / month' },
-    { value: '50k-100k', label: '€50,000–€100,000 / month' },
-    { value: 'over-100k', label: 'Over €100,000 / month' },
+    { value: 'Under €10,000 / month', label: 'Under €10,000 / month' },
+    { value: '€10,000–€50,000 / month', label: '€10,000–€50,000 / month' },
+    { value: '€50,000–€100,000 / month', label: '€50,000–€100,000 / month' },
+    { value: 'Over €100,000 / month', label: 'Over €100,000 / month' },
   ]
 
   const handleNext = () => {
@@ -438,6 +443,43 @@ export default function Home() {
         validUrl = 'https://' + validUrl
       }
 
+      const browser = navigator.userAgent
+      const screenSize = `${window.screen.width}x${window.screen.height}`
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'
+      const browserData = [
+        `ua=${browser}`,
+        `platform=${navigator.platform}`,
+        `language=${navigator.language}`,
+        `screen=${screenSize}`,
+        `timezone=${timeZone}`,
+      ].join(' | ')
+
+      let ipAddress = 'Unknown'
+      try {
+        const ipResponse = await fetch('https://api.ipify.org?format=json')
+        if (ipResponse.ok) {
+          const ipJson = await ipResponse.json()
+          ipAddress = ipJson?.ip || 'Unknown'
+        }
+      } catch (ipErr) {
+        console.warn('Failed to fetch client IP:', ipErr)
+      }
+
+      // EmailJS-ready payload values
+      const level = selectedChallenge ?? ''
+      const price = selectedRevenue ?? ''
+      const emailJsPayloadBase = {
+        level,
+        price,
+        url: validUrl,
+        email: emailTrimmed,
+        ip_address: ipAddress,
+        browser,
+        screen_size: screenSize,
+        time_zone: timeZone,
+        browser_data: browserData,
+      }
+
       // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
       setProgress(null)
@@ -500,6 +542,47 @@ export default function Home() {
       // Now start batch processing after page has loaded
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
+
+      // Send final scan summary to EmailJS (after results are ready)
+      let passResult: string | number = 'N/A'
+      let failResult: string | number = 'N/A'
+      try {
+        const stored = localStorage.getItem('scanResults')
+        if (stored) {
+          const parsedResults = z.array(z.object({
+            ruleId: z.string(),
+            ruleTitle: z.string(),
+            passed: z.boolean(),
+            reason: z.string(),
+          })).parse(JSON.parse(stored))
+          const passCount = parsedResults.filter((r) => r.passed).length
+          const failCount = parsedResults.length - passCount
+          passResult = `${passCount}/${parsedResults.length}`
+          failResult = `${failCount}/${parsedResults.length}`
+        }
+      } catch (summaryErr) {
+        console.warn('Could not compute pass/fail summary for EmailJS:', summaryErr)
+      }
+
+      const emailJsPayload = {
+        ...emailJsPayloadBase,
+        pass_result: passResult,
+        fail_result: failResult,
+      }
+
+      // Non-blocking email send
+      emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        emailJsPayload,
+        { publicKey: EMAILJS_PUBLIC_KEY }
+      )
+        .then((response) => {
+          console.log('EmailJS SUCCESS:', response.status, response.text)
+        })
+        .catch((err) => {
+          console.error('EmailJS FAILED:', err)
+        })
 
       toast.success('Scan completed successfully!')
       router.push('/scanner')
