@@ -66,7 +66,7 @@ const URLSchema = z.string()
     }
   }, 'Please enter a valid website URL (e.g. https://example.com or www.mystore.com)')
 
-  const EmailSchema = z.string()
+const EmailSchema = z.string()
   .min(1, 'Email is required')
   .email('Please enter a valid email address')
 
@@ -232,97 +232,117 @@ export default function Home() {
     return batches
   }
 
+  const BATCH_MAX_ATTEMPTS = 2 // initial run + one repeat if any error occurs
+
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
     setProgress({ current: 0, total: batches.length })
 
+    const ScanResultsSchema = z.array(z.object({
+      ruleId: z.string(),
+      ruleTitle: z.string(),
+      passed: z.boolean(),
+      reason: z.string(),
+    }))
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
 
-      try {
-        setProgress({ current: i + 1, total: batches.length })
+      setProgress({ current: i + 1, total: batches.length })
 
-        const response = await fetch('/api/scan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: batch.url,
-            rules: batch.rules,
-            captureScreenshot: true, // Capture screenshot for every batch to show progress
-          }),
-        })
+      let batchSucceeded = false
+      let lastBatchError: unknown = null
 
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || `Failed to scan batch ${i + 1}`)
-        }
+      for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+        try {
+          const response = await fetch('/api/scan', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              url: batch.url,
+              rules: batch.rules,
+              captureScreenshot: true, // Capture screenshot for every batch to show progress
+            }),
+          })
 
-        const data = await response.json()
-
-        const ScanResultsSchema = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        }))
-
-        const batchResults = ScanResultsSchema.parse(data.results)
-
-        // Remove duplicates before adding (check by ruleId)
-        const existingRuleIds = new Set(allResults.map(r => r.ruleId))
-        const newResults = batchResults.filter(result => {
-          if (existingRuleIds.has(result.ruleId)) {
-            console.warn(`Duplicate ruleId found: ${result.ruleId}, skipping duplicate`)
-            return false
+          if (!response.ok) {
+            let message = `Failed to scan batch ${i + 1}`
+            try {
+              const errorData = await response.json()
+              message = (errorData as { error?: string }).error || message
+            } catch {
+              /* ignore JSON parse errors */
+            }
+            throw new Error(message)
           }
-          existingRuleIds.add(result.ruleId)
-          return true
-        })
 
-        allResults.push(...newResults)
+          const data = await response.json()
+          const batchResults = ScanResultsSchema.parse(data.results)
 
-        // Store screenshot from every batch to show what AI is seeing
-        // Store in both state and sessionStorage for results page
-        if (data.screenshot) {
-          console.log(`Screenshot received from batch ${i + 1}, length: ${data.screenshot.length}`)
-          setWebsiteScreenshot(data.screenshot)
-          setCurrentBatchNumber(i + 1)
-          // Store in sessionStorage for results page (not localStorage due to size limits)
-          try {
-            sessionStorage.setItem('lastScreenshot', data.screenshot)
-            console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
-          } catch (e) {
-            console.warn('Could not store screenshot in sessionStorage:', e)
+          // Remove duplicates before adding (check by ruleId)
+          const existingRuleIds = new Set(allResults.map(r => r.ruleId))
+          const newResults = batchResults.filter(result => {
+            if (existingRuleIds.has(result.ruleId)) {
+              console.warn(`Duplicate ruleId found: ${result.ruleId}, skipping duplicate`)
+              return false
+            }
+            existingRuleIds.add(result.ruleId)
+            return true
+          })
+
+          allResults.push(...newResults)
+
+          // Store screenshot from every batch to show what AI is seeing
+          // Store in both state and sessionStorage for results page
+          if (data.screenshot) {
+            console.log(`Screenshot received from batch ${i + 1}, length: ${data.screenshot.length}`)
+            setWebsiteScreenshot(data.screenshot)
+            setCurrentBatchNumber(i + 1)
+            try {
+              sessionStorage.setItem('lastScreenshot', data.screenshot)
+              console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
+            } catch (e) {
+              console.warn('Could not store screenshot in sessionStorage:', e)
+            }
+          } else {
+            console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
           }
-        } else {
-          console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
+
+          batchSucceeded = true
+          break
+        } catch (err) {
+          lastBatchError = err
+          console.error(`Error processing batch ${i + 1} (attempt ${attempt}/${BATCH_MAX_ATTEMPTS}):`, err)
+          if (attempt < BATCH_MAX_ATTEMPTS) {
+            console.warn(`Retrying batch ${i + 1} once after error...`)
+            await new Promise((r) => setTimeout(r, 1500))
+          }
         }
+      }
 
-
-        const remainingBatches = batches.slice(i + 1)
-        if (remainingBatches.length > 0) {
-          localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
-        } else {
-          localStorage.removeItem('scanBatches')
-        }
-
-        localStorage.setItem('scanResults', JSON.stringify(allResults))
-
-      } catch (err) {
-        console.error(`Error processing batch ${i + 1}:`, err)
-        // If any batch fails, mark its rules as failed with the error message
+      if (!batchSucceeded) {
+        console.error(`Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`)
         batch.rules.forEach(rule => {
           allResults.push({
             ruleId: rule.id,
             ruleTitle: rule.title,
             passed: false,
-            reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
           })
         })
       }
+
+      const remainingBatches = batches.slice(i + 1)
+      if (remainingBatches.length > 0) {
+        localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
+      } else {
+        localStorage.removeItem('scanBatches')
+      }
+
+      localStorage.setItem('scanResults', JSON.stringify(allResults))
     }
 
     try {
