@@ -71,6 +71,14 @@ export interface PageSnapshot {
     mobileEvidence: string
     anySticky: boolean
   } | null
+  /** Product gallery thumbnails (small previews) — checked at desktop and mobile widths */
+  thumbnailGallery: {
+    desktopThumbnails: boolean
+    mobileThumbnails: boolean
+    desktopEvidence: string
+    mobileEvidence: string
+    anyThumbnails: boolean
+  } | null
 }
 
 export interface ScanRule {

@@ -65,6 +65,63 @@ export function isStickyCartRule(rule: ScanRule): boolean {
   )
 }
 
+export function isThumbnailGalleryRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  return (
+    rule.id === 'image-thumbnails' ||
+    (t.includes('thumbnail') && t.includes('gallery'))
+  )
+}
+
+/** Before-and-after / comparison imagery rule (not image-background "before/after" mentions). */
+export function isBeforeAfterRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  return (
+    rule.id === 'image-before-after' ||
+    (t.includes('before') && t.includes('after') && (t.includes('image') || d.includes('image'))) ||
+    d.includes('before-and-after') ||
+    d.includes('before and after')
+  )
+}
+
+/**
+ * True only when the product category plausibly expects visual transformation proof
+ * (skin/hair/body aesthetic results, etc.). Default false — strict to avoid false positives.
+ */
+export function expectsVisualTransformationContext(text: string, url: string): boolean {
+  const combined = `${text}\n${url}`.toLowerCase()
+  const head = combined.slice(0, 8000)
+
+  const strongPositive = [
+    /\b(?:anti-aging|anti age|anti-acne|anti acne|wrinkle|fine line|dark spot|hyperpigmentation|melasma|age spot|sun spot|blemish|acne|rosacea|eczema|psoriasis|blackhead|whitehead|pore minim)\b/i,
+    /\b(?:facial serum|face serum|eye serum|night cream|day cream|SPF\s*\d+|moisturizer|moisturiser|cleanser|toner|essence|face cream|exfoliant|chemical peel|sunscreen)\b/i,
+    /\b(?:retinol|retinoid|tretinoin|adapalene|benzoyl|salicylic|glycolic|lactic acid|niacinamide|azelaic|peptide)\b/i,
+    /\b(?:body contour|cellulite|stretch mark|scar (?:treatment|cream|gel)|teeth whitening|tooth whitening|whitening strips)\b/i,
+    /\b(?:hair loss|alopecia|regrowth|lash serum|brow serum|thinning hair)\b/i,
+    /\b(?:weight loss|fat loss|slimming)\b.*\b(?:program|plan|transform|results?)\b/i,
+  ]
+
+  if (!strongPositive.some((p) => p.test(head))) return false
+
+  const excludeUnlessSkinCosmetic = [
+    /\b(?:coffee|espresso|tea|latte|matcha|chai|cappuccino|brew|mug|tumbler|flavou?r|decaf)\b/i,
+    /\b(?:protein powder|meal replacement|snack bar|gummy vitamin|multivitamin)\b/i,
+    /\b(?:book|headphone|phone case|laptop|charger|furniture|wine|beer|spirit|vodka)\b/i,
+  ]
+
+  const hasSkinCosmeticContext =
+    /\b(?:skin|face|serum|cream|spf|moistur|cleanser|derma|cosmetic|acne|wrinkle|blemish|body care|hair care|scalp|lip care|eye care|toner|exfoliant)\b/i.test(
+      head
+    )
+
+  if (excludeUnlessSkinCosmetic.some((p) => p.test(head)) && !hasSkinCosmeticContext) {
+    return false
+  }
+
+  return true
+}
+
 export function isVariantRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -268,6 +325,63 @@ export function evaluateStickyCartRule(
   }
 }
 
+function uniqueEvidenceParts(...parts: (string | undefined)[]): string {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const p of parts) {
+    const t = (p || '').trim()
+    if (!t || seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+  }
+  return out.join('; ')
+}
+
+export function evaluateThumbnailGalleryRule(
+  rule: ScanRule,
+  thumbnailGallery: PageSnapshot['thumbnailGallery']
+): ScanResult | null {
+  if (!thumbnailGallery) return null
+
+  const { desktopThumbnails, mobileThumbnails, desktopEvidence, mobileEvidence } = thumbnailGallery
+
+  if (desktopThumbnails && mobileThumbnails) {
+    const detail = uniqueEvidenceParts(desktopEvidence, mobileEvidence) || 'DOM check'
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `Product image gallery thumbnails are present on both desktop and mobile (${detail}). Users can browse gallery images via small previews.`,
+    }
+  }
+
+  if (desktopThumbnails) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `Thumbnails are available in the product gallery on desktop${desktopEvidence ? ` (${desktopEvidence})` : ''}. The rule passes when the desktop layout shows thumbnail previews, even if mobile uses a different pattern (e.g. swipe only).`,
+    }
+  }
+
+  if (mobileThumbnails) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `Thumbnails are available in the product gallery on mobile${mobileEvidence ? ` (${mobileEvidence})` : ''}. The rule passes because at least one viewport shows thumbnail previews.`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'No product gallery thumbnails were detected on desktop or mobile. The rule fails when neither viewport shows a thumbnail strip or row of small preview images for the gallery.',
+  }
+}
+
 export function evaluateVariantRule(
   rule: ScanRule,
   keyElementsString: string,
@@ -353,6 +467,9 @@ export function tryEvaluateDeterministic(
     fullVisibleText: string
     shippingTime: PageSnapshot['shippingTime']
     stickyCTA: PageSnapshot['stickyCTA']
+    thumbnailGallery: PageSnapshot['thumbnailGallery']
+    /** Precomputed: expectsVisualTransformationContext(...) */
+    beforeAfterTransformationExpected: boolean
   }
 ): ScanResult | null {
   if (isLazyLoadingRule(rule)) {
@@ -373,6 +490,22 @@ export function tryEvaluateDeterministic(
   if (isStickyCartRule(rule)) {
     const stickyResult = evaluateStickyCartRule(rule, context.stickyCTA)
     if (stickyResult !== null) return stickyResult
+  }
+  if (isThumbnailGalleryRule(rule)) {
+    const thumbResult = evaluateThumbnailGalleryRule(rule, context.thumbnailGallery)
+    if (thumbResult !== null) return thumbResult
+  }
+  if (isBeforeAfterRule(rule)) {
+    if (!context.beforeAfterTransformationExpected) {
+      return {
+        ruleId: rule.id,
+        ruleTitle: rule.title,
+        passed: true,
+        reason:
+          'This product category does not require before-and-after images (no visual transformation is the primary purchase expectation). The rule passes as not applicable.',
+      }
+    }
+    return null
   }
   if (isColorRule(rule)) {
     return evaluateColorRule(rule, context.keyElementsString)
