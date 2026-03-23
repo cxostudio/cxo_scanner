@@ -272,6 +272,36 @@ export async function detectCustomerMedia(
       }
     }
 
+    // 10b. "Reviews with images" / "5 star reviews" blocks (common in third-party widgets)
+    // Some widgets do not expose review-specific classes but do expose strong headings + image rows.
+    const imageReviewHeadings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,div,span,p'))
+      .filter(el => {
+        const t = (el.textContent || '').toLowerCase().replace(/\s+/g, ' ').trim()
+        if (!t || t.length > 120) return false
+        return (
+          /reviews?\s+with\s+images?/.test(t) ||
+          /thousands?\s+of\s+5\s*star\s+reviews?/.test(t) ||
+          /5\s*star\s+reviews?/.test(t)
+        )
+      })
+      .slice(0, 20)
+    for (const heading of imageReviewHeadings) {
+      const container =
+        heading.closest('section, [class*="section"], [class*="block"], [class*="review"], [class*="widget"]') ||
+        heading.parentElement
+      if (!container) continue
+      const imgs = Array.from(container.querySelectorAll('img')).filter(img => {
+        const rect = img.getBoundingClientRect()
+        const w = (img as HTMLImageElement).naturalWidth || rect.width
+        const h = (img as HTMLImageElement).naturalHeight || rect.height
+        return Math.max(w, h, rect.width, rect.height) >= 56
+      })
+      if (imgs.length >= 4) {
+        const hText = (heading.textContent || '').trim().substring(0, 60)
+        photoEvidence.push(`"${hText}" section shows customer image thumbnails: ${imgs.length}`)
+      }
+    }
+
     // 11. Trusted Shops widget (common European review platform)
     const trustedShopsEls = document.querySelectorAll(
       '[class*="trusted-shops"], [class*="trustedshops"], [id*="trusted-shops"], [id*="trustedshops"], ' +

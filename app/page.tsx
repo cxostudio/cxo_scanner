@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
+import emailjs from '@emailjs/browser'
 
 interface Rule {
   id: string
@@ -29,6 +30,10 @@ interface BatchData {
   totalBatches: number
   timestamp: number
 }
+
+const EMAILJS_SERVICE_ID = 'service_j08d36o'
+const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
+const EMAILJS_PUBLIC_KEY = 'gnuaIRx_bs0IdMu7r'
 
 const RuleSchema = z.object({
   id: z.string().min(1, 'Rule ID is required'),
@@ -61,7 +66,7 @@ const URLSchema = z.string()
     }
   }, 'Please enter a valid website URL (e.g. https://example.com or www.mystore.com)')
 
-  const EmailSchema = z.string()
+const EmailSchema = z.string()
   .min(1, 'Email is required')
   .email('Please enter a valid email address')
 
@@ -86,17 +91,17 @@ export default function Home() {
 
   // Step 1 buttons data
   const step1Buttons = [
-    { value: 'low-conversion-rates', label: 'Low conversion rates' },
-    { value: 'low-average-order-value', label: 'Low average order value' },
-    { value: 'both', label: 'Both' },
+    { value: 'Low Conversion Rates', label: 'Low conversion rates' },
+    { value: 'Low Average Order Value', label: 'Low average order value' },
+    { value: 'Both', label: 'Both' },
   ]
 
   // Step 2 buttons data
   const step2Buttons = [
-    { value: 'under-10k', label: 'Under €10,000 / month' },
-    { value: '10k-50k', label: '€10,000–€50,000 / month' },
-    { value: '50k-100k', label: '€50,000–€100,000 / month' },
-    { value: 'over-100k', label: 'Over €100,000 / month' },
+    { value: 'Under €10,000 / month', label: 'Under €10,000 / month' },
+    { value: '€10,000–€50,000 / month', label: '€10,000–€50,000 / month' },
+    { value: '€50,000–€100,000 / month', label: '€50,000–€100,000 / month' },
+    { value: 'Over €100,000 / month', label: 'Over €100,000 / month' },
   ]
 
   const handleNext = () => {
@@ -227,97 +232,117 @@ export default function Home() {
     return batches
   }
 
+  const BATCH_MAX_ATTEMPTS = 2 // initial run + one repeat if any error occurs
+
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
     setProgress({ current: 0, total: batches.length })
 
+    const ScanResultsSchema = z.array(z.object({
+      ruleId: z.string(),
+      ruleTitle: z.string(),
+      passed: z.boolean(),
+      reason: z.string(),
+    }))
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
 
-      try {
-        setProgress({ current: i + 1, total: batches.length })
+      setProgress({ current: i + 1, total: batches.length })
 
-        const response = await fetch('/api/scan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: batch.url,
-            rules: batch.rules,
-            captureScreenshot: true, // Capture screenshot for every batch to show progress
-          }),
-        })
+      let batchSucceeded = false
+      let lastBatchError: unknown = null
 
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || `Failed to scan batch ${i + 1}`)
-        }
+      for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+        try {
+          const response = await fetch('/api/scan', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              url: batch.url,
+              rules: batch.rules,
+              captureScreenshot: true, // Capture screenshot for every batch to show progress
+            }),
+          })
 
-        const data = await response.json()
-
-        const ScanResultsSchema = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        }))
-
-        const batchResults = ScanResultsSchema.parse(data.results)
-
-        // Remove duplicates before adding (check by ruleId)
-        const existingRuleIds = new Set(allResults.map(r => r.ruleId))
-        const newResults = batchResults.filter(result => {
-          if (existingRuleIds.has(result.ruleId)) {
-            console.warn(`Duplicate ruleId found: ${result.ruleId}, skipping duplicate`)
-            return false
+          if (!response.ok) {
+            let message = `Failed to scan batch ${i + 1}`
+            try {
+              const errorData = await response.json()
+              message = (errorData as { error?: string }).error || message
+            } catch {
+              /* ignore JSON parse errors */
+            }
+            throw new Error(message)
           }
-          existingRuleIds.add(result.ruleId)
-          return true
-        })
 
-        allResults.push(...newResults)
+          const data = await response.json()
+          const batchResults = ScanResultsSchema.parse(data.results)
 
-        // Store screenshot from every batch to show what AI is seeing
-        // Store in both state and sessionStorage for results page
-        if (data.screenshot) {
-          console.log(`Screenshot received from batch ${i + 1}, length: ${data.screenshot.length}`)
-          setWebsiteScreenshot(data.screenshot)
-          setCurrentBatchNumber(i + 1)
-          // Store in sessionStorage for results page (not localStorage due to size limits)
-          try {
-            sessionStorage.setItem('lastScreenshot', data.screenshot)
-            console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
-          } catch (e) {
-            console.warn('Could not store screenshot in sessionStorage:', e)
+          // Remove duplicates before adding (check by ruleId)
+          const existingRuleIds = new Set(allResults.map(r => r.ruleId))
+          const newResults = batchResults.filter(result => {
+            if (existingRuleIds.has(result.ruleId)) {
+              console.warn(`Duplicate ruleId found: ${result.ruleId}, skipping duplicate`)
+              return false
+            }
+            existingRuleIds.add(result.ruleId)
+            return true
+          })
+
+          allResults.push(...newResults)
+
+          // Store screenshot from every batch to show what AI is seeing
+          // Store in both state and sessionStorage for results page
+          if (data.screenshot) {
+            console.log(`Screenshot received from batch ${i + 1}, length: ${data.screenshot.length}`)
+            setWebsiteScreenshot(data.screenshot)
+            setCurrentBatchNumber(i + 1)
+            try {
+              sessionStorage.setItem('lastScreenshot', data.screenshot)
+              console.log(`Screenshot updated from batch ${i + 1} and stored in sessionStorage`)
+            } catch (e) {
+              console.warn('Could not store screenshot in sessionStorage:', e)
+            }
+          } else {
+            console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
           }
-        } else {
-          console.warn(`No screenshot received from batch ${i + 1}. This may be due to Vercel timeout.`)
+
+          batchSucceeded = true
+          break
+        } catch (err) {
+          lastBatchError = err
+          console.error(`Error processing batch ${i + 1} (attempt ${attempt}/${BATCH_MAX_ATTEMPTS}):`, err)
+          if (attempt < BATCH_MAX_ATTEMPTS) {
+            console.warn(`Retrying batch ${i + 1} once after error...`)
+            await new Promise((r) => setTimeout(r, 1500))
+          }
         }
+      }
 
-
-        const remainingBatches = batches.slice(i + 1)
-        if (remainingBatches.length > 0) {
-          localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
-        } else {
-          localStorage.removeItem('scanBatches')
-        }
-
-        localStorage.setItem('scanResults', JSON.stringify(allResults))
-
-      } catch (err) {
-        console.error(`Error processing batch ${i + 1}:`, err)
-        // If any batch fails, mark its rules as failed with the error message
+      if (!batchSucceeded) {
+        console.error(`Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`)
         batch.rules.forEach(rule => {
           allResults.push({
             ruleId: rule.id,
             ruleTitle: rule.title,
             passed: false,
-            reason: `Error processing batch ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+            reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
           })
         })
       }
+
+      const remainingBatches = batches.slice(i + 1)
+      if (remainingBatches.length > 0) {
+        localStorage.setItem('scanBatches', JSON.stringify(remainingBatches))
+      } else {
+        localStorage.removeItem('scanBatches')
+      }
+
+      localStorage.setItem('scanResults', JSON.stringify(allResults))
     }
 
     try {
@@ -438,6 +463,43 @@ export default function Home() {
         validUrl = 'https://' + validUrl
       }
 
+      const browser = navigator.userAgent
+      const screenSize = `${window.screen.width}x${window.screen.height}`
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'
+      const browserData = [
+        `ua=${browser}`,
+        `platform=${navigator.platform}`,
+        `language=${navigator.language}`,
+        `screen=${screenSize}`,
+        `timezone=${timeZone}`,
+      ].join(' | ')
+
+      let ipAddress = 'Unknown'
+      try {
+        const ipResponse = await fetch('https://api.ipify.org?format=json')
+        if (ipResponse.ok) {
+          const ipJson = await ipResponse.json()
+          ipAddress = ipJson?.ip || 'Unknown'
+        }
+      } catch (ipErr) {
+        console.warn('Failed to fetch client IP:', ipErr)
+      }
+
+      // EmailJS-ready payload values
+      const level = selectedChallenge ?? ''
+      const price = selectedRevenue ?? ''
+      const emailJsPayloadBase = {
+        level,
+        price,
+        url: validUrl,
+        email: emailTrimmed,
+        ip_address: ipAddress,
+        browser,
+        screen_size: screenSize,
+        time_zone: timeZone,
+        browser_data: browserData,
+      }
+
       // First, show the analyze UI (site/page should load first)
       setShowAnalyze(true)
       setProgress(null)
@@ -501,6 +563,47 @@ export default function Home() {
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
+      // Send final scan summary to EmailJS (after results are ready)
+      let passResult: string | number = 'N/A'
+      let failResult: string | number = 'N/A'
+      try {
+        const stored = localStorage.getItem('scanResults')
+        if (stored) {
+          const parsedResults = z.array(z.object({
+            ruleId: z.string(),
+            ruleTitle: z.string(),
+            passed: z.boolean(),
+            reason: z.string(),
+          })).parse(JSON.parse(stored))
+          const passCount = parsedResults.filter((r) => r.passed).length
+          const failCount = parsedResults.length - passCount
+          passResult = `${passCount}/${parsedResults.length}`
+          failResult = `${failCount}/${parsedResults.length}`
+        }
+      } catch (summaryErr) {
+        console.warn('Could not compute pass/fail summary for EmailJS:', summaryErr)
+      }
+
+      const emailJsPayload = {
+        ...emailJsPayloadBase,
+        pass_result: passResult,
+        fail_result: failResult,
+      }
+
+      // Non-blocking email send
+      emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        emailJsPayload,
+        { publicKey: EMAILJS_PUBLIC_KEY }
+      )
+        .then((response) => {
+          console.log('EmailJS SUCCESS:', response.status, response.text)
+        })
+        .catch((err) => {
+          console.error('EmailJS FAILED:', err)
+        })
+
       toast.success('Scan completed successfully!')
       router.push('/scanner')
     } catch (err) {
@@ -530,166 +633,256 @@ export default function Home() {
   }
 
   return (
-    <main className="flex items-center justify-center md:px-4 min-h-screen w-full overflow-x-hidden">
+    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
       <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[400px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
             {/* Logo */}
-            <div className="text-center my-[34px]">
-              <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
-            </div>
+            
+            <motion.div
+              className="text-center mt-8 mb-9"
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.55, ease: [0.25, 0.1, 0.25, 1] }}
+            >
+              <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
+            </motion.div>
 
             {/* Back Button and Progress Bar */}
-            <div className="flex items-center gap-3">
-
-              <button
+            <motion.div
+              className="flex items-center gap-3"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.08 }}
+            >
+              <motion.button
+                type="button"
                 onClick={handleBack}
-                className="w-[35px] h-[35px] rounded-lg bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 transition shrink-0 cursor-pointer"
+                className="w-[35px] h-[35px] rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: 'tween', duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
               >
                 <span className="text-gray-700 text-xl mb-1">‹</span>
-              </button>
+              </motion.button>
               {/* Progress Bar */}
-              <div className="flex-1 bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-[#757575] h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercentage}%` }}
-                ></div>
+              <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                <motion.div
+                  className="bg-gray-600 h-2 rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${progressPercentage}%` }}
+                  transition={{ duration: 0.65, ease: [0.4, 0, 0.2, 1] }}
+                />
               </div>
-            </div>
+            </motion.div>
           </>
         )}
-        {/* Step Content */}
-        <div className="my-[35px] mx-[16px]">
+        {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
+        <div className="h-full">
           {!showAnalyze ? (
             <>
-              {currentStep === 1 && (
-                <div>
-                  <h2 className="text-[33px] leading-[48px] font-bold text-gray-[#09090B] text-center">
-                    What's your biggest challenge right now?
-                  </h2>
-                  <div className="mt-[28px]">
-                    {step1Buttons.map((button) => (
-                      <SelectButton
-                        key={button.value}
-                        label={button.label}
-                        value={button.value}
-                        selectedValue={selectedChallenge}
-                        onClick={setSelectedChallenge}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+              <AnimatePresence mode="wait">
+                {currentStep === 1 && (
+                  <motion.div
+                    key="step1"
+                    className="min-h-[400px]"
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -24 }}
+                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+                  >
+                    <motion.h2
+                      className="text-3xl font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
+                    >
+                      What's your biggest challenge right now?
+                    </motion.h2>
+                    <div >
+                      {step1Buttons.map((button, i) => (
+                        <motion.div
+                          key={button.value}
+                          initial={{ opacity: 0, y: 14 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1], delay: 0.38 + i * 0.08 }}
+                        >
+                          <SelectButton
+                            label={button.label}
+                            value={button.value}
+                            selectedValue={selectedChallenge}
+                            onClick={setSelectedChallenge}
+                          />
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
 
-              {currentStep === 2 && (
-                <>
-                  <h2 className="text-3xl my-[33px] font-bold text-gray-900 text-center px-4">
-                    What's your average online revenue?
-                  </h2>
-                  <div className="mt-[43px]">
-                    {step2Buttons.map((button) => (
-                      <SelectButton
-                        key={button.value}
-                        label={button.label}
-                        value={button.value}
-                        selectedValue={selectedRevenue}
-                        onClick={setSelectedRevenue}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
+                {currentStep === 2 && (
+                  <motion.div
+                    key="step2"
+                    className="min-h-[400px]"
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -24 }}
+                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+                  >
+                    <motion.h2
+                      className="text-3xl  font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
+                    >
+                      What's your average online revenue?
+                    </motion.h2>
+                    <div className="mt-8">
+                      {step2Buttons.map((button, i) => (
+                        <motion.div
+                          key={button.value}
+                          initial={{ opacity: 0, y: 14 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1], delay: 0.38 + i * 0.08 }}
+                        >
+                          <SelectButton
+                            label={button.label}
+                            value={button.value}
+                            selectedValue={selectedRevenue}
+                            onClick={setSelectedRevenue}
+                          />
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
 
-              {currentStep === 3 && (
-                <>
-                  <div>
-                    <h2 className="text-[33px] leading-[48px] font-bold text-[#757575] text-center">
-                      <i>You're almost done!</i>
-                    </h2>
-                    <h2 className="text-[33px] leading-[48px] font-bold text-black text-center">
-                      Let's finish your audit
-                    </h2>
-                  </div>
-                  <div className="mt-[33px]">
-                    <label className="block text-sm font-semibold text-black">
-                      Website URL: <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={websiteUrl}
-                      onChange={(e) => {
-                        setWebsiteUrl(e.target.value)
-                        if (urlError) setUrlError('')
-                      }}
-                      placeholder="Enter the URL of your main product page"
-                      className={`w-full mt-[13px] px-4 py-3 border rounded-xl bg-white text-sm focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
-                      required
-                      aria-invalid={!!urlError}
-                      aria-describedby={urlError ? 'url-error' : undefined}
-                    />
-                    {urlError && (
-                      <p id="url-error" className="mt-1.5 text-sm text-red-500">{urlError}</p>
-                    )}
-                    <div className="relative mt-[19px]">
-                      <label className="block text-sm font-semibold text-black">
-                        Email address: <span className="text-red-500">*</span>
+                {currentStep === 3 && (
+                  <motion.div
+                    key="step3"
+                    className="min-h-[400px]"
+                    initial={{ opacity: 0, x: 24 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -24 }}
+                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+                  >
+                      <motion.h2
+                        className="text-[#757575] text-center text-[33px] italic font-bold leading-[48px] tracking-[-1.2px] me-[12px] mt-[35px]"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
+                      >
+                        <i>You're almost done!</i>
+                      </motion.h2>
+                      <motion.h2
+                        className="text-3xl font-bold text-gray-900 text-center"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.12 }}
+                      >
+                        Let's finish your audit
+                      </motion.h2>
+                    <motion.div
+                      className="mt-8"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1], delay: 0.18 }}
+                    >
+                      <label className="block text-sm font-semibold text-gray-900">
+                        Website URL: <span className="text-red-500">*</span>
                       </label>
                       <input
-                        type="email"
-                        value={email}
+                        type="url"
+                        value={websiteUrl}
                         onChange={(e) => {
-                          setEmail(e.target.value)
-                          if (emailError) setEmailError('')
+                          setWebsiteUrl(e.target.value)
+                          if (urlError) setUrlError('')
                         }}
-                        placeholder="Enter your best email address"
-                        className={`w-full mt-[12px] px-4 py-3 border rounded-xl bg-white text-sm focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
+                        placeholder="Enter the URL of your main product page"
+                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
                         required
-                        aria-invalid={!!emailError}
-                        aria-describedby={emailError ? 'email-error' : undefined}
+                        aria-invalid={!!urlError}
+                        aria-describedby={urlError ? 'url-error' : undefined}
                       />
-                      {emailError && (
-                        <p id="email-error" className="mt-1.5 text-sm text-red-500">{emailError}</p>
+                      {urlError && (
+                        <p id="url-error" className="mt-1.5 text-sm text-red-500">{urlError}</p>
                       )}
-                    </div>
-                  </div>
-                </>
-              )}
+                      <div className="relative mt-4">
+                        <label className="block text-sm font-semibold text-gray-900">
+                          Email address: <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => {
+                            setEmail(e.target.value)
+                            if (emailError) setEmailError('')
+                          }}
+                          placeholder="Enter your best email address"
+                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
+                          required
+                          aria-invalid={!!emailError}
+                          aria-describedby={emailError ? 'email-error' : undefined}
+                        />
+                        {emailError && (
+                          <p id="email-error" className="mt-1.5 text-sm text-red-500">{emailError}</p>
+                        )}
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Continue Button or Access Results Button */}
               {currentStep < totalSteps ? (
-                <div className="mt-[91px]">
-                  <button
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
+                >
+                  <motion.button
+                    type="button"
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full py-5 rounded-xl transition-all duration-300 font-bold text-base text-center cursor-pointer transform hover:scale-105 ${!isStepValid()
+                    className={`w-full rounded-[10px] font-bold text-base text-center cursor-pointer ${!isStepValid()
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white hover:bg-gray-800 shadow-lg hover:shadow-xl'
+                      : 'bg-black text-white shadow-lg'
                       }`}
+                    whileHover={isStepValid() ? { scale: 1.015 } : {}}
+                    whileTap={isStepValid() ? { scale: 0.985 } : {}}
+                    transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                   >
-                    Continue ›
-                  </button>
-                </div>
+                    <p className="my-[18px]">Continue ›</p>
+                  </motion.button>
+                </motion.div>
               ) : (
-                <div className="mt-[91px]">
-                  <button
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
+                >
+                  <motion.button
+                    type="button"
                     onClick={handleStartScan}
                     disabled={!websiteUrl || !email}
-                    className={`w-full py-6 rounded-xl transition-all duration-300 font-bold text-lg text-center cursor-pointer transform hover:scale-105 ${!websiteUrl || !email
+                    className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-black to-gray-800 text-white hover:from-gray-800 hover:to-black shadow-2xl hover:shadow-black/50'
+                      : 'bg-black text-white shadow-2xl'
                       }`}
+                    whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
+                    whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
+                    transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     Access my results ›
-                  </button>
-                </div>
+                  </motion.button>
+                </motion.div>
               )}
             </>
           ) : (
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
-                <h2 className="text-2xl md:text-3xl font-bold text-center mb-2 text-gray-600 flex items-baseline justify-center gap-2 flex-wrap">
+                <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
                   Analyzing Your URL
                   <span className="flex gap-1 items-end" aria-hidden>
                     <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -765,7 +958,6 @@ export default function Home() {
                 )} */}
 
                 {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
-                <p className="text-sm font-medium text-white mb-3">Website URL:</p>
                 <div className="space-y-3">
                   <AnimatePresence mode="popLayout">
                     {analysisSteps
@@ -779,10 +971,10 @@ export default function Home() {
                         return (
                           <motion.div
                             key={id}
-                            initial={{ opacity: 0, y: 20 }}
+                            initial={{ opacity: 0, y: 16 }}
                             animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                            exit={{ x: 200, opacity: 0 }}
-                            transition={{ duration: 0.35 }}
+                            exit={{ x: 160, opacity: 0 }}
+                            transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
                             className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
                             {isCompleted ? (
@@ -817,34 +1009,59 @@ export default function Home() {
 
         {/* Social Proof Footer - Only show when not analyzing */}
         {!showAnalyze && (
-          <div className="my-[18px]">
+          <motion.div
+            className="my-[18px]"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1], delay: 0.35 }}
+          >
             <div className="flex justify-center gap-3">
               {/* Start: Profile Images */}
               <div className="flex -space-x-2">
-                <div className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200">
-                  <img src="/client_first.png" alt="user" className="w-[40px] h-[40px] object-cover" />
-                </div>
-                <div className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200">
-                  <img src="/client_second.png" alt="user" className="w-[40px] h-[40px] object-cover" />
-                </div>
-                <div className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200">
-                  <img src="/client_third.png" alt="user" className="w-[40px] h-[40px] object-cover" />
-                </div>
+                {['/client_first.png', '/client_second.png', '/client_third.png'].map((src, i) => (
+                  <motion.div
+                    key={src}
+                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200"
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.45 + i * 0.09 }}
+                  >
+                    <img src={src} alt="user" className="w-[40px] h-[40px] object-cover" />
+                  </motion.div>
+                ))}
               </div>
 
               {/* End: Stars and Text */}
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1">
+              <motion.div
+                className="flex flex-col"
+                initial={{ opacity: 0, x: 6 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.55 }}
+              >
+                <div className=" gap-1">
                   {[...Array(5)].map((_, i) => (
-                    <span key={i} className="text-[#FFB66E] text-lg w-[16px] h-[16px]">★</span>
+                    <motion.span
+                      key={i}
+                      className="text-[#FFB66E] text-lg w-[16px] h-[16px]"
+                      initial={{ opacity: 0, scale: 0.3 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1], delay: 0.65 + i * 0.06 }}
+                    >
+                      ★
+                    </motion.span>
                   ))}
                 </div>
-                <p className="text-xs font-semibold text-[#71717A] mt-[4px]">
+                <motion.p
+                  className="text-xs font-semibold text-[#71717A] mt-[6px]"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.92 }}
+                >
                   Trusted by e-commerce founders
-                </p>
-              </div>
+                </motion.p>
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
         )}
       </div>
     </main>

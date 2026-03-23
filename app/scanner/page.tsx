@@ -135,16 +135,16 @@ export default function ScannerPage() {
 
         {results && (
           <div className="mt-6">
-            <p className="relative text-[15px] leading-[20px] font-semibold text-gray-600 text-center mb-6">
+            <p className="relative text-[15px] leading-[20px] font-semibold text-[#09090B] text-center mb-6">
               Scan results for:
               <span className="relative group ml-1">
                 <a
                   href={url}
                   target="_blank"
-                  className="cursor-pointer text-blue-600"
+                  className="cursor-pointer text-[#09090B]"
                   rel="noreferrer"
                 >
-                  {url.slice(0, 30)}...
+                  {url.slice(0, 60)}...
                 </a>
 
                 <span
@@ -158,7 +158,7 @@ export default function ScannerPage() {
         group-hover:opacity-100 group-hover:visible
       "
                 >
-                  <span className="block break-words">
+                  <span className="block wrap-break-word">
                     {url}
                   </span>
                 </span>
@@ -167,7 +167,7 @@ export default function ScannerPage() {
 
 
             {/* Summary Box - Yellow */}
-            <div className="bg-[#FFF3CD] rounded-lg p-4 mb-6 border-[1px] border-[#FFC107]">
+            <div className="bg-[#FFF3CD] rounded-[10px] p-4 mb-6 border border-[#FFC107]">
               <p className="text-base font-semibold text-black text-center m-0">
                 {passedCount} of {totalCount} rules passed.
               </p>

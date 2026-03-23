@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.2",
+    "@emailjs/browser": "^4.4.1",
     "@openrouter/sdk": "^0.3.12",
     "@sparticuz/chromium": "^119.0.0",
     "ai": "^6.0.7",
