@@ -47,7 +47,7 @@
   {
     "id": "image-thumbnails",
     "title": "Show thumbnails in product image gallery",
-    "description": "The product gallery should include visible thumbnails to allow users to quickly browse all images without excessive scrolling."
+    "description": "The product gallery should include visible thumbnails to allow users to quickly browse all images without excessive scrolling. PASS if thumbnails appear on desktop or mobile (at least one viewport). FAIL only if neither desktop nor mobile shows a thumbnail strip or row of small preview images."
   },
   {
     "id": "image-square-format",
@@ -72,7 +72,7 @@
   {
     "id": "image-before-after",
     "title": "Include before-and-after images when applicable",
-    "description": "For products where results matter, before-and-after images should be included to demonstrate effectiveness and increase trust."
+    "description": "For product categories where a visible transformation is a normal expectation (e.g. skincare, cosmetic treatment, hair growth, teeth whitening, body contouring), before-and-after or comparison imagery should be included when it helps demonstrate effectiveness. For categories where visual transformation is not expected (food, beverages, general merchandise, electronics, apparel, etc.), this check does not apply — the rule passes automatically."
   },
   {
     "id": "description-benefits-over-features",

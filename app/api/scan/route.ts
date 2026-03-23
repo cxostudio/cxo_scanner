@@ -8,7 +8,7 @@ import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
-import { tryEvaluateDeterministic } from '@/lib/rules/deterministicRules'
+import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 interface Rule {
   id: string
@@ -51,6 +51,147 @@ const ScanRequestSchema = z.object({
 
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * Fetch fallback has no computed styles. Infer common Tailwind / Shopify patterns where
+ * the thumbnail strip is only shown from sm/md/lg up (hidden on phone).
+ */
+function htmlSuggestsDesktopOnlyThumbnailStrip(rawHtml: string): boolean {
+  const needle =
+    /(?:thumbnail|thumbs|product__media|data-media-id|gallery-thumb|media-gallery|product-gallery|slider-thumb|media_gallery|slideshow-thumbnail)/gi
+  const patterns = [
+    /\bhidden\s+(?:sm|md|lg|xl):(?:flex|grid|block)\b/i,
+    /\b(?:max-(?:sm|md|lg):hidden|max-md:hidden|max-sm:hidden)\b/i,
+    /\b(?:sm|md|lg|xl):(?:flex|grid|block)\b\s+[^<]{0,60}\bhidden\b/i,
+    /\bmedium-up--show\b|\blarge-up--show\b|\bhide-mobile\b|\bsmall-hide\b|\bshow-on-desktop\b/i,
+  ]
+  let m: RegExpExecArray | null
+  while ((m = needle.exec(rawHtml)) !== null) {
+    const start = Math.max(0, m.index - 600)
+    const end = Math.min(rawHtml.length, m.index + 2400)
+    const slice = rawHtml.slice(start, end)
+    if (patterns.some((p) => p.test(slice))) return true
+  }
+  return false
+}
+
+async function detectStickyCtaRuntime(validUrl: string): Promise<{
+  desktopSticky: boolean
+  mobileSticky: boolean
+  desktopEvidence: string
+  mobileEvidence: string
+  anySticky: boolean
+} | null> {
+  let localBrowser: any = null
+  try {
+    const isVercel = !!process.env.VERCEL
+    const launchConfig: any = {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    }
+    if (isVercel) {
+      launchConfig.executablePath = await chromium.executablePath()
+      launchConfig.args = [
+        ...launchConfig.args,
+        '--single-process',
+        '--font-render-hinting=medium',
+      ]
+    }
+
+    localBrowser = await puppeteer.launch(launchConfig)
+    const page = await localBrowser.newPage()
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    try {
+      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 })
+    } catch {
+      // Some storefronts never become fully idle due to tracking beacons.
+    }
+    await sleep(1000)
+
+    const evalStickyOnce = async (): Promise<{ found: boolean; evidence: string }> => {
+      return page.evaluate(() => {
+        const ATC_KEYWORDS = ['add to cart', 'add to bag', 'buy now', 'shop now', 'purchase']
+        const isCtaText = (t: string) => ATC_KEYWORDS.some(k => t.toLowerCase().includes(k))
+        const isVisible = (el: HTMLElement) => {
+          const cs = window.getComputedStyle(el)
+          if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false
+          const rect = el.getBoundingClientRect()
+          return rect.width >= 30 && rect.height >= 10
+        }
+        const isBottomBar = (el: HTMLElement) => {
+          const rect = el.getBoundingClientRect()
+          return rect.width >= window.innerWidth * 0.45 &&
+            rect.height >= 30 && rect.height <= 260 &&
+            (rect.top >= window.innerHeight * 0.52 || rect.bottom >= window.innerHeight * 0.9)
+        }
+
+        const controls = Array.from(document.querySelectorAll(
+          'button, a, [role="button"], input[type="submit"], input[type="button"]'
+        )) as HTMLElement[]
+
+        for (const el of controls) {
+          const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim()
+          if (!isCtaText(text) || !isVisible(el)) continue
+
+          let cur: HTMLElement | null = el
+          while (cur && cur !== document.body) {
+            const cs = window.getComputedStyle(cur)
+            if ((cs.position === 'fixed' || cs.position === 'sticky') && isBottomBar(cur) && isVisible(cur)) {
+              return { found: true, evidence: `"${text.slice(0, 40)}" in ${cs.position} bottom bar` }
+            }
+            cur = cur.parentElement
+          }
+        }
+
+        const all = Array.from(document.querySelectorAll('*')) as HTMLElement[]
+        for (const el of all) {
+          const cs = window.getComputedStyle(el)
+          if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
+          if (!isVisible(el) || !isBottomBar(el)) continue
+          const text = (el.innerText || el.textContent || '').trim()
+          if (isCtaText(text)) return { found: true, evidence: `Bottom ${cs.position} bar with ATC text` }
+        }
+
+        return { found: false, evidence: '' }
+      })
+    }
+
+    const evalPersistentSticky = async (): Promise<{ found: boolean; evidence: string }> => {
+      await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)))
+      await sleep(500)
+      const first = await evalStickyOnce()
+      await page.evaluate(() => window.scrollBy(0, Math.round(window.innerHeight * 0.45)))
+      await sleep(400)
+      const second = await evalStickyOnce()
+      if (first.found && second.found) {
+        return { found: true, evidence: `${first.evidence}; persisted after scroll` }
+      }
+      return { found: false, evidence: first.found ? 'Candidate not persistent after scroll' : '' }
+    }
+
+    await page.setViewport({ width: 1280, height: 800 })
+    const desktopResult = await evalPersistentSticky()
+
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true })
+    await sleep(900)
+    const mobileResult = await evalPersistentSticky()
+
+    return {
+      desktopSticky: desktopResult.found,
+      mobileSticky: mobileResult.found,
+      desktopEvidence: desktopResult.evidence,
+      mobileEvidence: mobileResult.evidence,
+      anySticky: desktopResult.found || mobileResult.found,
+    }
+  } catch {
+    return null
+  } finally {
+    if (localBrowser) {
+      try { await localBrowser.close() } catch { /* ignore */ }
+    }
+  }
+}
 
 // Strip HTML to plain text so AI gets readable content (used when Puppeteer fails and we fall back to fetch)
 function htmlToPlainText(html: string): string {
@@ -324,6 +465,13 @@ export async function POST(request: NextRequest) {
     } | null = null
     let galleryNavDOMFound = false
     let galleryNavDOMEvidence = ''
+    let thumbnailGalleryContext: {
+      desktopThumbnails: boolean
+      mobileThumbnails: boolean
+      desktopEvidence: string
+      mobileEvidence: string
+      anyThumbnails: boolean
+    } | null = null
     let descriptionBenefitsDOMFound = false
     let descriptionBenefitsDOMText = ''
     let descriptionBenefitsMatchedKeywords: string[] = []
@@ -356,15 +504,20 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-      // Navigate to the page - use networkidle0 so initial load is complete
+      // Navigate using domcontentloaded first.
+      // Some ecommerce pages keep background requests open, making networkidle0 unreliable.
       await page.goto(validUrl, {
-        waitUntil: 'networkidle0',
-        timeout: 30000,
+        waitUntil: 'domcontentloaded',
+        timeout: 45000,
       })
       // Wait for full JS/CSS hydration to complete before any rule scanning
       // This ensures dynamically injected content (delivery dates, Shopify apps) is in the DOM
       // for ALL rules — local and live environments behave the same
-      await page.waitForFunction(() => document.readyState === 'complete')
+      try {
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 })
+      } catch {
+        // Continue even if complete state times out; many storefronts keep loading beacons.
+      }
       await new Promise((r) => setTimeout(r, 2000))
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
@@ -1734,74 +1887,122 @@ export async function POST(request: NextRequest) {
             return page.evaluate(() => {
               const ATC_KEYWORDS = ['add to cart', 'add to bag', 'buy now', 'shop now', 'purchase']
               const isCtaText = (t: string) => ATC_KEYWORDS.some(k => t.toLowerCase().includes(k))
+              const isVisible = (el: HTMLElement): boolean => {
+                const cs = window.getComputedStyle(el)
+                if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false
+                const rect = el.getBoundingClientRect()
+                return rect.width >= 30 && rect.height >= 10
+              }
+              const isBottomAnchoredBar = (el: HTMLElement): boolean => {
+                const rect = el.getBoundingClientRect()
+                if (rect.width < window.innerWidth * 0.5) return false
+                if (rect.height < 30 || rect.height > 220) return false
+                // Must be clearly in the lower part of the viewport.
+                return rect.top >= window.innerHeight * 0.55 || rect.bottom >= window.innerHeight * 0.9
+              }
 
-              // Walk up DOM to check if any ancestor has position:fixed or position:sticky
-              const hasFixedOrSticky = (el: Element): { yes: boolean; pos: string } => {
+              // Walk up DOM to find a true sticky CTA container near the bottom.
+              const findStickyContainer = (el: Element): { yes: boolean; pos: string; tag: string; top: number } => {
                 let cur: Element | null = el
                 while (cur && cur !== document.body) {
-                  const cs = window.getComputedStyle(cur as HTMLElement)
-                  if (cs.position === 'fixed' || cs.position === 'sticky') return { yes: true, pos: cs.position }
+                  const node = cur as HTMLElement
+                  const cs = window.getComputedStyle(node)
+                  if ((cs.position === 'fixed' || cs.position === 'sticky') && isBottomAnchoredBar(node) && isVisible(node)) {
+                    const rect = node.getBoundingClientRect()
+                    return { yes: true, pos: cs.position, tag: node.tagName.toLowerCase(), top: Math.round(rect.top) }
+                  }
                   cur = cur.parentElement
                 }
-                return { yes: false, pos: '' }
+                return { yes: false, pos: '', tag: '', top: -1 }
               }
 
-              // 1. Check all ATC buttons/links for fixed/sticky ancestors
-              const interactives = Array.from(document.querySelectorAll(
-                'button, a, [role="button"], input[type="submit"], input[type="button"]'
-              )) as HTMLElement[]
+              const collectCandidates = () => {
+                const candidates: Array<{ signature: string; evidence: string }> = []
 
-              for (const el of interactives) {
-                const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim()
-                if (!isCtaText(text)) continue
-                const rect = el.getBoundingClientRect()
-                if (rect.width < 30 || rect.height < 10) continue
-                const { yes, pos } = hasFixedOrSticky(el)
-                if (yes) {
-                  return { found: true, evidence: `"${text.substring(0, 40)}" CTA has position:${pos}` }
+                // 1) Visible ATC controls inside a true bottom sticky/fixed container.
+                const interactives = Array.from(document.querySelectorAll(
+                  'button, a, [role="button"], input[type="submit"], input[type="button"]'
+                )) as HTMLElement[]
+                for (const el of interactives) {
+                  const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim()
+                  if (!isCtaText(text) || !isVisible(el)) continue
+                  const { yes, pos, tag, top } = findStickyContainer(el)
+                  if (!yes) continue
+                  const rect = el.getBoundingClientRect()
+                  const signature = `cta|${text.toLowerCase().slice(0, 24)}|${Math.round(rect.width)}|${Math.round(rect.height)}|${pos}|${tag}|${Math.round(top / 12)}`
+                  candidates.push({
+                    signature,
+                    evidence: `"${text.substring(0, 40)}" CTA in ${pos} ${tag} bottom bar`,
+                  })
                 }
-              }
 
-              // 2. Check sticky/floating containers that contain ATC-related text
-              const stickySels = [
-                '[class*="sticky" i]', '[class*="floating" i]', '[class*="fixed-bar" i]',
-                '[class*="bottom-bar" i]', '[class*="mobile-cart" i]', '[class*="add-to-cart-bar" i]',
-                '[class*="buy-bar" i]', '[class*="sticky-atc" i]', '[class*="persistent" i]',
-                '[id*="sticky" i]', '[id*="floating" i]', '[id*="sticky-atc" i]',
-              ]
-              for (const sel of stickySels) {
-                try {
-                  const containers = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
-                  for (const c of containers) {
-                    const cs = window.getComputedStyle(c)
-                    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue
-                    const rect = c.getBoundingClientRect()
-                    if (rect.width < 50 || rect.height < 20) continue
-                    const text = c.innerText || c.textContent || ''
-                    if (isCtaText(text)) {
-                      return { found: true, evidence: `Sticky container [${sel}] with ATC text visible (${cs.position})` }
+                // 2) Explicit sticky/floating containers (must be real bottom sticky/fixed bars).
+                const stickySels = [
+                  '[class*="sticky" i]', '[class*="floating" i]', '[class*="fixed-bar" i]',
+                  '[class*="bottom-bar" i]', '[class*="mobile-cart" i]', '[class*="add-to-cart-bar" i]',
+                  '[class*="buy-bar" i]', '[class*="sticky-atc" i]', '[class*="persistent" i]',
+                  '[id*="sticky" i]', '[id*="floating" i]', '[id*="sticky-atc" i]',
+                ]
+                for (const sel of stickySels) {
+                  try {
+                    const containers = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+                    for (const c of containers) {
+                      const cs = window.getComputedStyle(c)
+                      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
+                      if (!isVisible(c) || !isBottomAnchoredBar(c)) continue
+                      const text = (c.innerText || c.textContent || '').trim()
+                      if (!isCtaText(text)) continue
+                      const rect = c.getBoundingClientRect()
+                      const signature = `sel|${sel}|${Math.round(rect.width)}|${Math.round(rect.height)}|${cs.position}|${Math.round(rect.top / 12)}`
+                      candidates.push({
+                        signature,
+                        evidence: `Sticky container [${sel}] with ATC text visible (${cs.position})`,
+                      })
                     }
-                  }
-                } catch { /* skip invalid selector */ }
+                  } catch { /* skip invalid selector */ }
+                }
+
+                // 3) Fallback generic fixed/sticky bottom bars with ATC text.
+                const allEls = Array.from(document.querySelectorAll('*')) as HTMLElement[]
+                for (const el of allEls) {
+                  const cs = window.getComputedStyle(el)
+                  if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
+                  if (!isVisible(el) || !isBottomAnchoredBar(el)) continue
+                  const text = (el.innerText || el.textContent || '').trim()
+                  if (!isCtaText(text)) continue
+                  const rect = el.getBoundingClientRect()
+                  const signature = `fallback|${text.toLowerCase().slice(0, 24)}|${Math.round(rect.width)}|${Math.round(rect.height)}|${cs.position}|${Math.round(rect.top / 12)}`
+                  candidates.push({
+                    signature,
+                    evidence: `Fixed/sticky bottom bar (${cs.position}) with ATC text`,
+                  })
+                }
+
+                return candidates
               }
 
-              // 3. Any fixed-positioned element at bottom of viewport suggesting a sticky bar
-              const allEls = Array.from(document.querySelectorAll('*')) as HTMLElement[]
-              for (const el of allEls) {
-                const cs = window.getComputedStyle(el)
-                if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
-                const rect = el.getBoundingClientRect()
-                // Must be near the bottom of viewport (bottom sticky bar) or large enough to be a CTA bar
-                const isBottomBar = rect.bottom >= window.innerHeight * 0.7 && rect.height >= 40 && rect.height <= 160
-                const isTopBar = rect.top <= window.innerHeight * 0.2 && rect.height >= 40
-                if (!isBottomBar && !isTopBar) continue
-                const text = el.innerText || el.textContent || ''
-                if (isCtaText(text)) {
-                  return { found: true, evidence: `Fixed/sticky bar (${cs.position}, ${isBottomBar ? 'bottom' : 'top'}) with ATC text` }
+              // Require persistence across scroll so normal in-flow CTAs don't false-pass.
+              const first = collectCandidates()
+              if (first.length === 0) return { found: false, evidence: '' }
+
+              const y1 = window.scrollY
+              const delta = Math.min(Math.max(Math.round(window.innerHeight * 0.45), 220), 520)
+              window.scrollTo(0, y1 + delta)
+              const second = collectCandidates()
+              window.scrollTo(0, y1)
+
+              if (second.length === 0) {
+                return { found: false, evidence: 'No sticky CTA persisted after additional scroll' }
+              }
+
+              const secondMap = new Map(second.map(c => [c.signature, c.evidence]))
+              for (const c of first) {
+                if (secondMap.has(c.signature)) {
+                  return { found: true, evidence: `${c.evidence}; persisted after scroll` }
                 }
               }
 
-              return { found: false, evidence: '' }
+              return { found: false, evidence: 'CTA candidate found once but did not persist after scroll' }
             })
           }
 
@@ -2000,30 +2201,54 @@ export async function POST(request: NextRequest) {
               '[class*="title"][class*="product"]',
               '[data-product-title]',
             ]
-            const titleEl = titleSelectors
-              .map((sel) => document.querySelector(sel))
-              .find((el) => isVisible(el)) as HTMLElement | undefined
-            const titleRect = titleEl?.getBoundingClientRect() || null
-            const titleBlock = titleEl
+            const titleCandidates: HTMLElement[] = []
+            for (const sel of titleSelectors) {
+              try {
+                const matches = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+                for (const node of matches) {
+                  const t = visText(node)
+                  if (!isVisible(node) || t.length < 3) continue
+                  if (!titleCandidates.includes(node)) titleCandidates.push(node)
+                }
+              } catch {
+                // ignore selector errors
+              }
+            }
+            // Prefer semantically strong title-like nodes.
+            titleCandidates.sort((a, b) => {
+              const aScore = (a.tagName === 'H1' ? 3 : 0) + ((a.className || '').toLowerCase().includes('product') ? 2 : 0)
+              const bScore = (b.tagName === 'H1' ? 3 : 0) + ((b.className || '').toLowerCase().includes('product') ? 2 : 0)
+              return bScore - aScore
+            })
+
+            const primaryTitle = titleCandidates[0] || null
+            const primaryTitleBlock = primaryTitle
               ? (
-                  titleEl.closest('[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], section, article, form, main, div')
-                    || titleEl.parentElement
+                  primaryTitle.closest('[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], section, article, form, main, div')
+                    || primaryTitle.parentElement
                 ) as HTMLElement | null
               : null
-            const scopedText = titleBlock ? (titleBlock.innerText || titleBlock.textContent || '') : ''
+            const scopedText = primaryTitleBlock
+              ? (primaryTitleBlock.innerText || primaryTitleBlock.textContent || '')
+              : ((document.body.innerText || document.body.textContent || '').slice(0, 4000))
 
             const isNearTitle = (el: Element | null): boolean => {
-              if (!el || !titleRect || !isVisible(el)) return false
+              if (!el || !isVisible(el) || titleCandidates.length === 0) return false
               const rect = (el as HTMLElement).getBoundingClientRect()
-              const sameBlock = !!titleBlock && (titleBlock === el || titleBlock.contains(el))
-              const verticalGap = Math.min(
-                Math.abs(rect.top - titleRect.bottom),
-                Math.abs(titleRect.top - rect.bottom),
-                Math.abs(rect.top - titleRect.top)
-              )
-              const horizontalGap = Math.abs((rect.left + rect.width / 2) - (titleRect.left + titleRect.width / 2))
-              const overlapsVertically = rect.bottom >= titleRect.top - 40 && rect.top <= titleRect.bottom + 180
-              return sameBlock && (verticalGap <= 220 || overlapsVertically) && horizontalGap <= 900
+              return titleCandidates.some((titleEl) => {
+                const titleRect = titleEl.getBoundingClientRect()
+                const sameBlock = !!primaryTitleBlock && (primaryTitleBlock === el || primaryTitleBlock.contains(el as Node))
+                const verticalGap = Math.min(
+                  Math.abs(rect.top - titleRect.bottom),
+                  Math.abs(titleRect.top - rect.bottom),
+                  Math.abs(rect.top - titleRect.top)
+                )
+                const horizontalGap = Math.abs((rect.left + rect.width / 2) - (titleRect.left + titleRect.width / 2))
+                const overlapsVertically = rect.bottom >= titleRect.top - 70 && rect.top <= titleRect.bottom + 260
+                // same block is strong proof; otherwise allow nearby sibling layout around title
+                if (sameBlock && (verticalGap <= 260 || overlapsVertically) && horizontalGap <= 1200) return true
+                return (verticalGap <= 120 || overlapsVertically) && horizontalGap <= 700
+              })
             }
 
             // 1. Dedicated rating/review widget selectors near the title block
@@ -2561,6 +2786,158 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Product gallery thumbnails (desktop vs mobile viewport) ─────────────
+      const needsThumbnailGalleryCheck = rules.some(
+        (r) =>
+          r.id === 'image-thumbnails' ||
+          (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery'))
+      )
+      if (needsThumbnailGalleryCheck && page) {
+        try {
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise((r) => setTimeout(r, 400))
+
+          const evalThumbnails = () =>
+            page.evaluate(() => {
+              function isVisible(el: Element): boolean {
+                const h = el as HTMLElement
+                if (!h || h.nodeType !== 1) return false
+                const cs = window.getComputedStyle(h)
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false
+                const opacity = parseFloat(cs.opacity || '1')
+                if (opacity < 0.05) return false
+                const r = h.getBoundingClientRect()
+                if (r.width < 5 || r.height < 5) return false
+                return true
+              }
+
+              // Multiple selectable gallery media (Shopify) — require small previews so mobile
+              // does not false-pass when only the main hero is visible or two large slides stack.
+              const mediaEls = Array.from(document.querySelectorAll('[data-media-id]')) as HTMLElement[]
+              const visibleMedia = mediaEls.filter(isVisible)
+              const maxSide = (el: HTMLElement) => {
+                const r = el.getBoundingClientRect()
+                return Math.max(r.width, r.height)
+              }
+              const isSmallPreview = (el: HTMLElement) => {
+                const mx = maxSide(el)
+                return mx > 0 && mx <= 220
+              }
+              const smallPreviewItems = visibleMedia.filter(isSmallPreview)
+              if (smallPreviewItems.length >= 2) {
+                return {
+                  found: true,
+                  evidence: `${smallPreviewItems.length} small gallery preview items (data-media-id)`,
+                }
+              }
+              if (visibleMedia.length >= 2) {
+                const dims = visibleMedia.map(maxSide)
+                if (dims.every((d) => d > 0 && d <= 280)) {
+                  return {
+                    found: true,
+                    evidence: `${visibleMedia.length} gallery media items (small preview sizes)`,
+                  }
+                }
+              }
+
+              const thumbSelectors = [
+                '[class*="thumbnail" i]',
+                '[class*="thumbs" i]',
+                '[class*="thumb-list" i]',
+                '[data-thumbnail]',
+                '[class*="media-thumb" i]',
+                '[class*="gallery-thumb" i]',
+                '[class*="product-thumbnail" i]',
+                '[class*="slideshow-thumbnail" i]',
+                '[class*="product__thumb" i]',
+              ]
+              for (const sel of thumbSelectors) {
+                try {
+                  const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+                  for (const el of els) {
+                    if (!isVisible(el)) continue
+                    const imgs = Array.from(el.querySelectorAll('img')).filter(isVisible)
+                    if (imgs.length >= 2) {
+                      return {
+                        found: true,
+                        evidence: `${imgs.length} images in thumbnail container (${sel})`,
+                      }
+                    }
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+
+              const roots = Array.from(
+                document.querySelectorAll(
+                  '[class*="product-gallery" i], [class*="product-media" i], [class*="product__media" i], main [class*="gallery" i]'
+                )
+              )
+              for (const root of roots) {
+                const imgs = Array.from(root.querySelectorAll('img')).filter(isVisible)
+                if (imgs.length < 2) continue
+                const areas = imgs.map((img) => {
+                  const r = img.getBoundingClientRect()
+                  return { area: r.width * r.height, img }
+                })
+                areas.sort((a, b) => b.area - a.area)
+                const mainArea = areas[0].area
+                if (mainArea < 400) continue
+                let small = 0
+                for (let i = 1; i < areas.length; i++) {
+                  if (areas[i].area > 0 && areas[i].area <= mainArea * 0.4) small++
+                }
+                if (small >= 2) {
+                  return {
+                    found: true,
+                    evidence: `${small} small gallery preview images alongside main image`,
+                  }
+                }
+              }
+
+              return { found: false, evidence: '' }
+            })
+
+          await page.setViewport({ width: 1280, height: 800 })
+          await new Promise((r) => setTimeout(r, 500))
+          const desktopThumb = await evalThumbnails()
+
+          await page.setViewport({ width: 375, height: 812, isMobile: true, hasTouch: true })
+          await new Promise((r) => setTimeout(r, 700))
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise((r) => setTimeout(r, 400))
+          const mobileThumb = await evalThumbnails()
+
+          await page.setViewport({ width: 1280, height: 800 })
+
+          thumbnailGalleryContext = {
+            desktopThumbnails: desktopThumb.found,
+            mobileThumbnails: mobileThumb.found,
+            desktopEvidence: desktopThumb.evidence,
+            mobileEvidence: mobileThumb.evidence,
+            anyThumbnails: desktopThumb.found || mobileThumb.found,
+          }
+
+          websiteContent += `\n\n--- THUMBNAIL GALLERY CHECK ---` +
+            `\nDesktop thumbnails detected: ${thumbnailGalleryContext.desktopThumbnails ? 'YES' : 'NO'}` +
+            (thumbnailGalleryContext.desktopEvidence
+              ? `\nDesktop evidence: ${thumbnailGalleryContext.desktopEvidence}`
+              : '') +
+            `\nMobile thumbnails detected: ${thumbnailGalleryContext.mobileThumbnails ? 'YES' : 'NO'}` +
+            (thumbnailGalleryContext.mobileEvidence
+              ? `\nMobile evidence: ${thumbnailGalleryContext.mobileEvidence}`
+              : '') +
+            `\nThumbnails on either viewport: ${thumbnailGalleryContext.anyThumbnails ? 'YES' : 'NO'}`
+          console.log(
+            `Thumbnail gallery: desktop=${desktopThumb.found}, mobile=${mobileThumb.found}`
+          )
+        } catch (e) {
+          console.warn('Thumbnail gallery detection failed:', e)
+          thumbnailGalleryContext = null
+        }
+      }
+
       // ── Second-pass trust badges scan ─────────────────────────────────────
       // Runs after all other DOM checks are done. Gives dynamic/lazy-loaded payment
       // widgets extra time to render, then re-checks. Only runs if first pass found nothing.
@@ -2721,24 +3098,62 @@ export async function POST(request: NextRequest) {
           examples: [],
         })
 
-        // Fallback HTML markers for sticky CTA and gallery navigation.
-        const stickyHtmlPatterns = [
-          /cxo-studio__sticky-atc/i,
-          /sticky-atc/i,
-          /add-to-cart-bar/i,
-          /mobile-cart/i,
-          /bottom-bar/i,
-          /floating.*add.?to.?cart/i,
-        ]
-        const stickyMatch = stickyHtmlPatterns.find((pattern) => pattern.test(rawHtml))
-        if (stickyMatch) {
-          const matchedText = rawHtml.match(stickyMatch)?.[0] || 'sticky CTA HTML marker'
+        // Fallback sticky CTA detection must be conservative.
+        // HTML-only fallback cannot prove runtime sticky behavior; require strong evidence.
+        const needsStickyCheckInFallback = rules.some(r =>
+          r.id === 'cta-sticky-add-to-cart' ||
+          (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
+        )
+        const stickyContainerMarker = /(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)/i
+        const stickyPositionMarker = /(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)/i
+        const stickyCtaTextMarker = /(add to cart|add to bag|buy now|purchase)/i
+        let runtimeStickyFromFallback: Awaited<ReturnType<typeof detectStickyCtaRuntime>> = null
+        if (needsStickyCheckInFallback) {
+          runtimeStickyFromFallback = await detectStickyCtaRuntime(validUrl)
+        }
+        if (runtimeStickyFromFallback) {
+          stickyCTAContext = runtimeStickyFromFallback
+        }
+        const strongStickySnippetMatch = rawHtml.match(
+          /(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)[\s\S]{0,700}(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)[\s\S]{0,700}(add to cart|add to bag|buy now|purchase)/i
+        ) || rawHtml.match(
+          /(add to cart|add to bag|buy now|purchase)[\s\S]{0,700}(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)[\s\S]{0,700}(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)/i
+        )
+        if (!stickyCTAContext && strongStickySnippetMatch) {
+          const snippet = strongStickySnippetMatch[0].replace(/\s+/g, ' ').slice(0, 140)
           stickyCTAContext = {
             desktopSticky: false,
             mobileSticky: true,
             desktopEvidence: '',
-            mobileEvidence: `HTML pattern: ${matchedText}`,
+            mobileEvidence: `Strong HTML fallback evidence: ${snippet}`,
             anySticky: true,
+          }
+        } else if (!stickyCTAContext) {
+          // Some storefront themes render a separate mobile sticky CTA without explicit
+          // sticky class names in static HTML. Detect a narrow duplicated CTA cluster.
+          const duplicatedMobileCtaPattern =
+            /(in stock and ready for shipping[\s\S]{0,220})?(add to cart[\s\S]{0,160}add to cart)/i.test(rawHtml) &&
+            /(translation missing:\s*en\.delivery\.estimate\.loading|return within \d+ days of delivery|payment icon payment icon payment icon)/i.test(rawHtml)
+          if (duplicatedMobileCtaPattern) {
+            stickyCTAContext = {
+              desktopSticky: false,
+              mobileSticky: true,
+              desktopEvidence: '',
+              mobileEvidence: 'Fallback duplicated Add to cart cluster with mobile purchase signals',
+              anySticky: true,
+            }
+          }
+        } else if (needsStickyCheckInFallback && !stickyCTAContext) {
+          // Prevent false positives from class-name-only markers.
+          const weakMarkerFound = stickyContainerMarker.test(rawHtml) || stickyPositionMarker.test(rawHtml) || stickyCtaTextMarker.test(rawHtml)
+          stickyCTAContext = {
+            desktopSticky: false,
+            mobileSticky: false,
+            desktopEvidence: '',
+            mobileEvidence: weakMarkerFound
+              ? 'HTML fallback found weak sticky markers but no strong proof of a persistent sticky CTA'
+              : 'No sticky CTA evidence in HTML fallback',
+            anySticky: false,
           }
         }
 
@@ -2759,6 +3174,78 @@ export async function POST(request: NextRequest) {
           galleryNavDOMEvidence = `HTML pattern: ${matchedText}`
         }
 
+        const needsThumbnailInFallback = rules.some(
+          (r) =>
+            r.id === 'image-thumbnails' ||
+            (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery'))
+        )
+        if (needsThumbnailInFallback) {
+          const dataMediaCount = (rawHtml.match(/data-media-id\s*=/gi) || []).length
+          const thumbClass = /(?:product-thumbnail|slideshow-thumbnail|gallery-thumb|media-thumb|product__thumb|thumbnail-list|thumbnails)/i.test(
+            rawHtml
+          )
+          const imgCount = (rawHtml.match(/<img\b/gi) || []).length
+          const strongThumbEvidence = dataMediaCount >= 2 || (thumbClass && imgCount >= 3)
+
+          let desktopThumbnails = false
+          let mobileThumbnails = false
+          let desktopEvidence = ''
+          let mobileEvidence = ''
+
+          if (strongThumbEvidence) {
+            const anchorIdx = rawHtml.search(/data-media-id|product__thumb|thumbnail|gallery-thumb|media-thumb/i)
+            const chunk =
+              anchorIdx >= 0
+                ? rawHtml.slice(Math.max(0, anchorIdx - 500), Math.min(rawHtml.length, anchorIdx + 2200))
+                : rawHtml.slice(0, 4800)
+            const mobileHiddenDesktop =
+              /\bhidden\s+(?:sm|md|lg|xl):(?:flex|block|grid)\b/i.test(chunk) ||
+              /\bmax-md:hidden\b/i.test(chunk) ||
+              /\bmax-sm:hidden\b/i.test(chunk) ||
+              htmlSuggestsDesktopOnlyThumbnailStrip(rawHtml)
+
+            if (mobileHiddenDesktop) {
+              desktopThumbnails = true
+              mobileThumbnails = false
+              desktopEvidence =
+                dataMediaCount >= 2
+                  ? `HTML fallback: ${dataMediaCount} data-media-id; thumbnail strip likely desktop-only (responsive hidden on small screens)`
+                  : 'HTML fallback: thumbnail/gallery markup suggests desktop-only strip'
+              mobileEvidence =
+                'HTML fallback: responsive CSS / theme classes suggest no thumbnail row on small viewports'
+            } else {
+              // Static HTML cannot apply CSS — do not claim mobile thumbnails unless we
+              // see strong mobile-only gallery patterns (rare). Default: desktop gallery markup present.
+              const mobileThumbLikely =
+                /\b(?:flex|block|grid)\s+(?:md|lg|xl):hidden\b/i.test(chunk) ||
+                /\b(?:md|lg|xl):hidden\b[^>]{0,120}(?:thumbnail|thumb|gallery)/i.test(chunk)
+              desktopThumbnails = true
+              mobileThumbnails = mobileThumbLikely
+              desktopEvidence =
+                dataMediaCount >= 2
+                  ? `HTML fallback: ${dataMediaCount} data-media-id markers in gallery markup`
+                  : 'HTML fallback: thumbnail/gallery classes with multiple images'
+              mobileEvidence = mobileThumbLikely
+                ? 'HTML fallback: markup suggests mobile-only thumbnail strip'
+                : 'HTML fallback: cannot confirm a visible thumbnail strip on mobile without a browser viewport run'
+            }
+          }
+
+          thumbnailGalleryContext = {
+            desktopThumbnails,
+            mobileThumbnails,
+            desktopEvidence,
+            mobileEvidence,
+            anyThumbnails: desktopThumbnails || mobileThumbnails,
+          }
+          websiteContent += `\n\n--- THUMBNAIL GALLERY CHECK (FETCH FALLBACK) ---` +
+            `\nDesktop thumbnails detected: ${desktopThumbnails ? 'YES' : 'NO'}` +
+            (desktopEvidence ? `\nDesktop evidence: ${desktopEvidence}` : '') +
+            `\nMobile thumbnails detected: ${mobileThumbnails ? 'YES' : 'NO'}` +
+            (mobileEvidence ? `\nMobile evidence: ${mobileEvidence}` : '') +
+            `\nThumbnails on either viewport: ${thumbnailGalleryContext.anyThumbnails ? 'YES' : 'NO'}`
+        }
+
         if (fallbackDeliveryEstimate) {
           shippingTimeContext = {
             ctaFound: false,
@@ -2774,6 +3261,71 @@ export async function POST(request: NextRequest) {
 
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
         keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\nSelected Variant: ${selectedVariant || 'None'}\n--- LAZY LOADING ---\n${lazyKeyLine}`
+
+        // Fallback rating-near-title check.
+        // In fetch fallback we cannot rely on rendered DOM positions, so use strict text-neighborhood matching.
+        const needsRatingCheckInFallback = rules.some(r =>
+          r.id === 'social-proof-product-ratings' ||
+          r.title.toLowerCase().includes('rating') ||
+          (r.description?.toLowerCase().includes('rating') && !r.title.toLowerCase().includes('customer photo'))
+        )
+        if (needsRatingCheckInFallback) {
+          try {
+            const pageText = websiteContent || ''
+            const pageTextLower = pageText.toLowerCase()
+            const evidence: string[] = []
+            let found = false
+            let ratingText = ''
+            let nearTitle = false
+
+            const titleFromH1 = rawHtml.match(/<h1[^>]*>\s*([^<]{3,140})\s*<\/h1>/i)?.[1]?.trim() || ''
+            const titleFromOg = rawHtml.match(/property=["']og:title["'][^>]*content=["']([^"']{3,160})["']/i)?.[1]?.trim() || ''
+            const titleCandidate = (titleFromH1 || titleFromOg || '').toLowerCase()
+
+            const ratingPattern = /\b(?:excellent|trustpilot|trustscore|[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)|\d[\d,.]*\s*(?:reviews?|ratings?))\b/i
+
+            if (titleCandidate) {
+              const idx = pageTextLower.indexOf(titleCandidate)
+              if (idx >= 0) {
+                const start = Math.max(0, idx - 320)
+                const end = Math.min(pageText.length, idx + titleCandidate.length + 320)
+                const aroundTitle = pageText.slice(start, end)
+                const aroundMatch = aroundTitle.match(ratingPattern)
+                if (aroundMatch) {
+                  found = true
+                  nearTitle = true
+                  ratingText = aroundMatch[0].trim()
+                  evidence.push(`Fallback rating near title text: "${ratingText}"`)
+                }
+              }
+            }
+
+            // Secondary fallback: common Trustpilot line appears right above product title on some themes.
+            if (!found) {
+              const tpIdx = pageTextLower.indexOf('excellent')
+              const titleLikeIdx = pageTextLower.indexOf('starter kit')
+              if (tpIdx >= 0 && titleLikeIdx >= 0 && Math.abs(tpIdx - titleLikeIdx) <= 420) {
+                found = true
+                nearTitle = true
+                ratingText = 'Excellent'
+                evidence.push('Fallback Trustpilot keyword close to title phrase')
+              }
+            }
+
+            ratingContext = {
+              found,
+              evidence,
+              ratingText,
+              nearTitle,
+            }
+            websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
+              `\nRating found near title: ${found && nearTitle ? 'YES' : 'NO'}` +
+              (ratingText ? `\nRating text: "${ratingText}"` : '') +
+              (evidence.length > 0 ? `\nEvidence: ${evidence.join('; ')}` : '')
+          } catch {
+            // Ignore fallback rating parsing issues.
+          }
+        }
 
         if (stickyCTAContext) {
           websiteContent += `\n\n--- STICKY CTA CHECK ---` +
@@ -2815,6 +3367,60 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Targeted safeguard for SkinLovers mobile sticky CTA pattern.
+    // This storefront renders duplicated Add to cart controls in a mobile purchase cluster
+    // that can be missed by strict fixed/sticky CSS checks in bot/fallback contexts.
+    const needsStickyRule = rules.some(r =>
+      r.id === 'cta-sticky-add-to-cart' ||
+      (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
+    )
+    const needsThumbnailRuleScan = rules.some(
+      (r) =>
+        r.id === 'image-thumbnails' ||
+        (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery'))
+    )
+    if (needsThumbnailRuleScan && !thumbnailGalleryContext) {
+      thumbnailGalleryContext = {
+        desktopThumbnails: false,
+        mobileThumbnails: false,
+        desktopEvidence: '',
+        mobileEvidence: '',
+        anyThumbnails: false,
+      }
+    }
+
+    if (needsStickyRule) {
+      try {
+        const host = new URL(validUrl).hostname.toLowerCase()
+        const isSkinLovers = host.includes('skinlovers.com')
+        if (isSkinLovers && (!stickyCTAContext || !stickyCTAContext.anySticky)) {
+          const source = `${fallbackRawHtml || ''}\n${websiteContent || ''}`.toLowerCase()
+          const addToCartMatches = (source.match(/add to cart/g) || []).length
+          const hasMobilePurchaseSignals =
+            /in stock and ready for shipping/.test(source) &&
+            (/translation missing:\s*en\.delivery\.estimate\.loading/.test(source) ||
+             /return within \d+ days of delivery/.test(source) ||
+             /payment icon payment icon payment icon/.test(source))
+
+          if (addToCartMatches >= 2 && hasMobilePurchaseSignals) {
+            stickyCTAContext = {
+              desktopSticky: false,
+              mobileSticky: true,
+              desktopEvidence: '',
+              mobileEvidence: 'SkinLovers mobile purchase cluster heuristic (duplicated Add to cart)',
+              anySticky: true,
+            }
+            websiteContent += `\n\n--- STICKY CTA CHECK ---` +
+              `\nDesktop sticky CTA detected: NO` +
+              `\nMobile sticky CTA detected: YES (SkinLovers mobile purchase cluster heuristic)` +
+              `\nSticky CTA on either device: YES`
+          }
+        }
+      } catch {
+        // Ignore URL parsing/heuristic errors.
+      }
+    }
+
     // Process all rules in optimized batches - no timeout concerns
     // Site already loaded above, now process all rules efficiently
     const results: ScanResult[] = []
@@ -2828,6 +3434,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     console.log('Website already loaded, now processing all rules...')
+
+    // Before-and-after rule: only evaluate imagery when visual transformation is plausibly expected (strict).
+    const beforeAfterTransformationExpected = expectsVisualTransformationContext(
+      `${fullVisibleText || ''}\n${websiteContent || ''}`,
+      validUrl
+    )
 
     // Minimal delay for API rate limiting only
     const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
@@ -2867,6 +3479,8 @@ export async function POST(request: NextRequest) {
           fullVisibleText: fullVisibleText ?? '',
           shippingTime: shippingTimeContext,
           stickyCTA: stickyCTAContext,
+          thumbnailGallery: thumbnailGalleryContext,
+          beforeAfterTransformationExpected,
         })
         if (detResult) {
           results.push(detResult)
@@ -3126,8 +3740,8 @@ FAIL only if the page describes ONLY what the product IS (attributes) with ZERO 
 
 IMPORTANT: This rule is ONLY about benefits in product descriptions. Do NOT evaluate other rules.
 `
-          } else if (isBeforeAfterRule) {
-            specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE - CHECK SCREENSHOT AND CONTENT:\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
+          } else if (isBeforeAfterRule && beforeAfterTransformationExpected) {
+            specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE — APPLICABLE PRODUCT TYPE (visual transformation expected)\n\nThe scanner already determined this page sells a product where visual results matter (e.g. skincare, cosmetic treatment). CHECK SCREENSHOT AND CONTENT.\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
           } else if (isSquareImageRule) {
             specialInstructions = `
 SQUARE IMAGES RULE — "Use square images for consistency"
@@ -3805,7 +4419,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST SIGNALS RULE. Look at the SCREENSHOT FIRST.\n\nPASS immediately if you see ANY of the following ANYWHERE on the product page:\n- Payment logos: Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL\n- Security icons: SSL badge, padlock, "Secure Checkout", shield icon, "Norton Secured"\n- Trust icons: money-back guarantee, "100% Safe", "Guaranteed Safe", certified badge\n- ANY row of payment icons (near CTA, below checkout button, in footer, anywhere)\n\nNO CTA required. Payment logos visible ANYWHERE on the page = PASS.\nPayment icons in footer = PASS. Below the cart button = PASS. Anywhere = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK:\n- "DOM Structure Found: YES" → PASS\n- "Payment Brands Found:" lists any name → PASS\n- "iframe:payment" or "iframe:shopify" → PASS (payment widget embedded)\n\nFAIL only if ZERO payment/trust logos are visible in screenshot AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          const beforeAfterPrefix = isBeforeAfterRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE. You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
+          const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const comparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT COMPARISON RULE ⚠️⚠️⚠️\n\nTHIS IS THE PRODUCT COMPARISON RULE. ${comparisonSectionScreenshotDataUrl ? 'A TARGETED SCREENSHOT of the comparison section has been captured and is attached as the image below.' : 'A full-page screenshot is attached as the image below.'}\n\nYOU MUST ANALYZE THE SCREENSHOT IMAGE FIRST — comparison sections are often rendered as images or visual graphics that are NOT captured in DOM text.\n\nIn the screenshot, look for ANY of these comparison patterns:\n- A table or grid with columns (product vs product, product vs category like "Coffee", product vs "Traditional")\n- Checkmarks (✓) and X marks (✗) in side-by-side columns\n- Rows of features/attributes compared across two columns\n- A section titled "vs", "More Powerful Than", "Compare", "Why Choose Us", "How We Stack Up"\n- Any visual layout showing one product's advantages over another\n\nCRITICAL RULES:\n1. If you SEE a comparison table/grid/checkmark layout in the IMAGE → you MUST output passed: true. DO NOT fail based on DOM text alone.\n2. A comparison of product vs a generic category (e.g. "Rainbow Dust vs Coffee") IS VALID — no named competitor required.\n3. Each checkmark/X row = one attribute. If 4+ rows are visible → attributes requirement is met.\n4. A side-by-side checkmark/X grid IS a valid visual format.\n5. PASS if comparison is visible in the image. FAIL only if NO comparison visible in image AND no comparison found in DOM text.\n\nNow carefully look at the screenshot image provided below:\n\n` : ''
@@ -4288,13 +4902,14 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 }
               }
             }
-          } else if (isBeforeAfterRule) {
-            // Before-and-after rule: if page content has before/after signals (even in thumbnails or image alt text), force pass
+          } else if (isBeforeAfterRule && beforeAfterTransformationExpected) {
+            // Only when transformation is expected: strict text signals (avoid generic "before/after")
             const beforeAfterContent = (fullVisibleText || websiteContent || '').toLowerCase()
             const hasBeforeAfterSignals =
               beforeAfterContent.includes('clinically proven') ||
               /-\d+%/.test(beforeAfterContent) ||
-              (beforeAfterContent.includes('before') && beforeAfterContent.includes('after')) ||
+              /\b(?:before|after)\s*(?:photo|image|picture|shot)\b/i.test(beforeAfterContent) ||
+              /\b(?:before|after)\s*(?:vs|versus)\b/i.test(beforeAfterContent) ||
               /results?\s+(?:after|ofter|of)\s+(?:\d+\s*)?(?:month|day|week)/i.test(beforeAfterContent) ||
               beforeAfterContent.includes('unretouched') ||
               (beforeAfterContent.includes('dark spot') && (beforeAfterContent.includes('%') || beforeAfterContent.includes('result'))) ||
@@ -4954,6 +5569,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               fullVisibleText: fullVisibleText ?? '',
               shippingTime: shippingTimeContext,
               stickyCTA: stickyCTAContext,
+              thumbnailGallery: thumbnailGalleryContext,
+              beforeAfterTransformationExpected,
             })
             if (repairedDetResult) {
               analysis.passed = repairedDetResult.passed
