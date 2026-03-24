@@ -81,6 +81,7 @@ export default function Home() {
   const [urlError, setUrlError] = useState('')
   const [emailError, setEmailError] = useState('')
   const [showAnalyze, setShowAnalyze] = useState(false)
+  const [isStartingScan, setIsStartingScan] = useState(false)
   const [rules, setRules] = useState<Rule[]>([])
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
@@ -458,6 +459,7 @@ export default function Home() {
     }
 
     try {
+      setIsStartingScan(true)
       let validUrl = urlResult.data!
       if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
         validUrl = 'https://' + validUrl
@@ -603,10 +605,11 @@ export default function Home() {
         .catch((err) => {
           console.error('EmailJS FAILED:', err)
         })
-
+      setIsStartingScan(false)
       toast.success('Scan completed successfully!')
       router.push('/scanner')
     } catch (err) {
+      setIsStartingScan(false)
       if (err instanceof z.ZodError) {
         console.error('Validation error:', err.errors)
       } else {
@@ -861,20 +864,32 @@ export default function Home() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
                 >
-                  <motion.button
-                    type="button"
-                    onClick={handleStartScan}
-                    disabled={!websiteUrl || !email}
-                    className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white shadow-2xl'
-                      }`}
-                    whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
-                    whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
-                    transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
-                  >
-                    Access my results ›
-                  </motion.button>
+                  {isStartingScan ? (
+                    <div className="w-full py-6 rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <span
+                          className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+                          aria-hidden="true"
+                        />
+                        Loading results...
+                      </span>
+                    </div>
+                  ) : (
+                    <motion.button
+                      type="button"
+                      onClick={handleStartScan}
+                      disabled={!websiteUrl || !email}
+                      className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-black text-white shadow-2xl'
+                        }`}
+                      whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
+                      whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
+                      transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    >
+                      Access my results ›
+                    </motion.button>
+                  )}
                 </motion.div>
               )}
             </>
