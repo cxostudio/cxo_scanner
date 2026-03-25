@@ -81,6 +81,7 @@ export default function Home() {
   const [urlError, setUrlError] = useState('')
   const [emailError, setEmailError] = useState('')
   const [showAnalyze, setShowAnalyze] = useState(false)
+  const [isStartingScan, setIsStartingScan] = useState(false)
   const [rules, setRules] = useState<Rule[]>([])
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
@@ -397,75 +398,54 @@ export default function Home() {
   const handleStartScan = async () => {
     setUrlError('')
     setEmailError('')
-
+  
     const urlTrimmed = websiteUrl.trim()
     const emailTrimmed = email.trim()
-
-    if (!urlTrimmed) {
-      setUrlError('Website URL is required')
-      return
-    }
-    if (!emailTrimmed) {
-      setEmailError('Email address is required')
-      return
-    }
-
+  
+    // ✅ Basic validation
+    if (!urlTrimmed) return setUrlError('Website URL is required')
+    if (!emailTrimmed) return setEmailError('Email address is required')
+  
     const urlResult = URLSchema.safeParse(urlTrimmed)
     if (!urlResult.success) {
-      const msg = urlResult.error.errors[0]?.message || 'Invalid URL'
-      setUrlError(msg)
-      return
+      return setUrlError(urlResult.error.errors[0]?.message || 'Invalid URL')
     }
-
+  
     const emailResult = EmailSchema.safeParse(emailTrimmed)
     if (!emailResult.success) {
-      const msg = emailResult.error.errors[0]?.message || 'Invalid email'
-      setEmailError(msg)
-      return
+      return setEmailError(emailResult.error.errors[0]?.message || 'Invalid email')
     }
-
-    // Ensure rules are loaded before scanning
+  
     let rulesToUse = rules
-    if (rulesToUse.length === 0) {
-      await loadRules()
-      // Wait a bit for state to update
-      await new Promise(resolve => setTimeout(resolve, 100))
-      rulesToUse = rules
-
-      // If still empty, try loading directly
-      if (rulesToUse.length === 0) {
-        try {
-
-          const response = await fetch('/data/predefined-rules.json')
-          if (!response.ok) {
-            throw new Error('Failed to load rules')
-          }
-          const parsed = await response.json()
-          const validatedRules = z.array(RuleSchema).parse(parsed)
-          rulesToUse = validatedRules
-          setRules(validatedRules)
-        } catch (error) {
-          console.error('Error loading rules:', error)
-          toast.error('Failed to load rules. Please check predefined-rules.json file.')
-          return
-        }
-      }
-    }
-
-    if (rulesToUse.length === 0) {
-      toast.error('No rules available. Please check predefined-rules.json file.')
-      return
-    }
-
+  
     try {
-      let validUrl = urlResult.data!
-      if (!validUrl.startsWith('http://') && !validUrl.startsWith('https://')) {
-        validUrl = 'https://' + validUrl
+      setIsStartingScan(true)
+  
+      // ✅ Load rules (clean, no timeout hacks)
+      if (!rulesToUse.length) {
+        const res = await fetch('/data/predefined-rules.json')
+        if (!res.ok) throw new Error('Failed to load rules')
+  
+        const parsed = await res.json()
+        rulesToUse = z.array(RuleSchema).parse(parsed)
+        setRules(rulesToUse)
       }
-
+  
+      if (!rulesToUse.length) {
+        throw new Error('No rules available')
+      }
+  
+      // ✅ Normalize URL
+      let validUrl = urlResult.data!
+      if (!/^https?:\/\//i.test(validUrl)) {
+        validUrl = `https://${validUrl}`
+      }
+  
+      // ✅ Browser info
       const browser = navigator.userAgent
       const screenSize = `${window.screen.width}x${window.screen.height}`
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown'
+  
       const browserData = [
         `ua=${browser}`,
         `platform=${navigator.platform}`,
@@ -473,146 +453,113 @@ export default function Home() {
         `screen=${screenSize}`,
         `timezone=${timeZone}`,
       ].join(' | ')
-
+  
+      // ✅ Get IP (safe)
       let ipAddress = 'Unknown'
       try {
-        const ipResponse = await fetch('https://api.ipify.org?format=json')
-        if (ipResponse.ok) {
-          const ipJson = await ipResponse.json()
-          ipAddress = ipJson?.ip || 'Unknown'
+        const res = await fetch('https://api.ipify.org?format=json')
+        if (res.ok) {
+          const data = await res.json()
+          ipAddress = data?.ip || 'Unknown'
         }
-      } catch (ipErr) {
-        console.warn('Failed to fetch client IP:', ipErr)
+      } catch {
+        console.warn('IP fetch failed')
       }
-
-      // EmailJS-ready payload values
-      const level = selectedChallenge ?? ''
-      const price = selectedRevenue ?? ''
-      const emailJsPayloadBase = {
-        level,
-        price,
-        url: validUrl,
-        email: emailTrimmed,
-        ip_address: ipAddress,
-        browser,
-        screen_size: screenSize,
-        time_zone: timeZone,
-        browser_data: browserData,
-      }
-
-      // First, show the analyze UI (site/page should load first)
+  
+      // ✅ UI setup
       setShowAnalyze(true)
       setProgress(null)
-      setWebsiteScreenshot(null) // Reset screenshot for new scan
-      setCurrentBatchNumber(0) // Reset batch number
-      setIframeError(false) // Reset iframe error
-      // Screenshot not stored in localStorage, no need to remove
-
-      // Wait for the page/UI to fully render before starting batch requests
-      // This ensures the site loads first, then batch requests go (important for Vercel free account)
-      await new Promise(resolve => {
-        // Use requestAnimationFrame to wait for next paint cycle
-        requestAnimationFrame(() => {
-          // Add a small delay to ensure UI is fully rendered
-          setTimeout(() => {
-            resolve(undefined)
-          }, 200) // 300ms delay to ensure page is visible
-        })
-      })
-
-      // Fire-and-forget lightweight screenshot capture for UI preview.
-      // Runs in parallel with rule scanning so it doesn't slow down results.
-      try {
-        console.log('Triggering screenshot API for URL:', validUrl)
-        fetch('/api/screenshot', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ url: validUrl }),
-        })
-          .then(async (res) => {
-            console.log('Screenshot API response status:', res.status)
-            if (!res.ok) {
-              console.error('Screenshot API failed with status:', res.status)
-              return
-            }
-            const data = await res.json()
-            console.log('Screenshot API response data:', data)
-            if (data?.screenshot) {
-              console.log('Screenshot received, setting state')
-              setWebsiteScreenshot(data.screenshot)
-              try {
-                sessionStorage.setItem('lastScreenshot', data.screenshot)
-                console.log('Screenshot stored in sessionStorage')
-              } catch (e) {
-                console.warn('Could not store screenshot from /api/screenshot in sessionStorage:', e)
-              }
-            } else {
-              console.warn('No screenshot in API response')
-            }
+      setWebsiteScreenshot(null)
+      setCurrentBatchNumber(0)
+      setIframeError(false)
+  
+      // ✅ Wait for UI render
+      await new Promise((r) =>
+        requestAnimationFrame(() => setTimeout(r, 200))
+      )
+  
+      // ✅ Screenshot (non-blocking, clean)
+      ;(async () => {
+        try {
+          const res = await fetch('/api/screenshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: validUrl }),
           })
-          .catch((err) => {
-            console.error('Screenshot API call failed (non-blocking):', err)
-          })
-      } catch (sErr) {
-        console.warn('Screenshot API trigger failed (non-blocking):', sErr)
-      }
-
-      // Now start batch processing after page has loaded
+  
+          if (!res.ok) return
+  
+          const data = await res.json()
+          if (data?.screenshot) {
+            setWebsiteScreenshot(data.screenshot)
+            sessionStorage.setItem('lastScreenshot', data.screenshot)
+          }
+        } catch (err) {
+          console.warn('Screenshot failed:', err)
+        }
+      })()
+  
+      // ✅ Main processing — results are written to localStorage inside processBatches
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
-      // Send final scan summary to EmailJS (after results are ready)
+      // Navigate as soon as scan data is ready (before email/summary work)
+      router.push('/scanner')
+
+      // ✅ Summary for EmailJS (after redirect starts; non-blocking for UX)
       let passResult: string | number = 'N/A'
       let failResult: string | number = 'N/A'
+
       try {
         const stored = localStorage.getItem('scanResults')
         if (stored) {
-          const parsedResults = z.array(z.object({
-            ruleId: z.string(),
-            ruleTitle: z.string(),
-            passed: z.boolean(),
-            reason: z.string(),
-          })).parse(JSON.parse(stored))
-          const passCount = parsedResults.filter((r) => r.passed).length
-          const failCount = parsedResults.length - passCount
-          passResult = `${passCount}/${parsedResults.length}`
-          failResult = `${failCount}/${parsedResults.length}`
+          const parsed = z.array(
+            z.object({
+              ruleId: z.string(),
+              ruleTitle: z.string(),
+              passed: z.boolean(),
+              reason: z.string(),
+            })
+          ).parse(JSON.parse(stored))
+
+          const pass = parsed.filter(r => r.passed).length
+          passResult = `${pass}/${parsed.length}`
+          failResult = `${parsed.length - pass}/${parsed.length}`
         }
-      } catch (summaryErr) {
-        console.warn('Could not compute pass/fail summary for EmailJS:', summaryErr)
+      } catch {
+        console.warn('Summary parsing failed')
       }
 
-      const emailJsPayload = {
-        ...emailJsPayloadBase,
-        pass_result: passResult,
-        fail_result: failResult,
-      }
-
-      // Non-blocking email send
+      // ✅ EmailJS (non-blocking)
       emailjs.send(
         EMAILJS_SERVICE_ID,
         EMAILJS_TEMPLATE_ID,
-        emailJsPayload,
+        {
+          level: selectedChallenge ?? '',
+          price: selectedRevenue ?? '',
+          url: validUrl,
+          email: emailTrimmed,
+          ip_address: ipAddress,
+          browser,
+          screen_size: screenSize,
+          time_zone: timeZone,
+          browser_data: browserData,
+          pass_result: passResult,
+          fail_result: failResult,
+        },
         { publicKey: EMAILJS_PUBLIC_KEY }
-      )
-        .then((response) => {
-          console.log('EmailJS SUCCESS:', response.status, response.text)
-        })
-        .catch((err) => {
-          console.error('EmailJS FAILED:', err)
-        })
+      ).catch(err => console.error('EmailJS failed:', err))
 
       toast.success('Scan completed successfully!')
-      router.push('/scanner')
+  
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        console.error('Validation error:', err.errors)
-      } else {
-        toast.error(err instanceof Error ? err.message : 'An error occurred')
-      }
+      console.error(err)
+      toast.error(err instanceof Error ? err.message : 'Something went wrong')
       setShowAnalyze(false)
+    } finally {
+      // Only reset button loading. Do NOT setShowAnalyze(false) here on success —
+      // router.push is async; flipping showAnalyze would flash the form before /scanner mounts.
+      setIsStartingScan(false)
     }
   }
 
@@ -861,20 +808,32 @@ export default function Home() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
                 >
-                  <motion.button
-                    type="button"
-                    onClick={handleStartScan}
-                    disabled={!websiteUrl || !email}
-                    className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white shadow-2xl'
-                      }`}
-                    whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
-                    whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
-                    transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
-                  >
-                    Access my results ›
-                  </motion.button>
+                  {isStartingScan ? (
+                    <div className="w-full py-6 rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <span
+                          className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+                          aria-hidden="true"
+                        />
+                        Loading results...
+                      </span>
+                    </div>
+                  ) : (
+                    <motion.button
+                      type="button"
+                      onClick={handleStartScan}
+                      disabled={!websiteUrl || !email}
+                      className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-black text-white shadow-2xl'
+                        }`}
+                      whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
+                      whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
+                      transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    >
+                      Access my results ›
+                    </motion.button>
+                  )}
                 </motion.div>
               )}
             </>
@@ -917,13 +876,40 @@ export default function Home() {
                               title="Website inside desktop browser"
                               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                               loading="lazy"
-                              onError={() => {
+                              onError={async () => {
                                 setIframeError(true)
-                                if (websiteUrl && !websiteScreenshot) {
-                                  const validUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
-                                  fetch('/api/screenshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: validUrl }) })
-                                    .then(async (res) => { if (res.ok) { const d = await res.json(); if (d?.screenshot) { setWebsiteScreenshot(d.screenshot); try { sessionStorage.setItem('lastScreenshot', d.screenshot) } catch (_) {} } } })
-                                    .catch(() => {})
+                        
+                                if (!websiteUrl || websiteScreenshot) return
+                        
+                                const validUrl = websiteUrl.startsWith('http')
+                                  ? websiteUrl
+                                  : `https://${websiteUrl}`
+                        
+                                try {
+                                  const res = await fetch('/api/screenshot', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ url: validUrl }),
+                                  })
+                        
+                                  if (!res.ok) {
+                                    console.error('Screenshot API failed:', res.status)
+                                    return
+                                  }
+                        
+                                  const data = await res.json()
+                        
+                                  if (data?.screenshot) {
+                                    setWebsiteScreenshot(data.screenshot)
+                        
+                                    try {
+                                      sessionStorage.setItem('lastScreenshot', data.screenshot)
+                                    } catch (e) {
+                                      console.warn('SessionStorage failed:', e)
+                                    }
+                                  }
+                                } catch (err) {
+                                  console.error('Screenshot fallback failed:', err)
                                 }
                               }}
                             />

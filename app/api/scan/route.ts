@@ -10,6 +10,7 @@ import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLo
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
+import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 interface Rule {
   id: string
   title: string
@@ -3483,7 +3484,10 @@ export async function POST(request: NextRequest) {
           beforeAfterTransformationExpected,
         })
         if (detResult) {
-          results.push(detResult)
+          results.push({
+            ...detResult,
+            reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
+          })
           continue
         }
 
@@ -5324,9 +5328,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             const hasFaq = /frequently\s+asked\s+questions|^\s*faq\s*$/im.test(pageText) || (/what\s+is\s+\w+/i.test(pageText) && /how\s+(long|much|many|to)/i.test(pageText))
             const hasNutritional = /nutritional\s+information|nutrition\s+info|nutritional\s+info/i.test(pageText)
             const hasSectionLabels = /(shipping\s*&\s*delivery|return\s*&\s*refund|product\s+details|how\s+to\s+use|ingredients|directions)\s*/.test(pageText)
-            const hasOpenClose = /open\s*btn|close\s*btn|expand|collapse/i.test(pageText)
-            if (hasFaq || hasNutritional || (hasSectionLabels && hasOpenClose)) {
-              console.log('Product tabs rule: Page has FAQ/nutritional/section accordion content. Forcing PASS.')
+            if (hasFaq || hasNutritional || hasSectionLabels) {
+              console.log('Product tabs rule: Page has FAQ/nutritional/section labels that indicate accordion or tab organization. Forcing PASS.')
               analysis.passed = true
               analysis.reason = 'The page uses accordions or collapsible sections for product details (e.g. Frequently Asked Questions, Nutritional information, or section labels). Information is organized into expandable sections for easier navigation.'
             }
@@ -5349,20 +5352,16 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!analysis.passed) {
               const pageTextLower = (fullVisibleText || '').toLowerCase()
               const simpleDeliveryPhrases = [
-                'free shipping',
-                'free express shipping',
-                'free delivery',
                 'delivered between',
                 'delivered by',
+                'delivered on',
                 'arrives by',
                 'get it by',
                 'get it between',
                 'order now and get it',
                 'delivery by',
                 'ships by',
-                'delivery estimate',
-                'shipping over',
-                'delivery date',
+                'delivery date range',
               ]
               const matchedPhrase = simpleDeliveryPhrases.find(p => pageTextLower.includes(p))
               if (matchedPhrase) {
@@ -5398,6 +5397,39 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             }
             if (!analysis.passed) {
               console.log(`Delivery estimate rule: No delivery estimate found in DOM or page text. AI decision: ${analysis.passed ? 'PASS' : 'FAIL'}.`)
+            }
+            // Final cleanup: if PASS reason is generic, replace with concrete UI delivery line from page text when available
+            if (analysis.passed) {
+              const reasonLowerNow = (analysis.reason || '').toLowerCase()
+              const genericReason =
+                reasonLowerNow.includes('delivery estimate detected on the product page') ||
+                reasonLowerNow.includes('a delivery date range or time estimate is shown') ||
+                reasonLowerNow === 'delivery estimate'
+              if (genericReason) {
+                const sources = [
+                  shippingTimeContext?.shippingInfoNearCTA || '',
+                  shippingTimeContext?.shippingText || '',
+                  fullVisibleText || '',
+                ]
+                const patterns = [
+                  /delivered\s+on\s+[A-Za-z]+,?\s*\d{1,2}\s+[A-Za-z]+\s+with\s+express\s+shipping/i,
+                  /order\s+now\s+and\s+get\s+it\s+between\s+[^.\n]+/i,
+                  /get\s+it\s+between\s+[^.\n]+/i,
+                  /get\s+it\s+by\s+[A-Za-z]+,?\s*[A-Za-z]+\s+\d+/i,
+                  /delivered\s+by\s+[A-Za-z]+,?\s*[A-Za-z]+\s+\d+/i,
+                ]
+                let explicitDeliveryLine: string | undefined
+                for (const src of sources) {
+                  if (!src) continue
+                  explicitDeliveryLine = patterns
+                    .map((p) => src.match(p)?.[0])
+                    .find(Boolean) as string | undefined
+                  if (explicitDeliveryLine) break
+                }
+                if (explicitDeliveryLine) {
+                  analysis.reason = explicitDeliveryLine.trim()
+                }
+              }
             }
           } else if (isVariantRule) {
             // OVERRIDE: DOM found a selected variant but AI failed — trust DOM
@@ -5493,7 +5525,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           } else if (isFreeShippingThresholdRule) {
             // Hard override: only trigger on SPECIFIC free shipping phrases that clearly
             // indicate an active free shipping/delivery offer (not generic mentions in FAQ/policies)
-            const freeShippingPageText = (fullVisibleText || websiteContent || '').toLowerCase()
+            const freeShippingRawText = (fullVisibleText || websiteContent || '')
+            const freeShippingPageText = freeShippingRawText.toLowerCase()
             const hasFreeShippingInDom =
               // Very specific phrases that only appear when site actively offers it near CTA
               freeShippingPageText.includes('free express delivery') ||
@@ -5506,7 +5539,19 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!analysis.passed && hasFreeShippingInDom) {
               console.log(`Free shipping threshold rule: Specific free shipping/delivery phrase found in page DOM. Forcing PASS.`)
               analysis.passed = true
-              analysis.reason = `Free express delivery or free express shipping is clearly shown on the product page, meeting the requirement to highlight a free shipping incentive near the purchase area.`
+              const uiPhrasePatterns = [
+                /free\s+express\s+(?:shipping|delivery)(?:\s+over\s+[\$£€]?\d+[.,]?\d*)?/i,
+                /free\s+shipping\s+over\s+[\$£€]?\d+[.,]?\d*/i,
+                /add\s+[\$£€]?\d+[.,]?\d*\s*(?:more\s*)?for\s+free\s+shipping/i,
+                /[\$£€]?\d+[.,]?\d*\s+away\s+from\s+free\s+shipping/i,
+                /free\s+shipping\s+on\s+orders?\s+(?:over|above)\s+[\$£€]?\d+[.,]?\d*/i,
+              ]
+              const matchedUiText = uiPhrasePatterns
+                .map((p) => freeShippingRawText.match(p)?.[0]?.trim())
+                .find(Boolean)
+              analysis.reason = matchedUiText
+                ? `Free-shipping text is visible on the page: "${matchedUiText}".`
+                : `Free-shipping threshold text is visible near the purchase area (for example "Free express shipping over ...").`
             }
           } else if (isSquareImageRule) {
             // Hard override: DOM measured square containers → always PASS, even if AI disagreed
@@ -5584,7 +5629,11 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             ruleId: rule.id, // Explicitly use current rule.id
             ruleTitle: rule.title, // Explicitly use current rule.title
             passed: analysis.passed === true,
-            reason: analysis.reason || 'No reason provided',
+            reason: formatUserFriendlyRuleResult(
+              rule,
+              analysis.passed === true,
+              analysis.reason || 'No reason provided'
+            ),
           }
 
           // Final validation: Ensure result matches the rule being processed
@@ -5631,7 +5680,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             ruleId: rule.id,
             ruleTitle: rule.title,
             passed: false,
-            reason: `Error: ${errorMessage}`,
+            reason: formatUserFriendlyRuleResult(rule, false, `Error: ${errorMessage}`),
           })
 
           // Update last request time even on error to prevent rapid retries
