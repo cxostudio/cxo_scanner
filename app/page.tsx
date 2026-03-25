@@ -499,14 +499,17 @@ export default function Home() {
         }
       })()
   
-      // ✅ Main processing
+      // ✅ Main processing — results are written to localStorage inside processBatches
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
-  
-      // ✅ Summary calculation
+
+      // Navigate as soon as scan data is ready (before email/summary work)
+      router.push('/scanner')
+
+      // ✅ Summary for EmailJS (after redirect starts; non-blocking for UX)
       let passResult: string | number = 'N/A'
       let failResult: string | number = 'N/A'
-  
+
       try {
         const stored = localStorage.getItem('scanResults')
         if (stored) {
@@ -518,7 +521,7 @@ export default function Home() {
               reason: z.string(),
             })
           ).parse(JSON.parse(stored))
-  
+
           const pass = parsed.filter(r => r.passed).length
           passResult = `${pass}/${parsed.length}`
           failResult = `${parsed.length - pass}/${parsed.length}`
@@ -526,7 +529,7 @@ export default function Home() {
       } catch {
         console.warn('Summary parsing failed')
       }
-  
+
       // ✅ EmailJS (non-blocking)
       emailjs.send(
         EMAILJS_SERVICE_ID,
@@ -546,19 +549,17 @@ export default function Home() {
         },
         { publicKey: EMAILJS_PUBLIC_KEY }
       ).catch(err => console.error('EmailJS failed:', err))
-  
+
       toast.success('Scan completed successfully!')
-      router.push('/scanner')
   
     } catch (err) {
       console.error(err)
       toast.error(err instanceof Error ? err.message : 'Something went wrong')
       setShowAnalyze(false)
-  
     } finally {
-      // ✅ Always runs (fixes your duplicate calls)
+      // Only reset button loading. Do NOT setShowAnalyze(false) here on success —
+      // router.push is async; flipping showAnalyze would flash the form before /scanner mounts.
       setIsStartingScan(false)
-      setShowAnalyze(false)
     }
   }
 
