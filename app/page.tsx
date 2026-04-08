@@ -581,7 +581,7 @@ export default function Home() {
 
   return (
     <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
-      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[400px]'}`}>
+      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[600px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -626,7 +626,7 @@ export default function Home() {
           </>
         )}
         {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
-        <div className="h-full">
+        <div className="w-full h-full mx-auto">
           {!showAnalyze ? (
             <>
               <AnimatePresence mode="wait">
@@ -640,14 +640,14 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-3xl font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      className="text-2xl  tracking-[0.03em] font-plus-jakarta   font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
                     >
                       What's your biggest challenge right now?
                     </motion.h2>
-                    <div >
+                    <div>
                       {step1Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
@@ -677,7 +677,7 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-3xl  font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      className="text-2xl tracking-[0.03em] font-plus-jakarta  font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
@@ -714,21 +714,15 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                       <motion.h2
-                        className="text-[#757575] text-center text-[33px] italic font-bold leading-[48px] tracking-[-1.2px] me-[12px] mt-[35px]"
+                        className=" text-center text-2xl md:text-4xl font-semibold font-plus-jakarta leading-[48px] tracking-[0.03em] me-[12px] mt-[35px]"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
                       >
-                        <i>You're almost done!</i>
+                        <span className="text-[#757575]"><i>You're almost done!</i></span><br />
+                        <span className="text-[#09090b]">Let's finish your audit</span>
                       </motion.h2>
-                      <motion.h2
-                        className="text-3xl font-bold text-gray-900 text-center"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.12 }}
-                      >
-                        Let's finish your audit
-                      </motion.h2>
+                      
                     <motion.div
                       className="mt-8"
                       initial={{ opacity: 0 }}
@@ -791,15 +785,26 @@ export default function Home() {
                     type="button"
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full rounded-[10px] font-bold text-base text-center cursor-pointer ${!isStepValid()
+                    className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!isStepValid()
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white shadow-lg'
+                      : 'bg-black text-white'
                       }`}
                     whileHover={isStepValid() ? { scale: 1.015 } : {}}
                     whileTap={isStepValid() ? { scale: 0.985 } : {}}
                     transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                   >
-                    <p className="my-[18px]">Continue ›</p>
+                    <p className="my-[18px] flex items-center justify-center gap-2">
+                      <span>Continue</span>
+                      <span>
+                      <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 256 256"
+    className="w-4 h-4 fill-current"
+  >
+    <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
+  </svg>
+                      </span>
+                    </p>
                   </motion.button>
                 </motion.div>
               ) : (
@@ -823,7 +828,7 @@ export default function Home() {
                       type="button"
                       onClick={handleStartScan}
                       disabled={!websiteUrl || !email}
-                      className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
+                      className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!websiteUrl || !email
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-black text-white shadow-2xl'
                         }`}
@@ -831,7 +836,18 @@ export default function Home() {
                       whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
                       transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                     >
-                      Access my results ›
+                      <p className="my-[18px] flex items-center justify-center gap-2">
+                      <span>Access my results</span>
+                      <span>
+                         <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 256 256"
+    className="w-4 h-4 fill-current"
+  >
+    <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
+  </svg>
+                      </span>
+                      </p>
                     </motion.button>
                   )}
                 </motion.div>
@@ -841,6 +857,9 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
+                <div className="text-center mb-4">
+              <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
+              </div>
                 <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
                   Analyzing Your URL
                   <span className="flex gap-1 items-end" aria-hidden>
@@ -964,8 +983,8 @@ export default function Home() {
                             className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
                             {isCompleted ? (
-                              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                                <Check className="w-3.5 h-3.5 text-white" />
+                              <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                                <img src="/check.png" alt="check" className="w-3.5 h-3.5 object-cover" />
                               </div>
                             ) : (
                               <Cog className={`w-5 h-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
@@ -976,7 +995,7 @@ export default function Home() {
                             {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
                             {isActive && (
                               <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
-                                Analyzing...
+                              Analyzing your URL...
                               </span>
                             )}
                           </motion.div>
@@ -1003,11 +1022,11 @@ export default function Home() {
           >
             <div className="flex justify-center gap-3">
               {/* Start: Profile Images */}
-              <div className="flex -space-x-2">
+              <div className="flex -space-x-2 mt-[8px]">
                 {['/client_first.png', '/client_second.png', '/client_third.png'].map((src, i) => (
                   <motion.div
                     key={src}
-                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200"
+                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.15)]"
                     initial={{ opacity: 0, scale: 0.85 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.45 + i * 0.09 }}

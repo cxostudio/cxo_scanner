@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@import url('https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Inter+Tight:ital,wght@0,100..900;1,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
 .loading {
   display: inline-block;
   width: 20px;
@@ -39,7 +39,12 @@
 .loader span:nth-child(2) {
   animation-delay: -0.16s;
 }
-
+.font-inter {
+  font-family: "Inter Tight", sans-serif;
+}
+.font-plus-jakarta {
+  font-family: "Plus Jakarta Sans", sans-serif;
+}
 .loader span:nth-child(3) {
   animation-delay: 0s;
 }
