@@ -138,6 +138,12 @@ export default function Home() {
     // It will be loaded from API response during scan
   }, [])
 
+  // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
+  useEffect(() => {
+    if (!showAnalyze) return
+    router.prefetch('/scanner')
+  }, [showAnalyze, router])
+
   // Analysis steps + progress bar follow batch progress from processBatches (setProgress)
   useEffect(() => {
     if (!showAnalyze) {
@@ -533,58 +539,55 @@ export default function Home() {
       // ✅ Main processing — results are written to localStorage inside processBatches
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
-      await new Promise((r) =>
-        setTimeout(r, ANALYSIS_STEP_REMOVE_DELAY_MS + 500)
-      )
 
-      // Navigate as soon as scan + combine finish (batch-driven UI already tracked progress)
+      // Start navigation first; defer toast + localStorage parsing so they don't compete with the transition on this view.
       router.push('/scanner')
+      setTimeout(() => {
+        let passResult: string | number = 'N/A'
+        let failResult: string | number = 'N/A'
 
-      // ✅ Summary for EmailJS (after redirect starts; non-blocking for UX)
-      let passResult: string | number = 'N/A'
-      let failResult: string | number = 'N/A'
+        try {
+          const stored = localStorage.getItem('scanResults')
+          if (stored) {
+            const parsed = z.array(
+              z.object({
+                ruleId: z.string(),
+                ruleTitle: z.string(),
+                passed: z.boolean(),
+                reason: z.string(),
+              })
+            ).parse(JSON.parse(stored))
 
-      try {
-        const stored = localStorage.getItem('scanResults')
-        if (stored) {
-          const parsed = z.array(
-            z.object({
-              ruleId: z.string(),
-              ruleTitle: z.string(),
-              passed: z.boolean(),
-              reason: z.string(),
-            })
-          ).parse(JSON.parse(stored))
-
-          const pass = parsed.filter(r => r.passed).length
-          passResult = `${pass}/${parsed.length}`
-          failResult = `${parsed.length - pass}/${parsed.length}`
+            const pass = parsed.filter(r => r.passed).length
+            passResult = `${pass}/${parsed.length}`
+            failResult = `${parsed.length - pass}/${parsed.length}`
+          }
+        } catch {
+          console.warn('Summary parsing failed')
         }
-      } catch {
-        console.warn('Summary parsing failed')
-      }
 
-      // ✅ EmailJS (non-blocking)
-      // emailjs.send(
-      //   EMAILJS_SERVICE_ID,
-      //   EMAILJS_TEMPLATE_ID,
-      //   {
-      //     level: selectedChallenge ?? '',
-      //     price: selectedRevenue ?? '',
-      //     url: validUrl,
-      //     email: emailTrimmed,
-      //     ip_address: ipAddress,
-      //     browser,
-      //     screen_size: screenSize,
-      //     time_zone: timeZone,
-      //     browser_data: browserData,
-      //     pass_result: passResult,
-      //     fail_result: failResult,
-      //   },
-      //   { publicKey: EMAILJS_PUBLIC_KEY }
-      // ).catch(err => console.error('EmailJS failed:', err))
+        // ✅ EmailJS (non-blocking)
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
-      toast.success('Scan completed successfully!')
+        toast.success('Scan completed successfully!')
+      }, 0)
   
     } catch (err) {
       console.error(err)
