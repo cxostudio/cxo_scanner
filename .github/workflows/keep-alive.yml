@@ -1,0 +1,27 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *'  # Runs every 3 days
+  workflow_dispatch:         # Allows manual run anytime
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping Supabase Database
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/user_progress?limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+
+          echo "Response Code: $RESPONSE"
+
+          if [ "$RESPONSE" -eq 200 ]; then
+            echo "Supabase is alive!"
+          else
+            echo "Something went wrong. Response: $RESPONSE"
+            exit 1
+          fi
