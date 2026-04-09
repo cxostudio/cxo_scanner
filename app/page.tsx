@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Cog, Check } from 'lucide-react'
+import { Cog } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { z } from 'zod'
 import { toast } from 'react-toastify'
@@ -88,6 +88,9 @@ export default function Home() {
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
   const [removedSteps, setRemovedSteps] = useState<Set<number>>(new Set())
+  /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
+  const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
+  const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -125,6 +128,9 @@ export default function Home() {
     'Finalizing your audit report',
   ]
 
+  /** 0 = remove completed steps immediately after they reach Finished. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 700
+
   useEffect(() => {
     // Load rules on component mount
     loadRules()
@@ -132,44 +138,68 @@ export default function Home() {
     // It will be loaded from API response during scan
   }, [])
 
+  // Analysis steps + progress bar follow batch progress from processBatches (setProgress)
   useEffect(() => {
     if (!showAnalyze) {
       setMounted(0)
+      setRemovedSteps(new Set())
       return
     }
 
-    // If we have progress, update mounted based on batch progress
     if (progress) {
-      // Map batch progress to analysis steps
       const totalBatches = progress.total
       const currentBatch = progress.current
 
-      // Calculate which step should be active based on batch progress
-      // Distribute steps evenly across batches
-      const targetStep = Math.min(
-        Math.floor((currentBatch / totalBatches) * analysisSteps.length),
-        analysisSteps.length - 1
-      )
+      const targetStep =
+        currentBatch >= totalBatches
+          ? analysisSteps.length
+          : Math.min(
+              Math.floor((currentBatch / totalBatches) * analysisSteps.length),
+              analysisSteps.length - 1
+            )
 
       setMounted(targetStep)
     } else {
-      // When showAnalyze is true but no progress yet, show the first step
       setMounted(0)
     }
   }, [progress, showAnalyze])
 
-  // When a step completes (mounted advances), show checkmark briefly then remove it
+  // Remove completed steps immediately when they become Finished (or after delay, if configured).
   useEffect(() => {
-    if (mounted > 0) {
-      const justCompleted = mounted - 1
-      if (!removedSteps.has(justCompleted)) {
-        const t = setTimeout(() => {
-          setRemovedSteps(prev => new Set([...prev, justCompleted]))
-        }, 700)
-        return () => clearTimeout(t)
+    if (!showAnalyze || mounted <= 0) return
+
+    for (let k = 0; k < mounted; k++) {
+      if (analysisStepRemovalScheduledRef.current.has(k)) continue
+      analysisStepRemovalScheduledRef.current.add(k)
+
+      const idx = k
+      const applyRemove = () => {
+        setRemovedSteps(prev => {
+          if (prev.has(idx)) return prev
+          return new Set([...prev, idx])
+        })
+      }
+      if (ANALYSIS_STEP_REMOVE_DELAY_MS <= 0) {
+        applyRemove()
+      } else {
+        const id = window.setTimeout(applyRemove, ANALYSIS_STEP_REMOVE_DELAY_MS)
+        analysisStepRemoveTimeoutsRef.current.push(id)
       }
     }
-  }, [mounted])
+  }, [mounted, showAnalyze])
+
+  const analysisProgressPercent = useMemo(() => {
+    if (!showAnalyze || !progress) return 0
+    const { current, total } = progress
+    if (total <= 0) return 0
+    const raw = Math.min(100, Math.round((current / total) * 100))
+    const allBatchesDone = current >= total
+    const allStepsDone =
+      mounted >= analysisSteps.length &&
+      removedSteps.size >= analysisSteps.length
+    if (allBatchesDone && !allStepsDone) return Math.min(raw, 95)
+    return raw
+  }, [showAnalyze, progress, mounted, removedSteps, analysisSteps.length])
 
   const loadRules = async () => {
     try {
@@ -367,11 +397,8 @@ export default function Home() {
         })).parse(finalData.results)
 
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
-        // Store normalized URL (with protocol) so iframe works on Vercel
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
-        // Store screenshot URL for results page (if available)
         if (websiteScreenshot) {
-          // Store as data URL in sessionStorage instead of localStorage (smaller size limit)
           try {
             sessionStorage.setItem('lastScreenshot', websiteScreenshot)
           } catch (e) {
@@ -472,6 +499,10 @@ export default function Home() {
       setWebsiteScreenshot(null)
       setCurrentBatchNumber(0)
       setIframeError(false)
+      setRemovedSteps(new Set())
+      analysisStepRemoveTimeoutsRef.current.forEach((tid) => window.clearTimeout(tid))
+      analysisStepRemoveTimeoutsRef.current = []
+      analysisStepRemovalScheduledRef.current = new Set()
   
       // ✅ Wait for UI render
       await new Promise((r) =>
@@ -502,8 +533,11 @@ export default function Home() {
       // ✅ Main processing — results are written to localStorage inside processBatches
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
+      await new Promise((r) =>
+        setTimeout(r, ANALYSIS_STEP_REMOVE_DELAY_MS + 500)
+      )
 
-      // Navigate as soon as scan data is ready (before email/summary work)
+      // Navigate as soon as scan + combine finish (batch-driven UI already tracked progress)
       router.push('/scanner')
 
       // ✅ Summary for EmailJS (after redirect starts; non-blocking for UX)
@@ -531,24 +565,24 @@ export default function Home() {
       }
 
       // ✅ EmailJS (non-blocking)
-      emailjs.send(
-        EMAILJS_SERVICE_ID,
-        EMAILJS_TEMPLATE_ID,
-        {
-          level: selectedChallenge ?? '',
-          price: selectedRevenue ?? '',
-          url: validUrl,
-          email: emailTrimmed,
-          ip_address: ipAddress,
-          browser,
-          screen_size: screenSize,
-          time_zone: timeZone,
-          browser_data: browserData,
-          pass_result: passResult,
-          fail_result: failResult,
-        },
-        { publicKey: EMAILJS_PUBLIC_KEY }
-      ).catch(err => console.error('EmailJS failed:', err))
+      // emailjs.send(
+      //   EMAILJS_SERVICE_ID,
+      //   EMAILJS_TEMPLATE_ID,
+      //   {
+      //     level: selectedChallenge ?? '',
+      //     price: selectedRevenue ?? '',
+      //     url: validUrl,
+      //     email: emailTrimmed,
+      //     ip_address: ipAddress,
+      //     browser,
+      //     screen_size: screenSize,
+      //     time_zone: timeZone,
+      //     browser_data: browserData,
+      //     pass_result: passResult,
+      //     fail_result: failResult,
+      //   },
+      //   { publicKey: EMAILJS_PUBLIC_KEY }
+      // ).catch(err => console.error('EmailJS failed:', err))
 
       toast.success('Scan completed successfully!')
   
@@ -961,6 +995,28 @@ export default function Home() {
                     </button>
                   </div>
                 )} */}
+
+                {/* Label top-left, % top-right; bar has no text inside */}
+                <div
+                  className="mb-4 w-full max-w-[680px] mx-auto"
+                  role="progressbar"
+                  aria-valuenow={analysisProgressPercent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-zinc-600">Progress</span>
+                    <span className="text-xs font-medium tabular-nums text-zinc-800">
+                      {analysisProgressPercent}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                    <div
+                      className="h-full rounded-full bg-gray-600 transition-[width] duration-500 ease-out"
+                      style={{ width: `${analysisProgressPercent}%` }}
+                    />
+                  </div>
+                </div>
 
                 {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
                 <div className="space-y-3">
