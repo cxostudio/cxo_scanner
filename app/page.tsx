@@ -128,8 +128,10 @@ export default function Home() {
     'Finalizing your audit report',
   ]
 
-  /** 0 = remove completed steps immediately after they reach Finished. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 700
+  /** Time to show checkmark + "Finished" before the row exits (ms). 0 hides Finished — never paints. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 650
+  /** Extra delay per step index so rows exit in a short cascade instead of all at once. */
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 80
 
   useEffect(() => {
     // Load rules on component mount
@@ -188,7 +190,9 @@ export default function Home() {
       if (ANALYSIS_STEP_REMOVE_DELAY_MS <= 0) {
         applyRemove()
       } else {
-        const id = window.setTimeout(applyRemove, ANALYSIS_STEP_REMOVE_DELAY_MS)
+        const delay =
+          ANALYSIS_STEP_REMOVE_DELAY_MS + idx * ANALYSIS_STEP_REMOVE_STAGGER_MS
+        const id = window.setTimeout(applyRemove, delay)
         analysisStepRemoveTimeoutsRef.current.push(id)
       }
     }
@@ -198,14 +202,8 @@ export default function Home() {
     if (!showAnalyze || !progress) return 0
     const { current, total } = progress
     if (total <= 0) return 0
-    const raw = Math.min(100, Math.round((current / total) * 100))
-    const allBatchesDone = current >= total
-    const allStepsDone =
-      mounted >= analysisSteps.length &&
-      removedSteps.size >= analysisSteps.length
-    if (allBatchesDone && !allStepsDone) return Math.min(raw, 95)
-    return raw
-  }, [showAnalyze, progress, mounted, removedSteps, analysisSteps.length])
+    return Math.min(100, Math.round((current / total) * 100))
+  }, [showAnalyze, progress])
 
   const loadRules = async () => {
     try {
@@ -274,6 +272,7 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
+    // `current` = batches finished (not the batch currently scanning). Avoids 100% while last /api/scan is still in flight.
     setProgress({ current: 0, total: batches.length })
 
     const ScanResultsSchema = z.array(z.object({
@@ -285,8 +284,6 @@ export default function Home() {
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
-
-      setProgress({ current: i + 1, total: batches.length })
 
       let batchSucceeded = false
       let lastBatchError: unknown = null
@@ -380,6 +377,8 @@ export default function Home() {
       }
 
       localStorage.setItem('scanResults', JSON.stringify(allResults))
+
+      setProgress({ current: i + 1, total: batches.length })
     }
 
     try {
@@ -540,8 +539,8 @@ export default function Home() {
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
-      // Start navigation first; defer toast + localStorage parsing so they don't compete with the transition on this view.
-      router.push('/scanner')
+      // Replace (no extra history entry); toast/email deferred so navigation isn't blocked.
+      router.replace('/scanner')
       setTimeout(() => {
         let passResult: string | number = 'N/A'
         let failResult: string | number = 'N/A'
@@ -595,7 +594,7 @@ export default function Home() {
       setShowAnalyze(false)
     } finally {
       // Only reset button loading. Do NOT setShowAnalyze(false) here on success —
-      // router.push is async; flipping showAnalyze would flash the form before /scanner mounts.
+      // router.replace is async; flipping showAnalyze would flash the form before /scanner mounts.
       setIsStartingScan(false)
     }
   }
@@ -1015,7 +1014,7 @@ export default function Home() {
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                     <div
-                      className="h-full rounded-full bg-gray-600 transition-[width] duration-500 ease-out"
+                      className="h-full rounded-full bg-gray-600 transition-[width] duration-300 ease-out"
                       style={{ width: `${analysisProgressPercent}%` }}
                     />
                   </div>
@@ -1038,7 +1037,7 @@ export default function Home() {
                             initial={{ opacity: 0, y: 16 }}
                             animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
                             exit={{ x: 160, opacity: 0 }}
-                            transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
+                            transition={{ duration: 0.42, ease: [0.25, 0.1, 0.25, 1] }}
                             className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
                           >
                             {isCompleted ? (
