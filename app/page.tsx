@@ -526,7 +526,7 @@ export default function Home() {
             sessionStorage.setItem('lastScreenshot', data.screenshot)
           }
         } catch (err) {
-          console.warn('Screenshot  failed:', err)
+          console.warn('Screenshot failed:', err)
         }
       })()
   
