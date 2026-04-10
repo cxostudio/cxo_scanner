@@ -40,8 +40,24 @@ type NdComplete = {
   quadrants?: string[];
   quadrantLabels?: string[];
   url?: string;
+  previewMobile?: string;
   redirectWarning?: string;
 };
+
+/** sessionStorage often hits quota after lastScreenshot; fall back to localStorage for scan previews */
+function persistScanPreview(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value)
+    return
+  } catch {
+    /* QuotaExceeded or private mode */
+  }
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* ignore */
+  }
+}
 const LOADER_MESSAGES = [
   'Capturing page screenshots',
   'Scanning sections',
@@ -483,9 +499,14 @@ export default function Home() {
         if (msg.type === 'preview') {
           if (typeof msg.previewDesktop === 'string') {
             setPreviewDesktop(msg.previewDesktop)
+            persistScanPreview('scanPreviewDesktop', msg.previewDesktop)
           }
           if (typeof msg.preview === 'string' && !msg.previewDesktop) {
             setPreviewDesktop(msg.preview)
+            persistScanPreview('scanPreviewDesktop', msg.preview)
+          }
+          if (typeof msg.previewMobile === 'string') {
+            persistScanPreview('scanPreviewMobile', msg.previewMobile)
           }
         }
         if (msg.type === 'error') {
@@ -517,6 +538,9 @@ export default function Home() {
         }
       }
       const gotComplete = streamState.complete
+      if (typeof gotComplete?.previewMobile === 'string') {
+        persistScanPreview('scanPreviewMobile', gotComplete.previewMobile)
+      }
       if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
         setQuadrants(gotComplete.quadrants)
         setQuadrantLabels(gotComplete.quadrantLabels ?? [])
@@ -611,6 +635,18 @@ export default function Home() {
       setCurrentBatchNumber(0)
       setIframeError(false)
       setRemovedSteps(new Set())
+      try {
+        sessionStorage.removeItem('scanPreviewMobile')
+        sessionStorage.removeItem('scanPreviewDesktop')
+      } catch {
+        /* ignore */
+      }
+      try {
+        localStorage.removeItem('scanPreviewMobile')
+        localStorage.removeItem('scanPreviewDesktop')
+      } catch {
+        /* ignore */
+      }
       analysisStepRemoveTimeoutsRef.current.forEach((tid) => window.clearTimeout(tid))
       analysisStepRemoveTimeoutsRef.current = []
       analysisStepRemovalScheduledRef.current = new Set()
@@ -674,24 +710,24 @@ export default function Home() {
         }
 
         // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)

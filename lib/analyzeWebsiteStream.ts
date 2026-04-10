@@ -222,6 +222,8 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           quadrants,
           quadrantLabels: [...QUADRANT_LABELS],
           url: finalUrl,
+          /** For /scanner mobile frame — desktop already sent on first preview + batch screenshot */
+          previewMobile: mobileDataUrl,
           redirectWarning: wasRedirected
             ? `The site did not stay on your requested URL and redirected to "${finalUrl}" (possible geo-block or login wall). Screenshots are from that final page. If you use VPN/proxy, run the app on the same network: set PUPPETEER_PROXY in .env or enable VPN before npm run dev.`
             : undefined,
