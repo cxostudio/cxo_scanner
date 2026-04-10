@@ -8,6 +8,9 @@ import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 import emailjs from '@emailjs/browser'
+import { DualViewportLoader } from './components/DualViewportLoader';
+import { QuadrantScanSequence } from './components/QuadrantScanSequence';
+
 
 interface Rule {
   id: string
@@ -30,6 +33,20 @@ interface BatchData {
   totalBatches: number
   timestamp: number
 }
+
+type NdComplete = {
+  type: 'complete';
+  message?: string;
+  quadrants?: string[];
+  quadrantLabels?: string[];
+  url?: string;
+  redirectWarning?: string;
+};
+const LOADER_MESSAGES = [
+  'Capturing page screenshots',
+  'Scanning sections',
+  'Almost ready',
+] as const;
 
 const EMAILJS_SERVICE_ID = 'service_j08d36o'
 const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
@@ -73,7 +90,6 @@ const EmailSchema = z.string()
 export default function Home() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState(1)
-  const [mounted, setMounted] = useState(0)
   const [selectedChallenge, setSelectedChallenge] = useState<string | null>(null)
   const [selectedRevenue, setSelectedRevenue] = useState<string | null>(null)
   const [websiteUrl, setWebsiteUrl] = useState('')
@@ -88,6 +104,15 @@ export default function Home() {
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
   const [removedSteps, setRemovedSteps] = useState<Set<number>>(new Set())
+  const [quadrants, setQuadrants] = useState<string[]>([]);
+  const [quadrantLabels, setQuadrantLabels] = useState<string[]>([]);
+  const [analyzedUrl, setAnalyzedUrl] = useState<string | null>(null);
+  const [redirectWarning, setRedirectWarning] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
+  const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
+
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
@@ -120,13 +145,29 @@ export default function Home() {
     }
   }
 
+  /** Shown during analyze; progress + row exits follow rule batch scanning (`progress`), not the X-Ray preview stream. */
   const analysisSteps = [
     'Crawling your product page structure',
     'Analyzing user experience and interface',
     'Analyzing content and copy effectiveness',
     'Generating conversion recommendations',
     'Finalizing your audit report',
-  ]
+  ] as const
+  const ANALYSIS_STEP_COUNT = analysisSteps.length
+
+  const mounted = useMemo(() => {
+    if (!showAnalyze || !progress || progress.total <= 0) return 0
+    if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
+    return Math.min(
+      ANALYSIS_STEP_COUNT - 1,
+      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT)
+    )
+  }, [showAnalyze, progress, ANALYSIS_STEP_COUNT])
+
+  const analyzeProgressPercent = useMemo(() => {
+    if (!showAnalyze || !progress || progress.total <= 0) return 0
+    return Math.min(100, Math.round((progress.current / progress.total) * 100))
+  }, [showAnalyze, progress])
 
   /** Time to show checkmark + "Finished" before the row exits (ms). 0 hides Finished — never paints. */
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 650
@@ -146,31 +187,12 @@ export default function Home() {
     router.prefetch('/scanner')
   }, [showAnalyze, router])
 
-  // Analysis steps + progress bar follow batch progress from processBatches (setProgress)
+  // While analyze UI is hidden, reset step row removal state (mounted is derived from `progress` while visible).
   useEffect(() => {
     if (!showAnalyze) {
-      setMounted(0)
       setRemovedSteps(new Set())
-      return
     }
-
-    if (progress) {
-      const totalBatches = progress.total
-      const currentBatch = progress.current
-
-      const targetStep =
-        currentBatch >= totalBatches
-          ? analysisSteps.length
-          : Math.min(
-              Math.floor((currentBatch / totalBatches) * analysisSteps.length),
-              analysisSteps.length - 1
-            )
-
-      setMounted(targetStep)
-    } else {
-      setMounted(0)
-    }
-  }, [progress, showAnalyze])
+  }, [showAnalyze])
 
   // Remove completed steps immediately when they become Finished (or after delay, if configured).
   useEffect(() => {
@@ -197,13 +219,6 @@ export default function Home() {
       }
     }
   }, [mounted, showAnalyze])
-
-  const analysisProgressPercent = useMemo(() => {
-    if (!showAnalyze || !progress) return 0
-    const { current, total } = progress
-    if (total <= 0) return 0
-    return Math.min(100, Math.round((current / total) * 100))
-  }, [showAnalyze, progress])
 
   const loadRules = async () => {
     try {
@@ -423,8 +438,99 @@ export default function Home() {
       localStorage.removeItem('scanBatches')
     }
 
-    // Don't set progress to null here (would reset mounted to 0 and flash all step loaders)
+    // Don't set progress to null here (would reset the batch progress bar and step UI)
     // Toast + redirect happen in handleStartScan right after this returns
+  }
+
+  /** Calls server `analyzeWebsiteStream` via POST /api/preview_website — NDJSON desktop/mobile preview + quadrants. Parallel to rule scanning. */
+  const startWebsitePreviewStream = async (captureUrl: string) => {
+    const trimmed = captureUrl.trim()
+    if (!trimmed) {
+      setError('Please enter a URL.')
+      return
+    }
+    const urlParam = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    setIsLoading(true)
+    setError(null)
+    setQuadrants([])
+    setQuadrantLabels([])
+    setAnalyzedUrl(null)
+    setRedirectWarning(null)
+    setLoaderMsgIndex(0)
+    setPreviewDesktop(null)
+    try {
+      const response = await fetch('/api/preview_website', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: urlParam }),
+      })
+      if (!response.ok) {
+        const errJson = (await response.json().catch(() => ({}))) as { error?: string; details?: string }
+        throw new Error(errJson.details || errJson.error || `HTTP ${response.status}`)
+      }
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body.')
+      }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const streamState = { complete: null as NdComplete | null }
+      const handleNdjsonLine = (line: string) => {
+        if (!line.trim()) return
+        const msg = JSON.parse(line) as Record<string, unknown>
+        if (msg.type === 'preview') {
+          if (typeof msg.previewDesktop === 'string') {
+            setPreviewDesktop(msg.previewDesktop)
+          }
+          if (typeof msg.preview === 'string' && !msg.previewDesktop) {
+            setPreviewDesktop(msg.preview)
+          }
+        }
+        if (msg.type === 'error') {
+          throw new Error(
+            typeof msg.details === 'string'
+              ? msg.details
+              : typeof msg.error === 'string'
+                ? msg.error
+                : 'Capture failed'
+          )
+        }
+        if (msg.type === 'complete') {
+          streamState.complete = msg as NdComplete
+        }
+      }
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          handleNdjsonLine(line)
+        }
+        if (done) {
+          if (buffer.trim()) {
+            handleNdjsonLine(buffer)
+          }
+          break
+        }
+      }
+      const gotComplete = streamState.complete
+      if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
+        setQuadrants(gotComplete.quadrants)
+        setQuadrantLabels(gotComplete.quadrantLabels ?? [])
+        setAnalyzedUrl(gotComplete.url ?? urlParam)
+        setRedirectWarning(gotComplete.redirectWarning ?? null)
+      } else {
+        setError('No capture data returned.')
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
+      console.error('Website preview stream error:', err)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleStartScan = async () => {
@@ -513,6 +619,8 @@ export default function Home() {
       await new Promise((r) =>
         requestAnimationFrame(() => setTimeout(r, 200))
       )
+
+      void startWebsitePreviewStream(validUrl)
   
       // ✅ Screenshot (non-blocking, clean)
       ;(async () => {
@@ -614,6 +722,15 @@ export default function Home() {
     }
     return false
   }
+
+
+  useEffect(() => {
+    if (!isLoading) return;
+    const id = window.setInterval(() => {
+      setLoaderMsgIndex((i) => (i + 1) % LOADER_MESSAGES.length);
+    }, 2800);
+    return () => window.clearInterval(id);
+  }, [isLoading]);
 
   return (
     <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
@@ -898,86 +1015,46 @@ export default function Home() {
               </div>
                 <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
                   Analyzing Your URL
-                  <span className="flex gap-1 items-end" aria-hidden>
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
+                 
                 </h2>
 
-                {/* Desktop browser preview only */}
+                {/* Preview: empty desktop+phone shells + purple scan while loading; fill as stream arrives. overflow-x-auto keeps overlapping phone visible (main is overflow-x-hidden). */}
                 {websiteUrl && (
-                  <div className="mb-6 flex justify-center">
-                    {/* Desktop - browser window: traffic lights, address bar, site content */}
-                    <div className="w-full max-w-2xl h-[320px]">
-                      <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-2xl flex flex-col h-full">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-                        </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
-                          <div className="flex-1 flex items-center gap-2 px-3 py-1 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-[11px] font-medium">
-                            <svg className="w-3 h-3 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
-                            <span className="truncate">{websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}</span>
-                          </div>
-                        </div>
-                        <div className="flex-1 min-h-0 overflow-hidden bg-white">
-                          {!iframeError ? (
-                            <iframe
-                              src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                              className="w-full h-full min-h-0 border-0"
-                              style={{ blockSize: '100%', minHeight: 0 }}
-                              title="Website inside desktop browser"
-                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                              loading="lazy"
-                              onError={async () => {
-                                setIframeError(true)
-                        
-                                if (!websiteUrl || websiteScreenshot) return
-                        
-                                const validUrl = websiteUrl.startsWith('http')
-                                  ? websiteUrl
-                                  : `https://${websiteUrl}`
-                        
-                                try {
-                                  const res = await fetch('/api/screenshot', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ url: validUrl }),
-                                  })
-                        
-                                  if (!res.ok) {
-                                    console.error('Screenshot API failed:', res.status)
-                                    return
-                                  }
-                        
-                                  const data = await res.json()
-                        
-                                  if (data?.screenshot) {
-                                    setWebsiteScreenshot(data.screenshot)
-                        
-                                    try {
-                                      sessionStorage.setItem('lastScreenshot', data.screenshot)
-                                    } catch (e) {
-                                      console.warn('SessionStorage failed:', e)
-                                    }
-                                  }
-                                } catch (err) {
-                                  console.error('Screenshot fallback failed:', err)
-                                }
-                              }}
-                            />
-                          ) : websiteScreenshot ? (
-                            <img src={websiteScreenshot} alt="Desktop" className="w-full h-full object-cover object-top" />
-                          ) : (
-                            <div className="w-full h-full bg-[#18181b] flex items-center justify-center">
-                              <div className="w-10 h-10 border-2 border-[#3f3f46] border-t-purple-500 rounded-full animate-spin" />
-                            </div>
-                          )}
-                        </div>
+                  <div className="mb-8 w-full min-w-0 overflow-x-auto overflow-y-visible pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {error && (
+                      <div className="mx-auto mb-4 max-w-2xl rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-sm text-red-800 shadow-sm">
+                        <strong>Error:</strong> {error}
                       </div>
-                    </div>
+                    )}
+                    {isLoading && (
+                      <DualViewportLoader
+                        previewDesktop={previewDesktop}
+                        scanning
+                        statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
+                      />
+                    )}
+                    {!isLoading && quadrants.length > 0 && (
+                      <div className="mx-auto w-full max-w-6xl min-w-0">
+                        {previewDesktop && (
+                          <div className="mb-8">
+                            <DualViewportLoader
+                              previewDesktop={previewDesktop}
+                              scanning={false}
+                            />
+                          </div>
+                        )}
+                        {redirectWarning && (
+                          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                            <strong>Redirect / geo-block:</strong> {redirectWarning}
+                          </div>
+                        )}
+                        <QuadrantScanSequence
+                          quadrants={quadrants}
+                          quadrantLabels={quadrantLabels}
+                          previewDesktop={previewDesktop}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1002,25 +1079,25 @@ export default function Home() {
                 <div
                   className="mb-4 w-full max-w-[680px] mx-auto"
                   role="progressbar"
-                  aria-valuenow={analysisProgressPercent}
+                  aria-valuenow={analyzeProgressPercent}
                   aria-valuemin={0}
                   aria-valuemax={100}
                 >
                   <div className="mb-1.5 flex items-center justify-between gap-3">
                     <span className="text-xs font-medium text-zinc-600">Progress</span>
                     <span className="text-xs font-medium tabular-nums text-zinc-800">
-                      {analysisProgressPercent}%
+                      {analyzeProgressPercent}%
                     </span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                     <div
                       className="h-full rounded-full bg-gray-600 transition-[width] duration-300 ease-out"
-                      style={{ width: `${analysisProgressPercent}%` }}
+                      style={{ width: `${analyzeProgressPercent}%` }}
                     />
                   </div>
                 </div>
 
-                {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
+                {/* Analyze steps — advance + remove rows from rule batch progress */}
                 <div className="space-y-3">
                   <AnimatePresence mode="popLayout">
                     {analysisSteps

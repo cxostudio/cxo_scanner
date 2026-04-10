@@ -1,8 +1,9 @@
 // src/app/api/analyze_image/route.tsx – OpenRouter (Gemini via OpenRouter)
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { analyzeWebsiteStream } from '@/lib/analyzeWebsiteStream';
 
 // --- Configuration: OpenRouter (Gemini via OpenRouter) ---
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -20,6 +21,13 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface ApiRequestBody {
     url: string;
+}
+
+/** POST body: `url` or `websiteUrl`, optional `stream` for NDJSON preview capture via AnalyzeWebsite. */
+interface AnalyzeImagePostBody {
+    url?: string;
+    websiteUrl?: string;
+    stream?: boolean;
 }
 
 interface PredefineRule {
@@ -46,6 +54,7 @@ interface ApiResponse {
     error?: string;
     details?: string;
 }
+
 
 function loadPredefineRules(): PredefineRule[] {
     try {
@@ -122,15 +131,31 @@ Respond with valid JSON only, no other text. Use this exact structure:
 }
 
 // --- API Route Handler ---
-export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse>> {
+export async function POST(request: NextRequest): Promise<Response> {
+    let parsed: AnalyzeImagePostBody;
+    try {
+        parsed = (await request.json()) as AnalyzeImagePostBody;
+    } catch {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const raw = (parsed.url ?? parsed.websiteUrl ?? '').trim();
+    if (!raw) {
+        return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+
+    if (parsed.stream === true) {
+        const streamReq = new NextRequest(request.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url } satisfies ApiRequestBody),
+        });
+        return analyzeWebsiteStream(streamReq);
+    }
+
     let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
     try {
-        const body: ApiRequestBody = await request.json();
-        const { url } = body;
-
-        if (!url) {
-            return NextResponse.json({ error: 'URL is required' }, { status: 400 });
-        }
 
         browser = await puppeteer.launch({
             headless: true,

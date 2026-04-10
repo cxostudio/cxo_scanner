@@ -77,3 +77,17 @@
 .iphone-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.3);
 }
+
+/* UX-Ray style vertical sweep — DualViewportLoader + UxRayLoader */
+@keyframes ux-ray-sweep {
+  0% {
+    top: 0;
+  }
+  100% {
+    top: calc(100% - 3px);
+  }
+}
+
+.ux-ray-scan-line {
+  animation: ux-ray-sweep 2.6s ease-in-out infinite alternate;
+}
