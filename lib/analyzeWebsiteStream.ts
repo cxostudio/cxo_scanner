@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import puppeteer from 'puppeteer'
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export interface AnalyzeWebsiteStreamBody {
   url: string
@@ -46,25 +46,9 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+      let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
       try {
-        browser = await puppeteer.launch({
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-blink-features=AutomationControlled',
-            '--disable-infobars',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--disable-gpu',
-            '--disable-translate',
-            '--disable-web-security',
-            '--window-size=1280,800',
-            '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          ],
-        })
+        browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' })
         const page = await browser.newPage()
 
         await page.evaluateOnNewDocument(() => {
@@ -78,6 +62,9 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
         await page.setExtraHTTPHeaders({
           'Accept-Language': 'en-GB,en;q=0.9',
         })
+        await page.setUserAgent(
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        )
 
         try {
           await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 })

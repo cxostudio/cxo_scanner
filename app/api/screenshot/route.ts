@@ -1,49 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+
+/** Edge runtime cannot run Puppeteer — must be Node. */
+export const runtime = 'nodejs'
+
+/** Vercel: allow time for Chromium cold start + navigation + full-page capture. */
+export const maxDuration = 60
 
 /**
- * Screenshot + image reading: delegates to /api/analyze_image.
- * All screenshot capture and image reading (OpenRouter vision + rules) lives in analyze_image.
+ * Full-page PNG for the scanned URL. Returns JSON `{ screenshot: data:image/png;base64,... }`
+ * so `app/page.tsx` can `res.json()` — not a raw image body.
  */
 export async function POST(request: NextRequest) {
+  let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
   try {
-    const body = await request.json()
-    const { url } = body
-
-    if (!url) {
+    const body = (await request.json().catch(() => ({}))) as { url?: string }
+    const raw = typeof body?.url === 'string' ? body.url.trim() : ''
+    if (!raw) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 })
     }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
 
-    const validUrl = typeof url === 'string' ? url.trim() : ''
-    if (!validUrl) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 })
-    }
-
-    const baseUrl =
-      process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : (request.nextUrl?.origin ?? 'http://localhost:3000')
-
-    const res = await fetch(`${baseUrl}/api/analyze_image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: validUrl.startsWith('http') ? validUrl : `https://${validUrl}` }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: data?.error ?? 'Image analysis failed', details: data?.details },
-        { status: res.status }
-      )
-    }
-
-    return NextResponse.json(data)
-  } catch (error) {
-    console.error('Screenshot API error:', error)
-    return NextResponse.json(
-      { error: 'Failed to analyze images', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
+    browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1440,900' })
+    const page = await browser.newPage()
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 })
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     )
+    await page.setDefaultNavigationTimeout(55_000)
+    await page.setDefaultTimeout(55_000)
+
+    try {
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 55_000 })
+    } catch {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    }
+    await new Promise((r) => setTimeout(r, 800))
+
+    const screenshotBuf = await page.screenshot({ fullPage: true, type: 'png' })
+    const base64 = Buffer.from(screenshotBuf).toString('base64')
+    const screenshot = `data:image/png;base64,${base64}`
+
+    return NextResponse.json({ screenshot })
+  } catch (error) {
+    console.error('/api/screenshot error:', error)
+    return NextResponse.json(
+      {
+        error: 'Failed to capture screenshot',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 },
+    )
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => undefined)
+    }
   }
 }

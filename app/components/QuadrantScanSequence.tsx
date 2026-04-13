@@ -8,6 +8,7 @@ type Props = {
   quadrants: string[];
   quadrantLabels: string[];
   previewDesktop?: string | null;
+  previewMobile?: string | null;
 };
 
 const ENTER_MS = 600;
@@ -21,6 +22,7 @@ export function QuadrantScanSequence({
   quadrants,
   quadrantLabels,
   previewDesktop,
+  previewMobile,
 }: Props) {
   const [rowStack, setRowStack] = useState<{ src: string; label: string; key: number }[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -89,7 +91,7 @@ export function QuadrantScanSequence({
             className="flex min-h-[120px] shrink-0 flex-row flex-nowrap items-end justify-center gap-2 sm:min-h-[140px]"
           >
             {previewDesktop && (
-              <MiniDualViewportCard previewDesktop={previewDesktop} />
+              <MiniDualViewportCard previewDesktop={previewDesktop} previewMobile={previewMobile} />
             )}
             <AnimatePresence initial={false}>
               {rowStack.map((item) => (

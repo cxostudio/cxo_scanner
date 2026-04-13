@@ -1,9 +1,12 @@
 // src/app/api/analyze_image/route.tsx – OpenRouter (Gemini via OpenRouter)
 import { NextResponse, NextRequest } from 'next/server';
-import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { analyzeWebsiteStream } from '@/lib/analyzeWebsiteStream';
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 // --- Configuration: OpenRouter (Gemini via OpenRouter) ---
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -154,26 +157,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         return analyzeWebsiteStream(streamReq);
     }
 
-    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+    let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null;
     try {
-
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--disable-gpu',
-                '--disable-translate',
-                '--disable-web-security',
-                '--window-size=1280,800',
-                '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ],
-        });
+        browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' });
         const page = await browser.newPage();
 
         // Stealth: bot detection kam karne ke liye (puppeteer-extra Next.js me 500 de raha tha)
@@ -188,6 +174,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         await page.setExtraHTTPHeaders({
             'Accept-Language': 'en-GB,en;q=0.9',
         });
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         try {
             await page.goto(url, { waitUntil: 'load', timeout: 35000 });
@@ -247,8 +234,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     } catch (error: any) {
         console.error('Error in API route:', error);
-        if (!browser && error?.message?.includes('Chromium revision is not available')) {
-            console.error('Puppeteer chromium revision error. Ensure it is installed correctly or use --no-sandbox flags.');
+        if (!browser && error?.message?.includes('Could not find Chrome')) {
+            console.error('Chromium binary not found. On Vercel this route must use @sparticuz/chromium via launchPuppeteerBrowser.');
         }
         return NextResponse.json({
             error: 'Failed to analyze images',

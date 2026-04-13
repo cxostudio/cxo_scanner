@@ -128,6 +128,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
+  const [previewMobile, setPreviewMobile] = useState<string | null>(null);
 
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
@@ -474,6 +475,7 @@ export default function Home() {
     setRedirectWarning(null)
     setLoaderMsgIndex(0)
     setPreviewDesktop(null)
+    setPreviewMobile(null)
     try {
       const response = await fetch('/api/preview_website', {
         method: 'POST',
@@ -506,6 +508,7 @@ export default function Home() {
             persistScanPreview('scanPreviewDesktop', msg.preview)
           }
           if (typeof msg.previewMobile === 'string') {
+            setPreviewMobile(msg.previewMobile)
             persistScanPreview('scanPreviewMobile', msg.previewMobile)
           }
         }
@@ -539,6 +542,7 @@ export default function Home() {
       }
       const gotComplete = streamState.complete
       if (typeof gotComplete?.previewMobile === 'string') {
+        setPreviewMobile(gotComplete.previewMobile)
         persistScanPreview('scanPreviewMobile', gotComplete.previewMobile)
       }
       if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
@@ -710,24 +714,24 @@ export default function Home() {
         }
 
         // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -1062,19 +1066,21 @@ export default function Home() {
                         <strong>Error:</strong> {error}
                       </div>
                     )}
-                    {isLoading && (
+                    {isLoading && quadrants.length === 0 && (
                       <DualViewportLoader
                         previewDesktop={previewDesktop}
+                        previewMobile={previewMobile}
                         scanning
                         statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
                       />
                     )}
-                    {!isLoading && quadrants.length > 0 && (
+                    {quadrants.length > 0 && (
                       <div className="mx-auto w-full max-w-6xl min-w-0">
                         {previewDesktop && (
                           <div className="mb-8">
                             <DualViewportLoader
                               previewDesktop={previewDesktop}
+                              previewMobile={previewMobile}
                               scanning={false}
                             />
                           </div>
@@ -1088,6 +1094,7 @@ export default function Home() {
                           quadrants={quadrants}
                           quadrantLabels={quadrantLabels}
                           previewDesktop={previewDesktop}
+                          previewMobile={previewMobile}
                         />
                       </div>
                     )}
