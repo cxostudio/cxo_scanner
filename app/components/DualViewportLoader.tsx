@@ -18,24 +18,30 @@ export function DualViewportLoader({
 }: DualViewportLoaderProps) {
   const desktopReady = previewDesktop != null && previewDesktop.length > 0;
   const mobileReady = previewMobile != null && previewMobile.length > 0;
+  const mobileSrc = mobileReady ? previewMobile! : desktopReady ? previewDesktop! : null;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-3 sm:px-4">
       {scanning ? (
         <p className="mb-5 text-center text-sm font-medium text-zinc-500">In progress…</p>
       ) : (
-        <p className="mb-5 text-center text-sm font-medium text-zinc-600">Desktop preview</p>
+        <p className="mb-5 text-center text-sm font-medium text-zinc-600">Preview</p>
       )}
 
-      <div className="mx-auto flex w-full max-w-5xl justify-center pb-4">
-        <div className="flex w-full flex-col items-center gap-4 sm:flex-row sm:items-end sm:justify-center sm:gap-5">
-          <div className="relative z-0 w-[min(100%,32rem)] shrink-0 overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_20px_60px_-12px_rgba(0,0,0,0.2),0_8px_24px_-8px_rgba(0,0,0,0.12)] ring-1 ring-black/[0.05] sm:w-[36rem]">
-            <div className="flex h-9 items-center gap-2 border-b border-zinc-200 bg-zinc-100/95 px-3">
+      <div className="relative mx-auto w-full max-w-[920px] pb-4 pt-1">
+        <div
+          className="pointer-events-none absolute inset-x-3 inset-y-2 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-6"
+          aria-hidden
+        />
+
+        <div className="relative mx-auto w-full">
+          <div className="relative z-0 w-full max-w-[min(100%,40rem)] overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+            <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
               <span className="h-3 w-3 rounded-full bg-[#ff5f57]" aria-hidden />
               <span className="h-3 w-3 rounded-full bg-[#febc2e]" aria-hidden />
               <span className="h-3 w-3 rounded-full bg-[#28c840]" aria-hidden />
             </div>
-            <div className="relative aspect-16/10 w-full overflow-hidden bg-zinc-100">
+            <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-100">
               {desktopReady ? (
                 <img
                   src={previewDesktop!}
@@ -76,23 +82,57 @@ export function DualViewportLoader({
             </div>
           </div>
 
-          <div className="w-[9.5rem] shrink-0 overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_16px_42px_-14px_rgba(0,0,0,0.2)] ring-1 ring-black/[0.05] sm:w-[10.5rem]">
-            <div className="flex justify-center border-b border-zinc-200 bg-zinc-50 px-2 py-1.5">
-              <div className="h-4 w-12 rounded-full bg-zinc-900" aria-hidden />
-            </div>
-            <div className="relative aspect-[9/19] w-full overflow-hidden bg-zinc-100">
-              {mobileReady ? (
-                <img
-                  src={previewMobile!}
-                  alt=""
-                  className="absolute inset-0 z-0 h-full w-full object-cover object-top"
-                />
-              ) : (
-                <div
-                  className="absolute inset-0 z-0 bg-gradient-to-b from-zinc-50 via-zinc-100 to-zinc-200"
-                  aria-hidden
-                />
-              )}
+          <div className="mx-auto mt-4 w-full max-w-[14.2rem] sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2">
+            <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05]">
+              <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
+                <div className="flex justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">
+                  <div className="h-[1.15rem] w-[4.25rem] rounded-full bg-zinc-900" aria-hidden />
+                </div>
+                <div className="relative mx-2 aspect-[9/17.5] overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-100">
+                  {mobileSrc ? (
+                    <img
+                      src={mobileSrc}
+                      alt=""
+                      className="absolute inset-0 z-0 h-full w-full object-cover object-top"
+                    />
+                  ) : (
+                    <div
+                      className="absolute inset-0 z-0 bg-gradient-to-b from-zinc-50 via-zinc-100 to-zinc-200"
+                      aria-hidden
+                    />
+                  )}
+                  {scanning && (
+                    <div
+                      className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
+                      aria-hidden
+                    >
+                      <div
+                        className="absolute inset-0 opacity-[0.26]"
+                        style={{
+                          backgroundImage:
+                            'radial-gradient(circle, rgba(139, 92, 246, 0.4) 1px, transparent 1px)',
+                          backgroundSize: '12px 12px',
+                        }}
+                      />
+                      <div
+                        className="absolute inset-0 opacity-[0.18]"
+                        style={{
+                          backgroundImage:
+                            'linear-gradient(rgba(139, 92, 246, 0.32) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 92, 246, 0.32) 1px, transparent 1px)',
+                          backgroundSize: '20px 20px',
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-violet-600/14" />
+                      <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(167,139,250,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
+                    </div>
+                  )}
+                </div>
+                <div className="bg-white px-2 pb-2.5 pt-1.5 text-center">
+                  <p className="text-[0.7rem] font-bold leading-tight text-violet-950 sm:text-xs">
+                    Mobile view
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

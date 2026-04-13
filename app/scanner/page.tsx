@@ -112,6 +112,7 @@ export default function ScannerPage() {
   const failRatio = totalCount > 0 ? failedCount / totalCount : 0
   const passRatio = totalCount > 0 ? passedCount / totalCount : 0
   const scanHost = hostnameFromUrl(url)
+  const mobilePreviewSrc = mobilePreview || desktopPreview
 
   return (
     <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-visible">
@@ -126,15 +127,15 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Desktop + mobile: same row, tops/bottoms aligned; mobile all-white chrome */}
+        {/* Hero preview: desktop canvas + overlapped mobile frame */}
         {url && (
           <div className="relative mb-10 overflow-visible px-2 sm:px-3">
             <div
-              className="pointer-events-none absolute inset-x-4 inset-y-0 -z-10 rounded-[2rem] bg-gradient-to-b from-zinc-200/80 via-zinc-100/40 to-transparent blur-2xl sm:inset-x-8"
+              className="pointer-events-none absolute inset-x-3 inset-y-3 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-7"
               aria-hidden
             />
             <motion.div
-              className="mx-auto flex max-w-[920px] flex-col items-center gap-0 pt-2 pb-8 sm:flex-row"
+              className="relative mx-auto flex w-full max-w-[920px] flex-col items-center pt-2 pb-8"
               variants={previewContainerVariants}
               initial="hidden"
               animate="show"
@@ -144,13 +145,13 @@ export default function ScannerPage() {
                 className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-0"
                 variants={previewItemVariants}
               >
-                <div className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_24px_80px_-20px_rgba(0,0,0,0.18)] ring-1 ring-black/[0.04]">
-                  <div className="flex h-9 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3">
+                <div className="overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+                  <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" aria-hidden />
                     <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" aria-hidden />
                     <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" aria-hidden />
                   </div>
-                  <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50/90 px-3 py-2">
+                  <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50/90 px-4 py-2.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-500">
                       <svg className="h-3.5 w-3.5 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
@@ -174,25 +175,31 @@ export default function ScannerPage() {
                 </div>
               </motion.div>
 
-              {mobilePreview && (
-                <motion.div
-                  className="flex w-full max-w-[14rem] shrink-0 self-stretch sm:w-[min(32%,13.5rem)] sm:max-w-[15rem]"
-                  variants={previewItemVariants}
-                >
-                  <div className="flex h-full min-h-[240px] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-[0_20px_50px_-16px_rgba(0,0,0,0.18)] ring-1 ring-zinc-200/90">
-                    <div className="flex shrink-0 justify-center bg-white px-3 pb-1.5 pt-2.5">
+              <motion.div
+                className="mt-4 w-full max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2"
+                variants={previewItemVariants}
+              >
+                <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05]">
+                  <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
+                    <div className="flex shrink-0 justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">
                       <div
                         className="h-[1.15rem] w-[4.25rem] rounded-full bg-zinc-900"
                         aria-hidden
                       />
                     </div>
-                    <div className="mx-2 min-h-0 flex-1 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100">
-                      <img
-                        src={mobilePreview}
-                        alt="Mobile view of scanned site"
-                        className="h-full w-full bg-white object-contain object-top"
-                        loading="lazy"
-                      />
+                    <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100">
+                      {mobilePreviewSrc ? (
+                        <img
+                          src={mobilePreviewSrc}
+                          alt="Mobile view of scanned site"
+                          className="h-full w-full bg-white object-contain object-top"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex h-full min-h-[180px] items-center justify-center px-3 text-center text-xs text-zinc-400">
+                          Mobile capture unavailable for this run.
+                        </div>
+                      )}
                     </div>
                     <div className="shrink-0 bg-white px-2 pb-2.5 pt-1.5 text-center">
                       <p className="text-[0.7rem] font-bold leading-tight text-violet-950 sm:text-xs">
@@ -205,8 +212,8 @@ export default function ScannerPage() {
                       ) : null}
                     </div>
                   </div>
-                </motion.div>
-              )}
+                </div>
+              </motion.div>
             </motion.div>
           </div>
         )}

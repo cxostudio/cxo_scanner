@@ -90,7 +90,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           fullPage: false,
         })) as string
 
-        const desktopDataUrl = `data:image/png;base64,${desktopB64}`
+        let desktopDataUrl = `data:image/png;base64,${desktopB64}`
         send(controller, {
           type: 'preview',
           previewDesktop: desktopDataUrl,
@@ -167,6 +167,19 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
         })
 
         await new Promise((r) => setTimeout(r, 800))
+
+        // Refresh desktop preview after lazy-load/scroll settles so the top preview
+        // matches the same visual state used by quadrant thumbnails.
+        const refreshedDesktopB64 = (await page.screenshot({
+          type: 'png',
+          encoding: 'base64',
+          fullPage: false,
+        })) as string
+        desktopDataUrl = `data:image/png;base64,${refreshedDesktopB64}`
+        send(controller, {
+          type: 'preview',
+          previewDesktop: desktopDataUrl,
+        })
 
         const finalUrl = page.url()
 
