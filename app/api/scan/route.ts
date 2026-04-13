@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
-import puppeteer from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
 import path from 'path'
 import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
@@ -11,6 +9,10 @@ import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+
+export const runtime = 'nodejs'
+export const maxDuration = 60
 interface Rule {
   id: string
   title: string
@@ -85,21 +87,7 @@ async function detectStickyCtaRuntime(validUrl: string): Promise<{
 } | null> {
   let localBrowser: any = null
   try {
-    const isVercel = !!process.env.VERCEL
-    const launchConfig: any = {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    }
-    if (isVercel) {
-      launchConfig.executablePath = await chromium.executablePath()
-      launchConfig.args = [
-        ...launchConfig.args,
-        '--single-process',
-        '--font-render-hinting=medium',
-      ]
-    }
-
-    localBrowser = await puppeteer.launch(launchConfig)
+    localBrowser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' })
     const page = await localBrowser.newPage()
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
@@ -479,25 +467,7 @@ export async function POST(request: NextRequest) {
     let selectedVariant: string | null = null
     let fallbackRawHtml = ''
     try {
-      // Launch headless browser
-      // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
-      const isVercel = !!process.env.VERCEL
-
-      const launchConfig: any = {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      }
-
-      if (isVercel) {
-        launchConfig.executablePath = await chromium.executablePath()
-        launchConfig.args = [
-          ...launchConfig.args,
-          '--single-process',
-          '--font-render-hinting=medium',
-        ]
-      }
-
-      browser = await puppeteer.launch(launchConfig)
+      browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
       const page = await browser.newPage()
 
@@ -3492,7 +3462,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
-        const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
+        const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite'
 
         try {
 

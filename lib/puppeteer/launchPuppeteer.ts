@@ -28,10 +28,11 @@ export async function launchPuppeteerBrowser(options?: {
   ]
 
   if (process.env.VERCEL) {
+    chromium.setGraphicsMode = false
     return puppeteerCore.launch({
-      headless: true,
+      // `@sparticuz/chromium` runs chrome-headless-shell on serverless.
+      headless: 'shell',
       executablePath: await chromium.executablePath(),
-      defaultViewport: chromium.defaultViewport,
       // Sparticuz-recommended args for AWS/Vercel serverless
       args: [...chromium.args, windowSizeArg, '--disable-web-security'],
     })
