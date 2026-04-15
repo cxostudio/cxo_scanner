@@ -18,11 +18,18 @@ interface Rule {
   description: string
 }
 
+interface CheckpointPresentation {
+  requiredActions?: string
+  justificationsBenefits: string
+  examples: Array<{ url: string; filename: string; thumbnailUrl: string }>
+}
+
 interface ScanResult {
   ruleId: string
   ruleTitle: string
   passed: boolean
   reason: string
+  checkpoint?: CheckpointPresentation
 }
 
 interface BatchData {
@@ -239,13 +246,19 @@ export default function Home() {
 
   const loadRules = async () => {
     try {
-      // Load rules from predefined-rules.json
-      const response = await fetch('/data/predefined-rules.json')
+      const response = await fetch('/api/conversion-checkpoints')
       if (!response.ok) {
-        throw new Error('Failed to load rules')
+        throw new Error('Failed to load conversion checkpoints')
       }
-      const parsed = await response.json()
-      const validatedRules = z.array(RuleSchema).parse(parsed)
+      const data = (await response.json()) as {
+        rules?: unknown
+        records?: unknown
+        foundCount?: number
+        notFoundIds?: string[]
+      }
+      // Browser console — full API payload (records + mapped rules)
+      console.log('[conversion-checkpoints]', data)
+      const validatedRules = z.array(RuleSchema).parse(data.rules ?? [])
       setRules(validatedRules)
     } catch (error) {
       console.error('Error loading rules:', error)
@@ -307,12 +320,27 @@ export default function Home() {
     // `current` = batches finished (not the batch currently scanning). Avoids 100% while last /api/scan is still in flight.
     setProgress({ current: 0, total: batches.length })
 
-    const ScanResultsSchema = z.array(z.object({
-      ruleId: z.string(),
-      ruleTitle: z.string(),
-      passed: z.boolean(),
-      reason: z.string(),
-    }))
+    const ScanResultsSchema = z.array(
+      z.object({
+        ruleId: z.string(),
+        ruleTitle: z.string(),
+        passed: z.boolean(),
+        reason: z.string(),
+        checkpoint: z
+          .object({
+            requiredActions: z.string(),
+            justificationsBenefits: z.string(),
+            examples: z.array(
+              z.object({
+                url: z.string(),
+                filename: z.string(),
+                thumbnailUrl: z.string(),
+              }),
+            ),
+          })
+          .optional(),
+      }),
+    )
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
@@ -426,12 +454,29 @@ export default function Home() {
 
       if (finalResponse.ok) {
         const finalData = await finalResponse.json()
-        const validatedResults = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        })).parse(finalData.results)
+        const validatedResults = z
+          .array(
+            z.object({
+              ruleId: z.string(),
+              ruleTitle: z.string(),
+              passed: z.boolean(),
+              reason: z.string(),
+              checkpoint: z
+                .object({
+                  requiredActions: z.string(),
+                  justificationsBenefits: z.string(),
+                  examples: z.array(
+                    z.object({
+                      url: z.string(),
+                      filename: z.string(),
+                      thumbnailUrl: z.string(),
+                    }),
+                  ),
+                })
+                .optional(),
+            }),
+          )
+          .parse(finalData.results)
 
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
@@ -587,13 +632,13 @@ export default function Home() {
     try {
       setIsStartingScan(true)
   
-      // ✅ Load rules (clean, no timeout hacks)
+      // ✅ Load rules from Airtable conversion-checkpoints (same as /api/conversion-checkpoints)
       if (!rulesToUse.length) {
-        const res = await fetch('/data/predefined-rules.json')
-        if (!res.ok) throw new Error('Failed to load rules')
-  
-        const parsed = await res.json()
-        rulesToUse = z.array(RuleSchema).parse(parsed)
+        const res = await fetch('/api/conversion-checkpoints')
+        if (!res.ok) throw new Error('Failed to load conversion checkpoints')
+        const data = await res.json()
+        console.log('[conversion-checkpoints] scan refresh:', data)
+        rulesToUse = z.array(RuleSchema).parse(data.rules ?? [])
         setRules(rulesToUse)
       }
   
@@ -696,14 +741,18 @@ export default function Home() {
         try {
           const stored = localStorage.getItem('scanResults')
           if (stored) {
-            const parsed = z.array(
-              z.object({
-                ruleId: z.string(),
-                ruleTitle: z.string(),
-                passed: z.boolean(),
-                reason: z.string(),
-              })
-            ).parse(JSON.parse(stored))
+            const parsed = z
+              .array(
+                z
+                  .object({
+                    ruleId: z.string(),
+                    ruleTitle: z.string(),
+                    passed: z.boolean(),
+                    reason: z.string(),
+                  })
+                  .passthrough(),
+              )
+              .parse(JSON.parse(stored))
 
             const pass = parsed.filter(r => r.passed).length
             passResult = `${pass}/${parsed.length}`
@@ -714,24 +763,24 @@ export default function Home() {
         }
 
         // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -833,7 +882,7 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-2xl  tracking-[0.03em] font-plus-jakarta   font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
+                      className="text-2xl  tracking-[-0.03em] font-plus-jakarta   font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
@@ -870,7 +919,7 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-2xl tracking-[0.03em] font-plus-jakarta  font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
+                      className="text-2xl tracking-[-0.03em] font-plus-jakarta  font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
@@ -907,7 +956,7 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                       <motion.h2
-                        className=" text-center text-2xl md:text-4xl font-semibold font-plus-jakarta leading-[48px] tracking-[0.03em] me-[12px] mt-[35px]"
+                        className=" text-center text-2xl md:text-4xl font-semibold font-plus-jakarta leading-[48px] tracking-[-0.03em] me-[12px] mt-[35px]"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
@@ -1060,7 +1109,7 @@ export default function Home() {
 
                 {/* Preview: empty desktop+phone shells + purple scan while loading; fill as stream arrives. overflow-x-auto keeps overlapping phone visible (main is overflow-x-hidden). */}
                 {websiteUrl && (
-                  <div className="mb-8 w-full min-w-0 overflow-x-auto overflow-y-visible pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="mb-8 w-full ">
                     {error && (
                       <div className="mx-auto mb-4 max-w-2xl rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-sm text-red-800 shadow-sm">
                         <strong>Error:</strong> {error}

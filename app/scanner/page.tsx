@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Check, X, ChevronDown, AlertCircle } from 'lucide-react';
 import { z } from 'zod'
+import { CheckpointResultBody } from '../components/CheckpointResultBody'
+import type { CheckpointPresentation } from '../components/CheckpointResultBody'
 
 /** Slow, smooth bar fill (left → right) */
 const barEase = [0.4, 0, 0.2, 1] as const
@@ -32,6 +34,7 @@ interface ScanResult {
   ruleTitle: string
   passed: boolean
   reason: string
+  checkpoint?: CheckpointPresentation
 }
 
 function hostnameFromUrl(raw: string): string {
@@ -65,12 +68,29 @@ export default function ScannerPage() {
 
       const storedResults = localStorage.getItem('scanResults')
       if (storedResults) {
-        const parsed = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        })).parse(JSON.parse(storedResults))
+        const parsed = z
+          .array(
+            z.object({
+              ruleId: z.string(),
+              ruleTitle: z.string(),
+              passed: z.boolean(),
+              reason: z.string(),
+              checkpoint: z
+                .object({
+                  requiredActions: z.string(),
+                  justificationsBenefits: z.string(),
+                  examples: z.array(
+                    z.object({
+                      url: z.string(),
+                      filename: z.string(),
+                      thumbnailUrl: z.string(),
+                    }),
+                  ),
+                })
+                .optional(),
+            }),
+          )
+          .parse(JSON.parse(storedResults))
         setResults(parsed)
       }
 
@@ -179,7 +199,7 @@ export default function ScannerPage() {
                 className="mt-4 w-full max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2"
                 variants={previewItemVariants}
               >
-                <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05]">
+                <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05] ">
                   <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
                     <div className="flex shrink-0 justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">
                       <div
@@ -187,7 +207,7 @@ export default function ScannerPage() {
                         aria-hidden
                       />
                     </div>
-                    <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100">
+                    <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100 max-h-[420px] overflow-y-scroll hide-scrollbar">
                       {mobilePreviewSrc ? (
                         <img
                           src={mobilePreviewSrc}
@@ -345,28 +365,61 @@ export default function ScannerPage() {
 
                     {/* Expanded Content */}
                     {isExpanded && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <div className={`p-3 rounded-lg ${result.passed
-                          ? 'bg-green-50'
-                          : 'bg-orange-50'
-                          }`}>
-                          <div className={`flex items-center gap-2 mb-2 ${result.passed ? 'text-green-700' : 'text-orange-700'
-                            }`}>
-                            {result.passed ? (
-                              <>
-                                <Check size={16} className="shrink-0" />
-                                <strong className="text-sm font-semibold">Why it Passed:</strong>
-                              </>
-                            ) : (
-                              <>
-                                <X size={16} className="shrink-0" />
-                                <strong className="text-sm font-semibold">Why it Failed:</strong>
-                              </>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap m-0">
-                            {result.reason}
-                          </p>
+                      <div className="mt-4 border-t border-gray-200 pt-4">
+                        <div
+                          className={`rounded-lg p-3 ${
+                            result.passed ? 'bg-green-50' : 'bg-orange-50'
+                          }`}
+                        >
+                          {result.checkpoint ? (
+                            <>
+                              <div
+                                className={`mb-3 flex items-center gap-2 ${
+                                  result.passed ? 'text-green-700' : 'text-orange-800'
+                                }`}
+                              >
+                                {result.passed ? (
+                                  <>
+                                    <Check size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Details</strong>
+                                  </>
+                                ) : (
+                                  <>
+                                    <X size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Details</strong>
+                                  </>
+                                )}
+                              </div>
+                              <CheckpointResultBody
+                                checkpoint={result.checkpoint}
+                                summaryLine={result.reason}
+                                passed={result.passed}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <div
+                                className={`mb-2 flex items-center gap-2 ${
+                                  result.passed ? 'text-green-700' : 'text-orange-700'
+                                }`}
+                              >
+                                {result.passed ? (
+                                  <>
+                                    <Check size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Why it Passed:</strong>
+                                  </>
+                                ) : (
+                                  <>
+                                    <X size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Why it Failed:</strong>
+                                  </>
+                                )}
+                              </div>
+                              <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
+                                {result.reason}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}

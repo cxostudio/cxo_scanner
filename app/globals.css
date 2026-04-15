@@ -91,3 +91,12 @@
 .ux-ray-scan-line {
   animation: ux-ray-sweep 2.6s ease-in-out infinite alternate;
 }
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

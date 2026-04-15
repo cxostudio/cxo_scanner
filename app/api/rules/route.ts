@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { z } from 'zod'
+import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+
+export const dynamic = 'force-dynamic'
 
 const RuleSchema = z.object({
   id: z.string().min(1),
@@ -11,38 +14,29 @@ const RuleSchema = z.object({
 
 const RulesArraySchema = z.array(RuleSchema)
 
-// Path to the predefined rules JSON file
 const rulesFilePath = path.join(process.cwd(), 'data', 'predefined-rules.json')
 
-// GET - Read rules from JSON file
+// GET — rules from Airtable conversion-checkpoints (same source as /api/conversion-checkpoints)
 export async function GET() {
   try {
-    const fileContents = await fs.readFile(rulesFilePath, 'utf8')
-    const rules = JSON.parse(fileContents)
-    
-    // Validate with Zod
-    const validatedRules = RulesArraySchema.parse(rules)
-    
+    const result = await getConversionCheckpointRules()
+    if (!result.ok) {
+      return NextResponse.json(result.body, { status: result.status })
+    }
+    const validatedRules = RulesArraySchema.parse(result.rules)
+    console.log('[api/rules] conversion-checkpoints count:', validatedRules.length)
     return NextResponse.json({ rules: validatedRules })
   } catch (error) {
-    console.error('Error reading rules:', error)
-    
+    console.error('Error loading conversion-checkpoint rules:', error)
+
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Invalid rules format in JSON file', details: error.errors },
-        { status: 500 }
+        { error: 'Invalid rules format from Airtable', details: error.errors },
+        { status: 500 },
       )
     }
-    
-    // If file doesn't exist, return empty array
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return NextResponse.json({ rules: [] })
-    }
-    
-    return NextResponse.json(
-      { error: 'Failed to read rules file' },
-      { status: 500 }
-    )
+
+    return NextResponse.json({ error: 'Failed to load rules' }, { status: 500 })
   }
 }
 

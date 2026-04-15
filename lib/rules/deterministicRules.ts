@@ -57,14 +57,6 @@ export function isProductTitleRule(rule: ScanRule): boolean {
   )
 }
 
-export function isStickyCartRule(rule: ScanRule): boolean {
-  const t = rule.title.toLowerCase()
-  return (
-    rule.id === 'cta-sticky-add-to-cart' ||
-    (t.includes('sticky') && t.includes('cart'))
-  )
-}
-
 export function isThumbnailGalleryRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   return (
@@ -284,46 +276,6 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
   }
 }
 
-export function evaluateStickyCartRule(
-  rule: ScanRule,
-  stickyCTA: PageSnapshot['stickyCTA']
-): ScanResult | null {
-  if (!stickyCTA) return null
-
-  if (stickyCTA.mobileSticky && stickyCTA.desktopSticky) {
-    return {
-      ruleId: rule.id,
-      ruleTitle: rule.title,
-      passed: true,
-      reason: 'Sticky Add to Cart is detected on both mobile and desktop. The CTA remains visible while scrolling, so the rule passes.',
-    }
-  }
-
-  if (stickyCTA.mobileSticky) {
-    return {
-      ruleId: rule.id,
-      ruleTitle: rule.title,
-      passed: true,
-      reason: 'Sticky Add to Cart is detected on mobile. Even though desktop may not use a sticky CTA, the rule passes because the button remains visible while scrolling on mobile.',
-    }
-  }
-
-  if (stickyCTA.desktopSticky) {
-    return {
-      ruleId: rule.id,
-      ruleTitle: rule.title,
-      passed: true,
-      reason: 'Sticky Add to Cart is detected on desktop. The button stays fixed while scrolling, so the rule passes.',
-    }
-  }
-
-  return {
-    ruleId: rule.id,
-    ruleTitle: rule.title,
-    passed: false,
-    reason: 'No sticky Add to Cart button was detected on mobile or desktop. The rule fails only when both views lack a sticky or floating CTA.',
-  }
-}
 
 function uniqueEvidenceParts(...parts: (string | undefined)[]): string {
   const seen = new Set<string>()
@@ -466,7 +418,6 @@ export function tryEvaluateDeterministic(
     keyElementsString: string
     fullVisibleText: string
     shippingTime: PageSnapshot['shippingTime']
-    stickyCTA: PageSnapshot['stickyCTA']
     thumbnailGallery: PageSnapshot['thumbnailGallery']
     /** Precomputed: expectsVisualTransformationContext(...) */
     beforeAfterTransformationExpected: boolean
@@ -486,10 +437,6 @@ export function tryEvaluateDeterministic(
   if (isVariantRule(rule)) {
     const variantResult = evaluateVariantRule(rule, context.keyElementsString, context.fullVisibleText)
     if (variantResult !== null) return variantResult
-  }
-  if (isStickyCartRule(rule)) {
-    const stickyResult = evaluateStickyCartRule(rule, context.stickyCTA)
-    if (stickyResult !== null) return stickyResult
   }
   if (isThumbnailGalleryRule(rule)) {
     const thumbResult = evaluateThumbnailGalleryRule(rule, context.thumbnailGallery)

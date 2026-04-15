@@ -1,12 +1,12 @@
 // src/app/api/analyze_image/route.tsx – OpenRouter (Gemini via OpenRouter)
 import { NextResponse, NextRequest } from 'next/server';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { analyzeWebsiteStream } from '@/lib/analyzeWebsiteStream';
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer';
+import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 120;
+export const dynamic = 'force-dynamic';
 
 // --- Configuration: OpenRouter (Gemini via OpenRouter) ---
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -59,15 +59,14 @@ interface ApiResponse {
 }
 
 
-function loadPredefineRules(): PredefineRule[] {
-    try {
-        const rulesPath = join(process.cwd(), 'public', 'data', 'predefined-rules.json');
-        const raw = readFileSync(rulesPath, 'utf-8');
-        const rules = JSON.parse(raw) as PredefineRule[];
-        return Array.isArray(rules) ? rules : [];
-    } catch {
+async function loadPredefineRulesFromCheckpoints(): Promise<PredefineRule[]> {
+    const result = await getConversionCheckpointRules();
+    if (!result.ok) {
+        console.warn('[analyze_image] conversion-checkpoints failed:', result.body);
         return [];
     }
+    console.log('[analyze_image] conversion-checkpoints rules:', result.rules.length);
+    return result.rules.map((r) => ({ id: r.id, title: r.title, description: r.description }));
 }
 
 async function analyzeScreenshotWithRules(
@@ -214,7 +213,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const screenshotDataUrl = `data:image/png;base64,${screenshotBase64}`;
 
-        const rules = loadPredefineRules();
+        const rules = await loadPredefineRulesFromCheckpoints();
         const { analysis, ruleResults } = await analyzeScreenshotWithRules(screenshotDataUrl, url, rules);
         const overall = rules.length > 0
             ? (ruleResults.every(r => r.status === 'pass') ? 'pass' : 'fail')

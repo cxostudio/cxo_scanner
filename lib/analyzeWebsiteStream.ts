@@ -1,3 +1,4 @@
+import type { Page } from 'puppeteer-core'
 import { NextRequest } from 'next/server'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
@@ -6,6 +7,38 @@ export interface AnalyzeWebsiteStreamBody {
 }
 
 const QUADRANT_LABELS = ['Top', 'Upper middle', 'Lower middle', 'Bottom'] as const
+
+/** Ecommerce sites rarely reach networkidle; domcontentloaded + settle is reliable for previews. */
+const PREVIEW_GOTO_TIMEOUT_MS = 60_000
+const PREVIEW_GOTO_RETRY_MS = 45_000
+const READY_COMPLETE_WAIT_MS = 15_000
+const POST_NAV_SETTLE_MS = 2_000
+
+/**
+ * Navigate for screenshot capture: prefer domcontentloaded (fast), wait for load where possible,
+ * then allow JS/layout to settle (Spacegoods-class Shopify apps).
+ */
+async function gotoForPreview(page: Page, targetUrl: string): Promise<void> {
+  const runGoto = (timeout: number) =>
+    page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout })
+
+  try {
+    await runGoto(PREVIEW_GOTO_TIMEOUT_MS)
+  } catch (err) {
+    console.warn('[analyzeWebsiteStream] navigation failed, retrying domcontentloaded:', err)
+    await runGoto(PREVIEW_GOTO_RETRY_MS)
+  }
+
+  try {
+    await page.waitForFunction(() => document.readyState === 'complete', {
+      timeout: READY_COMPLETE_WAIT_MS,
+    })
+  } catch {
+    // Many storefronts never reach "complete" due to analytics / long-polling.
+  }
+
+  await new Promise((r) => setTimeout(r, POST_NAV_SETTLE_MS))
+}
 
 function ndjsonResponse(stream: ReadableStream<Uint8Array>) {
   return new Response(stream, {
@@ -55,8 +88,8 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true })
         })
 
-        await page.setDefaultNavigationTimeout(35000)
-        await page.setDefaultTimeout(40000)
+        await page.setDefaultNavigationTimeout(90_000)
+        await page.setDefaultTimeout(90_000)
         await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
 
         await page.setExtraHTTPHeaders({
@@ -66,23 +99,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         )
 
-        try {
-          await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 })
-        } catch (navErr: unknown) {
-          const isTimeout =
-            String(navErr).includes('timeout') || (navErr as Error)?.message?.includes('timeout')
-          if (isTimeout) {
-            try {
-              await page.goto(url, { waitUntil: 'networkidle0', timeout: 25000 })
-            } catch {
-              throw navErr
-            }
-          } else {
-            throw navErr
-          }
-        }
-
-        await new Promise((r) => setTimeout(r, 600))
+        await gotoForPreview(page, url)
 
         const desktopB64 = (await page.screenshot({
           type: 'png',
@@ -116,24 +133,9 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           await mobilePage.evaluateOnNewDocument(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true })
           })
-          await mobilePage.setDefaultNavigationTimeout(45000)
-          await mobilePage.setDefaultTimeout(45000)
-          try {
-            await mobilePage.goto(url, { waitUntil: 'networkidle0', timeout: 45000 })
-          } catch (navM: unknown) {
-            const isTimeout =
-              String(navM).includes('timeout') || (navM as Error)?.message?.includes('timeout')
-            if (isTimeout) {
-              try {
-                await mobilePage.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 })
-                await new Promise((r) => setTimeout(r, 2000))
-              } catch {
-                throw navM
-              }
-            } else {
-              throw navM
-            }
-          }
+          await mobilePage.setDefaultNavigationTimeout(90_000)
+          await mobilePage.setDefaultTimeout(90_000)
+          await gotoForPreview(mobilePage, url)
           await new Promise((r) => setTimeout(r, 600))
           const mobB64 = (await mobilePage.screenshot({
             type: 'png',
