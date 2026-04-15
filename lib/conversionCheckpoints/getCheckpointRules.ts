@@ -181,32 +181,38 @@ export type GetCheckpointRulesResult =
  * Loads Airtable rows and maps them to scan rules (title = Conversion Checkpoint, description = Required Actions).
  */
 export async function getConversionCheckpointRules(): Promise<GetCheckpointRulesResult> {
-  const apiUrl ="https://api.airtable.com/v0/"
-  const baseId = "app1HP8C17pAMjacf"
-  const maxRecords = "maxRecords=500"
-  const tableName = "Conversion%20Checkpoints"
-  const apiKey = process.env.API_KEY
-  if (!apiUrl || !apiKey) {
-    return { ok: false, status: 500, body: { error: 'Missing API_URL or API_KEY in environment.' } }
-  }
+  try {
+    const apiUrl =
+      process.env.API_URL ??
+      'https://api.airtable.com/v0/app1HP8C17pAMjacf/Conversion%20Checkpoints?maxRecords=500'
+    const apiKey = process.env.API_KEY
+    if (!apiUrl || !apiKey) {
+      return { ok: false, status: 500, body: { error: 'Missing API_URL or API_KEY in environment.' } }
+    }
 
-  const result = await fetchRecordsByIds(`${apiUrl}/${baseId}/${tableName}?${maxRecords}`, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
-  if (!result.ok) {
-    return { ok: false, status: result.status, body: result.body }
-  }
+    const result = await fetchRecordsByIds(apiUrl, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
+    if (!result.ok) {
+      return { ok: false, status: result.status, body: result.body }
+    }
 
-  const rules: ScanRule[] = []
-  for (const rec of result.records) {
-    const rule = mapAirtableRecordToRule(rec)
-    if (rule && !isStickyAddToCartRule(rule)) rules.push(rule)
-  }
+    const rules: ScanRule[] = []
+    for (const rec of result.records) {
+      const rule = mapAirtableRecordToRule(rec)
+      if (rule && !isStickyAddToCartRule(rule)) rules.push(rule)
+    }
 
-  return {
-    ok: true,
-    requestedIds: result.requestedIds,
-    foundCount: result.foundCount,
-    notFoundIds: result.notFoundIds,
-    records: result.records,
-    rules,
+    return {
+      ok: true,
+      requestedIds: result.requestedIds,
+      foundCount: result.foundCount,
+      notFoundIds: result.notFoundIds,
+      records: result.records,
+      rules,
+    }
+  } catch (err) {
+    console.error('[getConversionCheckpointRules]', err)
+    const message =
+      err instanceof Error ? err.message : 'Unexpected error loading conversion checkpoints'
+    return { ok: false, status: 500, body: { error: message } }
   }
 }
