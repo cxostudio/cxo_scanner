@@ -181,13 +181,16 @@ export type GetCheckpointRulesResult =
  * Loads Airtable rows and maps them to scan rules (title = Conversion Checkpoint, description = Required Actions).
  */
 export async function getConversionCheckpointRules(): Promise<GetCheckpointRulesResult> {
-  const apiUrl = process.env.API_URL
+  const apiUrl ="https://api.airtable.com/v0/"
+  const baseId = "app1HP8C17pAMjacf"
+  const maxRecords = "maxRecords=500"
+  const tableName = "Conversion%20Checkpoints"
   const apiKey = process.env.API_KEY
   if (!apiUrl || !apiKey) {
     return { ok: false, status: 500, body: { error: 'Missing API_URL or API_KEY in environment.' } }
   }
 
-  const result = await fetchRecordsByIds(apiUrl, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
+  const result = await fetchRecordsByIds(`https://api.airtable.com/v0/${baseId}/${tableName}?${maxRecords}`, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
   if (!result.ok) {
     return { ok: false, status: result.status, body: result.body }
   }
