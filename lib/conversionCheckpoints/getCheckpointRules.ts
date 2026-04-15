@@ -190,7 +190,7 @@ export async function getConversionCheckpointRules(): Promise<GetCheckpointRules
     return { ok: false, status: 500, body: { error: 'Missing API_URL or API_KEY in environment.' } }
   }
 
-  const result = await fetchRecordsByIds(`https://api.airtable.com/v0/${baseId}/${tableName}?${maxRecords}`, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
+  const result = await fetchRecordsByIds(`${apiUrl}/${baseId}/${tableName}?${maxRecords}`, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
   if (!result.ok) {
     return { ok: false, status: result.status, body: result.body }
   }
