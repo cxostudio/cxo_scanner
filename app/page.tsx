@@ -763,24 +763,24 @@ export default function Home() {
         }
 
         // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -1116,10 +1116,11 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="mx-auto grid w-full max-w-[1320px] gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
-                      <div className="min-w-0">
+                    <div className="mx-auto grid w-full max-w-[1400px] gap-5 px-0 mt-[30px] sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
+                      <div className="flex min-h-0 min-w-0 flex-col">
                         {isLoading && quadrants.length === 0 && (
                           <DualViewportLoader
+                            align="start"
                             previewDesktop={previewDesktop}
                             previewMobile={previewMobile}
                             scanning
@@ -1127,10 +1128,11 @@ export default function Home() {
                           />
                         )}
                         {quadrants.length > 0 && (
-                          <div className="mx-auto w-full max-w-6xl min-w-0">
+                          <div className="w-full min-w-0 max-w-none">
                             {previewDesktop && (
                               <div className="mb-8">
                                 <DualViewportLoader
+                                  align="start"
                                   previewDesktop={previewDesktop}
                                   previewMobile={previewMobile}
                                   scanning={false}
@@ -1152,10 +1154,9 @@ export default function Home() {
                         )}
                       </div>
 
-                      <aside className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm">
-                        {/* Label top-left, % top-right; bar has no text inside */}
+                      <aside className="flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm max-h-[min(34rem,82vh)] lg:h-[min(34rem,76vh)] lg:max-h-none">
                         <div
-                          className="w-full"
+                          className="w-full shrink-0"
                           role="progressbar"
                           aria-valuenow={analyzeProgressPercent}
                           aria-valuemin={0}
@@ -1175,8 +1176,7 @@ export default function Home() {
                           </div>
                         </div>
 
-                        {/* Analyze steps — advance + remove rows from rule batch progress */}
-                        <div className="mt-4 space-y-3">
+                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
                           <AnimatePresence mode="popLayout">
                             {analysisSteps
                               .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
@@ -1193,22 +1193,37 @@ export default function Home() {
                                     animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
                                     exit={{ x: 160, opacity: 0 }}
                                     transition={{ duration: 0.42, ease: [0.25, 0.1, 0.25, 1] }}
-                                    className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4"
+                                    className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
                                   >
                                     {isCompleted ? (
                                       <div className="flex h-5 w-5 shrink-0 items-center justify-center">
-                                        <img src="/check.png" alt="check" className="h-3.5 w-3.5 object-cover" />
+                                        <img src="/check.png" alt="" className="h-3.5 w-3.5 object-cover" />
                                       </div>
                                     ) : (
-                                      <Cog className={`h-5 w-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
+                                      <Cog
+                                        className={`h-5 w-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`}
+                                        aria-hidden
+                                      />
                                     )}
-                                    <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
+                                    <span
+                                      className={`min-w-0 flex-1 text-sm font-medium ${
+                                        isCompleted
+                                          ? 'text-gray-500 line-through'
+                                          : isPending
+                                            ? 'text-gray-400'
+                                            : 'text-gray-900'
+                                      }`}
+                                    >
                                       {title}
                                     </span>
-                                    {isCompleted && <span className="text-sm font-medium text-gray-600">Finished</span>}
+                                    {isCompleted && (
+                                      <span className="shrink-0 text-xs font-medium text-gray-600 sm:text-sm">
+                                        Finished
+                                      </span>
+                                    )}
                                     {isActive && (
-                                      <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                                        Analyzing your URL...
+                                      <span className="max-w-[6.5rem] shrink-0 truncate text-xs font-medium text-gray-700 sm:max-w-[11rem] sm:text-sm">
+                                        Analyzing…
                                       </span>
                                     )}
                                   </motion.div>

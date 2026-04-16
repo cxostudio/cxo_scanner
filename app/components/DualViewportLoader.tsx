@@ -7,6 +7,8 @@ type DualViewportLoaderProps = {
   previewMobile?: string | null;
   statusText?: string;
   scanning?: boolean;
+  /** `start` = left-align mockups (analyze + progress layout); default centered */
+  align?: 'center' | 'start';
 };
 
 /** Desktop-only browser mockup with optional UX-Ray scan overlay on the viewport. */
@@ -15,20 +17,29 @@ export function DualViewportLoader({
   previewMobile = null,
   statusText = 'Capturing page screenshots',
   scanning = true,
+  align = 'center',
 }: DualViewportLoaderProps) {
   const desktopReady = previewDesktop != null && previewDesktop.length > 0;
   const mobileReady = previewMobile != null && previewMobile.length > 0;
   const mobileSrc = mobileReady ? previewMobile! : desktopReady ? previewDesktop! : null;
+  const isStart = align === 'start';
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-3 sm:px-4">
-      {scanning ? (
-        <p className="mb-5 text-center text-sm font-medium text-zinc-500">In progress…</p>
-      ) : (
-        <p className="mb-5 text-center text-sm font-medium text-zinc-600">Preview</p>
-      )}
-
-      <div className="relative mx-auto w-full max-w-[920px] pb-4 pt-1">
+    <div
+      className={
+        isStart
+          ? 'w-full max-w-none px-0 sm:pr-2'
+          : 'mx-auto w-full max-w-5xl px-3 sm:px-4'
+      }
+    >
+       <p
+          className={`mb-5 text-sm font-medium text-zinc-600 ${isStart ? 'text-left' : 'text-center'}`}
+        >
+          
+        </p>
+      <div
+        className={`relative w-full max-w-[920px] pb-4 pt-1 ${isStart ? 'mx-0' : 'mx-auto'}`}
+      >
         <div
           className="pointer-events-none absolute inset-x-3 inset-y-2 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-6"
           aria-hidden
@@ -139,7 +150,9 @@ export function DualViewportLoader({
       </div>
 
       {scanning && (
-        <div className="pointer-events-none mx-auto mt-8 flex max-w-md justify-center">
+        <div
+          className={`pointer-events-none mt-8 flex max-w-md ${isStart ? 'mx-0 justify-start' : 'mx-auto justify-center'}`}
+        >
           <div className="flex max-w-[min(100%-1rem,28rem)] items-center gap-2.5 rounded-full border border-white/10 bg-zinc-950/90 px-4 py-2.5 text-sm text-white shadow-lg backdrop-blur-sm">
             <span
               className="inline-flex h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400 shadow-[0_0_12px_rgba(167,139,250,0.9)]"

@@ -4,6 +4,8 @@
  */
 
 import type { ScanRule, ScanResult, LazyLoadingResult, PageSnapshot } from '@/lib/scanner/types'
+import type { FooterSocialSnapshot } from '@/lib/rules/footerSocialLinksRule'
+import { evaluateFooterSocialLinksRule } from '@/lib/rules/footerSocialLinksRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
@@ -421,8 +423,11 @@ export function tryEvaluateDeterministic(
     thumbnailGallery: PageSnapshot['thumbnailGallery']
     /** Precomputed: expectsVisualTransformationContext(...) */
     beforeAfterTransformationExpected: boolean
+    footerSocial: FooterSocialSnapshot
   }
 ): ScanResult | null {
+  const footerResult = evaluateFooterSocialLinksRule(rule, context.footerSocial)
+  if (footerResult !== null) return footerResult
   if (isLazyLoadingRule(rule)) {
     return evaluateLazyLoadingRule(rule, context.lazyLoading)
   }

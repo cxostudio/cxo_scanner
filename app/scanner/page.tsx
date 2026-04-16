@@ -99,7 +99,8 @@ export default function ScannerPage() {
         sessionStorage.getItem('scanPreviewDesktop') ?? localStorage.getItem('scanPreviewDesktop')
       const scanMobile =
         sessionStorage.getItem('scanPreviewMobile') ?? localStorage.getItem('scanPreviewMobile')
-      setDesktopPreview(lastScreenshot || scanDesktop || null)
+      // Prefer analyze-step preview (top-of-page viewport); batch AI screenshots are often mid-page.
+      setDesktopPreview(scanDesktop || lastScreenshot || null)
       setMobilePreview(scanMobile && scanMobile.length > 0 ? scanMobile : null)
     } catch (error) {
       console.error('Error loading scanner data:', error)
@@ -184,7 +185,7 @@ export default function ScannerPage() {
                       <img
                         src={desktopPreview}
                         alt="Desktop view of scanned site"
-                        className="absolute inset-0 h-full w-full object-cover object-center"
+                        className="absolute inset-0 h-full w-full object-cover object-top"
                       />
                     ) : (
                       <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-zinc-400">

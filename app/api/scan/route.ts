@@ -7,6 +7,10 @@ import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
+import {
+  collectFooterSocialSnapshot,
+  emptyFooterSocialSnapshot,
+} from '@/lib/rules/footerSocialLinksRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -492,9 +496,13 @@ export async function POST(request: NextRequest) {
     let trustBadgesContext: {
       ctaFound: boolean
       ctaText: string
+      /** Payment / trust signals in the purchase block near the primary CTA (Visa, SSL, etc.). */
       domStructureFound: boolean
       paymentBrandsFound: string[]
+      /** Same signals detected elsewhere (e.g. footer only) — does NOT satisfy "near CTA". */
+      paymentBrandsElsewhere: string[]
       trustBadgesCount: number
+      trustBadgesElsewhereCount: number
       trustBadgesInfo: string
       containerDescription: string
     } | null = null
@@ -529,6 +537,15 @@ export async function POST(request: NextRequest) {
       format: string
       evidence: string[]
     } | null = null
+    /** Header / menu-drawer links for "important pages in main navigation" (reduces false FAIL on hamburger UIs). */
+    let mainNavContext: {
+      headerLinkCount: number
+      shoppingSignalCount: number
+      shoppingMatches: string[]
+      menuControlFound: boolean
+      essentialNavLikely: boolean
+      sample: string
+    } | null = null
     let galleryNavDOMFound = false
     let galleryNavDOMEvidence = ''
     let thumbnailGalleryContext: {
@@ -543,6 +560,7 @@ export async function POST(request: NextRequest) {
     let descriptionBenefitsMatchedKeywords: string[] = []
     let selectedVariant: string | null = null
     let fallbackRawHtml = ''
+    let footerSocialSnapshot = emptyFooterSocialSnapshot()
     try {
       browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
@@ -1324,7 +1342,7 @@ export async function POST(request: NextRequest) {
       await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.4)))
       await new Promise(r => setTimeout(r, 1500))
 
-      // Get trust badges context — scans whole page for payment badge elements (no CTA dependency)
+      // Trust badges: payment / security signals must be NEAR the primary purchase CTA (rule text).
       trustBadgesContext = await page.evaluate(() => {
         const PAYMENT_BRANDS = [
           'visa', 'mastercard', 'master card', 'amex', 'american express',
@@ -1339,8 +1357,12 @@ export async function POST(request: NextRequest) {
           'guaranteed safe', 'safe & secure', 'encrypted', 'norton secured',
           'mcafee secure', 'trusted shop', 'comodo', 'security badge',
         ]
+        const BRAND_SCAN = [
+          'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
+          'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
+          'clearpay', 'stripe', 'discover',
+        ]
 
-        // ── Helper: match an element against payment/trust keywords ───────────
         function elementMatchesTrust(el: Element): string | null {
           const img = el as HTMLImageElement
           const hel = el as HTMLElement
@@ -1352,7 +1374,6 @@ export async function POST(request: NextRequest) {
             hel.getAttribute?.('data-icon') || '',
             hel.getAttribute?.('data-brand') || '',
             hel.getAttribute?.('data-method') || '',
-            // ✅ NEW: check src/href URL — payment logos often have brand in filename
             img.src || img.getAttribute?.('data-src') || img.getAttribute?.('data-lazy-src') || '',
             el.tagName === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
             hel.className?.toString() || '',
@@ -1360,20 +1381,16 @@ export async function POST(request: NextRequest) {
           ].map(t => t.toLowerCase())
           const combined = texts.join(' ')
 
-          // Payment brand names
           const brandMatch = PAYMENT_BRANDS.find(b => combined.includes(b))
           if (brandMatch) return brandMatch
 
-          // SVG <title> inside payment icons
           const svgTitle = (el.querySelector?.('title')?.textContent || '').toLowerCase()
           const svgBrand = PAYMENT_BRANDS.find(b => svgTitle.includes(b))
           if (svgBrand) return svgBrand
 
-          // Trust keywords (only specific phrases, not lone "secure")
           const trustMatch = TRUST_KEYWORDS.find(k => combined.includes(k))
           if (trustMatch) return trustMatch
 
-          // ✅ NEW: check direct text content for short elements (payment brand labels)
           const directText = (hel.childElementCount === 0 ? hel.textContent?.trim() : '')?.toLowerCase() || ''
           if (directText && directText.length < 40) {
             const textBrand = PAYMENT_BRANDS.find(b => directText.includes(b))
@@ -1385,10 +1402,35 @@ export async function POST(request: NextRequest) {
           return null
         }
 
-        // ── Try to find CTA (optional — not required for rule to pass) ─────────
+        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
+          if (!cta) return false
+          if (cta === el || cta.contains(el)) return true
+          const roots = [
+            cta.closest('form[action*="cart"]'),
+            cta.closest('[class*="product-form"]'),
+            cta.closest('[class*="product__info"]'),
+            cta.closest('[class*="product-details"]'),
+            cta.closest('[class*="product-info"]'),
+            cta.closest('[data-product-blocks]'),
+            cta.closest('[id*="ProductInfo"]'),
+            cta.closest('[id*="product-template"]'),
+            cta.closest('[data-section-type="product-template"]'),
+            cta.closest('main'),
+          ].filter((n): n is HTMLElement => !!n)
+          for (const root of roots) {
+            if (root.contains(el)) return true
+          }
+          const c = cta.getBoundingClientRect()
+          const t = (el as HTMLElement).getBoundingClientRect()
+          if (c.height < 4 || t.height < 1) return false
+          const hz = t.left < c.right + 200 && t.right > c.left - 200
+          const v = t.top < c.bottom + 400 && t.bottom > c.top - 160
+          return hz && v
+        }
+
         const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
         const cta = Array.from(document.querySelectorAll<HTMLElement>(
-          'button, [type="submit"]'
+          'button, [type="submit"], a[href*="/cart"]',
         )).find(el => {
           const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
           return ctaPatterns.some(p => text.includes(p))
@@ -1398,87 +1440,98 @@ export async function POST(request: NextRequest) {
           ? (cta.textContent || cta.getAttribute('aria-label') || 'CTA').trim()
           : 'not found'
 
-        // ── Scan entire page for payment badge elements ───────────────────────
-        const found = new Map<string, string>()
+        const foundNear = new Map<string, string>()
+        const foundElsewhere = new Map<string, string>()
 
         const allElements = Array.from(document.querySelectorAll(
-          'img, svg, use, [class*="payment" i], [class*="badge" i], [class*="trust" i], ' +
+          'img, svg, use, iframe, [class*="payment" i], [class*="badge" i], [class*="trust" i], ' +
           '[class*="visa" i], [class*="paypal" i], [class*="mastercard" i], [class*="amex" i], ' +
           '[class*="apple-pay" i], [class*="google-pay" i], [class*="klarna" i], ' +
           '[class*="shop-pay" i], [class*="stripe" i], [class*="secure" i], ' +
           '[id*="payment" i], [id*="badge" i], [id*="trust" i], ' +
-          '[data-payment], [data-brand], [data-method]'
+          '[data-payment], [data-brand], [data-method]',
         ))
 
         for (const el of allElements) {
-          const label = elementMatchesTrust(el)
-          if (label && !found.has(label)) {
-            const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
-            found.set(label, desc)
+          let label: string | null = null
+          if (el.tagName === 'IFRAME') {
+            const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
+            const title = (el.getAttribute('title') || '').toLowerCase()
+            const combined = `${src} ${title}`
+            const PAYMENT_IFRAME_PATTERNS = [
+              'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
+              'payment', 'checkout', 'trust', 'badge', 'secure',
+            ]
+            const match = PAYMENT_IFRAME_PATTERNS.find(p => combined.includes(p))
+            if (match) label = `iframe:${match}`
+          } else {
+            label = elementMatchesTrust(el)
           }
-          if (found.size >= 12) break
+          if (!label) continue
+          const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
+          const near = nearPrimaryCta(cta, el)
+          const bucket = near ? foundNear : foundElsewhere
+          if (!bucket.has(label)) bucket.set(label, desc)
+          if (foundNear.size + foundElsewhere.size >= 20) break
         }
 
-        // ── ✅ NEW: Scan page body text for payment brand names (catches text-only badges) ─
-        if (found.size === 0) {
-          const bodyText = document.body.innerText?.toLowerCase() || ''
-          const BRAND_SCAN = [
-            'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
-            'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
-            'clearpay', 'stripe', 'discover',
-          ]
-          for (const brand of BRAND_SCAN) {
-            if (bodyText.includes(brand)) {
-              found.set(brand, 'text')
-              if (found.size >= 5) break
+        if (foundNear.size === 0 && cta) {
+          const purchaseRoot =
+            cta.closest('form[action*="cart"]') ||
+            cta.closest('[class*="product-form"]') ||
+            cta.closest('[class*="product__info"]') ||
+            cta.closest('[class*="product-details"]') ||
+            cta.closest('[class*="product-info"]') ||
+            cta.parentElement?.parentElement?.parentElement
+          if (purchaseRoot) {
+            const chunk = (purchaseRoot.textContent || '').toLowerCase()
+            for (const brand of BRAND_SCAN) {
+              if (chunk.includes(brand) && !foundNear.has(brand)) {
+                foundNear.set(brand, 'text-in-purchase-block')
+                break
+              }
+            }
+            for (const k of TRUST_KEYWORDS) {
+              if (chunk.includes(k) && !foundNear.has(k)) {
+                foundNear.set(k, 'text-in-purchase-block')
+                break
+              }
             }
           }
         }
 
-        // ── ✅ NEW: Check iframes src URLs for payment/trust widget patterns ──
-        // (can't execute inside cross-origin iframes, but src URL reveals the provider)
-        const PAYMENT_IFRAME_PATTERNS = [
-          'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
-          'payment', 'checkout', 'trust', 'badge', 'secure',
-        ]
-        const iframes = Array.from(document.querySelectorAll('iframe'))
-        for (const iframe of iframes) {
-          const src = (iframe.getAttribute('src') || iframe.getAttribute('data-src') || '').toLowerCase()
-          const title = (iframe.getAttribute('title') || '').toLowerCase()
-          const combined = src + ' ' + title
-          const match = PAYMENT_IFRAME_PATTERNS.find(p => combined.includes(p))
-          if (match && !found.has(`iframe:${match}`)) {
-            found.set(`iframe:${match}`, `iframe[src*="${match}"]`)
-            if (found.size >= 12) break
-          }
-        }
-
-        // ── Fallback: scan ALL page elements (catches custom icon fonts, etc.) ─
-        if (found.size === 0) {
+        if (foundNear.size === 0) {
           const everything = Array.from(document.querySelectorAll('*'))
           for (const el of everything) {
             const label = elementMatchesTrust(el)
-            if (label && !found.has(label)) {
-              found.set(label, el.tagName)
-            }
-            if (found.size >= 12) break
+            if (!label) continue
+            const near = nearPrimaryCta(cta, el)
+            const bucket = near ? foundNear : foundElsewhere
+            if (!bucket.has(label)) bucket.set(label, el.tagName)
+            if (foundNear.size + foundElsewhere.size >= 24) break
           }
         }
 
-        const brands = Array.from(found.keys())
-        const count = brands.length
-        const domStructureFound = count > 0
+        const brandsNear = Array.from(foundNear.keys())
+        const brandsElse = Array.from(foundElsewhere.keys())
+        const countNear = brandsNear.length
+        const countElse = brandsElse.length
+        const domStructureFound = countNear > 0
 
         return {
           ctaFound: !!cta,
           ctaText,
           domStructureFound,
-          paymentBrandsFound: brands,
-          trustBadgesCount: count,
+          paymentBrandsFound: brandsNear,
+          paymentBrandsElsewhere: brandsElse,
+          trustBadgesCount: countNear,
+          trustBadgesElsewhereCount: countElse,
           trustBadgesInfo: domStructureFound
-            ? `Found ${count} payment/trust badge(s) on page: ${brands.join(', ')}`
-            : 'No payment/trust badges detected on page',
-          containerDescription: 'full page scan',
+            ? `Near primary CTA: ${brandsNear.join(', ')}`
+            : countElse > 0
+              ? `No trust signals near CTA; elsewhere only: ${brandsElse.join(', ')}`
+              : 'No payment/trust badges detected near the primary CTA',
+          containerDescription: cta ? 'purchase block + proximity to primary CTA' : 'CTA not found — cannot verify proximity',
         }
       })
 
@@ -1750,12 +1803,134 @@ export async function POST(request: NextRequest) {
       // Combine visible text and key elements (DOM only, no image/OCR reading)
       keyElements = `${keyElements || ''}\nSelected Variant: ${selectedVariant || 'None'}`
 
+      try {
+        footerSocialSnapshot = await collectFooterSocialSnapshot(page)
+        const footerScanBlock = [
+          '',
+          '--- FOOTER SOCIAL LINKS (DOM scan) ---',
+          `Footer element matched: ${footerSocialSnapshot.footerRootFound ? 'YES' : 'NO'}${footerSocialSnapshot.footerRootSelector ? ` (${footerSocialSnapshot.footerRootSelector})` : ''}`,
+          `Social in footer: ${footerSocialSnapshot.socialHostsInFooterRoot.length ? footerSocialSnapshot.socialHostsInFooterRoot.join(', ') : 'None'}`,
+          `Social in page lower band (bottom ~32%): ${footerSocialSnapshot.socialHostsInLowerBand.length ? footerSocialSnapshot.socialHostsInLowerBand.join(', ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerScanBlock}`
+      } catch (footerSnapErr) {
+        console.warn('[scan] footer social DOM snapshot failed:', footerSnapErr)
+        footerSocialSnapshot = emptyFooterSocialSnapshot()
+      }
+
+      try {
+        mainNavContext = await page.evaluate(() => {
+          const shoppingKeywordHit = (label: string): boolean => {
+            const low = label.toLowerCase()
+            const keys = [
+              'shop', 'bundle', 'collection', 'catalog', 'review', 'sale', 'subscribe',
+              'subscription', 'gift', 'sample', 'product', 'cart', 'checkout', 'account',
+              'sign in', 'sign-in', 'labs', 'get started', 'best sell', 'new arrival',
+              'store', 'order', 'buy', 'bestseller',
+            ]
+            return keys.some(k => low.includes(k))
+          }
+
+          const roots: Element[] = []
+          const tryAdd = (sel: string) => {
+            try {
+              document.querySelectorAll(sel).forEach(el => {
+                if (!el.closest('footer')) roots.push(el)
+              })
+            } catch { /* invalid selector */ }
+          }
+          for (const sel of [
+            'header',
+            '[role="banner"]',
+            '#shopify-section-header',
+            '[class*="site-header" i]',
+            '[class*="SiteHeader" i]',
+          ]) {
+            tryAdd(sel)
+          }
+          const uniqueRoots = [...new Set(roots)]
+
+          const linkTexts: string[] = []
+          const seen = new Set<string>()
+          const pushLabel = (raw: string) => {
+            const t = raw.replace(/\s+/g, ' ').trim()
+            if (t.length < 2 || t.length > 72) return
+            const key = t.toLowerCase()
+            if (seen.has(key)) return
+            seen.add(key)
+            linkTexts.push(t)
+          }
+
+          for (const root of uniqueRoots) {
+            root.querySelectorAll('a[href]').forEach(a => {
+              pushLabel((a.textContent || '').trim())
+            })
+          }
+
+          for (const sel of [
+            '[data-menu-drawer] a[href]',
+            '[id*="menu-drawer" i] a[href]',
+            '.menu-drawer a[href]',
+            'details[class*="menu" i] a[href]',
+            '[class*="drawer" i][class*="menu" i] a[href]',
+          ]) {
+            try {
+              document.querySelectorAll(sel).forEach(a => {
+                if (a.closest('footer')) return
+                pushLabel((a.textContent || '').trim())
+              })
+            } catch { /* ignore */ }
+          }
+
+          const shoppingMatches = linkTexts.filter(shoppingKeywordHit)
+          const menuControlFound = !!document.querySelector(
+            'header [aria-label*="menu" i], header button[aria-expanded], ' +
+              '[class*="hamburger" i], [class*="menu-toggle" i], [data-drawer-toggle], ' +
+              '[aria-controls*="menu" i]',
+          )
+
+          const shoppingSignalCount = shoppingMatches.length
+          const essentialNavLikely =
+            shoppingSignalCount >= 2 ||
+            (shoppingSignalCount >= 1 && linkTexts.length >= 4)
+
+          const sample = linkTexts.slice(0, 30).join(' | ')
+          return {
+            headerLinkCount: linkTexts.length,
+            shoppingSignalCount,
+            shoppingMatches,
+            menuControlFound,
+            essentialNavLikely,
+            sample,
+          }
+        })
+        const navBlock = [
+          '',
+          '--- MAIN NAVIGATION (DOM scan) ---',
+          `Distinct header/menu link labels: ${mainNavContext.headerLinkCount}`,
+          `Shopping-related labels matched: ${mainNavContext.shoppingSignalCount}`,
+          `Shopping labels: ${mainNavContext.shoppingMatches.length ? mainNavContext.shoppingMatches.join(', ') : 'None'}`,
+          `Menu / drawer control in header: ${mainNavContext.menuControlFound ? 'YES' : 'NO'}`,
+          `Essential shopping links in header/nav (DOM): ${mainNavContext.essentialNavLikely ? 'YES' : 'NO'}`,
+          `Sample: ${mainNavContext.sample || 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${navBlock}`
+        console.log(
+          `[scan] main nav DOM: essential=${mainNavContext.essentialNavLikely} shopping=${mainNavContext.shoppingSignalCount} links=${mainNavContext.headerLinkCount}`,
+        )
+      } catch (mainNavErr) {
+        console.warn('[scan] main navigation DOM snapshot failed:', mainNavErr)
+        mainNavContext = null
+      }
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
-        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaText || "N/A"}\nDOM Structure Found (same container/sibling as CTA): ${trustBadgesContext.domStructureFound ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(", ") : "None"}\nPurchase Container: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}` : '') +
+        (trustBadgesContext
+          ? `\n\n--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nTrust signals NEAR primary CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nPayment / trust brands near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nTrust signals elsewhere only (footer, etc. — does NOT pass rule): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nTrust Badges Count (near CTA): ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+          : '') +
         (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
 
@@ -2984,15 +3159,15 @@ export async function POST(request: NextRequest) {
       }
 
       // ── Second-pass trust badges scan ─────────────────────────────────────
-      // Runs after all other DOM checks are done. Gives dynamic/lazy-loaded payment
-      // widgets extra time to render, then re-checks. Only runs if first pass found nothing.
-      const needsTrustReScan = rules.some(r =>
-        r.id === 'trust-badges-near-cta' ||
-        (r.title.toLowerCase().includes('trust') && r.title.toLowerCase().includes('signal'))
+      // Re-check near-CTA only after scroll + settle (lazy payment widgets).
+      const needsTrustReScan = rules.some(
+        r =>
+          r.id === 'trust-badges-near-cta' ||
+          r.id === 'recihw16WgNwYG09z' ||
+          (r.title.toLowerCase().includes('trust') && r.title.toLowerCase().includes('signal')),
       )
       if (needsTrustReScan && page && !trustBadgesContext?.domStructureFound) {
         try {
-          // Scroll to 30-50% of page (where CTA / payment section usually lives)
           await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)))
           await new Promise(r => setTimeout(r, 2000))
 
@@ -3007,9 +3182,38 @@ export async function POST(request: NextRequest) {
               'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
               'guaranteed safe', 'safe & secure', 'encrypted',
             ]
-            const found = new Map<string, string>()
+            const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
+            const cta = Array.from(document.querySelectorAll<HTMLElement>(
+              'button, [type="submit"], a[href*="/cart"]',
+            )).find(el => {
+              const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
+              return ctaPatterns.some(p => text.includes(p))
+            }) || null
 
-            // Scan all elements including dynamically added ones
+            function nearPrimaryCta(ctaEl: HTMLElement | null, el: Element): boolean {
+              if (!ctaEl) return false
+              if (ctaEl === el || ctaEl.contains(el)) return true
+              const roots = [
+                ctaEl.closest('form[action*="cart"]'),
+                ctaEl.closest('[class*="product-form"]'),
+                ctaEl.closest('[class*="product__info"]'),
+                ctaEl.closest('[class*="product-details"]'),
+                ctaEl.closest('[class*="product-info"]'),
+                ctaEl.closest('main'),
+              ].filter((n): n is HTMLElement => !!n)
+              for (const root of roots) {
+                if (root.contains(el)) return true
+              }
+              const c = ctaEl.getBoundingClientRect()
+              const t = (el as HTMLElement).getBoundingClientRect()
+              if (c.height < 4 || t.height < 1) return false
+              const hz = t.left < c.right + 200 && t.right > c.left - 200
+              const v = t.top < c.bottom + 400 && t.bottom > c.top - 160
+              return hz && v
+            }
+
+            const foundNear = new Map<string, string>()
+            const foundElse = new Map<string, string>()
             const allEls = Array.from(document.querySelectorAll('*'))
             for (const el of allEls) {
               const hel = el as HTMLElement
@@ -3022,48 +3226,44 @@ export async function POST(request: NextRequest) {
                 el.id || '',
                 hel.childElementCount === 0 ? (hel.textContent?.trim().substring(0, 40) || '') : '',
               ].join(' ').toLowerCase()
-
-              // Check SVG title
               const svgT = el.querySelector?.('title')?.textContent?.toLowerCase() || ''
-              const combined = texts + ' ' + svgT
-
-              const brand = PAYMENT_BRANDS.find(b => combined.includes(b))
-              const trust = TRUST_KEYWORDS.find(k => combined.includes(k))
-              const label = brand || trust
-              if (label && !found.has(label)) {
-                found.set(label, el.tagName)
+              const combined = `${texts} ${svgT}`
+              let label: string | null = PAYMENT_BRANDS.find(b => combined.includes(b)) || null
+              if (!label) label = TRUST_KEYWORDS.find(k => combined.includes(k)) || null
+              if (!label && el.tagName === 'IFRAME') {
+                const src = (el.getAttribute('src') || '').toLowerCase()
+                const IFRAME_PAY = ['shopify', 'paypal', 'stripe', 'klarna', 'payment', 'checkout', 'trust']
+                const m = IFRAME_PAY.find(p => src.includes(p))
+                if (m) label = `iframe:${m}`
               }
-              if (found.size >= 8) break
-            }
-
-            // Check iframes
-            for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
-              const src = (iframe.getAttribute('src') || '').toLowerCase()
-              const IFRAME_PAY = ['shopify', 'paypal', 'stripe', 'klarna', 'payment', 'checkout', 'trust']
-              const match = IFRAME_PAY.find(p => src.includes(p))
-              if (match) found.set(`iframe:${match}`, 'iframe')
+              if (!label) continue
+              const bucket = nearPrimaryCta(cta, el) ? foundNear : foundElse
+              if (!bucket.has(label)) bucket.set(label, el.tagName)
+              if (foundNear.size + foundElse.size >= 24) break
             }
 
             return {
-              found: found.size > 0,
-              brands: Array.from(found.keys()),
+              brandsNear: Array.from(foundNear.keys()),
+              brandsElse: Array.from(foundElse.keys()),
             }
           })
 
-          if (reScanResult.found && trustBadgesContext) {
-            console.log(`Trust badges second-pass: found ${reScanResult.brands.join(', ')}. Updating context.`)
+          if (reScanResult.brandsNear.length > 0 && trustBadgesContext) {
+            console.log(`Trust badges second-pass (near CTA): ${reScanResult.brandsNear.join(', ')}`)
+            const mergedNear = [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brandsNear])]
+            const mergedElse = [...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...reScanResult.brandsElse])]
             trustBadgesContext = {
               ...trustBadgesContext,
               domStructureFound: true,
-              paymentBrandsFound: [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brands])],
-              trustBadgesCount: reScanResult.brands.length,
-              trustBadgesInfo: `Second-pass found: ${reScanResult.brands.join(', ')}`,
+              paymentBrandsFound: mergedNear,
+              paymentBrandsElsewhere: mergedElse,
+              trustBadgesCount: mergedNear.length,
+              trustBadgesElsewhereCount: mergedElse.length,
+              trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
+              containerDescription: 'second-pass scan (purchase area)',
             }
-            // Also update websiteContent so AI sees the updated result
-            websiteContent = websiteContent.replace(
-              /--- TRUST BADGES CHECK ---[\s\S]*?(?=\n\n---|$)/,
-              `--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nDOM Structure Found (same container/sibling as CTA): YES\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nPurchase Container: second-pass scan\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
-            )
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nTrust signals NEAR primary CTA (DOM): YES\nPayment / trust brands near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nTrust signals elsewhere only (footer, etc. — does NOT pass rule): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nTrust Badges Count (near CTA): ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
           }
         } catch (e) {
           console.warn('Trust badges second-pass scan failed:', e)
@@ -3519,6 +3719,7 @@ export async function POST(request: NextRequest) {
           shippingTime: shippingTimeContext,
           thumbnailGallery: thumbnailGalleryContext,
           beforeAfterTransformationExpected,
+          footerSocial: footerSocialSnapshot,
         })
         if (detResult) {
           results.push(
@@ -3600,6 +3801,7 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes("preselect")
           const isTrustBadgesRule =
             rule.id === 'trust-badges-near-cta' ||
+            rule.id === 'recihw16WgNwYG09z' ||
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
             (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
@@ -3624,6 +3826,24 @@ export async function POST(request: NextRequest) {
             (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('arrow')) ||
             (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('mobile')) ||
             (rule.description.toLowerCase().includes('swipe') && rule.description.toLowerCase().includes('navigation'))
+          const isMainNavImportantPagesRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            if (t.includes('breadcrumb') || d.includes('breadcrumb')) return false
+            if (
+              (t.includes('swipe') || t.includes('arrow')) &&
+              (t.includes('gallery') || t.includes('image') || d.includes('gallery'))
+            ) {
+              return false
+            }
+            if (d.includes('swipe') && d.includes('gallery') && d.includes('navigation')) return false
+            return (
+              t.includes('main navigation') ||
+              (t.includes('important pages') && t.includes('navigation')) ||
+              (t.includes('essential pages') && t.includes('navigation')) ||
+              (d.includes('main navigation') && (d.includes('essential') || d.includes('important')))
+            )
+          })()
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
           if (isBreadcrumbRule) {
@@ -3655,6 +3875,43 @@ Breadcrumbs are a navigation trail near the TOP of the page, usually just below 
 
 ✅ PASS reason: "Breadcrumb navigation ('Home / Mens / New Arrivals') is visible near the top of the page, helping users understand site hierarchy."
 ❌ FAIL reason: "No breadcrumb navigation was detected in the page header or top section. Add breadcrumb navigation (e.g. Home > Category > Product) to help users navigate."
+`
+          } else if (isMainNavImportantPagesRule) {
+            const navEssential = mainNavContext?.essentialNavLikely === true
+            const navLabels = mainNavContext?.shoppingMatches?.length
+              ? mainNavContext.shoppingMatches.slice(0, 12).join(', ')
+              : 'none'
+            const navCounts = mainNavContext
+              ? `distinct_nav_labels=${mainNavContext.headerLinkCount}; shopping_hits=${mainNavContext.shoppingSignalCount}; menu_or_drawer=${mainNavContext.menuControlFound ? 'yes' : 'no'}; MAIN_NAV_DOM_ESSENTIAL_LIKELY=${navEssential}`
+              : 'MAIN_NAV_DOM=unavailable'
+            specialInstructions = `
+MAIN NAVIGATION — "Are important / essential pages linked in the main navigation?"
+
+DOM PRE-SCAN (authoritative when positive — appears here because page text sent to you may be truncated):
+${navCounts}
+Shopping-related labels detected in header/menu chrome: ${navLabels}
+
+━━━━ WHAT THIS RULE MEANS ━━━━
+
+• The main navigation is the PRIMARY site chrome: top header links, category bar, OR a hamburger / "Menu" that opens the primary nav / mega-menu (Shopify drawer, etc.).
+• You need multiple clear paths to MONEY / SHOPPING destinations (e.g. Shop all, Bundles, Collections, Reviews, Cart, Get started)—not every legal or policy page.
+• Contact, About, and generic customer-service pages are EXPECTED in the footer; do NOT fail because those are missing from the header.
+
+━━━━ PASS ━━━━
+
+✅ PASS if ANY of these is true:
+1. MAIN_NAV_DOM_ESSENTIAL_LIKELY=true → PASS immediately (DOM found several shopping-related nav labels in header or menu drawer).
+2. The SCREENSHOT shows a normal header or mega-menu with obvious shop/browse paths (even if some links are inside a menu panel).
+3. A hamburger / "Menu" / drawer pattern is visible AND DOM shows shopping-related labels (Shop, Bundles, Reviews, etc.)—that counts as main navigation for modern storefronts.
+
+━━━━ FAIL ━━━━
+
+❌ FAIL only if: the header is effectively empty of shopping paths AND MAIN_NAV_DOM_ESSENTIAL_LIKELY is false AND the screenshot shows no primary shop/browse navigation (only logo + search + cart with no way to reach categories or shop).
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS: "Header / menu includes Shop all, Bundles, and Reviews—key shopping destinations are in primary navigation."
+❌ FAIL: "No shop or category links appear in the header or primary menu—users cannot reach the catalog from main navigation."
 `
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
@@ -4044,45 +4301,29 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST SIGNALS / PAYMENT BADGES RULE
+TRUST SIGNALS NEAR THE CTA (secure checkout / payment badges)
 
-Simple rule: Does the page show ANY payment method logos OR security/trust badges? If YES → PASS. If NO → FAIL.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCREENSHOT CHECK (primary source)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Look at the SCREENSHOT carefully. PASS immediately if you see ANY of the following ANYWHERE on the page:
-- Payment logos: Visa, Mastercard, Amex / American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL
-- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon, "Norton Secured", "McAfee Secure"
-- Trust icons: money-back guarantee badge, "100% Safe", "Guaranteed Safe", certified badge, "Safe & Secure"
-- A row of small payment icons anywhere (near CTA, below checkout, in footer, in product description)
-- Payment icons inside or below an Add to Cart / Buy Now button area
-
-IMPORTANT: Do NOT require payment logos to be near the CTA. If they appear ANYWHERE on the page → PASS.
+This rule matches the checkpoint title: trust signals must appear NEAR the primary purchase action (Add to cart, Buy now, Checkout), not only in the distant footer.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DOM CHECK (from KEY ELEMENTS)
+DOM CHECK FIRST (KEY ELEMENTS — authoritative)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Check the TRUST BADGES CHECK section in KEY ELEMENTS:
-- "DOM Structure Found: YES" → PASS immediately
-- "Payment Brands Found:" lists any brand name → PASS immediately
-- Even "iframe:payment" or "iframe:shopify" in the brands list → PASS (payment widget detected)
+Read "--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---":
+- If "Trust signals NEAR primary CTA (DOM): YES" → PASS (DOM already verified proximity).
+- If "Payment / trust brands near CTA:" lists brands or iframe:* near CTA → PASS.
+- If "Trust signals NEAR primary CTA (DOM): NO" but "Trust signals elsewhere only" lists brands → those are NOT sufficient → FAIL unless the SCREENSHOT clearly shows payment/security badges immediately beside or below the main Add to cart / Buy area (same visual block as the CTA).
+
+If "CTA Found: NO" and DOM says NO near-CTA signals → rely on screenshot; if still no badges adjacent to an obvious primary purchase button → FAIL.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RESULT LOGIC
+SCREENSHOT CHECK (same rule — proximity matters)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PASS if:
-  screenshot shows ANY payment/trust logo/icon
-  OR DOM Structure Found = YES
-  OR Payment Brands Found contains any brand
+PASS from the image only if payment logos, SSL/secure checkout, or trust badges appear in the SAME purchase block as the main Add to cart / Buy button (immediately under/beside that button, or inside the same product-buy card). Icons only in the far footer or unrelated sections do NOT pass.
 
-FAIL ONLY if:
-  screenshot shows ZERO payment/trust badges
-  AND DOM Structure Found = NO
-  AND Payment Brands Found = None
+FAIL if trust signals exist only in the footer or far from purchase when DOM also says near-CTA = NO.
 
-PASS reason example: "Payment trust badges (Visa, Mastercard, PayPal, Apple Pay) are visible on the product page, providing payment trust signals to users."
-FAIL reason example: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal) were detected anywhere on the product page. Add payment method icons near the Add to Cart button to build trust."
+PASS reason example: "Visa, Mastercard and Shop Pay icons sit directly under the Add to cart button in the product buy area."
+FAIL reason example: "Payment logos appear only in the site footer, not next to the Add to cart button—move trust badges into the purchase block near the CTA."
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
@@ -4161,7 +4402,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
-          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST SIGNALS RULE. Look at the SCREENSHOT FIRST.\n\nPASS immediately if you see ANY of the following ANYWHERE on the product page:\n- Payment logos: Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL\n- Security icons: SSL badge, padlock, "Secure Checkout", shield icon, "Norton Secured"\n- Trust icons: money-back guarantee, "100% Safe", "Guaranteed Safe", certified badge\n- ANY row of payment icons (near CTA, below checkout button, in footer, anywhere)\n\nNO CTA required. Payment logos visible ANYWHERE on the page = PASS.\nPayment icons in footer = PASS. Below the cart button = PASS. Anywhere = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK:\n- "DOM Structure Found: YES" → PASS\n- "Payment Brands Found:" lists any name → PASS\n- "iframe:payment" or "iframe:shopify" → PASS (payment widget embedded)\n\nFAIL only if ZERO payment/trust logos are visible in screenshot AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS NEAR CTA RULE ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. The rule is: payment / secure-checkout trust badges must appear NEAR the primary Add to cart (or Buy) control—not only in the footer.\n\nPASS from the image if payment logos, SSL, or trust text sit in the same purchase block as the main CTA (directly under/beside that button).\n\nFAIL if logos appear only in the distant footer or unrelated sections while the buy area shows none.\n\nIf the image is ambiguous, use KEY ELEMENTS "Trust signals NEAR primary CTA (DOM)" — YES means PASS; NO with brands only "elsewhere" means FAIL unless the screenshot clearly shows badges next to the CTA.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
@@ -4172,7 +4413,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -4620,6 +4862,13 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Breadcrumb rule reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
             }
+          } else if (isMainNavImportantPagesRule) {
+            if (!analysis.passed && mainNavContext?.essentialNavLikely) {
+              const labels = mainNavContext.shoppingMatches.slice(0, 8).join(', ')
+              console.log(`Main navigation rule: DOM shows essential shopping nav (${labels}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
+            }
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
             // Only pass if AI explicitly says videos ARE present (not just mentions "video" in general)
@@ -5012,41 +5261,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
-            const FULL_BRAND_LIST = [
-              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay',
-              'amex', 'american express', 'klarna', 'shop pay', 'maestro',
-              'afterpay', 'clearpay', 'stripe', 'discover', 'union pay',
-              'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'jcb',
-              'revolut', 'twint', 'pay later',
-            ]
-            const TRUST_SIGNAL_LIST = [
-              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-              'money back guarantee', '100% safe', 'protected checkout',
-              'secure payment', 'guaranteed safe', 'safe & secure', 'encrypted',
-            ]
-
-            // Hard override 1: DOM scan (first or second pass) found payment badge → PASS
+            // Hard override: DOM verified payment/trust signals near primary CTA only (not footer-only).
             if (!analysis.passed && trustBadgesContext?.domStructureFound) {
               const brands = trustBadgesContext.paymentBrandsFound
                 .filter(b => !b.startsWith('iframe:'))
                 .concat(trustBadgesContext.paymentBrandsFound.filter(b => b.startsWith('iframe:')).map(b => b.replace('iframe:', 'payment widget (')+')'))
                 .join(', ')
-              console.log(`Trust badges rule: DOM found payment badges (${brands}). Forcing PASS.`)
+              console.log(`Trust badges rule: DOM found payment/trust signals near CTA (${brands}). Forcing PASS.`)
               analysis.passed = true
-              analysis.reason = `Payment trust badges (${brands}) are displayed on the product page, providing trust signals to users at the point of purchase.`
-            }
-
-            // Hard override 2: full page text contains ANY payment brand or trust keyword
-            if (!analysis.passed) {
-              const trustText = (fullVisibleText || websiteContent || '').toLowerCase()
-              const brandsInText = FULL_BRAND_LIST.filter(b => trustText.includes(b))
-              const trustsInText = TRUST_SIGNAL_LIST.filter(k => trustText.includes(k))
-              const allFound = [...brandsInText, ...trustsInText]
-              if (allFound.length >= 1) {
-                console.log(`Trust badges rule: Found trust signal "${allFound[0]}" in page text. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Trust signals (${allFound.slice(0, 5).join(', ')}) are present on the product page, providing payment trust indicators to users.`
-              }
+              analysis.reason = `Payment and security trust badges (${brands}) appear near the main Add to cart / purchase area, which supports checkout confidence.`
             }
 
             // Sanity check: warn only, never force a false FAIL
@@ -5149,6 +5372,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               shippingTime: shippingTimeContext,
               thumbnailGallery: thumbnailGalleryContext,
               beforeAfterTransformationExpected,
+              footerSocial: footerSocialSnapshot,
             })
             if (repairedDetResult) {
               analysis.passed = repairedDetResult.passed

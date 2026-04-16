@@ -101,6 +101,15 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
 
         await gotoForPreview(page, url)
 
+        // Ensure desktop preview is above-the-fold (same as fresh mobile tab). Some sites
+        // restore scroll or paint mid-page before first capture without this.
+        await page.evaluate(() => {
+          window.scrollTo(0, 0)
+          document.documentElement.scrollTop = 0
+          document.body.scrollTop = 0
+        })
+        await new Promise((r) => setTimeout(r, 200))
+
         const desktopB64 = (await page.screenshot({
           type: 'png',
           encoding: 'base64',
@@ -136,6 +145,11 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           await mobilePage.setDefaultNavigationTimeout(90_000)
           await mobilePage.setDefaultTimeout(90_000)
           await gotoForPreview(mobilePage, url)
+          await mobilePage.evaluate(() => {
+            window.scrollTo(0, 0)
+            document.documentElement.scrollTop = 0
+            document.body.scrollTop = 0
+          })
           await new Promise((r) => setTimeout(r, 600))
           const mobB64 = (await mobilePage.screenshot({
             type: 'png',
@@ -171,26 +185,45 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           // ignore
         }
 
-        const { width, height } = await page.evaluate(() => ({
-          width: document.documentElement.scrollWidth,
+        const { height, innerHeight } = await page.evaluate(() => ({
           height: document.documentElement.scrollHeight,
+          innerHeight: window.innerHeight,
         }))
 
-        const safeW = Math.max(1, width)
         const safeH = Math.max(4, height)
-        const quarterH = Math.ceil(safeH / 4)
+        const vh = Math.max(1, innerHeight)
+        const maxScrollY = Math.max(0, safeH - vh)
+
+        // Viewport screenshots at scroll positions (clip with fullPage:false only captures the
+        // viewport, so y offsets beyond the viewport produced blank tiles before).
+        const scrollTargets = [0, 1, 2, 3].map((i) => {
+          if (maxScrollY <= 0) return 0
+          if (i === 3) return maxScrollY
+          return Math.min(Math.floor((i * maxScrollY) / 3), maxScrollY)
+        })
 
         const quadrants: string[] = []
         for (let i = 0; i < 4; i++) {
-          const y = i * quarterH
-          const clipHeight = i === 3 ? safeH - y : quarterH
+          const targetY = scrollTargets[i] ?? 0
+          await page.evaluate((y) => {
+            window.scrollTo(0, y)
+            document.documentElement.scrollTop = y
+            document.body.scrollTop = y
+          }, targetY)
+          await new Promise((r) => setTimeout(r, 280))
           const b64 = (await page.screenshot({
             type: 'png',
             encoding: 'base64',
-            clip: { x: 0, y, width: safeW, height: Math.max(1, clipHeight) },
+            fullPage: false,
           })) as string
           quadrants.push(`data:image/png;base64,${b64}`)
         }
+
+        await page.evaluate(() => {
+          window.scrollTo(0, 0)
+          document.documentElement.scrollTop = 0
+          document.body.scrollTop = 0
+        })
 
         await browser.close()
         browser = null

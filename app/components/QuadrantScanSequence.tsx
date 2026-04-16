@@ -83,12 +83,12 @@ export function QuadrantScanSequence({
 
   return (
     <LayoutGroup>
-      <div className="mx-auto flex w-full max-w-full min-w-0 flex-col gap-4 px-1 sm:px-2">
+      <div className="mx-auto flex w-full max-w-full min-w-0 flex-col gap-4 px-0">
         {/* Single horizontal line: no wrap — scroll on small viewports (scrollbar hidden) */}
-        <div className="scrollbar-none flex w-full min-w-0 flex-nowrap items-end justify-center gap-2 overflow-x-auto pb-1 sm:gap-3">
+        <div className="scrollbar-none flex w-full min-w-0 flex-nowrap items-end justify-start gap-2 overflow-x-auto pb-1 sm:gap-3">
           <motion.div
             layout
-            className="flex min-h-[120px] shrink-0 flex-row flex-nowrap items-end justify-center gap-2 sm:min-h-[140px]"
+            className="flex min-h-[120px] shrink-0 flex-row flex-nowrap items-end justify-start gap-2 sm:min-h-[140px]"
           >
             {previewDesktop && (
               <MiniDualViewportCard previewDesktop={previewDesktop} previewMobile={previewMobile} />
