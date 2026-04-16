@@ -823,7 +823,7 @@ export default function Home() {
 
   return (
     <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
-      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[600px]'}`}>
+      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-[1400px]' : 'max-w-[600px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -1107,46 +1107,117 @@ export default function Home() {
                  
                 </h2>
 
-                {/* Preview: empty desktop+phone shells + purple scan while loading; fill as stream arrives. overflow-x-auto keeps overlapping phone visible (main is overflow-x-hidden). */}
+                {/* Preview + right-side progress panel (stacked on small screens). */}
                 {websiteUrl && (
-                  <div className="mb-8 w-full ">
+                  <div className="mb-8 w-full">
                     {error && (
                       <div className="mx-auto mb-4 max-w-2xl rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-sm text-red-800 shadow-sm">
                         <strong>Error:</strong> {error}
                       </div>
                     )}
-                    {isLoading && quadrants.length === 0 && (
-                      <DualViewportLoader
-                        previewDesktop={previewDesktop}
-                        previewMobile={previewMobile}
-                        scanning
-                        statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
-                      />
-                    )}
-                    {quadrants.length > 0 && (
-                      <div className="mx-auto w-full max-w-6xl min-w-0">
-                        {previewDesktop && (
-                          <div className="mb-8">
-                            <DualViewportLoader
+
+                    <div className="mx-auto grid w-full max-w-[1320px] gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
+                      <div className="min-w-0">
+                        {isLoading && quadrants.length === 0 && (
+                          <DualViewportLoader
+                            previewDesktop={previewDesktop}
+                            previewMobile={previewMobile}
+                            scanning
+                            statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
+                          />
+                        )}
+                        {quadrants.length > 0 && (
+                          <div className="mx-auto w-full max-w-6xl min-w-0">
+                            {previewDesktop && (
+                              <div className="mb-8">
+                                <DualViewportLoader
+                                  previewDesktop={previewDesktop}
+                                  previewMobile={previewMobile}
+                                  scanning={false}
+                                />
+                              </div>
+                            )}
+                            {redirectWarning && (
+                              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                                <strong>Redirect / geo-block:</strong> {redirectWarning}
+                              </div>
+                            )}
+                            <QuadrantScanSequence
+                              quadrants={quadrants}
+                              quadrantLabels={quadrantLabels}
                               previewDesktop={previewDesktop}
                               previewMobile={previewMobile}
-                              scanning={false}
                             />
                           </div>
                         )}
-                        {redirectWarning && (
-                          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                            <strong>Redirect / geo-block:</strong> {redirectWarning}
-                          </div>
-                        )}
-                        <QuadrantScanSequence
-                          quadrants={quadrants}
-                          quadrantLabels={quadrantLabels}
-                          previewDesktop={previewDesktop}
-                          previewMobile={previewMobile}
-                        />
                       </div>
-                    )}
+
+                      <aside className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm">
+                        {/* Label top-left, % top-right; bar has no text inside */}
+                        <div
+                          className="w-full"
+                          role="progressbar"
+                          aria-valuenow={analyzeProgressPercent}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                        >
+                          <div className="mb-1.5 flex items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-zinc-600">Progress</span>
+                            <span className="text-xs font-medium tabular-nums text-zinc-800">
+                              {analyzeProgressPercent}%
+                            </span>
+                          </div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div
+                              className="h-full rounded-full bg-gray-600 transition-[width] duration-300 ease-out"
+                              style={{ width: `${analyzeProgressPercent}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Analyze steps — advance + remove rows from rule batch progress */}
+                        <div className="mt-4 space-y-3">
+                          <AnimatePresence mode="popLayout">
+                            {analysisSteps
+                              .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
+                              .filter(({ index }) => !removedSteps.has(index))
+                              .map(({ title, index, id }) => {
+                                const isCompleted = index < mounted
+                                const isActive = index === mounted
+                                const isPending = index > mounted
+
+                                return (
+                                  <motion.div
+                                    key={id}
+                                    initial={{ opacity: 0, y: 16 }}
+                                    animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
+                                    exit={{ x: 160, opacity: 0 }}
+                                    transition={{ duration: 0.42, ease: [0.25, 0.1, 0.25, 1] }}
+                                    className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4"
+                                  >
+                                    {isCompleted ? (
+                                      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+                                        <img src="/check.png" alt="check" className="h-3.5 w-3.5 object-cover" />
+                                      </div>
+                                    ) : (
+                                      <Cog className={`h-5 w-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
+                                    )}
+                                    <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
+                                      {title}
+                                    </span>
+                                    {isCompleted && <span className="text-sm font-medium text-gray-600">Finished</span>}
+                                    {isActive && (
+                                      <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                                        Analyzing your URL...
+                                      </span>
+                                    )}
+                                  </motion.div>
+                                )
+                              })}
+                          </AnimatePresence>
+                        </div>
+                      </aside>
+                    </div>
                   </div>
                 )}
 
@@ -1167,69 +1238,6 @@ export default function Home() {
                   </div>
                 )} */}
 
-                {/* Label top-left, % top-right; bar has no text inside */}
-                <div
-                  className="mb-4 w-full max-w-[680px] mx-auto"
-                  role="progressbar"
-                  aria-valuenow={analyzeProgressPercent}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <div className="mb-1.5 flex items-center justify-between gap-3">
-                    <span className="text-xs font-medium text-zinc-600">Progress</span>
-                    <span className="text-xs font-medium tabular-nums text-zinc-800">
-                      {analyzeProgressPercent}%
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
-                    <div
-                      className="h-full rounded-full bg-gray-600 transition-[width] duration-300 ease-out"
-                      style={{ width: `${analyzeProgressPercent}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Analyze steps — advance + remove rows from rule batch progress */}
-                <div className="space-y-3">
-                  <AnimatePresence mode="popLayout">
-                    {analysisSteps
-                      .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
-                      .filter(({ index }) => !removedSteps.has(index))
-                      .map(({ title, index, id }) => {
-                        const isCompleted = index < mounted
-                        const isActive = index === mounted
-                        const isPending = index > mounted
-
-                        return (
-                          <motion.div
-                            key={id}
-                            initial={{ opacity: 0, y: 16 }}
-                            animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                            exit={{ x: 160, opacity: 0 }}
-                            transition={{ duration: 0.42, ease: [0.25, 0.1, 0.25, 1] }}
-                            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
-                          >
-                            {isCompleted ? (
-                              <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                                <img src="/check.png" alt="check" className="w-3.5 h-3.5 object-cover" />
-                              </div>
-                            ) : (
-                              <Cog className={`w-5 h-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
-                            )}
-                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
-                              {title}
-                            </span>
-                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
-                            {isActive && (
-                              <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
-                              Analyzing your URL...
-                              </span>
-                            )}
-                          </motion.div>
-                        )
-                      })}
-                  </AnimatePresence>
-                </div>
               </div>
 
               {!websiteUrl && (
@@ -1253,7 +1261,7 @@ export default function Home() {
                 {['/client_first.png', '/client_second.png', '/client_third.png'].map((src, i) => (
                   <motion.div
                     key={src}
-                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.15)]"
+                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200 shadow-[0_1px_5px_#00000026]"
                     initial={{ opacity: 0, scale: 0.85 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.45 + i * 0.09 }}

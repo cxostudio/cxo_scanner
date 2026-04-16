@@ -184,7 +184,7 @@ export default function ScannerPage() {
                       <img
                         src={desktopPreview}
                         alt="Desktop view of scanned site"
-                        className="absolute inset-0 h-full w-full object-cover object-top"
+                        className="absolute inset-0 h-full w-full object-cover object-center"
                       />
                     ) : (
                       <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-zinc-400">
@@ -378,21 +378,9 @@ export default function ScannerPage() {
                                   result.passed ? 'text-green-700' : 'text-orange-800'
                                 }`}
                               >
-                                {result.passed ? (
-                                  <>
-                                    <Check size={16} className="shrink-0" />
-                                    <strong className="text-sm font-semibold">Details</strong>
-                                  </>
-                                ) : (
-                                  <>
-                                    <X size={16} className="shrink-0" />
-                                    <strong className="text-sm font-semibold">Details</strong>
-                                  </>
-                                )}
                               </div>
                               <CheckpointResultBody
                                 checkpoint={result.checkpoint}
-                                summaryLine={result.reason}
                                 passed={result.passed}
                               />
                             </>

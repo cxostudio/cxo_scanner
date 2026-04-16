@@ -14,21 +14,21 @@ const mdClass =
 
 export function CheckpointResultBody({
   checkpoint,
-  summaryLine,
   passed,
 }: {
   checkpoint: CheckpointPresentation
-  summaryLine: string
   passed: boolean
 }) {
   return (
     <div className="space-y-5">
-      {summaryLine.trim() ? (
-        <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Scan summary
+      {checkpoint.requiredActions?.trim() ? (
+        <div className="rounded-lg border border-zinc-200/80 bg-white/80 p-3 shadow-sm">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+            Required actions
           </p>
-          <p className="text-sm leading-relaxed text-gray-800">{summaryLine}</p>
+          <div className={mdClass}>
+            <ReactMarkdown>{checkpoint.requiredActions}</ReactMarkdown>
+          </div>
         </div>
       ) : null}
 
@@ -74,9 +74,10 @@ export function CheckpointResultBody({
         </div>
       ) : null}
 
-      {!checkpoint.justificationsBenefits.trim() &&
+      {!checkpoint.requiredActions?.trim() &&
+        !checkpoint.justificationsBenefits.trim() &&
         checkpoint.examples.length === 0 &&
-        !summaryLine.trim() && (
+        (
           <p className="text-sm text-gray-600">
             {passed ? 'No extra checkpoint details for this rule.' : 'No checkpoint details available.'}
           </p>
