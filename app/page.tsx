@@ -1,13 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Cog, Check } from 'lucide-react'
+import { Cog } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 import emailjs from '@emailjs/browser'
+import { DualViewportLoader } from './components/DualViewportLoader';
+import { QuadrantScanSequence } from './components/QuadrantScanSequence';
+
 
 interface Rule {
   id: string
@@ -15,11 +18,18 @@ interface Rule {
   description: string
 }
 
+interface CheckpointPresentation {
+  requiredActions?: string
+  justificationsBenefits: string
+  examples: Array<{ url: string; filename: string; thumbnailUrl: string }>
+}
+
 interface ScanResult {
   ruleId: string
   ruleTitle: string
   passed: boolean
   reason: string
+  checkpoint?: CheckpointPresentation
 }
 
 interface BatchData {
@@ -30,6 +40,36 @@ interface BatchData {
   totalBatches: number
   timestamp: number
 }
+
+type NdComplete = {
+  type: 'complete';
+  message?: string;
+  quadrants?: string[];
+  quadrantLabels?: string[];
+  url?: string;
+  previewMobile?: string;
+  redirectWarning?: string;
+};
+
+/** sessionStorage often hits quota after lastScreenshot; fall back to localStorage for scan previews */
+function persistScanPreview(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value)
+    return
+  } catch {
+    /* QuotaExceeded or private mode */
+  }
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* ignore */
+  }
+}
+const LOADER_MESSAGES = [
+  'Capturing page screenshots',
+  'Scanning sections',
+  'Almost ready',
+] as const;
 
 const EMAILJS_SERVICE_ID = 'service_j08d36o'
 const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
@@ -73,7 +113,6 @@ const EmailSchema = z.string()
 export default function Home() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState(1)
-  const [mounted, setMounted] = useState(0)
   const [selectedChallenge, setSelectedChallenge] = useState<string | null>(null)
   const [selectedRevenue, setSelectedRevenue] = useState<string | null>(null)
   const [websiteUrl, setWebsiteUrl] = useState('')
@@ -88,6 +127,19 @@ export default function Home() {
   const [currentBatchNumber, setCurrentBatchNumber] = useState<number>(0)
   const [iframeError, setIframeError] = useState<boolean>(false)
   const [removedSteps, setRemovedSteps] = useState<Set<number>>(new Set())
+  const [quadrants, setQuadrants] = useState<string[]>([]);
+  const [quadrantLabels, setQuadrantLabels] = useState<string[]>([]);
+  const [analyzedUrl, setAnalyzedUrl] = useState<string | null>(null);
+  const [redirectWarning, setRedirectWarning] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
+  const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
+  const [previewMobile, setPreviewMobile] = useState<string | null>(null);
+
+  /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
+  const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
+  const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -117,13 +169,34 @@ export default function Home() {
     }
   }
 
+  /** Shown during analyze; progress + row exits follow rule batch scanning (`progress`), not the X-Ray preview stream. */
   const analysisSteps = [
     'Crawling your product page structure',
     'Analyzing user experience and interface',
     'Analyzing content and copy effectiveness',
     'Generating conversion recommendations',
     'Finalizing your audit report',
-  ]
+  ] as const
+  const ANALYSIS_STEP_COUNT = analysisSteps.length
+
+  const mounted = useMemo(() => {
+    if (!showAnalyze || !progress || progress.total <= 0) return 0
+    if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
+    return Math.min(
+      ANALYSIS_STEP_COUNT - 1,
+      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT)
+    )
+  }, [showAnalyze, progress, ANALYSIS_STEP_COUNT])
+
+  const analyzeProgressPercent = useMemo(() => {
+    if (!showAnalyze || !progress || progress.total <= 0) return 0
+    return Math.min(100, Math.round((progress.current / progress.total) * 100))
+  }, [showAnalyze, progress])
+
+  /** Long enough to read “Finished”; short enough not to block batch progress feel. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 280
+  /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
   useEffect(() => {
     // Load rules on component mount
@@ -132,54 +205,60 @@ export default function Home() {
     // It will be loaded from API response during scan
   }, [])
 
+  // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
+  useEffect(() => {
+    if (!showAnalyze) return
+    router.prefetch('/scanner')
+  }, [showAnalyze, router])
+
+  // While analyze UI is hidden, reset step row removal state (mounted is derived from `progress` while visible).
   useEffect(() => {
     if (!showAnalyze) {
-      setMounted(0)
-      return
+      setRemovedSteps(new Set())
     }
+  }, [showAnalyze])
 
-    // If we have progress, update mounted based on batch progress
-    if (progress) {
-      // Map batch progress to analysis steps
-      const totalBatches = progress.total
-      const currentBatch = progress.current
-
-      // Calculate which step should be active based on batch progress
-      // Distribute steps evenly across batches
-      const targetStep = Math.min(
-        Math.floor((currentBatch / totalBatches) * analysisSteps.length),
-        analysisSteps.length - 1
-      )
-
-      setMounted(targetStep)
-    } else {
-      // When showAnalyze is true but no progress yet, show the first step
-      setMounted(0)
-    }
-  }, [progress, showAnalyze])
-
-  // When a step completes (mounted advances), show checkmark briefly then remove it
+  // After each batch, show “Finished” briefly (ANALYSIS_STEP_REMOVE_DELAY_MS), then remove the row.
   useEffect(() => {
-    if (mounted > 0) {
-      const justCompleted = mounted - 1
-      if (!removedSteps.has(justCompleted)) {
-        const t = setTimeout(() => {
-          setRemovedSteps(prev => new Set([...prev, justCompleted]))
-        }, 700)
-        return () => clearTimeout(t)
+    if (!showAnalyze || mounted <= 0) return
+
+    for (let k = 0; k < mounted; k++) {
+      if (analysisStepRemovalScheduledRef.current.has(k)) continue
+      analysisStepRemovalScheduledRef.current.add(k)
+
+      const idx = k
+      const applyRemove = () => {
+        setRemovedSteps(prev => {
+          if (prev.has(idx)) return prev
+          return new Set([...prev, idx])
+        })
+      }
+      if (ANALYSIS_STEP_REMOVE_DELAY_MS <= 0) {
+        applyRemove()
+      } else {
+        const delay =
+          ANALYSIS_STEP_REMOVE_DELAY_MS + idx * ANALYSIS_STEP_REMOVE_STAGGER_MS
+        const id = window.setTimeout(applyRemove, delay)
+        analysisStepRemoveTimeoutsRef.current.push(id)
       }
     }
-  }, [mounted])
+  }, [mounted, showAnalyze])
 
   const loadRules = async () => {
     try {
-      // Load rules from predefined-rules.json
-      const response = await fetch('/data/predefined-rules.json')
+      const response = await fetch('/api/conversion-checkpoints')
       if (!response.ok) {
-        throw new Error('Failed to load rules')
+        throw new Error('Failed to load conversion checkpoints')
       }
-      const parsed = await response.json()
-      const validatedRules = z.array(RuleSchema).parse(parsed)
+      const data = (await response.json()) as {
+        rules?: unknown
+        records?: unknown
+        foundCount?: number
+        notFoundIds?: string[]
+      }
+      // Browser console — full API payload (records + mapped rules)
+      console.log('[conversion-checkpoints]', data)
+      const validatedRules = z.array(RuleSchema).parse(data.rules ?? [])
       setRules(validatedRules)
     } catch (error) {
       console.error('Error loading rules:', error)
@@ -238,19 +317,33 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
+    // `current` = batches finished (not the batch currently scanning). Avoids 100% while last /api/scan is still in flight.
     setProgress({ current: 0, total: batches.length })
 
-    const ScanResultsSchema = z.array(z.object({
-      ruleId: z.string(),
-      ruleTitle: z.string(),
-      passed: z.boolean(),
-      reason: z.string(),
-    }))
+    const ScanResultsSchema = z.array(
+      z.object({
+        ruleId: z.string(),
+        ruleTitle: z.string(),
+        passed: z.boolean(),
+        reason: z.string(),
+        checkpoint: z
+          .object({
+            requiredActions: z.string(),
+            justificationsBenefits: z.string(),
+            examples: z.array(
+              z.object({
+                url: z.string(),
+                filename: z.string(),
+                thumbnailUrl: z.string(),
+              }),
+            ),
+          })
+          .optional(),
+      }),
+    )
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
-
-      setProgress({ current: i + 1, total: batches.length })
 
       let batchSucceeded = false
       let lastBatchError: unknown = null
@@ -344,6 +437,8 @@ export default function Home() {
       }
 
       localStorage.setItem('scanResults', JSON.stringify(allResults))
+
+      setProgress({ current: i + 1, total: batches.length })
     }
 
     try {
@@ -359,19 +454,33 @@ export default function Home() {
 
       if (finalResponse.ok) {
         const finalData = await finalResponse.json()
-        const validatedResults = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        })).parse(finalData.results)
+        const validatedResults = z
+          .array(
+            z.object({
+              ruleId: z.string(),
+              ruleTitle: z.string(),
+              passed: z.boolean(),
+              reason: z.string(),
+              checkpoint: z
+                .object({
+                  requiredActions: z.string(),
+                  justificationsBenefits: z.string(),
+                  examples: z.array(
+                    z.object({
+                      url: z.string(),
+                      filename: z.string(),
+                      thumbnailUrl: z.string(),
+                    }),
+                  ),
+                })
+                .optional(),
+            }),
+          )
+          .parse(finalData.results)
 
         localStorage.setItem('scanResults', JSON.stringify(validatedResults))
-        // Store normalized URL (with protocol) so iframe works on Vercel
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
-        // Store screenshot URL for results page (if available)
         if (websiteScreenshot) {
-          // Store as data URL in sessionStorage instead of localStorage (smaller size limit)
           try {
             sessionStorage.setItem('lastScreenshot', websiteScreenshot)
           } catch (e) {
@@ -391,8 +500,110 @@ export default function Home() {
       localStorage.removeItem('scanBatches')
     }
 
-    // Don't set progress to null here (would reset mounted to 0 and flash all step loaders)
+    // Don't set progress to null here (would reset the batch progress bar and step UI)
     // Toast + redirect happen in handleStartScan right after this returns
+  }
+
+  /** Calls server `analyzeWebsiteStream` via POST /api/preview_website — NDJSON desktop/mobile preview + quadrants. Parallel to rule scanning. */
+  const startWebsitePreviewStream = async (captureUrl: string) => {
+    const trimmed = captureUrl.trim()
+    if (!trimmed) {
+      setError('Please enter a URL.')
+      return
+    }
+    const urlParam = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    setIsLoading(true)
+    setError(null)
+    setQuadrants([])
+    setQuadrantLabels([])
+    setAnalyzedUrl(null)
+    setRedirectWarning(null)
+    setLoaderMsgIndex(0)
+    setPreviewDesktop(null)
+    setPreviewMobile(null)
+    try {
+      const response = await fetch('/api/preview_website', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: urlParam }),
+      })
+      if (!response.ok) {
+        const errJson = (await response.json().catch(() => ({}))) as { error?: string; details?: string }
+        throw new Error(errJson.details || errJson.error || `HTTP ${response.status}`)
+      }
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body.')
+      }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const streamState = { complete: null as NdComplete | null }
+      const handleNdjsonLine = (line: string) => {
+        if (!line.trim()) return
+        const msg = JSON.parse(line) as Record<string, unknown>
+        if (msg.type === 'preview') {
+          if (typeof msg.previewDesktop === 'string') {
+            setPreviewDesktop(msg.previewDesktop)
+            persistScanPreview('scanPreviewDesktop', msg.previewDesktop)
+          }
+          if (typeof msg.preview === 'string' && !msg.previewDesktop) {
+            setPreviewDesktop(msg.preview)
+            persistScanPreview('scanPreviewDesktop', msg.preview)
+          }
+          if (typeof msg.previewMobile === 'string') {
+            setPreviewMobile(msg.previewMobile)
+            persistScanPreview('scanPreviewMobile', msg.previewMobile)
+          }
+        }
+        if (msg.type === 'error') {
+          throw new Error(
+            typeof msg.details === 'string'
+              ? msg.details
+              : typeof msg.error === 'string'
+                ? msg.error
+                : 'Capture failed'
+          )
+        }
+        if (msg.type === 'complete') {
+          streamState.complete = msg as NdComplete
+        }
+      }
+      while (true) {
+        const { done, value } = await reader.read()
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          handleNdjsonLine(line)
+        }
+        if (done) {
+          if (buffer.trim()) {
+            handleNdjsonLine(buffer)
+          }
+          break
+        }
+      }
+      const gotComplete = streamState.complete
+      if (typeof gotComplete?.previewMobile === 'string') {
+        setPreviewMobile(gotComplete.previewMobile)
+        persistScanPreview('scanPreviewMobile', gotComplete.previewMobile)
+      }
+      if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
+        setQuadrants(gotComplete.quadrants)
+        setQuadrantLabels(gotComplete.quadrantLabels ?? [])
+        setAnalyzedUrl(gotComplete.url ?? urlParam)
+        setRedirectWarning(gotComplete.redirectWarning ?? null)
+      } else {
+        setError('No capture data returned.')
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
+      console.error('Website preview stream error:', err)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleStartScan = async () => {
@@ -421,13 +632,13 @@ export default function Home() {
     try {
       setIsStartingScan(true)
   
-      // ✅ Load rules (clean, no timeout hacks)
+      // ✅ Load rules from Airtable conversion-checkpoints (same as /api/conversion-checkpoints)
       if (!rulesToUse.length) {
-        const res = await fetch('/data/predefined-rules.json')
-        if (!res.ok) throw new Error('Failed to load rules')
-  
-        const parsed = await res.json()
-        rulesToUse = z.array(RuleSchema).parse(parsed)
+        const res = await fetch('/api/conversion-checkpoints')
+        if (!res.ok) throw new Error('Failed to load conversion checkpoints')
+        const data = await res.json()
+        console.log('[conversion-checkpoints] scan refresh:', data)
+        rulesToUse = z.array(RuleSchema).parse(data.rules ?? [])
         setRules(rulesToUse)
       }
   
@@ -472,11 +683,27 @@ export default function Home() {
       setWebsiteScreenshot(null)
       setCurrentBatchNumber(0)
       setIframeError(false)
+      setRemovedSteps(new Set())
+      try {
+        sessionStorage.removeItem('scanPreviewMobile')
+        sessionStorage.removeItem('scanPreviewDesktop')
+      } catch {
+        /* ignore */
+      }
+      try {
+        localStorage.removeItem('scanPreviewMobile')
+        localStorage.removeItem('scanPreviewDesktop')
+      } catch {
+        /* ignore */
+      }
+      analysisStepRemoveTimeoutsRef.current.forEach((tid) => window.clearTimeout(tid))
+      analysisStepRemoveTimeoutsRef.current = []
+      analysisStepRemovalScheduledRef.current = new Set()
   
-      // ✅ Wait for UI render
-      await new Promise((r) =>
-        requestAnimationFrame(() => setTimeout(r, 200))
-      )
+      // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+      void startWebsitePreviewStream(validUrl)
   
       // ✅ Screenshot (non-blocking, clean)
       ;(async () => {
@@ -495,7 +722,7 @@ export default function Home() {
             sessionStorage.setItem('lastScreenshot', data.screenshot)
           }
         } catch (err) {
-          console.warn('Screenshot failed:', err)
+          console.warn('Screenshot  failed:', err)
         }
       })()
   
@@ -503,54 +730,58 @@ export default function Home() {
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
-      // Navigate as soon as scan data is ready (before email/summary work)
-      router.push('/scanner')
+      // Replace (no extra history entry); toast/email deferred so navigation isn't blocked.
+      router.replace('/scanner')
+      setTimeout(() => {
+        let passResult: string | number = 'N/A'
+        let failResult: string | number = 'N/A'
 
-      // ✅ Summary for EmailJS (after redirect starts; non-blocking for UX)
-      let passResult: string | number = 'N/A'
-      let failResult: string | number = 'N/A'
+        try {
+          const stored = localStorage.getItem('scanResults')
+          if (stored) {
+            const parsed = z
+              .array(
+                z
+                  .object({
+                    ruleId: z.string(),
+                    ruleTitle: z.string(),
+                    passed: z.boolean(),
+                    reason: z.string(),
+                  })
+                  .passthrough(),
+              )
+              .parse(JSON.parse(stored))
 
-      try {
-        const stored = localStorage.getItem('scanResults')
-        if (stored) {
-          const parsed = z.array(
-            z.object({
-              ruleId: z.string(),
-              ruleTitle: z.string(),
-              passed: z.boolean(),
-              reason: z.string(),
-            })
-          ).parse(JSON.parse(stored))
-
-          const pass = parsed.filter(r => r.passed).length
-          passResult = `${pass}/${parsed.length}`
-          failResult = `${parsed.length - pass}/${parsed.length}`
+            const pass = parsed.filter(r => r.passed).length
+            passResult = `${pass}/${parsed.length}`
+            failResult = `${parsed.length - pass}/${parsed.length}`
+          }
+        } catch {
+          console.warn('Summary parsing failed')
         }
-      } catch {
-        console.warn('Summary parsing failed')
-      }
 
-      // ✅ EmailJS (non-blocking)
-      emailjs.send(
-        EMAILJS_SERVICE_ID,
-        EMAILJS_TEMPLATE_ID,
-        {
-          level: selectedChallenge ?? '',
-          price: selectedRevenue ?? '',
-          url: validUrl,
-          email: emailTrimmed,
-          ip_address: ipAddress,
-          browser,
-          screen_size: screenSize,
-          time_zone: timeZone,
-          browser_data: browserData,
-          pass_result: passResult,
-          fail_result: failResult,
-        },
-        { publicKey: EMAILJS_PUBLIC_KEY }
-      ).catch(err => console.error('EmailJS failed:', err))
+        // ✅ EmailJS (non-blocking)
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
-      toast.success('Scan completed successfully!')
+        toast.success('Scan completed successfully!')
+      }, 0)
   
     } catch (err) {
       console.error(err)
@@ -558,7 +789,7 @@ export default function Home() {
       setShowAnalyze(false)
     } finally {
       // Only reset button loading. Do NOT setShowAnalyze(false) here on success —
-      // router.push is async; flipping showAnalyze would flash the form before /scanner mounts.
+      // router.replace is async; flipping showAnalyze would flash the form before /scanner mounts.
       setIsStartingScan(false)
     }
   }
@@ -579,9 +810,18 @@ export default function Home() {
     return false
   }
 
+
+  useEffect(() => {
+    if (!isLoading) return;
+    const id = window.setInterval(() => {
+      setLoaderMsgIndex((i) => (i + 1) % LOADER_MESSAGES.length);
+    }, 2800);
+    return () => window.clearInterval(id);
+  }, [isLoading]);
+
   return (
     <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
-      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-4xl' : 'max-w-[400px]'}`}>
+      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-[1400px]' : 'max-w-[600px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -626,7 +866,7 @@ export default function Home() {
           </>
         )}
         {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
-        <div className="h-full">
+        <div className="w-full h-full mx-auto">
           {!showAnalyze ? (
             <>
               <AnimatePresence mode="wait">
@@ -640,14 +880,14 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-3xl font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      className="text-2xl  tracking-[-0.03em] font-plus-jakarta   font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
                     >
                       What's your biggest challenge right now?
                     </motion.h2>
-                    <div >
+                    <div>
                       {step1Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
@@ -677,7 +917,7 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.h2
-                      className="text-3xl  font-bold text-gray-900 text-center mt-[35px] mb-[28px]"
+                      className="text-2xl tracking-[-0.03em] font-plus-jakarta  font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
@@ -714,21 +954,15 @@ export default function Home() {
                     transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                       <motion.h2
-                        className="text-[#757575] text-center text-[33px] italic font-bold leading-[48px] tracking-[-1.2px] me-[12px] mt-[35px]"
+                        className=" text-center text-2xl md:text-4xl font-semibold font-plus-jakarta leading-[48px] tracking-[-0.03em] me-[12px] mt-[35px]"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.06 }}
                       >
-                        <i>You're almost done!</i>
+                        <span className="text-[#757575]"><i>You're almost done!</i></span><br />
+                        <span className="text-[#09090b]">Let's finish your audit</span>
                       </motion.h2>
-                      <motion.h2
-                        className="text-3xl font-bold text-gray-900 text-center"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.12 }}
-                      >
-                        Let's finish your audit
-                      </motion.h2>
+                      
                     <motion.div
                       className="mt-8"
                       initial={{ opacity: 0 }}
@@ -791,15 +1025,26 @@ export default function Home() {
                     type="button"
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full rounded-[10px] font-bold text-base text-center cursor-pointer ${!isStepValid()
+                    className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!isStepValid()
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-black text-white shadow-lg'
+                      : 'bg-black text-white'
                       }`}
                     whileHover={isStepValid() ? { scale: 1.015 } : {}}
                     whileTap={isStepValid() ? { scale: 0.985 } : {}}
                     transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                   >
-                    <p className="my-[18px]">Continue ›</p>
+                    <p className="my-[18px] flex items-center justify-center gap-2">
+                      <span>Continue</span>
+                      <span>
+                      <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 256 256"
+    className="w-4 h-4 fill-current"
+  >
+    <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
+  </svg>
+                      </span>
+                    </p>
                   </motion.button>
                 </motion.div>
               ) : (
@@ -823,7 +1068,7 @@ export default function Home() {
                       type="button"
                       onClick={handleStartScan}
                       disabled={!websiteUrl || !email}
-                      className={`w-full py-6 rounded-[10px] font-bold text-lg text-center cursor-pointer ${!websiteUrl || !email
+                      className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!websiteUrl || !email
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-black text-white shadow-2xl'
                         }`}
@@ -831,7 +1076,18 @@ export default function Home() {
                       whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
                       transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                     >
-                      Access my results ›
+                      <p className="my-[18px] flex items-center justify-center gap-2">
+                      <span>Access my results</span>
+                      <span>
+                         <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 256 256"
+    className="w-4 h-4 fill-current"
+  >
+    <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
+  </svg>
+                      </span>
+                      </p>
                     </motion.button>
                   )}
                 </motion.div>
@@ -841,87 +1097,139 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
+                <div className="text-center mb-4">
+              <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
+              </div>
                 <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
                   Analyzing Your URL
-                  <span className="flex gap-1 items-end" aria-hidden>
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
+                 
                 </h2>
 
-                {/* Desktop browser preview only */}
+                {/* Preview + right-side progress panel (stacked on small screens). */}
                 {websiteUrl && (
-                  <div className="mb-6 flex justify-center">
-                    {/* Desktop - browser window: traffic lights, address bar, site content */}
-                    <div className="w-full max-w-2xl h-[320px]">
-                      <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-2xl flex flex-col h-full">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-                        </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
-                          <div className="flex-1 flex items-center gap-2 px-3 py-1 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-[11px] font-medium">
-                            <svg className="w-3 h-3 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
-                            <span className="truncate">{websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`}</span>
+                  <div className="mb-8 w-full">
+                    {error && (
+                      <div className="mx-auto mb-4 max-w-2xl rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-sm text-red-800 shadow-sm">
+                        <strong>Error:</strong> {error}
+                      </div>
+                    )}
+
+                    <div className="mx-auto grid w-full max-w-[1400px] gap-5 px-0 mt-[30px] sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
+                      <div className="flex min-h-0 min-w-0 flex-col">
+                        {isLoading && quadrants.length === 0 && (
+                          <DualViewportLoader
+                            align="start"
+                            previewDesktop={previewDesktop}
+                            previewMobile={previewMobile}
+                            scanning
+                            statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
+                          />
+                        )}
+                        {quadrants.length > 0 && (
+                          <div className="w-full min-w-0 max-w-none">
+                            {previewDesktop && (
+                              <div className="mb-8">
+                                <DualViewportLoader
+                                  align="start"
+                                  previewDesktop={previewDesktop}
+                                  previewMobile={previewMobile}
+                                  scanning={false}
+                                />
+                              </div>
+                            )}
+                            {redirectWarning && (
+                              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                                <strong>Redirect / geo-block:</strong> {redirectWarning}
+                              </div>
+                            )}
+                            <QuadrantScanSequence
+                              quadrants={quadrants}
+                              quadrantLabels={quadrantLabels}
+                              previewDesktop={previewDesktop}
+                              previewMobile={previewMobile}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <aside className="flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm max-h-[min(34rem,82vh)] lg:h-[min(34rem,76vh)] lg:max-h-none">
+                        <div
+                          className="w-full shrink-0"
+                          role="progressbar"
+                          aria-valuenow={analyzeProgressPercent}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                        >
+                          <div className="mb-1.5 flex items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-zinc-600">Progress</span>
+                            <span className="text-xs font-medium tabular-nums text-zinc-800">
+                              {analyzeProgressPercent}%
+                            </span>
+                          </div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div
+                              className="h-full rounded-full bg-gray-600 transition-[width] duration-100 ease-out"
+                              style={{ width: `${analyzeProgressPercent}%` }}
+                            />
                           </div>
                         </div>
-                        <div className="flex-1 min-h-0 overflow-hidden bg-white">
-                          {!iframeError ? (
-                            <iframe
-                              src={`/api/proxy?url=${encodeURIComponent(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`)}`}
-                              className="w-full h-full min-h-0 border-0"
-                              style={{ blockSize: '100%', minHeight: 0 }}
-                              title="Website inside desktop browser"
-                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                              loading="lazy"
-                              onError={async () => {
-                                setIframeError(true)
-                        
-                                if (!websiteUrl || websiteScreenshot) return
-                        
-                                const validUrl = websiteUrl.startsWith('http')
-                                  ? websiteUrl
-                                  : `https://${websiteUrl}`
-                        
-                                try {
-                                  const res = await fetch('/api/screenshot', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ url: validUrl }),
-                                  })
-                        
-                                  if (!res.ok) {
-                                    console.error('Screenshot API failed:', res.status)
-                                    return
-                                  }
-                        
-                                  const data = await res.json()
-                        
-                                  if (data?.screenshot) {
-                                    setWebsiteScreenshot(data.screenshot)
-                        
-                                    try {
-                                      sessionStorage.setItem('lastScreenshot', data.screenshot)
-                                    } catch (e) {
-                                      console.warn('SessionStorage failed:', e)
-                                    }
-                                  }
-                                } catch (err) {
-                                  console.error('Screenshot fallback failed:', err)
-                                }
-                              }}
-                            />
-                          ) : websiteScreenshot ? (
-                            <img src={websiteScreenshot} alt="Desktop" className="w-full h-full object-cover object-top" />
-                          ) : (
-                            <div className="w-full h-full bg-[#18181b] flex items-center justify-center">
-                              <div className="w-10 h-10 border-2 border-[#3f3f46] border-t-purple-500 rounded-full animate-spin" />
-                            </div>
-                          )}
+
+                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
+                          <AnimatePresence mode="popLayout">
+                            {analysisSteps
+                              .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
+                              .filter(({ index }) => !removedSteps.has(index))
+                              .map(({ title, index, id }) => {
+                                const isCompleted = index < mounted
+                                const isActive = index === mounted
+                                const isPending = index > mounted
+
+                                return (
+                                  <motion.div
+                                    key={id}
+                                    initial={{ opacity: 0, y: 16 }}
+                                    animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
+                                    exit={{ x: 32, opacity: 0 }}
+                                    transition={{ duration: 0.16, ease: [0.25, 0.1, 0.25, 1] }}
+                                    className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
+                                  >
+                                    {isCompleted ? (
+                                      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+                                        <img src="/check.png" alt="" className="h-3.5 w-3.5 object-cover" />
+                                      </div>
+                                    ) : (
+                                      <Cog
+                                        className={`h-5 w-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`}
+                                        aria-hidden
+                                      />
+                                    )}
+                                    <span
+                                      className={`min-w-0 flex-1 text-sm font-medium ${
+                                        isCompleted
+                                          ? 'text-gray-500 line-through'
+                                          : isPending
+                                            ? 'text-gray-400'
+                                            : 'text-gray-900'
+                                      }`}
+                                    >
+                                      {title}
+                                    </span>
+                                    {isCompleted && (
+                                      <span className="shrink-0 text-xs font-medium text-gray-600 sm:text-sm">
+                                        Finished
+                                      </span>
+                                    )}
+                                    {isActive && (
+                                      <span className="max-w-[6.5rem] shrink-0 truncate text-xs font-medium text-gray-700 sm:max-w-[11rem] sm:text-sm">
+                                        Analyzing this url...
+                                      </span>
+                                    )}
+                                  </motion.div>
+                                )
+                              })}
+                          </AnimatePresence>
                         </div>
-                      </div>
+                      </aside>
                     </div>
                   </div>
                 )}
@@ -943,47 +1251,6 @@ export default function Home() {
                   </div>
                 )} */}
 
-                {/* Steps - all steps visible; active spins, completed shows checkmark then slides out, pending waits */}
-                <div className="space-y-3">
-                  <AnimatePresence mode="popLayout">
-                    {analysisSteps
-                      .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
-                      .filter(({ index }) => !removedSteps.has(index))
-                      .map(({ title, index, id }) => {
-                        const isCompleted = index < mounted
-                        const isActive = index === mounted
-                        const isPending = index > mounted
-
-                        return (
-                          <motion.div
-                            key={id}
-                            initial={{ opacity: 0, y: 16 }}
-                            animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                            exit={{ x: 160, opacity: 0 }}
-                            transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
-                            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-200"
-                          >
-                            {isCompleted ? (
-                              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                                <Check className="w-3.5 h-3.5 text-white" />
-                              </div>
-                            ) : (
-                              <Cog className={`w-5 h-5 shrink-0 text-gray-400 ${isActive ? 'animate-spin' : ''}`} />
-                            )}
-                            <span className={`flex-1 text-sm font-medium ${isCompleted ? 'text-gray-500 line-through' : isPending ? 'text-gray-400' : 'text-gray-900'}`}>
-                              {title}
-                            </span>
-                            {isCompleted && <span className="text-gray-600 text-sm font-medium">Finished</span>}
-                            {isActive && (
-                              <span className="text-gray-700 text-sm font-medium flex items-center gap-1.5">
-                                Analyzing...
-                              </span>
-                            )}
-                          </motion.div>
-                        )
-                      })}
-                  </AnimatePresence>
-                </div>
               </div>
 
               {!websiteUrl && (
@@ -1003,11 +1270,11 @@ export default function Home() {
           >
             <div className="flex justify-center gap-3">
               {/* Start: Profile Images */}
-              <div className="flex -space-x-2">
+              <div className="flex -space-x-2 mt-[8px]">
                 {['/client_first.png', '/client_second.png', '/client_third.png'].map((src, i) => (
                   <motion.div
                     key={src}
-                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200"
+                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200 shadow-[0_1px_5px_#00000026]"
                     initial={{ opacity: 0, scale: 0.85 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.45 + i * 0.09 }}

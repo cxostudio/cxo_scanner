@@ -31,7 +31,7 @@ export default function SelectButton({
       transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
     >
       
-      <p className="text-[#09090B] text-center  text-[14.8px] font-semibold leading-[28px] space-x-[0.48px]">
+      <p className="text-[#71717a] text-center font-inter font-normal leading-[28px] tracking-[0.02em]">
         {label}
       </p>
     </motion.button>

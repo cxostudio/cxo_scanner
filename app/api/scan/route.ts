@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
-import puppeteer from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
 import path from 'path'
 import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
+import {
+  collectFooterSocialSnapshot,
+  emptyFooterSocialSnapshot,
+} from '@/lib/rules/footerSocialLinksRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
+import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import {
+  buildCheckpointPresentationMap,
+  type CheckpointPresentation,
+} from '@/lib/conversionCheckpoints/checkpointPresentation'
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+
+export const runtime = 'nodejs'
+export const maxDuration = 60
 interface Rule {
   id: string
   title: string
@@ -22,7 +33,77 @@ interface ScanResult {
   ruleTitle: string
   passed: boolean
   reason: string
+  checkpoint?: CheckpointPresentation
 }
+
+/**
+ * Substrings matched against `${rule.title} ${rule.description}` (lowercased).
+ * Must cover all conversion checkpoints (30) including site chrome / IA rules
+ * (footer, nav, cart, search, logo, deals, etc.) or those rules are dropped before scan.
+ */
+const ACTIVE_CONVERSION_RULE_MATCHERS = [
+  'after',
+  'annotation',
+  'arrow',
+  'back to top',
+  'before',
+  'benefit',
+  'breadcrumb',
+  'button',
+  'cart',
+  'color',
+  'composition',
+  'contact',
+  'customer review',
+  'customer support',
+  'deal',
+  'description',
+  'discount',
+  'dropdown',
+  'footer',
+  'free shipping',
+  'gallery',
+  'help center',
+  'highlight',
+  'homepage',
+  'lazy loading',
+  'link label',
+  'live chat',
+  'location',
+  'logo',
+  'material',
+  'menu',
+  'mobile',
+  'navigation',
+  'newsletter',
+  'offer',
+  'preselect',
+  'price',
+  'privacy',
+  'promote',
+  'pure black',
+  'rating',
+  'scarcity',
+  'search',
+  'secure checkout',
+  'sitewide',
+  'size',
+  'subscription',
+  'swipe',
+  'terms',
+  'title',
+  'trust',
+  'urgency',
+  'verb',
+  'video testimonial',
+] as const
+
+function isActiveConversionRule(rule: Rule): boolean {
+  const haystack = `${rule.title} ${rule.description}`.toLowerCase()
+  return ACTIVE_CONVERSION_RULE_MATCHERS.some((keyword) => haystack.includes(keyword))
+}
+
+
 
 // Zod schemas for validation
 const RuleSchema = z.object({
@@ -85,24 +166,10 @@ async function detectStickyCtaRuntime(validUrl: string): Promise<{
 } | null> {
   let localBrowser: any = null
   try {
-    const isVercel = !!process.env.VERCEL
-    const launchConfig: any = {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    }
-    if (isVercel) {
-      launchConfig.executablePath = await chromium.executablePath()
-      launchConfig.args = [
-        ...launchConfig.args,
-        '--single-process',
-        '--font-render-hinting=medium',
-      ]
-    }
-
-    localBrowser = await puppeteer.launch(launchConfig)
+    localBrowser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' })
     const page = await localBrowser.newPage()
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
     try {
       await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 })
     } catch {
@@ -287,38 +354,7 @@ function extractCustomerPhotoSignalsFromHtml(rawHtml: string): { found: boolean;
   return { found: evidence.length > 0, evidence }
 }
 
-function addBusinessDays(start: Date, businessDays: number): Date {
-  const date = new Date(start)
-  let added = 0
-  while (added < businessDays) {
-    date.setDate(date.getDate() + 1)
-    const day = date.getDay()
-    if (day !== 0 && day !== 6) added += 1
-  }
-  return date
-}
 
-function extractDeliveryEstimateFromHtml(rawHtml: string): string | null {
-  if (!rawHtml) return null
-
-  const deliveryWindowMatch = rawHtml.match(/deliveryWindow\s*=\s*"(\d+)-(\d+)"/i)
-  if (!deliveryWindowMatch) return null
-
-  const minDays = parseInt(deliveryWindowMatch[1], 10)
-  const maxDays = parseInt(deliveryWindowMatch[2], 10)
-  if (!Number.isFinite(minDays) || !Number.isFinite(maxDays)) return null
-
-  const now = new Date()
-  const fromDate = addBusinessDays(now, minDays)
-  const toDate = addBusinessDays(now, maxDays)
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  })
-
-  return `Order now and get it between ${formatter.format(fromDate)} and ${formatter.format(toDate)}.`
-}
 
 // Helper: detect lazy loading usage on the current page.
 // Counts elements with loading="lazy" and logs the result to the server console.
@@ -350,7 +386,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules, captureScreenshot = true, iframeSelector } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector } = validationResult.data
+    const activeRules = incomingRules
+      .filter(isActiveConversionRule)
+    const rules = activeRules
+
+    if (rules.length === 0) {
+      return NextResponse.json(
+        { error: 'No active conversion-checkpoint rules matched the configured checkpoint keyword set (expected ~30 rules).' },
+        { status: 400 }
+      )
+    }
+
+    if (rules.length !== incomingRules.length) {
+      console.log(
+        `[scan] filtered non-active/sticky rules: kept ${rules.length}/${incomingRules.length} for conversion-checkpoint scan`
+      )
+    }
 
     // Normalize URL
     let validUrl = url.trim()
@@ -403,6 +455,23 @@ export async function POST(request: NextRequest) {
       apiKey: apiKey,
     })
 
+    let checkpointByRuleId = new Map<string, CheckpointPresentation>()
+    try {
+      const cpRes = await getConversionCheckpointRules()
+      if (cpRes.ok) {
+        checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
+      }
+    } catch (e) {
+      console.warn('[scan] conversion checkpoint metadata not loaded:', e)
+    }
+
+    function withCheckpoint<R extends { ruleId: string }>(
+      row: R,
+    ): R & { checkpoint?: CheckpointPresentation } {
+      const c = checkpointByRuleId.get(row.ruleId)
+      return c ? { ...row, checkpoint: c } : row
+    }
+
     // Fetch website content with Puppeteer to detect JavaScript-loaded content
     let websiteContent = ''
     // Keep a separate copy of the full visible text (without truncation) so
@@ -427,9 +496,13 @@ export async function POST(request: NextRequest) {
     let trustBadgesContext: {
       ctaFound: boolean
       ctaText: string
+      /** True only when img/svg/iframe (or svg use) trust marks are near the primary CTA — not plain text. */
       domStructureFound: boolean
       paymentBrandsFound: string[]
+      /** Visual trust marks elsewhere (e.g. footer) — does NOT satisfy "near CTA". */
+      paymentBrandsElsewhere: string[]
       trustBadgesCount: number
+      trustBadgesElsewhereCount: number
       trustBadgesInfo: string
       containerDescription: string
     } | null = null
@@ -464,6 +537,21 @@ export async function POST(request: NextRequest) {
       format: string
       evidence: string[]
     } | null = null
+    /** Header / menu-drawer links for "important pages in main navigation" (reduces false FAIL on hamburger UIs). */
+    let mainNavContext: {
+      headerLinkCount: number
+      shoppingSignalCount: number
+      shoppingMatches: string[]
+      menuControlFound: boolean
+      essentialNavLikely: boolean
+      sample: string
+    } | null = null
+    /** Top announcement / promo bar (deals + urgency near top — homepage rule; same signal on PDP). */
+    let topOfPageDealsPromoContext: {
+      promoAtTopLikely: boolean
+      matchedLabels: string[]
+      evidenceSnippet: string
+    } | null = null
     let galleryNavDOMFound = false
     let galleryNavDOMEvidence = ''
     let thumbnailGalleryContext: {
@@ -478,26 +566,9 @@ export async function POST(request: NextRequest) {
     let descriptionBenefitsMatchedKeywords: string[] = []
     let selectedVariant: string | null = null
     let fallbackRawHtml = ''
+    let footerSocialSnapshot = emptyFooterSocialSnapshot()
     try {
-      // Launch headless browser
-      // For Vercel: use @sparticuz/chromium, for local: use regular puppeteer
-      const isVercel = !!process.env.VERCEL
-
-      const launchConfig: any = {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      }
-
-      if (isVercel) {
-        launchConfig.executablePath = await chromium.executablePath()
-        launchConfig.args = [
-          ...launchConfig.args,
-          '--single-process',
-          '--font-render-hinting=medium',
-        ]
-      }
-
-      browser = await puppeteer.launch(launchConfig)
+      browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
       const page = await browser.newPage()
 
@@ -509,7 +580,7 @@ export async function POST(request: NextRequest) {
       // Some ecommerce pages keep background requests open, making networkidle0 unreliable.
       await page.goto(validUrl, {
         waitUntil: 'domcontentloaded',
-        timeout: 45000,
+        timeout: 60_000,
       })
       // Wait for full JS/CSS hydration to complete before any rule scanning
       // This ensures dynamically injected content (delivery dates, Shopify apps) is in the DOM
@@ -1277,7 +1348,7 @@ export async function POST(request: NextRequest) {
       await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.4)))
       await new Promise(r => setTimeout(r, 1500))
 
-      // Get trust badges context — scans whole page for payment badge elements (no CTA dependency)
+      // Trust badges: payment / security signals must be NEAR the primary purchase CTA (rule text).
       trustBadgesContext = await page.evaluate(() => {
         const PAYMENT_BRANDS = [
           'visa', 'mastercard', 'master card', 'amex', 'american express',
@@ -1286,15 +1357,84 @@ export async function POST(request: NextRequest) {
           'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'giropay', 'jcb',
           'revolut', 'twint', 'przelewy24', 'eps', 'blik', 'pay later',
         ]
-        const TRUST_KEYWORDS = [
-          'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-          'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
-          'guaranteed safe', 'safe & secure', 'encrypted', 'norton secured',
-          'mcafee secure', 'trusted shop', 'comodo', 'security badge',
-        ]
+        /** Prefer visible product-form CTAs over header/footer duplicates for stable scans. */
+        function findPrimaryPurchaseCta(): HTMLElement | null {
+          const ctaPatterns = [
+            'add to bag',
+            'add to basket',
+            'add to cart',
+            'add to order',
+            'buy now',
+            'buy it now',
+            'purchase',
+            'checkout',
+            'pay now',
+            'order now',
+            'complete order',
+            'place order',
+            'add pack',
+            'get it now',
+          ]
+          const selectors =
+            'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+          let best: HTMLElement | null = null
+          let bestScore = 0
+          for (const el of candidates) {
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+            const val =
+              el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+            const combined = `${text} ${aria} ${val}`
+            if (!ctaPatterns.some((p) => combined.includes(p))) continue
+            const st = window.getComputedStyle(el)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+              continue
+            const r = el.getBoundingClientRect()
+            if (r.width < 4 || r.height < 4) continue
+            const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+            const inHeaderOnly =
+              !!el.closest('header, [class*="header" i], nav') &&
+              !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+            const inProduct = !!(
+              el.closest('form[action*="cart" i]') ||
+              el.closest('[class*="product-form" i]') ||
+              el.closest('[class*="product__" i]') ||
+              el.closest('[class*="product-info" i]') ||
+              el.closest('[class*="product-details" i]') ||
+              el.closest('[data-product-form]') ||
+              el.closest('[id*="product-form" i]') ||
+              el.closest('[class*="purchase" i]') ||
+              el.closest('[name="add"]') ||
+              el.closest('[class*="shopify" i]')
+            )
+            let score = r.width * r.height + (inProduct ? 800000 : 0)
+            if (inFooter) score *= 0.02
+            if (inHeaderOnly && !inProduct) score *= 0.05
+            if (score > bestScore) {
+              bestScore = score
+              best = el
+            }
+          }
+          return best
+        }
 
-        // ── Helper: match an element against payment/trust keywords ───────────
-        function elementMatchesTrust(el: Element): string | null {
+        /** Icons/logos/badges only: IMG, SVG, USE (sprite), IFRAME — not plain text nodes. */
+        function elementMatchesVisualTrust(el: Element): string | null {
+          const tag = el.tagName
+          if (tag === 'IFRAME') {
+            const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
+            const title = (el.getAttribute('title') || '').toLowerCase()
+            const combined = `${src} ${title}`
+            const PAYMENT_IFRAME_PATTERNS = [
+              'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
+              'payment', 'checkout', 'trust', 'badge', 'secure',
+            ]
+            const match = PAYMENT_IFRAME_PATTERNS.find((p) => combined.includes(p))
+            return match ? `iframe:${match}` : null
+          }
+          if (tag !== 'IMG' && tag !== 'SVG' && tag !== 'USE') return null
+
           const img = el as HTMLImageElement
           const hel = el as HTMLElement
           const texts = [
@@ -1305,133 +1445,156 @@ export async function POST(request: NextRequest) {
             hel.getAttribute?.('data-icon') || '',
             hel.getAttribute?.('data-brand') || '',
             hel.getAttribute?.('data-method') || '',
-            // ✅ NEW: check src/href URL — payment logos often have brand in filename
             img.src || img.getAttribute?.('data-src') || img.getAttribute?.('data-lazy-src') || '',
-            el.tagName === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
+            tag === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
             hel.className?.toString() || '',
             el.id || '',
-          ].map(t => t.toLowerCase())
+          ].map((t) => t.toLowerCase())
           const combined = texts.join(' ')
-
-          // Payment brand names
-          const brandMatch = PAYMENT_BRANDS.find(b => combined.includes(b))
+          const brandMatch = PAYMENT_BRANDS.find((b) => combined.includes(b))
           if (brandMatch) return brandMatch
 
-          // SVG <title> inside payment icons
           const svgTitle = (el.querySelector?.('title')?.textContent || '').toLowerCase()
-          const svgBrand = PAYMENT_BRANDS.find(b => svgTitle.includes(b))
+          const svgBrand = PAYMENT_BRANDS.find((b) => svgTitle.includes(b))
           if (svgBrand) return svgBrand
 
-          // Trust keywords (only specific phrases, not lone "secure")
-          const trustMatch = TRUST_KEYWORDS.find(k => combined.includes(k))
-          if (trustMatch) return trustMatch
+          const sealHints = [
+            'ssl',
+            'secure checkout',
+            'secure payment',
+            'encrypted',
+            'norton',
+            'mcafee',
+            'comodo',
+            'trust badge',
+            'safe checkout',
+            'protected checkout',
+            'padlock',
+            'truste',
+          ]
+          const forSeal = `${combined} ${svgTitle}`
+          if (sealHints.some((h) => forSeal.includes(h)) || /lock|shield|padlock|ssl|secure|trust.?badge/i.test(forSeal)) {
+            const r = hel.getBoundingClientRect()
+            const reasonableSize = r.width > 0 && r.height > 0 && r.width <= 400 && r.height <= 400
+            if (tag === 'USE' || reasonableSize) return 'security-seal'
+          }
 
-          // ✅ NEW: check direct text content for short elements (payment brand labels)
-          const directText = (hel.childElementCount === 0 ? hel.textContent?.trim() : '')?.toLowerCase() || ''
-          if (directText && directText.length < 40) {
-            const textBrand = PAYMENT_BRANDS.find(b => directText.includes(b))
-            if (textBrand) return textBrand
-            const textTrust = TRUST_KEYWORDS.find(k => directText.includes(k))
-            if (textTrust) return textTrust
+          const r = hel.getBoundingClientRect()
+          const smallVisual = r.width > 0 && r.height > 0 && r.width <= 200 && r.height <= 200
+          if (
+            /money\s*-?\s*back|moneyback|guarantee|60\s*-?\s*day|90\s*-?\s*day/.test(forSeal) &&
+            (/icon|badge|stamp|seal|shield|ribbon|guarantee|svg|img/.test(forSeal) || smallVisual)
+          ) {
+            return 'guarantee-badge'
           }
 
           return null
         }
 
-        // ── Try to find CTA (optional — not required for rule to pass) ─────────
-        const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
-        const cta = Array.from(document.querySelectorAll<HTMLElement>(
-          'button, [type="submit"]'
-        )).find(el => {
-          const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
-          return ctaPatterns.some(p => text.includes(p))
-        }) || null
+        /** Footer / global chrome — never counts as “near CTA”. */
+        function isExcludedFarFromBuy(el: Element): boolean {
+          return !!el.closest(
+            'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+              '[class*="site-footer" i], [data-section-type="footer" i]',
+          )
+        }
+
+        /** ±4 sibling DOM nodes from the button (or its 1–2 wrappers); not the whole main landmark. */
+        function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
+          if (cta === el || cta.contains(el)) return true
+          const tryAnchor = (anchor: HTMLElement): boolean => {
+            const parent = anchor.parentElement
+            if (!parent) return false
+            const kids = Array.from(parent.children) as Element[]
+            const idx = kids.indexOf(anchor)
+            if (idx < 0) return false
+            for (let off = -range; off <= range; off++) {
+              if (off === 0) continue
+              const sib = kids[idx + off]
+              if (sib && (sib === el || sib.contains(el))) return true
+            }
+            return false
+          }
+          if (tryAnchor(cta)) return true
+          const wrap = cta.parentElement
+          if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
+          const wrap2 = wrap?.parentElement
+          if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
+          return false
+        }
+
+        function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
+          const c = cta.getBoundingClientRect()
+          const t = (el as HTMLElement).getBoundingClientRect()
+          if (c.height < 4 || t.height < 1) return false
+          const hz = t.left < c.right + 200 && t.right > c.left - 200
+          const gapBelow = t.top - c.bottom
+          const gapAbove = c.top - t.bottom
+          const nearBelow = gapBelow >= -48 && gapBelow <= 200
+          const nearAbove = gapAbove >= -36 && gapAbove <= 72
+          return hz && (nearBelow || nearAbove)
+        }
+
+        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
+          if (!cta) return false
+          if (isExcludedFarFromBuy(el)) return false
+          if (cta === el || cta.contains(el)) return true
+          if (isWithinSiblingBandOfCta(cta, el, 4)) return true
+          return pixelNearBuyButton(cta, el)
+        }
+
+        const cta = findPrimaryPurchaseCta()
+        if (cta) {
+          try {
+            cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+          } catch {
+            /* ignore */
+          }
+        }
 
         const ctaText = cta
           ? (cta.textContent || cta.getAttribute('aria-label') || 'CTA').trim()
           : 'not found'
 
-        // ── Scan entire page for payment badge elements ───────────────────────
-        const found = new Map<string, string>()
+        const foundNear = new Map<string, string>()
+        const foundElsewhere = new Map<string, string>()
 
-        const allElements = Array.from(document.querySelectorAll(
-          'img, svg, use, [class*="payment" i], [class*="badge" i], [class*="trust" i], ' +
-          '[class*="visa" i], [class*="paypal" i], [class*="mastercard" i], [class*="amex" i], ' +
-          '[class*="apple-pay" i], [class*="google-pay" i], [class*="klarna" i], ' +
-          '[class*="shop-pay" i], [class*="stripe" i], [class*="secure" i], ' +
-          '[id*="payment" i], [id*="badge" i], [id*="trust" i], ' +
-          '[data-payment], [data-brand], [data-method]'
-        ))
+        const allElements = Array.from(
+          document.querySelectorAll('img, picture img, svg, svg use, iframe'),
+        )
 
         for (const el of allElements) {
-          const label = elementMatchesTrust(el)
-          if (label && !found.has(label)) {
-            const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
-            found.set(label, desc)
-          }
-          if (found.size >= 12) break
+          const label = elementMatchesVisualTrust(el)
+          if (!label) continue
+          const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
+          const near = nearPrimaryCta(cta, el)
+          const bucket = near ? foundNear : foundElsewhere
+          if (!bucket.has(label)) bucket.set(label, desc)
+          if (foundNear.size + foundElsewhere.size >= 24) break
         }
 
-        // ── ✅ NEW: Scan page body text for payment brand names (catches text-only badges) ─
-        if (found.size === 0) {
-          const bodyText = document.body.innerText?.toLowerCase() || ''
-          const BRAND_SCAN = [
-            'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
-            'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
-            'clearpay', 'stripe', 'discover',
-          ]
-          for (const brand of BRAND_SCAN) {
-            if (bodyText.includes(brand)) {
-              found.set(brand, 'text')
-              if (found.size >= 5) break
-            }
-          }
-        }
-
-        // ── ✅ NEW: Check iframes src URLs for payment/trust widget patterns ──
-        // (can't execute inside cross-origin iframes, but src URL reveals the provider)
-        const PAYMENT_IFRAME_PATTERNS = [
-          'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
-          'payment', 'checkout', 'trust', 'badge', 'secure',
-        ]
-        const iframes = Array.from(document.querySelectorAll('iframe'))
-        for (const iframe of iframes) {
-          const src = (iframe.getAttribute('src') || iframe.getAttribute('data-src') || '').toLowerCase()
-          const title = (iframe.getAttribute('title') || '').toLowerCase()
-          const combined = src + ' ' + title
-          const match = PAYMENT_IFRAME_PATTERNS.find(p => combined.includes(p))
-          if (match && !found.has(`iframe:${match}`)) {
-            found.set(`iframe:${match}`, `iframe[src*="${match}"]`)
-            if (found.size >= 12) break
-          }
-        }
-
-        // ── Fallback: scan ALL page elements (catches custom icon fonts, etc.) ─
-        if (found.size === 0) {
-          const everything = Array.from(document.querySelectorAll('*'))
-          for (const el of everything) {
-            const label = elementMatchesTrust(el)
-            if (label && !found.has(label)) {
-              found.set(label, el.tagName)
-            }
-            if (found.size >= 12) break
-          }
-        }
-
-        const brands = Array.from(found.keys())
-        const count = brands.length
-        const domStructureFound = count > 0
+        const brandsNear = Array.from(foundNear.keys())
+        const brandsElse = Array.from(foundElsewhere.keys())
+        const countNear = brandsNear.length
+        const countElse = brandsElse.length
+        const domStructureFound = countNear > 0
 
         return {
           ctaFound: !!cta,
           ctaText,
           domStructureFound,
-          paymentBrandsFound: brands,
-          trustBadgesCount: count,
+          paymentBrandsFound: brandsNear,
+          paymentBrandsElsewhere: brandsElse,
+          trustBadgesCount: countNear,
+          trustBadgesElsewhereCount: countElse,
           trustBadgesInfo: domStructureFound
-            ? `Found ${count} payment/trust badge(s) on page: ${brands.join(', ')}`
-            : 'No payment/trust badges detected on page',
-          containerDescription: 'full page scan',
+            ? `Visual icons/logos near primary CTA: ${brandsNear.join(', ')}`
+            : countElse > 0
+              ? `No visual trust icons near CTA; elsewhere only: ${brandsElse.join(', ')}`
+              : 'No payment/security/guarantee icons detected near the primary CTA',
+          containerDescription: cta
+            ? '±4 sibling nodes around buy button or tight pixel band; footer excluded'
+            : 'CTA not found — cannot verify proximity',
         }
       })
 
@@ -1703,12 +1866,208 @@ export async function POST(request: NextRequest) {
       // Combine visible text and key elements (DOM only, no image/OCR reading)
       keyElements = `${keyElements || ''}\nSelected Variant: ${selectedVariant || 'None'}`
 
+      try {
+        footerSocialSnapshot = await collectFooterSocialSnapshot(page)
+        const footerScanBlock = [
+          '',
+          '--- FOOTER SOCIAL LINKS (DOM scan) ---',
+          `Footer element matched: ${footerSocialSnapshot.footerRootFound ? 'YES' : 'NO'}${footerSocialSnapshot.footerRootSelector ? ` (${footerSocialSnapshot.footerRootSelector})` : ''}`,
+          `Social in footer: ${footerSocialSnapshot.socialHostsInFooterRoot.length ? footerSocialSnapshot.socialHostsInFooterRoot.join(', ') : 'None'}`,
+          `Social in page lower band (bottom ~32%): ${footerSocialSnapshot.socialHostsInLowerBand.length ? footerSocialSnapshot.socialHostsInLowerBand.join(', ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerScanBlock}`
+      } catch (footerSnapErr) {
+        console.warn('[scan] footer social DOM snapshot failed:', footerSnapErr)
+        footerSocialSnapshot = emptyFooterSocialSnapshot()
+      }
+
+      try {
+        topOfPageDealsPromoContext = await page.evaluate(() => {
+          window.scrollTo(0, 0)
+          const chunks: string[] = []
+          const push = (s: string) => {
+            const t = s.replace(/\s+/g, ' ').trim()
+            if (t.length < 4 || t.length > 700) return
+            chunks.push(t)
+          }
+          const selectors = [
+            '[class*="announcement" i]',
+            '[class*="promo-bar" i]',
+            '[id*="announcement" i]',
+            '[data-announcement]',
+            '[class*="utility-bar" i]',
+            '[class*="top-bar" i]',
+            '[class*="marketing-banner" i]',
+            '[class*="sale-banner" i]',
+            '[class*="countdown" i]',
+          ]
+          for (const sel of selectors) {
+            try {
+              document.querySelectorAll(sel).forEach(el => {
+                if (el.closest('footer')) return
+                const r = el.getBoundingClientRect()
+                if (r.bottom > -30 && r.top < 280) push((el.textContent || '').trim())
+              })
+            } catch { /* ignore */ }
+          }
+          try {
+            document.querySelectorAll('body > *').forEach(el => {
+              if (el.closest('footer')) return
+              const r = el.getBoundingClientRect()
+              if (r.top >= -15 && r.top < 160 && r.height > 5 && r.height < 140 && r.width > 140) {
+                push((el.textContent || '').trim())
+              }
+            })
+          } catch { /* ignore */ }
+
+          const dedup = [...new Set(chunks)]
+          const topBlob = `${dedup.join(' \n ')}\n${(document.body.innerText || '').slice(0, 4800)}`
+
+          const checks: { name: string; ok: boolean }[] = [
+            { name: 'percent-off', ok: /\d+\s*%\s*off|up to\s+\d+\s*%|at least\s+\d+\s*%\s*off/i.test(topBlob) },
+            { name: 'free-gift', ok: /free\s+gifts?|gift\s+worth|\+free\s+gifts?|free\s+gift/i.test(topBlob) },
+            { name: 'season-or-flash-offer', ok: /spring\s+offer|summer\s+sale|black\s+friday|cyber\s+monday|flash\s+sale|special\s+offer/i.test(topBlob) },
+            { name: 'limited-urgency', ok: /limited\s+time|ends?\s+(today|tonight|soon)|last\s+chance|hurry|while\s+supplies/i.test(topBlob) },
+            { name: 'launch-new', ok: /\bnew\s+flavo?u?r\s+launch|\bjust\s+dropped|now\s+live\b/i.test(topBlob) },
+            { name: 'save-deal', ok: /\bsave\s+\d+|extra\s+\$?\d+\s+off|extra\s+£?\d+\s+off|%\s*off\s*\+/i.test(topBlob) },
+          ]
+          const hitNames = checks.filter(c => c.ok).map(c => c.name)
+          const promoAtTopLikely = hitNames.length >= 1
+          return {
+            promoAtTopLikely,
+            matchedLabels: hitNames,
+            evidenceSnippet: topBlob.replace(/\s+/g, ' ').trim().slice(0, 400),
+          }
+        })
+        const promoBlock = [
+          '',
+          '--- TOP OF PAGE DEALS / PROMO (DOM scan) ---',
+          `Deal or urgency messaging near top (DOM): ${topOfPageDealsPromoContext.promoAtTopLikely ? 'YES' : 'NO'}`,
+          `Matched signals: ${topOfPageDealsPromoContext.matchedLabels.length ? topOfPageDealsPromoContext.matchedLabels.join(', ') : 'None'}`,
+          `Snippet: ${topOfPageDealsPromoContext.evidenceSnippet || 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${promoBlock}`
+        console.log(
+          `[scan] top deals/promo DOM: likely=${topOfPageDealsPromoContext.promoAtTopLikely} hits=${topOfPageDealsPromoContext.matchedLabels.join(',') || 'none'}`,
+        )
+      } catch (topPromoErr) {
+        console.warn('[scan] top-of-page deals/promo DOM snapshot failed:', topPromoErr)
+        topOfPageDealsPromoContext = null
+      }
+
+      try {
+        mainNavContext = await page.evaluate(() => {
+          const shoppingKeywordHit = (label: string): boolean => {
+            const low = label.toLowerCase()
+            const keys = [
+              'shop', 'bundle', 'collection', 'catalog', 'review', 'sale', 'subscribe',
+              'subscription', 'gift', 'sample', 'product', 'cart', 'checkout', 'account',
+              'sign in', 'sign-in', 'labs', 'get started', 'best sell', 'new arrival',
+              'store', 'order', 'buy', 'bestseller',
+            ]
+            return keys.some(k => low.includes(k))
+          }
+
+          const roots: Element[] = []
+          const tryAdd = (sel: string) => {
+            try {
+              document.querySelectorAll(sel).forEach(el => {
+                if (!el.closest('footer')) roots.push(el)
+              })
+            } catch { /* invalid selector */ }
+          }
+          for (const sel of [
+            'header',
+            '[role="banner"]',
+            '#shopify-section-header',
+            '[class*="site-header" i]',
+            '[class*="SiteHeader" i]',
+          ]) {
+            tryAdd(sel)
+          }
+          const uniqueRoots = [...new Set(roots)]
+
+          const linkTexts: string[] = []
+          const seen = new Set<string>()
+          const pushLabel = (raw: string) => {
+            const t = raw.replace(/\s+/g, ' ').trim()
+            if (t.length < 2 || t.length > 72) return
+            const key = t.toLowerCase()
+            if (seen.has(key)) return
+            seen.add(key)
+            linkTexts.push(t)
+          }
+
+          for (const root of uniqueRoots) {
+            root.querySelectorAll('a[href]').forEach(a => {
+              pushLabel((a.textContent || '').trim())
+            })
+          }
+
+          for (const sel of [
+            '[data-menu-drawer] a[href]',
+            '[id*="menu-drawer" i] a[href]',
+            '.menu-drawer a[href]',
+            'details[class*="menu" i] a[href]',
+            '[class*="drawer" i][class*="menu" i] a[href]',
+          ]) {
+            try {
+              document.querySelectorAll(sel).forEach(a => {
+                if (a.closest('footer')) return
+                pushLabel((a.textContent || '').trim())
+              })
+            } catch { /* ignore */ }
+          }
+
+          const shoppingMatches = linkTexts.filter(shoppingKeywordHit)
+          const menuControlFound = !!document.querySelector(
+            'header [aria-label*="menu" i], header button[aria-expanded], ' +
+              '[class*="hamburger" i], [class*="menu-toggle" i], [data-drawer-toggle], ' +
+              '[aria-controls*="menu" i]',
+          )
+
+          const shoppingSignalCount = shoppingMatches.length
+          const essentialNavLikely =
+            shoppingSignalCount >= 2 ||
+            (shoppingSignalCount >= 1 && linkTexts.length >= 4)
+
+          const sample = linkTexts.slice(0, 30).join(' | ')
+          return {
+            headerLinkCount: linkTexts.length,
+            shoppingSignalCount,
+            shoppingMatches,
+            menuControlFound,
+            essentialNavLikely,
+            sample,
+          }
+        })
+        const navBlock = [
+          '',
+          '--- MAIN NAVIGATION (DOM scan) ---',
+          `Distinct header/menu link labels: ${mainNavContext.headerLinkCount}`,
+          `Shopping-related labels matched: ${mainNavContext.shoppingSignalCount}`,
+          `Shopping labels: ${mainNavContext.shoppingMatches.length ? mainNavContext.shoppingMatches.join(', ') : 'None'}`,
+          `Menu / drawer control in header: ${mainNavContext.menuControlFound ? 'YES' : 'NO'}`,
+          `Essential shopping links in header/nav (DOM): ${mainNavContext.essentialNavLikely ? 'YES' : 'NO'}`,
+          `Sample: ${mainNavContext.sample || 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${navBlock}`
+        console.log(
+          `[scan] main nav DOM: essential=${mainNavContext.essentialNavLikely} shopping=${mainNavContext.shoppingSignalCount} links=${mainNavContext.headerLinkCount}`,
+        )
+      } catch (mainNavErr) {
+        console.warn('[scan] main navigation DOM snapshot failed:', mainNavErr)
+        mainNavContext = null
+      }
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
-        (trustBadgesContext ? `\n\n--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${trustBadgesContext.ctaText || "N/A"}\nDOM Structure Found (same container/sibling as CTA): ${trustBadgesContext.domStructureFound ? "YES" : "NO"}\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(", ") : "None"}\nPurchase Container: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}` : '') +
+        (trustBadgesContext
+          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+          : '') +
         (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
 
@@ -1877,10 +2236,7 @@ export async function POST(request: NextRequest) {
       // ── Sticky Add to Cart detection — desktop + mobile viewports ──────────
       // Run AFTER screenshots so viewport changes don't affect screenshot capture.
       // PASS if sticky CTA found on either desktop or mobile.
-      const needsStickyCheck = rules.some(r =>
-        r.id === 'cta-sticky-add-to-cart' ||
-        (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
-      )
+      const needsStickyCheck = false
       if (needsStickyCheck && page) {
         try {
           // Inner evaluate helper (inlined per viewport)
@@ -2940,86 +3296,217 @@ export async function POST(request: NextRequest) {
       }
 
       // ── Second-pass trust badges scan ─────────────────────────────────────
-      // Runs after all other DOM checks are done. Gives dynamic/lazy-loaded payment
-      // widgets extra time to render, then re-checks. Only runs if first pass found nothing.
-      const needsTrustReScan = rules.some(r =>
-        r.id === 'trust-badges-near-cta' ||
-        (r.title.toLowerCase().includes('trust') && r.title.toLowerCase().includes('signal'))
+      // Re-check near-CTA only after scroll + settle (lazy payment widgets).
+      const needsTrustReScan = rules.some(
+        r =>
+          r.id === 'trust-badges-near-cta' ||
+          r.id === 'recihw16WgNwYG09z' ||
+          (r.title.toLowerCase().includes('trust') && r.title.toLowerCase().includes('signal')),
       )
       if (needsTrustReScan && page && !trustBadgesContext?.domStructureFound) {
         try {
-          // Scroll to 30-50% of page (where CTA / payment section usually lives)
           await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)))
           await new Promise(r => setTimeout(r, 2000))
 
           const reScanResult = await page.evaluate(() => {
             const PAYMENT_BRANDS = [
-              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
+              'visa', 'mastercard', 'master card', 'paypal', 'apple pay', 'google pay', 'amex',
               'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
               'clearpay', 'stripe', 'discover', 'union pay', 'wero', 'ideal',
             ]
-            const TRUST_KEYWORDS = [
-              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-              'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
-              'guaranteed safe', 'safe & secure', 'encrypted',
-            ]
-            const found = new Map<string, string>()
-
-            // Scan all elements including dynamically added ones
-            const allEls = Array.from(document.querySelectorAll('*'))
-            for (const el of allEls) {
-              const hel = el as HTMLElement
+            function matchVisualTrust(el: Element): string | null {
+              const tag = el.tagName
+              if (tag === 'IFRAME') {
+                const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
+                const title = (el.getAttribute('title') || '').toLowerCase()
+                const combined = `${src} ${title}`
+                const patterns = ['shopify', 'paypal', 'stripe', 'klarna', 'afterpay', 'payment', 'checkout', 'trust', 'badge', 'secure']
+                const m = patterns.find((p) => combined.includes(p))
+                return m ? `iframe:${m}` : null
+              }
+              if (tag !== 'IMG' && tag !== 'SVG' && tag !== 'USE') return null
               const img = el as HTMLImageElement
+              const hel = el as HTMLElement
               const texts = [
-                img.alt || '', hel.title || '',
+                img.alt || '',
+                hel.title || '',
                 hel.getAttribute?.('aria-label') || '',
                 img.src || img.getAttribute?.('data-src') || '',
+                tag === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
                 hel.className?.toString() || '',
                 el.id || '',
-                hel.childElementCount === 0 ? (hel.textContent?.trim().substring(0, 40) || '') : '',
-              ].join(' ').toLowerCase()
-
-              // Check SVG title
-              const svgT = el.querySelector?.('title')?.textContent?.toLowerCase() || ''
-              const combined = texts + ' ' + svgT
-
-              const brand = PAYMENT_BRANDS.find(b => combined.includes(b))
-              const trust = TRUST_KEYWORDS.find(k => combined.includes(k))
-              const label = brand || trust
-              if (label && !found.has(label)) {
-                found.set(label, el.tagName)
+              ]
+                .join(' ')
+                .toLowerCase()
+              const svgT = (el.querySelector?.('title')?.textContent || '').toLowerCase()
+              const forSeal = `${texts} ${svgT}`
+              const brand = PAYMENT_BRANDS.find((b) => forSeal.includes(b))
+              if (brand) return brand
+              const sealHints = ['ssl', 'secure checkout', 'secure payment', 'encrypted', 'norton', 'mcafee', 'comodo', 'trust badge', 'safe checkout', 'protected checkout', 'padlock', 'truste']
+              if (sealHints.some((h) => forSeal.includes(h)) || /lock|shield|padlock|ssl|secure|trust.?badge/i.test(forSeal)) {
+                const r = hel.getBoundingClientRect()
+                if (tag === 'USE' || (r.width > 0 && r.height > 0 && r.width <= 400 && r.height <= 400))
+                  return 'security-seal'
               }
-              if (found.size >= 8) break
+              const r = hel.getBoundingClientRect()
+              const small = r.width > 0 && r.height > 0 && r.width <= 200 && r.height <= 200
+              if (
+                /money\s*-?\s*back|moneyback|guarantee|60\s*-?\s*day|90\s*-?\s*day/.test(forSeal) &&
+                (/icon|badge|stamp|seal|shield|ribbon|guarantee|svg|img/.test(forSeal) || small)
+              )
+                return 'guarantee-badge'
+              return null
+            }
+            function findPrimaryPurchaseCta(): HTMLElement | null {
+              const ctaPatterns = [
+                'add to bag',
+                'add to basket',
+                'add to cart',
+                'add to order',
+                'buy now',
+                'buy it now',
+                'purchase',
+                'checkout',
+                'pay now',
+                'order now',
+                'complete order',
+                'place order',
+                'add pack',
+                'get it now',
+              ]
+              const selectors =
+                'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+              const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+              let best: HTMLElement | null = null
+              let bestScore = 0
+              for (const el of candidates) {
+                const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+                const val =
+                  el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+                const combined = `${text} ${aria} ${val}`
+                if (!ctaPatterns.some((p) => combined.includes(p))) continue
+                const st = window.getComputedStyle(el)
+                if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+                  continue
+                const r = el.getBoundingClientRect()
+                if (r.width < 4 || r.height < 4) continue
+                const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+                const inHeaderOnly =
+                  !!el.closest('header, [class*="header" i], nav') &&
+                  !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+                const inProduct = !!(
+                  el.closest('form[action*="cart" i]') ||
+                  el.closest('[class*="product-form" i]') ||
+                  el.closest('[class*="product__" i]') ||
+                  el.closest('[class*="product-info" i]') ||
+                  el.closest('[class*="product-details" i]') ||
+                  el.closest('[data-product-form]') ||
+                  el.closest('[id*="product-form" i]') ||
+                  el.closest('[class*="purchase" i]') ||
+                  el.closest('[name="add"]') ||
+                  el.closest('[class*="shopify" i]')
+                )
+                let score = r.width * r.height + (inProduct ? 800000 : 0)
+                if (inFooter) score *= 0.02
+                if (inHeaderOnly && !inProduct) score *= 0.05
+                if (score > bestScore) {
+                  bestScore = score
+                  best = el
+                }
+              }
+              return best
             }
 
-            // Check iframes
-            for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
-              const src = (iframe.getAttribute('src') || '').toLowerCase()
-              const IFRAME_PAY = ['shopify', 'paypal', 'stripe', 'klarna', 'payment', 'checkout', 'trust']
-              const match = IFRAME_PAY.find(p => src.includes(p))
-              if (match) found.set(`iframe:${match}`, 'iframe')
+            const cta = findPrimaryPurchaseCta()
+            if (cta) {
+              try {
+                cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+              } catch {
+                /* ignore */
+              }
+            }
+
+            function isExcludedFarFromBuy(el: Element): boolean {
+              return !!el.closest(
+                'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+                  '[class*="site-footer" i], [data-section-type="footer" i]',
+              )
+            }
+            function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
+              if (cta === el || cta.contains(el)) return true
+              const tryAnchor = (anchor: HTMLElement): boolean => {
+                const parent = anchor.parentElement
+                if (!parent) return false
+                const kids = Array.from(parent.children) as Element[]
+                const idx = kids.indexOf(anchor)
+                if (idx < 0) return false
+                for (let off = -range; off <= range; off++) {
+                  if (off === 0) continue
+                  const sib = kids[idx + off]
+                  if (sib && (sib === el || sib.contains(el))) return true
+                }
+                return false
+              }
+              if (tryAnchor(cta)) return true
+              const wrap = cta.parentElement
+              if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
+              const wrap2 = wrap?.parentElement
+              if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
+              return false
+            }
+            function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
+              const c = cta.getBoundingClientRect()
+              const t = (el as HTMLElement).getBoundingClientRect()
+              if (c.height < 4 || t.height < 1) return false
+              const hz = t.left < c.right + 200 && t.right > c.left - 200
+              const gapBelow = t.top - c.bottom
+              const gapAbove = c.top - t.bottom
+              const nearBelow = gapBelow >= -48 && gapBelow <= 200
+              const nearAbove = gapAbove >= -36 && gapAbove <= 72
+              return hz && (nearBelow || nearAbove)
+            }
+            function nearPrimaryCta(ctaEl: HTMLElement | null, el: Element): boolean {
+              if (!ctaEl) return false
+              if (isExcludedFarFromBuy(el)) return false
+              if (ctaEl === el || ctaEl.contains(el)) return true
+              if (isWithinSiblingBandOfCta(ctaEl, el, 4)) return true
+              return pixelNearBuyButton(ctaEl, el)
+            }
+
+            const foundNear = new Map<string, string>()
+            const foundElse = new Map<string, string>()
+            const allEls = Array.from(document.querySelectorAll('img, picture img, svg, svg use, iframe'))
+            for (const el of allEls) {
+              const label = matchVisualTrust(el)
+              if (!label) continue
+              const bucket = nearPrimaryCta(cta, el) ? foundNear : foundElse
+              if (!bucket.has(label)) bucket.set(label, el.tagName)
+              if (foundNear.size + foundElse.size >= 24) break
             }
 
             return {
-              found: found.size > 0,
-              brands: Array.from(found.keys()),
+              brandsNear: Array.from(foundNear.keys()),
+              brandsElse: Array.from(foundElse.keys()),
             }
           })
 
-          if (reScanResult.found && trustBadgesContext) {
-            console.log(`Trust badges second-pass: found ${reScanResult.brands.join(', ')}. Updating context.`)
+          if (reScanResult.brandsNear.length > 0 && trustBadgesContext) {
+            console.log(`Trust badges second-pass (near CTA): ${reScanResult.brandsNear.join(', ')}`)
+            const mergedNear = [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brandsNear])]
+            const mergedElse = [...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...reScanResult.brandsElse])]
             trustBadgesContext = {
               ...trustBadgesContext,
               domStructureFound: true,
-              paymentBrandsFound: [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brands])],
-              trustBadgesCount: reScanResult.brands.length,
-              trustBadgesInfo: `Second-pass found: ${reScanResult.brands.join(', ')}`,
+              paymentBrandsFound: mergedNear,
+              paymentBrandsElsewhere: mergedElse,
+              trustBadgesCount: mergedNear.length,
+              trustBadgesElsewhereCount: mergedElse.length,
+              trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
+              containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
             }
-            // Also update websiteContent so AI sees the updated result
-            websiteContent = websiteContent.replace(
-              /--- TRUST BADGES CHECK ---[\s\S]*?(?=\n\n---|$)/,
-              `--- TRUST BADGES CHECK ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nDOM Structure Found (same container/sibling as CTA): YES\nTrust Badges Count: ${trustBadgesContext.trustBadgesCount}\nPayment Brands Found: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nPurchase Container: second-pass scan\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
-            )
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
           }
         } catch (e) {
           console.warn('Trust badges second-pass scan failed:', e)
@@ -3061,7 +3548,6 @@ export async function POST(request: NextRequest) {
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
         selectedVariant = extractSelectedVariantFromHtml(rawHtml)
-        const fallbackDeliveryEstimate = extractDeliveryEstimateFromHtml(rawHtml)
         const fallbackCustomerPhotoSignals = extractCustomerPhotoSignalsFromHtml(rawHtml)
         if (fallbackCustomerPhotoSignals.found) {
           customerPhotoFound = true
@@ -3101,10 +3587,7 @@ export async function POST(request: NextRequest) {
 
         // Fallback sticky CTA detection must be conservative.
         // HTML-only fallback cannot prove runtime sticky behavior; require strong evidence.
-        const needsStickyCheckInFallback = rules.some(r =>
-          r.id === 'cta-sticky-add-to-cart' ||
-          (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
-        )
+        const needsStickyCheckInFallback = false
         const stickyContainerMarker = /(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)/i
         const stickyPositionMarker = /(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)/i
         const stickyCtaTextMarker = /(add to cart|add to bag|buy now|purchase)/i
@@ -3247,6 +3730,7 @@ export async function POST(request: NextRequest) {
             `\nThumbnails on either viewport: ${thumbnailGalleryContext.anyThumbnails ? 'YES' : 'NO'}`
         }
 
+        const fallbackDeliveryEstimate: string | null = null
         if (fallbackDeliveryEstimate) {
           shippingTimeContext = {
             ctaFound: false,
@@ -3371,10 +3855,7 @@ export async function POST(request: NextRequest) {
     // Targeted safeguard for SkinLovers mobile sticky CTA pattern.
     // This storefront renders duplicated Add to cart controls in a mobile purchase cluster
     // that can be missed by strict fixed/sticky CSS checks in bot/fallback contexts.
-    const needsStickyRule = rules.some(r =>
-      r.id === 'cta-sticky-add-to-cart' ||
-      (r.title.toLowerCase().includes('sticky') && r.title.toLowerCase().includes('cart'))
-    )
+    const needsStickyRule = false
     const needsThumbnailRuleScan = rules.some(
       (r) =>
         r.id === 'image-thumbnails' ||
@@ -3429,11 +3910,11 @@ export async function POST(request: NextRequest) {
 
     // Split rules into batches
     const batches: Rule[][] = []
-    for (let i = 0; i < rules.length; i += BATCH_SIZE) {
-      batches.push(rules.slice(i, i + BATCH_SIZE))
+    for (let i = 0; i < activeRules.length; i += BATCH_SIZE) {
+      batches.push(activeRules.slice(i, i + BATCH_SIZE))
     }
 
-    console.log(`Processing ${rules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
+    console.log(`Processing ${activeRules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
     console.log('Website already loaded, now processing all rules...')
 
     // Before-and-after rule: only evaluate imagery when visual transformation is plausibly expected (strict).
@@ -3479,20 +3960,22 @@ export async function POST(request: NextRequest) {
           keyElementsString: keyElements ?? '',
           fullVisibleText: fullVisibleText ?? '',
           shippingTime: shippingTimeContext,
-          stickyCTA: stickyCTAContext,
           thumbnailGallery: thumbnailGalleryContext,
           beforeAfterTransformationExpected,
+          footerSocial: footerSocialSnapshot,
         })
         if (detResult) {
-          results.push({
-            ...detResult,
-            reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
-          })
+          results.push(
+            withCheckpoint({
+              ...detResult,
+              reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
+            }),
+          )
           continue
         }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
-        const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
+        const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite'
 
         try {
 
@@ -3529,8 +4012,6 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes('real customer video');
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
-
-          const isStickyCartRule = rule.id === 'cta-sticky-add-to-cart' || rule.title.toLowerCase().includes('sticky') && rule.title.toLowerCase().includes('cart')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           const isDescriptionBenefitsRule =
@@ -3538,11 +4019,9 @@ export async function POST(request: NextRequest) {
             (rule.title.toLowerCase().includes('benefit') && rule.title.toLowerCase().includes('description')) ||
             (rule.title.toLowerCase().includes('focus') && rule.title.toLowerCase().includes('benefit')) ||
             (rule.description.toLowerCase().includes('benefits') && rule.description.toLowerCase().includes('description'))
-          const isCTAProminenceRule = rule.id === 'cta-prominence' || (rule.title.toLowerCase().includes('cta') && rule.title.toLowerCase().includes('prominent'))
           const isColorRule =
             rule.id === 'colors-avoid-pure-black' ||
-            (!isCTAProminenceRule &&
-             !(rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title')) &&
+            (!(rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title')) &&
              (
                rule.title.toLowerCase().includes('color') ||
                rule.title.toLowerCase().includes('black') ||
@@ -3558,12 +4037,6 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes("quantity") ||
             rule.description.toLowerCase().includes("tiered") ||
             rule.description.toLowerCase().includes("price drop")
-          const isShippingRule =
-            rule.id === 'shipping-time-visibility' ||
-            rule.title.toLowerCase().includes("delivery estimate") ||
-            rule.title.toLowerCase().includes("shipping time") ||
-            rule.description.toLowerCase().includes("delivered by") ||
-            rule.description.toLowerCase().includes("delivery estimate")
           const isVariantRule =
             rule.title.toLowerCase().includes("variant") ||
             rule.title.toLowerCase().includes("preselect") ||
@@ -3571,6 +4044,7 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes("preselect")
           const isTrustBadgesRule =
             rule.id === 'trust-badges-near-cta' ||
+            rule.id === 'recihw16WgNwYG09z' ||
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("cta")) ||
             (rule.title.toLowerCase().includes("trust") && rule.title.toLowerCase().includes("signal")) ||
             (rule.description.toLowerCase().includes("trust") && rule.description.toLowerCase().includes("cta"))
@@ -3578,10 +4052,6 @@ export async function POST(request: NextRequest) {
             rule.id === 'product-comparison' ||
             rule.title.toLowerCase().includes('product comparison') ||
             rule.description.toLowerCase().includes('product comparison');
-          const isProductTabsRule =
-            rule.id === 'product-tabs' ||
-            rule.title.toLowerCase().includes('tabs') || rule.title.toLowerCase().includes('accordions') ||
-            rule.description.toLowerCase().includes('tabs') || rule.description.toLowerCase().includes('accordions')
           const isImageAnnotationsRule =
             rule.id === 'image-annotations' ||
             (rule.title.toLowerCase().includes('annotation') && rule.title.toLowerCase().includes('image')) ||
@@ -3599,11 +4069,44 @@ export async function POST(request: NextRequest) {
             (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('arrow')) ||
             (rule.title.toLowerCase().includes('swipe') && rule.title.toLowerCase().includes('mobile')) ||
             (rule.description.toLowerCase().includes('swipe') && rule.description.toLowerCase().includes('navigation'))
-          const isSquareImageRule =
-            rule.id === 'image-square-format' ||
-            (rule.title.toLowerCase().includes('square') && rule.title.toLowerCase().includes('image')) ||
-            (rule.description.toLowerCase().includes('square') && (rule.description.toLowerCase().includes('aspect') || rule.description.toLowerCase().includes('1:1')))
-
+          const isMainNavImportantPagesRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            if (t.includes('breadcrumb') || d.includes('breadcrumb')) return false
+            if (
+              (t.includes('swipe') || t.includes('arrow')) &&
+              (t.includes('gallery') || t.includes('image') || d.includes('gallery'))
+            ) {
+              return false
+            }
+            if (d.includes('swipe') && d.includes('gallery') && d.includes('navigation')) return false
+            return (
+              t.includes('main navigation') ||
+              (t.includes('important pages') && t.includes('navigation')) ||
+              (t.includes('essential pages') && t.includes('navigation')) ||
+              (d.includes('main navigation') && (d.includes('essential') || d.includes('important')))
+            )
+          })()
+          const isTopOfPageDealsUrgencyPromoRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            if (t.includes('breadcrumb')) return false
+            const mentionsDealFamily =
+              t.includes('deal') ||
+              t.includes('special offer') ||
+              (t.includes('urgency') && (t.includes('offer') || t.includes('highlight'))) ||
+              (d.includes('special offer') && d.includes('homepage')) ||
+              (d.includes('urgency') && d.includes('promotion'))
+            const mentionsTopPlacement =
+              t.includes('homepage') ||
+              t.includes('near the top') ||
+              t.includes('top of') ||
+              t.includes('above the fold') ||
+              d.includes('top of') ||
+              d.includes('above the fold') ||
+              d.includes('near the top')
+            return mentionsDealFamily && mentionsTopPlacement
+          })()
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
           if (isBreadcrumbRule) {
@@ -3635,6 +4138,79 @@ Breadcrumbs are a navigation trail near the TOP of the page, usually just below 
 
 ✅ PASS reason: "Breadcrumb navigation ('Home / Mens / New Arrivals') is visible near the top of the page, helping users understand site hierarchy."
 ❌ FAIL reason: "No breadcrumb navigation was detected in the page header or top section. Add breadcrumb navigation (e.g. Home > Category > Product) to help users navigate."
+`
+          } else if (isMainNavImportantPagesRule) {
+            const navEssential = mainNavContext?.essentialNavLikely === true
+            const navLabels = mainNavContext?.shoppingMatches?.length
+              ? mainNavContext.shoppingMatches.slice(0, 12).join(', ')
+              : 'none'
+            const navCounts = mainNavContext
+              ? `distinct_nav_labels=${mainNavContext.headerLinkCount}; shopping_hits=${mainNavContext.shoppingSignalCount}; menu_or_drawer=${mainNavContext.menuControlFound ? 'yes' : 'no'}; MAIN_NAV_DOM_ESSENTIAL_LIKELY=${navEssential}`
+              : 'MAIN_NAV_DOM=unavailable'
+            specialInstructions = `
+MAIN NAVIGATION — "Are important / essential pages linked in the main navigation?"
+
+DOM PRE-SCAN (authoritative when positive — appears here because page text sent to you may be truncated):
+${navCounts}
+Shopping-related labels detected in header/menu chrome: ${navLabels}
+
+━━━━ WHAT THIS RULE MEANS ━━━━
+
+• The main navigation is the PRIMARY site chrome: top header links, category bar, OR a hamburger / "Menu" that opens the primary nav / mega-menu (Shopify drawer, etc.).
+• You need multiple clear paths to MONEY / SHOPPING destinations (e.g. Shop all, Bundles, Collections, Reviews, Cart, Get started)—not every legal or policy page.
+• Contact, About, and generic customer-service pages are EXPECTED in the footer; do NOT fail because those are missing from the header.
+
+━━━━ PASS ━━━━
+
+✅ PASS if ANY of these is true:
+1. MAIN_NAV_DOM_ESSENTIAL_LIKELY=true → PASS immediately (DOM found several shopping-related nav labels in header or menu drawer).
+2. The SCREENSHOT shows a normal header or mega-menu with obvious shop/browse paths (even if some links are inside a menu panel).
+3. A hamburger / "Menu" / drawer pattern is visible AND DOM shows shopping-related labels (Shop, Bundles, Reviews, etc.)—that counts as main navigation for modern storefronts.
+
+━━━━ FAIL ━━━━
+
+❌ FAIL only if: the header is effectively empty of shopping paths AND MAIN_NAV_DOM_ESSENTIAL_LIKELY is false AND the screenshot shows no primary shop/browse navigation (only logo + search + cart with no way to reach categories or shop).
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS: "Header / menu includes Shop all, Bundles, and Reviews—key shopping destinations are in primary navigation."
+❌ FAIL: "No shop or category links appear in the header or primary menu—users cannot reach the catalog from main navigation."
+`
+          } else if (isTopOfPageDealsUrgencyPromoRule) {
+            const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
+            const promoHits = topOfPageDealsPromoContext?.matchedLabels?.length
+              ? topOfPageDealsPromoContext.matchedLabels.join(', ')
+              : 'none'
+            const promoDomLine = topOfPageDealsPromoContext
+              ? `TOP_PROMO_DOM_LIKELY=${promoLikely}; matched=${promoHits}`
+              : 'TOP_PROMO_DOM=unavailable'
+            specialInstructions = `
+TOP OF PAGE — Deals, special offers, or urgency (often titled "homepage" in the checkpoint)
+
+DOM PRE-SCAN (authoritative when positive — repeated here because KEY ELEMENTS / page text in your context may be truncated):
+${promoDomLine}
+
+━━━━ SCOPE ━━━━
+
+• If the scanned URL is the STORE HOMEPAGE, judge the TOP of that page.
+• If the scanned URL is a PRODUCT or other landing page, judge the TOP of THIS PAGE the same way (announcement bar above the header, hero promo strip, etc.). Do NOT fail only because the URL path is not "/".
+• A coloured top bar with "% off", "Spring offer", "Free gifts", "Limited time", countdown, or "Shop now" style messaging COUNTS.
+
+━━━━ PASS ━━━━
+
+✅ PASS if ANY of these is true:
+1. TOP_PROMO_DOM_LIKELY=true → PASS immediately (DOM/text near top shows deal or urgency signals).
+2. The SCREENSHOT shows a prominent offer strip, banner, or hero at the very top (even thin full-width bars count).
+3. Clear percentage off + gift / offer language is readable at the top of the screenshot.
+
+━━━━ FAIL ━━━━
+
+❌ FAIL only if: TOP_PROMO_DOM_LIKELY is false AND the screenshot shows no promotional / urgency / deal messaging in the top area (only neutral nav with no offer).
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS: "A top announcement bar shows 'Spring offer: up to 58% off + free gifts' — deals are highlighted at the top."
+❌ FAIL: "No offer or urgency messaging appears at the top of the page; only the logo and menu are visible."
 `
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
@@ -3672,8 +4248,6 @@ If the screenshot shows nothing:
 ✅ PASS reason: "Product images include annotations: '-63% colour intensity of dark spots' and 'Dermatologically tested' badge are visible on the product image."
 ❌ FAIL reason: "No annotations or badges were found on product images. Add benefit labels, percentage claims, or overlays on product images to highlight key advantages."
 `
-          } else if (isThumbnailsRule) {
-            specialInstructions = `\nTHUMBNAILS IN PRODUCT GALLERY RULE - LENIENT CHECK:\n\nThe rule asks for thumbnails in the product image gallery. CRITICAL: If thumbnails EXIST on the page (a row of small images below or beside the main product image, a carousel with arrows to scroll, or multiple selectable small images), you MUST PASS—even if the user would need to scroll to see them or some thumbnails are off-screen.\n\nPASS when:\n- There is a thumbnail strip/carousel below or next to the main product image (with or without scroll arrows).\n- Multiple small images are shown that let users browse gallery images (even if scrolling is needed to see all).\n- Any small preview images in the product gallery area count as thumbnails.\n\nFAIL only when:\n- The product gallery has NO thumbnails at all (e.g. only one main image with no way to see other images as small previews).\n\nDo NOT fail just because thumbnails require scrolling to be visible. Thumbnails present = PASS.`
           } else if (isMobileGalleryRule) {
             specialInstructions = `
 GALLERY NAVIGATION RULE — "Enable swipe or arrows on mobile galleries"
@@ -3746,42 +4320,7 @@ IMPORTANT: This rule is ONLY about benefits in product descriptions. Do NOT eval
 `
           } else if (isBeforeAfterRule && beforeAfterTransformationExpected) {
             specialInstructions = `\nBEFORE-AND-AFTER IMAGES RULE — APPLICABLE PRODUCT TYPE (visual transformation expected)\n\nThe scanner already determined this page sells a product where visual results matter (e.g. skincare, cosmetic treatment). CHECK SCREENSHOT AND CONTENT.\n\nYou are receiving a SCREENSHOT. Look at the image FIRST.\n\nPASS when you see ANY of these:\n1. Main product image: split / comparison image (before vs after), or face/skin with "before" and "after" labels, or percentage improvement (e.g. -63%, -81%, -25%) on the image.\n2. Thumbnail strip: any thumbnail that shows before/after comparison, split face, "Clinically proven" with percentage, or result percentages (e.g. -63%, -81%) on a thumbnail.\n3. Multiple thumbnails with result imagery (e.g. "results after 1 month", "dark spots", "all skin types") that indicate efficacy proof.\n\nCRITICAL: Before-and-after can appear in the MAIN image OR in the THUMBNAIL ROW. If the screenshot shows thumbnails with split-face images, percentages (-63%, -81%), or "Clinically proven" text on images → PASS. Do NOT say "no before-and-after found" if the image shows comparison/result thumbnails or main image with before/after.\n\nFAIL only when: no comparison imagery at all (no split images, no result percentages on images, no before/after in main or thumbnails).`
-          } else if (isSquareImageRule) {
-            specialInstructions = `
-SQUARE IMAGES RULE — "Use square images for consistency"
-
-CRITICAL: Do NOT check raw image file dimensions. Many ecommerce sites (Shopify etc.) use rectangular source images but display them in square CSS containers. The rule checks VISUAL appearance, not file dimensions.
-
-━━━━ DECISION LOGIC ━━━━
-
-Check the SQUARE IMAGE CHECK section in KEY ELEMENTS first:
-
-1. If "Visually square: YES" → PASS immediately (DOM confirms square containers)
-2. If "CSS aspect-ratio / object-fit enforces square: YES" → PASS immediately
-3. If "Square containers (w≈h within 12%): X" and X > 0 → PASS
-
-Then check the screenshot:
-4. If gallery thumbnails/images appear visually square (grid items with equal height and width) → PASS
-5. If the main product image appears square or nearly square in the layout → PASS
-
-━━━━ FAIL CONDITION ━━━━
-
-FAIL only when ALL of these are true:
-- SQUARE IMAGE CHECK shows "Visually square: NO" AND "Square containers: 0"
-- AND screenshot clearly shows gallery images are tall/portrait or wide/landscape rectangles with noticeably unequal dimensions
-
-━━━━ IMPORTANT ━━━━
-
-- Do NOT fail because the source image file is rectangular — CSS can crop/display it as square
-- PASS if containers appear square in the rendered UI
-- Many Shopify product galleries are visually square even with rectangular source images
-
-✅ PASS reason: "Product gallery images appear square in the UI layout (CSS containers enforce 1:1 aspect ratio), maintaining consistent visual alignment."
-❌ FAIL reason: "Product gallery images appear clearly rectangular (portrait/landscape) in the UI, causing inconsistent visual alignment. Use square containers or add aspect-ratio: 1/1 with object-fit: cover."
-`
-          }
-
-          else if (isVideoTestimonialRule) {
+          } else if (isVideoTestimonialRule) {
             specialInstructions = `
 VIDEO TESTIMONIALS RULE - DETECT CUSTOMER-UPLOADED VIDEO (DOM + VISUAL):
 
@@ -3935,122 +4474,12 @@ VERDICT:
 
 MANDATORY in reason: mention WHERE you see the customer video (e.g. "video embedded inside a review card with reviewer name and Verified Purchase, in Customer reviews section").
 `
-          } else if (isStickyCartRule) {
-            specialInstructions = `
-STICKY ADD TO CART RULE
-
-IMPORTANT: The rule passes if a sticky/floating Add to Cart button exists on EITHER desktop OR mobile. Many ecommerce sites show the sticky CTA only on mobile.
-
-━━━━ CHECK STICKY CTA CHECK IN KEY ELEMENTS FIRST ━━━━
-
-1. "Sticky CTA on either device: YES" → PASS immediately
-2. "Desktop sticky CTA detected: YES" → PASS
-3. "Mobile sticky CTA detected: YES" → PASS
-4. Only if BOTH are NO → proceed to screenshot analysis
-
-━━━━ SCREENSHOT CHECK ━━━━
-
-Look for:
-- A floating/sticky bar at the bottom or top of the screen with "Add to Cart" / "Buy Now"
-- A CTA button that remains visible when the page is scrolled (position:fixed or sticky)
-- On mobile: a bottom bar with ATC button and optionally price
-- On desktop: a fixed header or sidebar with ATC button
-
-━━━━ DECISION ━━━━
-
-✅ PASS if STICKY CTA CHECK shows YES on either device, OR screenshot shows a floating CTA bar
-❌ FAIL only if both desktop AND mobile sticky detection = NO, AND screenshot shows no sticky/floating CTA
-
-Do NOT mention prices or currency. Do NOT mention specific amounts.
-
-✅ PASS reason: "A sticky Add to Cart button is detected on mobile as a floating CTA bar at the bottom of the screen, remaining visible while scrolling."
-❌ FAIL reason: "No sticky Add to Cart button was detected on either desktop or mobile. The Add to Cart button disappears when scrolling and does not remain fixed or floating."
-`
           } else if (isProductTitleRule) {
             specialInstructions = `\nPRODUCT TITLE RULE - DETAILED CHECK:\nThe PRODUCT TITLE itself (not the description section) must be descriptive, specific, and include key attributes.\n\nCRITICAL: This rule checks the TITLE only. A product description section existing on the page does NOT make a generic title acceptable. The title must be descriptive on its own.\n\nTitle should include: brand, size, color, key characteristics, or specific benefits. Should be under 65 characters for SEO.\n\nIf FAILED: You MUST specify:\n1. WHAT the current title is (quote it exactly)\n2. WHAT is missing from the TITLE (e.g., size, color, brand, key characteristics, specific benefits)\n3. WHY it's a problem (e.g., "too generic", "lacks SEO keywords", "doesn't describe product clearly on its own")\n4. WHERE the title is located (e.g., "product page header", "product title section")\n5. NOTE if description exists but explain that title should still be descriptive independently\n\nIf PASSED: Title must be descriptive and clear on its own, even if description section also exists.\n\nExample FAIL: "The product title 'Rainbow Dust - Starter Kit' located in the product page header is too generic. While a product description section exists with benefits, the title itself lacks key attributes like size (e.g., '50g', '100ml'), flavor/variant details, or specific benefits. The title should be descriptive on its own for SEO and clarity, regardless of description content."\n\nExample PASS: "The product title 'Spacegoods Rainbow Dust - Coffee Flavor Starter Kit (50g)' is descriptive and clear. It includes brand name, product name, flavor variant, and size, making it SEO-friendly and informative."`
           } else if (isBenefitsNearTitleRule) {
             specialInstructions = `\nBENEFITS NEAR PRODUCT TITLE RULE - LENIENT "IN SAME BLOCK" CHECK:\n\nWHAT "NEAR" MEANS: The product title usually sits in a block with several elements ABOVE it (e.g. breadcrumb, brand, category, image) and several BELOW it (e.g. price, quantity, CTA, trust badges). If you find 2-3 key benefits ANYWHERE in this block—above the title, between elements, or below the title—that counts as "near" the title. PASS.\n\nREQUIREMENTS:\n1. Benefits must be in the SAME section/block as the product title (within a few elements above or below the title, not in a separate description section far down the page).\n2. Must have 2-3 benefits (not just 1; more than 3 is fine).\n3. Benefits can be above the title, below the title, or beside it—as long as they are in the product header/title area.\n4. If benefits appear between elements that surround the title (e.g. 4 elements above title, 4 below—and benefits are among them), that is acceptable → PASS.\n\nCRITICAL - WHEN TO PASS:\n- If the page has a product title and 2-3 benefit-like points (e.g. "reduces dark spots", "boosts radiance", "evens skin tone", "vitamin C", "hydrating") anywhere in the product info block (above, beside, or below the title), you MUST PASS. Do not fail just because benefits are not in a single list directly under the title.\n\nIf PASSED: Specify where the benefits are (e.g. "above title", "below title", "in same block as title") and list the 2-3 benefits found.\n\nIf FAILED: Only fail if there are truly NO benefit-like points in the title block (e.g. only title + price + CTA with no benefit bullets or benefit text in that area).`
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE - STRICT CHECK:\nCheck "Pure black (#000000) detected:" in KEY ELEMENTS.\nIf "YES" → FAIL (black is being used, violates rule)\nIf "NO" → PASS (no pure black, rule followed)\nAlso verify in content: look for #000000, rgb(0,0,0), or "black" color codes.\nSofter tones like #333333, #121212 are acceptable.`
-          } else if (isProductTabsRule) {
-            specialInstructions = `\nPRODUCT TABS/ACCORDIONS RULE - STEP-BY-STEP CHECK:
-
-You are an expert E-commerce UX Auditor. Your task is to analyze if the product page uses tabs or accordions for organizing product details.
-
-RULE DEFINITION: Product pages should use clickable tabs or accordions (e.g. Description, Reviews, Specifications, Ingredients, How to Use) to reduce clutter, improve scannability, and make information easier to access.
-
-STEP 1 (Identify Tab/Accordion Elements):
-Look for ANY of these patterns on the page:
-- Clickable tabs (horizontal navigation with multiple sections like "Description", "Ingredients", "How to Use", "Reviews")
-- Collapsible accordions (vertical sections with expandable/collapsible headers)
-- Toggle sections (clickable headings that show/hide content)
-- Tabbed interface (different content panels that switch when clicked)
-- Accordion-style sections (content organized under expandable headings)
-- Vue.js/Nuxt.js directives (@collapse, x-collapse, data-collapse, collapse attributes)
-- Elements with @click or similar event handlers that toggle visibility
-- Elements with aria-expanded="true/false" attributes
-
-CRITICAL: Check "Tabs/Accordions Found:" in KEY ELEMENTS section:
-- If you see ANY tabs/accordions detected (e.g., "accordion(6)", "vue-collapse(3)") → PASS
-- If you see "None" or "No tabs/accordions found" → FAIL
-- The structured detection will find Vue.js/Nuxt.js patterns that might not be visually obvious
-
-STEP 2 (Check Content Organization):
-Verify that product information is organized into separate sections:
-- Description/Details section
-- Ingredients/What's Inside section  
-- How to Use/Directions section
-- Shipping/Delivery information
-- Returns/Refund policy
-- Product specifications/characteristics
-- Reviews section
-
-STEP 3 (Verify Interactivity):
-Check if sections are actually functional:
-- Tabs are clickable and switch content when clicked
-- Accordions expand/collapse when clicked
-- Content is properly organized under each tab/accordion
-- Users can easily navigate between different information types
-
-ACCEPTABLE FORMATS (ANY of these PASS):
-✅ Traditional tabs (horizontal clickable tabs)
-✅ Accordions (vertical collapsible sections)
-✅ Toggle sections (clickable headings that show/hide content)
-✅ Tabbed interface (content panels that switch)
-✅ Expandable sections with clear headings
-✅ Collapsible product information sections
-
-UNACCEPTABLE (FAIL):
-❌ All information in one long continuous text block
-❌ No separation between different types of information
-❌ No way to navigate between content sections
-❌ All content visible at once without organization
-
-EXAMPLES FOR AI TRAINING:
-
-✅ PASS Example 1 (Good - Accordions):
-Page shows collapsible sections: "Product Details", "Ingredients", "How to Use", "Shipping & Delivery". Each section has a clickable heading that expands/collapses content. Information is properly organized and users can easily navigate between different types of product information.
-
-✅ PASS Example 2 (Good - Tabs):  
-Page shows horizontal tabs: "Description", "Specifications", "Reviews", "Shipping". Users can click each tab to view different content sections. Information is organized and scannable.
-
-❌ FAIL Example 1 (Bad - Single Block):
-Page shows all product information as one continuous block of text: description, ingredients, usage instructions, and shipping information are all presented together without any separation or organization. Users cannot easily find specific information and must scroll through everything.
-
-❌ FAIL Example 2 (Bad - No Organization):
-Product details are presented as a wall of text with no clear separation between description, ingredients, usage instructions, and shipping information. No tabs, accordions, or other organizational elements are present.
-
-CRITICAL INSTRUCTIONS:
-1. You MUST look for tabs, accordions, collapsible sections, or toggle elements
-2. Both horizontal tabs AND vertical accordions are acceptable
-3. The goal is ORGANIZATION - information must be separated into logical sections
-4. If you see ANY form of tabs/accordions/collapsible sections → PASS
-5. If ALL information is in one continuous block with no organization → FAIL
-6. Be SPECIFIC about what type of tabs/accordions you found (e.g., "collapsible sections with headings", "horizontal tabs", "expandable content areas", "Vue.js collapse directives")
-7. If PASSED: Mention the specific sections/tabs found (e.g., "Description, Ingredients, How to Use sections as collapsible accordions")
-8. If FAILED: Explain that information is not organized into tabs/accordions and appears as one continuous block
-9. MOST IMPORTANT: Check "Tabs/Accordions Found:" in KEY ELEMENTS - if it shows ANY tabs/accordions detected, you MUST PASS the rule`
-
           } else if (isQuantityDiscountRule) {
             specialInstructions = `
 QUANTITY / DISCOUNT CHECK:
@@ -4066,39 +4495,6 @@ Check "QUANTITY / DISCOUNT CHECK" in KEY ELEMENTS. If "Rule passes (any of above
 
 Important: Ignore coupon codes. Ignore free shipping. Only tiered pricing, percentage discount, or price drop count.`
 
-          } else if (isShippingRule) {
-            specialInstructions = `
-DELIVERY ESTIMATE RULE — "Display delivery estimate near CTA"
-
-IMPORTANT: Do NOT require an Add to Cart button. Do NOT check for CTA proximity. ONLY check whether the page shows a delivery DATE RANGE or a delivery TIME anywhere on the page.
-
-━━━━ WHAT TO LOOK FOR ━━━━
-
-✅ PASS if the page shows ANY of these (anywhere on page):
-  • A delivery DATE RANGE: "Order now and get it between Tue, Mar 17 and Wed, Mar 18"
-  • A delivery date: "Get it by Thursday, Mar 20" / "Delivered by Fri, Oct 12"
-  • A delivery window: "Delivered between Mon 10 and Wed 12"
-  • A countdown/cutoff time: "Order within 2 hours 30 mins" / "Order before 3pm"
-  • A delivery date with shipping method: "Delivered on Tuesday, 22 Oct with Express Shipping"
-  • Any specific date or date range indicating when delivery will arrive
-
-❌ FAIL only if:
-  • The page shows NO delivery date, NO delivery range, NO countdown, NO cutoff time anywhere
-  • Only generic text like "Fast shipping" / "Ships within 3-5 days" with no specific date or range
-
-━━━━ HOW TO DECIDE ━━━━
-
-1. Check the screenshot first — scan the ENTIRE page for any date range or delivery time
-2. Check "DELIVERY TIME CHECK" in KEY ELEMENTS — if "Has Delivery Date or Range: YES" → PASS immediately
-3. If you see any delivery date range visible in the product section → PASS
-
-Do NOT fail because of CTA position. Do NOT fail because delivery info is not "near" a button.
-PASS = delivery date or time exists anywhere on the page.
-FAIL = no delivery date or time visible anywhere on the page.
-
-Be specific in your reason. Example PASS reason: "The page shows delivery between Tue, Mar 17 and Wed, Mar 18 in the product section."
-Example FAIL reason: "No specific delivery date, date range, or countdown timer is shown anywhere on the page."
-              `
           } else if (isVariantRule) {
             specialInstructions = `
 VARIANT PRESELECTION RULE - STEP - BY - STEP AUDIT:
@@ -4204,45 +4600,29 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST SIGNALS / PAYMENT BADGES RULE
+TRUST SIGNALS NEAR THE PRIMARY CTA — VISUAL ONLY (CRO audit)
 
-Simple rule: Does the page show ANY payment method logos OR security/trust badges? If YES → PASS. If NO → FAIL.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCREENSHOT CHECK (primary source)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Look at the SCREENSHOT carefully. PASS immediately if you see ANY of the following ANYWHERE on the page:
-- Payment logos: Visa, Mastercard, Amex / American Express, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL
-- Security icons: SSL badge, padlock/lock icon, "Secure Checkout", shield icon, "Norton Secured", "McAfee Secure"
-- Trust icons: money-back guarantee badge, "100% Safe", "Guaranteed Safe", certified badge, "Safe & Secure"
-- A row of small payment icons anywhere (near CTA, below checkout, in footer, in product description)
-- Payment icons inside or below an Add to Cart / Buy Now button area
-
-IMPORTANT: Do NOT require payment logos to be near the CTA. If they appear ANYWHERE on the page → PASS.
+Count ONLY icons, logos, and badges (payment marks, security seals, guarantee badge graphics) in the immediate area around Add to cart / Add to bag / Buy. Do NOT count plain text (e.g. "secure checkout" or "money-back guarantee" as words only with no icon). Footer-only icons do not pass.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DOM CHECK (from KEY ELEMENTS)
+DOM CHECK FIRST (KEY ELEMENTS — authoritative)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Check the TRUST BADGES CHECK section in KEY ELEMENTS:
-- "DOM Structure Found: YES" → PASS immediately
-- "Payment Brands Found:" lists any brand name → PASS immediately
-- Even "iframe:payment" or "iframe:shopify" in the brands list → PASS (payment widget detected)
+Read "--- TRUST BADGES CHECK (icons/logos/badges only":
+- If "Visual trust icons near CTA (DOM): YES" → PASS (DOM detected img/svg/iframe-class trust marks near the CTA).
+- If "Visual trust marks near CTA" lists payment brands, security-seal, guarantee-badge, or iframe:* → PASS (same meaning).
+- If "Visual trust icons near CTA (DOM): NO" and marks exist only under "elsewhere only" → FAIL unless the SCREENSHOT clearly shows at least one icon/logo/badge beside or directly under the primary purchase button (same block as the CTA).
+
+If "CTA Found: NO" and DOM says NO → use screenshot; FAIL if no visible trust icons near an obvious primary purchase control.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RESULT LOGIC
+SCREENSHOT CHECK (same strict rule)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PASS if:
-  screenshot shows ANY payment/trust logo/icon
-  OR DOM Structure Found = YES
-  OR Payment Brands Found contains any brand
+PASS only if you clearly see at least one trust ICON or LOGO or BADGE near the primary CTA (above, beside, or directly below — same purchase block). Text-only trust copy does not count.
 
-FAIL ONLY if:
-  screenshot shows ZERO payment/trust badges
-  AND DOM Structure Found = NO
-  AND Payment Brands Found = None
+FAIL if only text appears near the CTA, or icons exist only in the footer / far from the buy area.
 
-PASS reason example: "Payment trust badges (Visa, Mastercard, PayPal, Apple Pay) are visible on the product page, providing payment trust signals to users."
-FAIL reason example: "No payment logos or security badges (Visa, Mastercard, SSL, PayPal) were detected anywhere on the product page. Add payment method icons near the Add to Cart button to build trust."
+PASS reason example: "Visa, Mastercard and Shop Pay logos appear as icons directly under the Add to bag button."
+FAIL reason example: "No payment or trust icons appear near the Add to bag button—only body copy; footer logos are too far from the CTA."
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
@@ -4287,105 +4667,7 @@ PASS immediately if you see ANY of the following in the screenshot:
 - Do NOT require exactly 4+ attributes
 - Any visible comparison layout = PASS
 `
-          } else if (isCTAProminenceRule) {
-            specialInstructions = `
-CTA PROMINENCE RULE - STEP - BY - STEP AUDIT:
-
-            Task: Audit the "CTA Prominence" of this product page.
-
-You are an expert E - commerce UX Auditor.Follow these steps strictly:
-
-STEP 1(Identify - Find Primary CTA):
-            - Look for the primary "Add to Cart" or "Buy Now" button
-              - Check "CTA CONTEXT" section in KEY ELEMENTS for CTA information
-                - Identify the main call - to - action button(not secondary buttons like "Wishlist" or "Compare")
-
-STEP 2(Check Position - Above the Fold):
-            - Verify if the button is "Above the Fold"(visible without scrolling)
-              - Check if button is immediately visible when page loads
-                - If button requires scrolling to see → FAIL(must be above the fold)
-                  - If button is visible at the top of the page without scrolling → PASS this step
-
-STEP 3(Analyze Contrast - Color Stands Out):
-            - Check if the button color stands out clearly from the page background
-              - Good examples: Solid electric blue button on white background, bright green on white, high - contrast colors
-                - Bad examples: Ghost button(transparent with thin border), light gray on white, low - contrast colors
-                  - Button should have high visual contrast against background
-                    - If button blends into background → FAIL
-                      - If button has clear, high - contrast color → PASS this step
-
-STEP 4(Check Size - Largest Clickable Element):
-            - Verify if the button is the largest, most clickable element in the product section
-              - Compare button size with other buttons(Wishlist, Compare, etc.)
-                - Button should be larger than secondary buttons
-                  - Button should be easily clickable(not too small)
-                    - If button is smaller than other elements or too small → FAIL
-                      - If button is the largest clickable element → PASS this step
-
-STEP 5(Final Verdict):
-            - PASS if ALL 4 steps pass:
-            1. Primary CTA identified ✓
-            2. Above the fold(visible without scrolling) ✓
-            3. High - contrast color(stands out from background) ✓
-            4. Largest clickable element(bigger than secondary buttons) ✓
-            - FAIL if ANY step fails
-
-EXAMPLES FOR AI TRAINING:
-
-✅ Example 1 - PASS(Good - Solid Electric Blue Button):
-            Analysis:
-            - STEP 1: Found primary "Add to Cart" button
-              - STEP 2: Button is above the fold, visible immediately without scrolling
-                - STEP 3: Button uses solid electric blue color on white background - high contrast, clearly stands out
-                  - STEP 4: Button is the largest clickable element in product section, bigger than "Wishlist" and "Compare" buttons
-                    - STEP 5: All requirements met
-
-            Output: { "passed": true, "reason": "The 'Add to Cart' button is prominently displayed above the fold with a solid electric blue color on white background, providing high contrast. It is the largest clickable element in the product section and is immediately visible without scrolling, meeting all prominence requirements." }
-
-❌ Example 2 - FAIL(Bad - Ghost Button):
-            Analysis:
-            - STEP 1: Found primary "Add to Cart" button
-              - STEP 2: Button is above the fold, visible without scrolling
-                - STEP 3: Button is a ghost button(transparent with thin border) that blends into the white background - low contrast
-                  - STEP 4: Button size is reasonable but lacks visual prominence due to low contrast
-                    - STEP 5: Contrast requirement failed
-
-            Output: { "passed": false, "reason": "The 'Add to Cart' button is above the fold but uses a ghost button design (transparent with thin border) that blends into the white background. The low contrast makes it less prominent than required. The button should use a solid, high-contrast color to stand out clearly." }
-
-❌ Example 3 - FAIL(Bad - Below the Fold):
-            Analysis:
-            - STEP 1: Found primary "Add to Cart" button
-              - STEP 2: Button requires scrolling to be visible - located below the fold
-                - STEP 3: Button has good contrast(green on white)
-                  - STEP 4: Button is large and prominent
-                    - STEP 5: Position requirement failed
-
-            Output: { "passed": false, "reason": "The 'Add to Cart' button requires scrolling to be visible and is located below the fold. While it has good contrast and size, it must be positioned above the fold (visible without scrolling) to meet the prominence requirement." }
-
-✅ Example 4 - PASS(Good - High Contrast, Large Size):
-            Analysis:
-            - STEP 1: Found primary "Buy Now" button
-              - STEP 2: Button is above the fold, immediately visible
-                - STEP 3: Button uses bright orange color on dark background - excellent contrast
-                  - STEP 4: Button is significantly larger than other buttons in the section
-                    - STEP 5: All requirements met
-
-            Output: { "passed": true, "reason": "The 'Buy Now' button is prominently displayed above the fold with a bright orange color on dark background, providing excellent contrast. It is the largest clickable element in the product section and is immediately visible, meeting all prominence requirements." }
-
-CRITICAL INSTRUCTIONS:
-            1. You MUST check ALL 4 steps: Identify → Position → Contrast → Size
-            2. Above the fold means visible WITHOUT scrolling
-            3. High contrast means button color clearly stands out from background
-            4. Largest element means bigger than secondary buttons in the same section
-            5. Ghost buttons(transparent with borders) typically FAIL contrast check
-            6. Solid, bright colors on contrasting backgrounds typically PASS
-            7. If the screenshot shows an "Add to Cart" or "Add to cart" button with a SOLID background color (e.g. green, blue, teal, orange) — you MUST PASS. Do NOT call it a ghost button if it has a visible fill color.
-            8. If PASSED: Mention position(above fold), contrast(color description), and size
-            9. If FAILED: Specify which step failed(position, contrast, or size) and why
-            10. Do NOT mention currency symbols, prices, or amounts in the reason
-            11. Focus on visual prominence: position, contrast, and size
-              `
-          } else if (isFreeShippingThresholdRule) {
+          }  else if (isFreeShippingThresholdRule) {
             // DOM fallback: only match SPECIFIC phrases that indicate an active offer (not FAQ/policy mentions)
             const freeShippingDomFound = (() => {
               const text = (fullVisibleText || '').toLowerCase()
@@ -4419,36 +4701,20 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
-          const productTabsPrefix = isProductTabsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT TABS/ACCORDIONS RULE ⚠️⚠️⚠️\n\nTHIS IS THE ACCORDIONS RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nIn the screenshot, look for ACCORDION-LIKE UI:\n- Rows or labels such as "Product Details", "Ingredients", "How to Use", "Shipping & Delivery", "Return & Refund Policy"\n- Chevron icons (>, ▼, ▶) or arrows next to each label\n- Vertical list of section headers that look expandable/collapsible\n\nCRITICAL: If you SEE this pattern in the screenshot → you MUST output passed: true. Do NOT fail based on "Tabs/Accordions Found: None" in KEY ELEMENTS. Many sites build accordions with divs (no <details>), so KEY ELEMENTS miss them but the screenshot clearly shows accordions. When in doubt, trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS / PAYMENT BADGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE TRUST SIGNALS RULE. Look at the SCREENSHOT FIRST.\n\nPASS immediately if you see ANY of the following ANYWHERE on the product page:\n- Payment logos: Visa, Mastercard, Amex, PayPal, Apple Pay, Google Pay, Klarna, Shop Pay, Maestro, Discover, Stripe, Afterpay, Clearpay, Revolut, iDEAL\n- Security icons: SSL badge, padlock, "Secure Checkout", shield icon, "Norton Secured"\n- Trust icons: money-back guarantee, "100% Safe", "Guaranteed Safe", certified badge\n- ANY row of payment icons (near CTA, below checkout button, in footer, anywhere)\n\nNO CTA required. Payment logos visible ANYWHERE on the page = PASS.\nPayment icons in footer = PASS. Below the cart button = PASS. Anywhere = PASS.\n\nIf screenshot is unclear → check KEY ELEMENTS TRUST BADGES CHECK:\n- "DOM Structure Found: YES" → PASS\n- "Payment Brands Found:" lists any name → PASS\n- "iframe:payment" or "iframe:shopify" → PASS (payment widget embedded)\n\nFAIL only if ZERO payment/trust logos are visible in screenshot AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS NEAR CTA (VISUAL ONLY) ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. Icons, logos, or badges (payment, SSL/seal, guarantee graphic) must appear NEAR the primary purchase button (Add to cart, Add to bag, Buy, etc.). Plain text alone does NOT pass. Footer-only icons do NOT pass.\n\nPASS from the image only if you see actual icons/logos/badges in the same purchase block as the main CTA.\n\nFAIL if trust is text-only near the CTA, or icons appear only in the footer.\n\nIf ambiguous, use KEY ELEMENTS "Visual trust icons near CTA (DOM)" — YES means PASS; NO with marks only "elsewhere" means FAIL unless the screenshot clearly shows icons next to the CTA.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
-
-          const comparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR PRODUCT COMPARISON RULE ⚠️⚠️⚠️\n\nTHIS IS THE PRODUCT COMPARISON RULE. ${comparisonSectionScreenshotDataUrl ? 'A TARGETED SCREENSHOT of the comparison section has been captured and is attached as the image below.' : 'A full-page screenshot is attached as the image below.'}\n\nYOU MUST ANALYZE THE SCREENSHOT IMAGE FIRST — comparison sections are often rendered as images or visual graphics that are NOT captured in DOM text.\n\nIn the screenshot, look for ANY of these comparison patterns:\n- A table or grid with columns (product vs product, product vs category like "Coffee", product vs "Traditional")\n- Checkmarks (✓) and X marks (✗) in side-by-side columns\n- Rows of features/attributes compared across two columns\n- A section titled "vs", "More Powerful Than", "Compare", "Why Choose Us", "How We Stack Up"\n- Any visual layout showing one product's advantages over another\n\nCRITICAL RULES:\n1. If you SEE a comparison table/grid/checkmark layout in the IMAGE → you MUST output passed: true. DO NOT fail based on DOM text alone.\n2. A comparison of product vs a generic category (e.g. "Rainbow Dust vs Coffee") IS VALID — no named competitor required.\n3. Each checkmark/X row = one attribute. If 4+ rows are visible → attributes requirement is met.\n4. A side-by-side checkmark/X grid IS a valid visual format.\n5. PASS if comparison is visible in the image. FAIL only if NO comparison visible in image AND no comparison found in DOM text.\n\nNow carefully look at the screenshot image provided below:\n\n` : ''
-          // Debug: log what DOM/content the AI gets for delivery rule (so user can see why it failed)
-          if (rule.id === 'shipping-time-visibility') {
-            const deliveryBlockStart = contentForAI.indexOf('--- DELIVERY TIME CHECK ---')
-            const deliveryBlock = deliveryBlockStart >= 0
-              ? contentForAI.substring(deliveryBlockStart, deliveryBlockStart + 900)
-              : '(DELIVERY TIME CHECK block not found in content)'
-            console.log('[DELIVERY RULE] DOM context used for this rule:', {
-              ctaFound: shippingTimeContext?.ctaFound,
-              hasDeliveryDate: shippingTimeContext?.hasDeliveryDate,
-              allRequirementsMet: shippingTimeContext?.allRequirementsMet,
-              deliveryInfoNearCTA_preview: (shippingTimeContext?.shippingInfoNearCTA || '').substring(0, 300),
-            })
-            console.log('[DELIVERY RULE] Content sent to AI (DELIVERY TIME CHECK section):\n', deliveryBlock)
-          }
-
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${productTabsPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
+          const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -4690,78 +4956,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = true
               analysis.reason = `The page uses softer dark tones for text. No pure black (#000000) is used in a way that affects readability.`
             }
-          } else if (isCTAProminenceRule) {
-            // CTA prominence: fail often due to "ghost button" / "not prominent" when screenshot was taken before button style loaded (hydration).
-            // If page has "Add to cart" and failure is about prominence/contrast (not position), allow pass.
-            const ctaContent = (fullVisibleText || websiteContent || '').toLowerCase()
-            const hasAddToCartInPage = ctaContent.includes('add to cart') || ctaContent.includes('add to bag')
-            const hasVisualEvidence = !!screenshotDataUrl
-            const ctaIndex = ctaContent.indexOf('add to cart') >= 0
-              ? ctaContent.indexOf('add to cart')
-              : ctaContent.indexOf('add to bag')
-            const ctaSnippet = ctaIndex >= 0
-              ? ctaContent.substring(Math.max(0, ctaIndex - 220), Math.min(ctaContent.length, ctaIndex + 320))
-              : ''
-            const nearbyPurchaseSignals = [
-              /(?:€|\$|£)\s*\d/.test(ctaSnippet),
-              /\bin stock\b/.test(ctaSnippet),
-              /\bquantity\b/.test(ctaSnippet),
-              /\bsave\s*\d+%/.test(ctaSnippet),
-              /\bready for shipping\b/.test(ctaSnippet),
-            ].filter(Boolean).length
-            const ctaVisibleWithoutScrolling =
-              shippingTimeContext?.ctaVisibleWithoutScrolling ||
-              /CTA Visible Without Scrolling:\s*YES/i.test(websiteContent || '')
-            const reasonClaimsMissingFillOrContrast =
-              (reasonLower.includes('lacks a solid background') && reasonLower.includes('button')) ||
-              (reasonLower.includes('lacks a solid background color') && reasonLower.includes('button')) ||
-              (reasonLower.includes('solid background color') && reasonLower.includes('ghost button')) ||
-              (reasonLower.includes('lacks a high-contrast') && reasonLower.includes('button'))
-            const failedForProminenceOrContrast =
-              (reasonLower.includes('ghost') && reasonLower.includes('button')) ||
-              reasonLower.includes('not the most prominent') ||
-              (reasonLower.includes('prominence requirement') && reasonLower.includes('cta')) ||
-              (reasonLower.includes('not visually distinct') && (reasonLower.includes('cta') || reasonLower.includes('button'))) ||
-              reasonClaimsMissingFillOrContrast ||
-              (reasonLower.includes('transparent') && reasonLower.includes('border') && reasonLower.includes('button')) ||
-              (reasonLower.includes('failing to meet the prominence') && reasonLower.includes('cta'))
-            const failedForPositionOnly =
-              reasonLower.includes('below the fold') ||
-              reasonLower.includes('requires scrolling') ||
-              reasonLower.includes('not found') ||
-              reasonLower.includes('not visible above the fold')
-            const didNotFailForPosition = !failedForPositionOnly
-            if (!analysis.passed && hasAddToCartInPage && failedForProminenceOrContrast && didNotFailForPosition) {
-              console.log(`CTA prominence rule: Page has Add to Cart; failure was prominence/contrast only (likely hydration). Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `The 'Add to Cart' button is present and is the main CTA. It may render with full styling (e.g. solid color) after page load or refresh.`
-            }
-            // Some false negatives mention "not visible above the fold" even when DOM confirms the CTA is in the initial viewport.
-            if (!analysis.passed && hasAddToCartInPage && ctaVisibleWithoutScrolling && (failedForProminenceOrContrast || reasonLower.includes('not visible above the fold'))) {
-              console.log(`CTA prominence rule: DOM confirms Add to Cart is visible without scrolling. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `The 'Add to Cart' button is visible above the fold and serves as the primary CTA. It appears as a filled, high-contrast purchase button in the product section, so the rule passes.`
-            }
-            // Fetch fallback has no reliable screenshot/visual styles. If purchase-block text clearly clusters around Add to Cart,
-            // avoid failing solely on imagined fold/contrast issues.
-            if (!analysis.passed && !hasVisualEvidence && hasAddToCartInPage && nearbyPurchaseSignals >= 3) {
-              console.log(`CTA prominence rule: No screenshot available, but purchase signals cluster around Add to Cart in fetched text. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `The page clearly presents 'Add to Cart' as the main purchase action alongside price, stock, quantity, and savings signals. In fetch-only mode without screenshot evidence, the rule should not fail for inferred contrast or fold issues.`
-            }
-          } else if (isStickyCartRule) {
-            // Hard override: DOM scan found sticky/fixed CTA on either viewport → force PASS
-            if (!analysis.passed && stickyCTAContext?.anySticky) {
-              const device = stickyCTAContext.mobileSticky ? 'mobile' : 'desktop'
-              const evidence = stickyCTAContext.mobileEvidence || stickyCTAContext.desktopEvidence || ''
-              console.log(`Sticky CTA rule: DOM confirmed sticky CTA on ${device}. Forcing PASS. (${evidence})`)
-              analysis.passed = true
-              analysis.reason = stickyCTAContext.mobileSticky
-                ? `A sticky Add to Cart button is present on mobile as a floating CTA bar, remaining visible while scrolling. Rule passes.`
-                : `A sticky Add to Cart button is present on desktop, remaining fixed/sticky while scrolling. Rule passes.`
-            }
-            // If both viewports detected no sticky but AI passed — accept AI's result (screenshot may have caught it)
-          } else if (isImageAnnotationsRule) {
+          }  else if (isImageAnnotationsRule) {
             let annotationForcedPass = false
 
             // Override 1: DOM confirmed annotations → force PASS
@@ -4966,6 +5161,30 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation') && !reasonLower.includes('trail')) {
               console.warn(`Warning: Breadcrumb rule reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
+            }
+          } else if (isMainNavImportantPagesRule) {
+            if (!analysis.passed && mainNavContext?.essentialNavLikely) {
+              const labels = mainNavContext.shoppingMatches.slice(0, 8).join(', ')
+              console.log(`Main navigation rule: DOM shows essential shopping nav (${labels}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
+            }
+          } else if (isTopOfPageDealsUrgencyPromoRule) {
+            const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()
+            const textFallback =
+              /\d+\s*%\s*off|up to\s+\d+\s*%|at least\s+\d+\s*%\s*off|free\s+gifts?|spring\s+offer|limited\s+time|flash\s+sale|special\s+offer|extra\s+£?\d+|extra\s+\$?\d+/.test(
+                topSlice,
+              )
+            if (
+              !analysis.passed &&
+              (topOfPageDealsPromoContext?.promoAtTopLikely || textFallback)
+            ) {
+              const hits = topOfPageDealsPromoContext?.matchedLabels?.length
+                ? topOfPageDealsPromoContext.matchedLabels.join(', ')
+                : 'top-of-page offer text'
+              console.log(`Top deals/promo rule: DOM or text fallback matched (${hits}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Deal or urgency messaging appears near the top of the page (e.g. announcement bar with offers; signals: ${hits}).`
             }
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
@@ -5322,116 +5541,13 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 console.warn(`Warning: Comparison rule but reason doesn't mention comparison: ${analysis.reason.substring(0, 50)}`)
               }
             }
-          } else if (isProductTabsRule && !analysis.passed) {
-            // Content override: page has FAQ, nutritional info, or section labels that indicate accordions/tabs
-            const pageText = (fullVisibleText || websiteContent || '').toLowerCase()
-            const hasFaq = /frequently\s+asked\s+questions|^\s*faq\s*$/im.test(pageText) || (/what\s+is\s+\w+/i.test(pageText) && /how\s+(long|much|many|to)/i.test(pageText))
-            const hasNutritional = /nutritional\s+information|nutrition\s+info|nutritional\s+info/i.test(pageText)
-            const hasSectionLabels = /(shipping\s*&\s*delivery|return\s*&\s*refund|product\s+details|how\s+to\s+use|ingredients|directions)\s*/.test(pageText)
-            if (hasFaq || hasNutritional || hasSectionLabels) {
-              console.log('Product tabs rule: Page has FAQ/nutritional/section labels that indicate accordion or tab organization. Forcing PASS.')
-              analysis.passed = true
-              analysis.reason = 'The page uses accordions or collapsible sections for product details (e.g. Frequently Asked Questions, Nutritional information, or section labels). Information is organized into expandable sections for easier navigation.'
-            }
-          } else if (isQuantityDiscountRule && quantityDiscountContext?.hasAnyDiscount) {
+          }  else if (isQuantityDiscountRule && quantityDiscountContext?.hasAnyDiscount) {
             console.log(`Quantity/discount rule: Tiered pricing, percentage discount, or price drop detected. Forcing PASS.`)
             analysis.passed = true
             analysis.reason = quantityDiscountContext.foundPatterns?.length
               ? `Product page shows discount: ${quantityDiscountContext.foundPatterns.join('; ')}. Rule passes.`
               : `Product page shows tiered quantity pricing, percentage discount, or price drop. Rule passes.`
-          } else if (isShippingRule) {
-            // Override 1: DOM page.evaluate found a date range, countdown, or shipping phrase anywhere on page
-            if (shippingTimeContext?.allRequirementsMet) {
-              console.log(`Delivery estimate detected in DOM text: "${shippingTimeContext.shippingText}". Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = shippingTimeContext.shippingText && shippingTimeContext.shippingText !== 'None'
-                ? shippingTimeContext.shippingText.trim()
-                : `A delivery date range or time estimate is shown on the product page. Rule passes.`
-            }
-            // Override 2: Screenshot / visible page text contains simple delivery phrases (primary screenshot detection)
-            if (!analysis.passed) {
-              const pageTextLower = (fullVisibleText || '').toLowerCase()
-              const simpleDeliveryPhrases = [
-                'delivered between',
-                'delivered by',
-                'delivered on',
-                'arrives by',
-                'get it by',
-                'get it between',
-                'order now and get it',
-                'delivery by',
-                'ships by',
-                'delivery date range',
-              ]
-              const matchedPhrase = simpleDeliveryPhrases.find(p => pageTextLower.includes(p))
-              if (matchedPhrase) {
-                console.log(`Delivery estimate detected in screenshot/page text: "${matchedPhrase}". Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Delivery estimate detected on the product page: "${matchedPhrase}". Rule passes.`
-              }
-            }
-            // Override 3: Full visible text contains a delivery date pattern (regex-based safety net)
-            if (!analysis.passed) {
-              const deliveryTextPatterns = [
-                /get\s+it\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
-                /delivered\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
-                /arrives\s+by\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
-                /order\s+now\s+and\s+get\s+it\s+between\s+.+?\s+and\s+.+/i,
-                /get\s+it\s+between\s+.+?\s+and\s+.+/i,
-                /between\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
-                /delivered\s+between\s+[A-Za-z]+\s+\d+\s+and\s+[A-Za-z]+\s+\d+/i,
-                /delivered\s+on\s+[A-Za-z]+\s*,?\s*[A-Za-z]+\s+\d+/i,
-                /order\s+within\s+[\d\s]+(?:hours?|hrs?|minutes?|mins?)/i,
-                /order\s+before\s+[\d\s]+(?:am|pm)/i,
-                /estimated\s+delivery\s*:\s*[A-Za-z]+\s+\d+/i,
-              ]
-              const matchedPattern = deliveryTextPatterns.find(p => p.test(fullVisibleText))
-              if (matchedPattern) {
-                const matchedText = fullVisibleText.match(matchedPattern)?.[0] || ''
-                console.log(`Delivery estimate detected in screenshot/page text (regex): "${matchedText}". Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = matchedText
-                  ? `Delivery estimate shown on the page: "${matchedText}". Rule passes.`
-                  : `A delivery date range or time estimate is shown on the product page. Rule passes.`
-              }
-            }
-            if (!analysis.passed) {
-              console.log(`Delivery estimate rule: No delivery estimate found in DOM or page text. AI decision: ${analysis.passed ? 'PASS' : 'FAIL'}.`)
-            }
-            // Final cleanup: if PASS reason is generic, replace with concrete UI delivery line from page text when available
-            if (analysis.passed) {
-              const reasonLowerNow = (analysis.reason || '').toLowerCase()
-              const genericReason =
-                reasonLowerNow.includes('delivery estimate detected on the product page') ||
-                reasonLowerNow.includes('a delivery date range or time estimate is shown') ||
-                reasonLowerNow === 'delivery estimate'
-              if (genericReason) {
-                const sources = [
-                  shippingTimeContext?.shippingInfoNearCTA || '',
-                  shippingTimeContext?.shippingText || '',
-                  fullVisibleText || '',
-                ]
-                const patterns = [
-                  /delivered\s+on\s+[A-Za-z]+,?\s*\d{1,2}\s+[A-Za-z]+\s+with\s+express\s+shipping/i,
-                  /order\s+now\s+and\s+get\s+it\s+between\s+[^.\n]+/i,
-                  /get\s+it\s+between\s+[^.\n]+/i,
-                  /get\s+it\s+by\s+[A-Za-z]+,?\s*[A-Za-z]+\s+\d+/i,
-                  /delivered\s+by\s+[A-Za-z]+,?\s*[A-Za-z]+\s+\d+/i,
-                ]
-                let explicitDeliveryLine: string | undefined
-                for (const src of sources) {
-                  if (!src) continue
-                  explicitDeliveryLine = patterns
-                    .map((p) => src.match(p)?.[0])
-                    .find(Boolean) as string | undefined
-                  if (explicitDeliveryLine) break
-                }
-                if (explicitDeliveryLine) {
-                  analysis.reason = explicitDeliveryLine.trim()
-                }
-              }
-            }
-          } else if (isVariantRule) {
+          }  else if (isVariantRule) {
             // OVERRIDE: DOM found a selected variant but AI failed — trust DOM
             if (!analysis.passed && selectedVariant) {
               console.log(`Variant rule: DOM had Selected Variant "${selectedVariant}". Forcing PASS.`)
@@ -5462,41 +5578,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Variant rule response should mention checking Selected Variant`)
             }
           } else if (isTrustBadgesRule) {
-            const FULL_BRAND_LIST = [
-              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay',
-              'amex', 'american express', 'klarna', 'shop pay', 'maestro',
-              'afterpay', 'clearpay', 'stripe', 'discover', 'union pay',
-              'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'jcb',
-              'revolut', 'twint', 'pay later',
-            ]
-            const TRUST_SIGNAL_LIST = [
-              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-              'money back guarantee', '100% safe', 'protected checkout',
-              'secure payment', 'guaranteed safe', 'safe & secure', 'encrypted',
-            ]
-
-            // Hard override 1: DOM scan (first or second pass) found payment badge → PASS
+            // Hard override: DOM verified payment/trust signals near primary CTA only (not footer-only).
             if (!analysis.passed && trustBadgesContext?.domStructureFound) {
               const brands = trustBadgesContext.paymentBrandsFound
                 .filter(b => !b.startsWith('iframe:'))
                 .concat(trustBadgesContext.paymentBrandsFound.filter(b => b.startsWith('iframe:')).map(b => b.replace('iframe:', 'payment widget (')+')'))
                 .join(', ')
-              console.log(`Trust badges rule: DOM found payment badges (${brands}). Forcing PASS.`)
+              console.log(`Trust badges rule: DOM found payment/trust signals near CTA (${brands}). Forcing PASS.`)
               analysis.passed = true
-              analysis.reason = `Payment trust badges (${brands}) are displayed on the product page, providing trust signals to users at the point of purchase.`
-            }
-
-            // Hard override 2: full page text contains ANY payment brand or trust keyword
-            if (!analysis.passed) {
-              const trustText = (fullVisibleText || websiteContent || '').toLowerCase()
-              const brandsInText = FULL_BRAND_LIST.filter(b => trustText.includes(b))
-              const trustsInText = TRUST_SIGNAL_LIST.filter(k => trustText.includes(k))
-              const allFound = [...brandsInText, ...trustsInText]
-              if (allFound.length >= 1) {
-                console.log(`Trust badges rule: Found trust signal "${allFound[0]}" in page text. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Trust signals (${allFound.slice(0, 5).join(', ')}) are present on the product page, providing payment trust indicators to users.`
-              }
+              analysis.reason = `Payment or trust icons (${brands}) appear near the main purchase button (e.g. Add to cart or Add to bag), which supports checkout confidence.`
             }
 
             // Sanity check: warn only, never force a false FAIL
@@ -5553,22 +5643,6 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 ? `Free-shipping text is visible on the page: "${matchedUiText}".`
                 : `Free-shipping threshold text is visible near the purchase area (for example "Free express shipping over ...").`
             }
-          } else if (isSquareImageRule) {
-            // Hard override: DOM measured square containers → always PASS, even if AI disagreed
-            if (!analysis.passed && squareImageContext?.visuallySquare) {
-              const sqCount = squareImageContext.squareContainersFound
-              const total = squareImageContext.totalGalleryImages
-              const cssNote = squareImageContext.cssEnforced ? ' (CSS aspect-ratio or object-fit enforces square)' : ''
-              console.log(`Square image rule: DOM found ${sqCount}/${total} square containers${cssNote}. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `Product gallery images appear square in the rendered UI (${sqCount} of ${total} containers have equal width and height${cssNote}), maintaining consistent visual layout.`
-            }
-            // Secondary override: CSS explicitly enforces 1:1 aspect ratio → PASS
-            if (!analysis.passed && squareImageContext?.cssEnforced) {
-              console.log(`Square image rule: CSS aspect-ratio/object-fit enforces square containers. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `CSS enforces a square (1:1) aspect ratio on product gallery image containers, ensuring consistent visual appearance regardless of source image dimensions.`
-            }
           }
 
           // If reason is not relevant, keep original reason (no prefix)
@@ -5613,9 +5687,9 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               keyElementsString: keyElements ?? '',
               fullVisibleText: fullVisibleText ?? '',
               shippingTime: shippingTimeContext,
-              stickyCTA: stickyCTAContext,
               thumbnailGallery: thumbnailGalleryContext,
               beforeAfterTransformationExpected,
+              footerSocial: footerSocialSnapshot,
             })
             if (repairedDetResult) {
               analysis.passed = repairedDetResult.passed
@@ -5625,7 +5699,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           // Create result object with explicit rule identification
-          const result = {
+          const result = withCheckpoint({
             ruleId: rule.id, // Explicitly use current rule.id
             ruleTitle: rule.title, // Explicitly use current rule.title
             passed: analysis.passed === true,
@@ -5634,7 +5708,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed === true,
               analysis.reason || 'No reason provided'
             ),
-          }
+          })
 
           // Final validation: Ensure result matches the rule being processed
           if (result.ruleId !== rule.id) {
@@ -5676,12 +5750,14 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             }
           }
 
-          results.push({
-            ruleId: rule.id,
-            ruleTitle: rule.title,
-            passed: false,
-            reason: formatUserFriendlyRuleResult(rule, false, `Error: ${errorMessage}`),
-          })
+          results.push(
+            withCheckpoint({
+              ruleId: rule.id,
+              ruleTitle: rule.title,
+              passed: false,
+              reason: formatUserFriendlyRuleResult(rule, false, `Error: ${errorMessage}`),
+            }),
+          )
 
           // Update last request time even on error to prevent rapid retries
           lastRequestTime = Date.now()
@@ -5689,7 +5765,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
       }
 
       // Log batch completion
-      console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${rules.length}`)
+      console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${activeRules.length}`)
 
       // Wait 300ms between batches (except after last batch) - minimal delay for speed
       if (batchIndex < batches.length - 1) {

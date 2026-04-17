@@ -174,69 +174,19 @@ function userReasonLine(rule: RuleLike, passed: boolean, raw: string): string {
   return passed ? 'Rule passed for this page.' : 'Rule failed for this page.'
 }
 
-function failSuggestion(rule: RuleLike): string {
-  const byId: Record<string, string> = {
-    'colors-avoid-pure-black': 'Change pure black (#000000) to a soft dark gray for text or backgrounds.',
-    'images-lazy-loading': 'Add lazy loading to images and videos that load below the first screen.',
-    'navigation-breadcrumbs': 'Add a simple path like Home / Category / Product near the top.',
-    'cta-sticky-add-to-cart': 'Add a buy bar or floating button that stays on screen while scrolling.',
-    'social-proof-product-ratings': 'Show stars or a score close to the product title.',
-    'image-thumbnails': 'Add a row of small images under or beside the main product photo.',
-    'image-before-after': 'Add clear before/after or results photos if you sell results-driven products.',
-    'image-mobile-navigation': 'Add arrows or swipe support for the product photo gallery on phones.',
-    'trust-badges-near-cta': 'Add card logos or a short “secure checkout” line on the product page.',
-    'shipping-time-visibility': 'Add an estimated delivery date or date range on the page.',
-    'description-benefits-over-features': 'Add short bullets that say how the product helps the customer.',
-    'ugc-customer-photos': 'Add customer photos in reviews or lifestyle shots in the gallery.',
-    'variant-preselection': 'Make one size/color clearly selected when the page opens.',
-    'quantity-discounts': 'Add a tier price, percent off, or was/now price if you offer deals.',
-    'free-shipping-threshold': 'Add how much to spend for free shipping near the buy button.',
-    'product-title-clarity': 'Use a clear title with brand, product type, and size or volume.',
-    'product-tabs': 'Split long details into tabs or accordions (Description, Ingredients, Shipping, etc.).',
-    'benefits-near-title': 'Add 2–3 short benefit bullets right under the product name.',
-    'image-annotations': 'Add small labels or badges on images (claims, percentages, “tested”, etc.).',
-    'image-square-format': 'Use square image frames for main gallery photos.',
-    'image-multiple-angles': 'Add more gallery images: angles, texture, packaging, and in-use shots.',
-    'image-background-consistency': 'Use a clean white or light background on the main product photo.',
-    'product-comparison': 'Add a comparison block (vs another product or checkmark list).',
-    'video-testimonials': 'Add short customer video reviews with a play button in the reviews area.',
-    'cta-prominence': 'Make the Add to cart button larger and higher contrast than other controls.',
-  }
-  return (
-    byId[rule.id] ||
-    `Adjust the page so it clearly meets: ${rule.title}.`
-  )
-}
-
 /**
- * Public API: Status + Reason always; Suggestion only when the rule fails.
- * Does not change PASS/FAIL — only formats the explanation text.
+ * Short evaluator summary for storage and UI (no Status / Suggestion blocks — Airtable
+ * "Required Actions" & "Justifications & Benefits" replace long-form suggestions in results).
  */
 export function formatUserFriendlyRuleResult(
   rule: RuleLike,
   passed: boolean,
   rawReason: string
 ): string {
-  const status = passed ? 'PASS' : 'FAIL'
-  const reasonLine = fitWordRange(
+  return fitWordRange(
     userReasonLine(rule, passed, rawReason),
     16,
     45,
     'in visible product page sections'
   )
-  const lines: string[] = [
-    `Status: ${status}`,
-    '',
-    `Reason: ${reasonLine}`,
-  ]
-  if (!passed) {
-    const suggestionLine = fitWordRange(
-      failSuggestion(rule),
-      10,
-      20,
-      'near the main product purchase area'
-    )
-    lines.push('', `Suggestion: ${suggestionLine}`)
-  }
-  return lines.join('\n')
 }

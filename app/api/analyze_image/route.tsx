@@ -1,8 +1,12 @@
 // src/app/api/analyze_image/route.tsx – OpenRouter (Gemini via OpenRouter)
-import { NextResponse, type NextRequest } from 'next/server';
-import puppeteer from 'puppeteer';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { NextResponse, NextRequest } from 'next/server';
+import { analyzeWebsiteStream } from '@/lib/analyzeWebsiteStream';
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer';
+import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules';
+
+export const runtime = 'nodejs';
+export const maxDuration = 120;
+export const dynamic = 'force-dynamic';
 
 // --- Configuration: OpenRouter (Gemini via OpenRouter) ---
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -20,6 +24,13 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface ApiRequestBody {
     url: string;
+}
+
+/** POST body: `url` or `websiteUrl`, optional `stream` for NDJSON preview capture via AnalyzeWebsite. */
+interface AnalyzeImagePostBody {
+    url?: string;
+    websiteUrl?: string;
+    stream?: boolean;
 }
 
 interface PredefineRule {
@@ -47,15 +58,15 @@ interface ApiResponse {
     details?: string;
 }
 
-function loadPredefineRules(): PredefineRule[] {
-    try {
-        const rulesPath = join(process.cwd(), 'public', 'data', 'predefined-rules.json');
-        const raw = readFileSync(rulesPath, 'utf-8');
-        const rules = JSON.parse(raw) as PredefineRule[];
-        return Array.isArray(rules) ? rules : [];
-    } catch {
+
+async function loadPredefineRulesFromCheckpoints(): Promise<PredefineRule[]> {
+    const result = await getConversionCheckpointRules();
+    if (!result.ok) {
+        console.warn('[analyze_image] conversion-checkpoints failed:', result.body);
         return [];
     }
+    console.log('[analyze_image] conversion-checkpoints rules:', result.rules.length);
+    return result.rules.map((r) => ({ id: r.id, title: r.title, description: r.description }));
 }
 
 async function analyzeScreenshotWithRules(
@@ -122,33 +133,32 @@ Respond with valid JSON only, no other text. Use this exact structure:
 }
 
 // --- API Route Handler ---
-export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse>> {
-    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+export async function POST(request: NextRequest): Promise<Response> {
+    let parsed: AnalyzeImagePostBody;
     try {
-        const body: ApiRequestBody = await request.json();
-        const { url } = body;
+        parsed = (await request.json()) as AnalyzeImagePostBody;
+    } catch {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
 
-        if (!url) {
-            return NextResponse.json({ error: 'URL is required' }, { status: 400 });
-        }
+    const raw = (parsed.url ?? parsed.websiteUrl ?? '').trim();
+    if (!raw) {
+        return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--disable-gpu',
-                '--disable-translate',
-                '--disable-web-security',
-                '--window-size=1280,800',
-                '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ],
+    if (parsed.stream === true) {
+        const streamReq = new NextRequest(request.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url } satisfies ApiRequestBody),
         });
+        return analyzeWebsiteStream(streamReq);
+    }
+
+    let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null;
+    try {
+        browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' });
         const page = await browser.newPage();
 
         // Stealth: bot detection kam karne ke liye (puppeteer-extra Next.js me 500 de raha tha)
@@ -163,6 +173,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
         await page.setExtraHTTPHeaders({
             'Accept-Language': 'en-GB,en;q=0.9',
         });
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         try {
             await page.goto(url, { waitUntil: 'load', timeout: 35000 });
@@ -202,7 +213,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
         const screenshotDataUrl = `data:image/png;base64,${screenshotBase64}`;
 
-        const rules = loadPredefineRules();
+        const rules = await loadPredefineRulesFromCheckpoints();
         const { analysis, ruleResults } = await analyzeScreenshotWithRules(screenshotDataUrl, url, rules);
         const overall = rules.length > 0
             ? (ruleResults.every(r => r.status === 'pass') ? 'pass' : 'fail')
@@ -222,8 +233,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
     } catch (error: any) {
         console.error('Error in API route:', error);
-        if (!browser && error?.message?.includes('Chromium revision is not available')) {
-            console.error('Puppeteer chromium revision error. Ensure it is installed correctly or use --no-sandbox flags.');
+        if (!browser && error?.message?.includes('Could not find Chrome')) {
+            console.error('Chromium binary not found. On Vercel this route must use @sparticuz/chromium via launchPuppeteerBrowser.');
         }
         return NextResponse.json({
             error: 'Failed to analyze images',

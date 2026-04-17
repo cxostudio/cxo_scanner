@@ -1,27 +1,61 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { Check, X, ChevronDown, AlertCircle } from 'lucide-react';
 import { z } from 'zod'
+import { CheckpointResultBody } from '../components/CheckpointResultBody'
+import type { CheckpointPresentation } from '../components/CheckpointResultBody'
+
+/** Slow, smooth bar fill (left → right) */
+const barEase = [0.4, 0, 0.2, 1] as const
+const greenBarTransition = { duration: 1.75, ease: barEase }
+const redBarTransition = { duration: 1.55, ease: barEase, delay: 0.45 }
+
+/** Desktop + mobile preview row — smooth staggered entrance */
+const previewEase = [0.4, 0, 0.2, 1] as const
+const previewContainerVariants = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.16, delayChildren: 0.08 },
+  },
+}
+const previewItemVariants = {
+  hidden: { opacity: 0, y: 22 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.75, ease: previewEase },
+  },
+}
 
 interface ScanResult {
   ruleId: string
   ruleTitle: string
   passed: boolean
   reason: string
+  checkpoint?: CheckpointPresentation
+}
+
+function hostnameFromUrl(raw: string): string {
+  if (!raw.trim()) return ''
+  try {
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+    return new URL(href).hostname.replace(/^www\./, '')
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').split('/')[0] ?? raw
+  }
 }
 
 export default function ScannerPage() {
   const [results, setResults] = useState<ScanResult[] | null>(null)
   const [url, setUrl] = useState('')
-  const [mounted, setMounted] = useState(false)
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set())
   const [visibleCount, setVisibleCount] = useState(8)
-  const [websiteScreenshot, setWebsiteScreenshot] = useState<string | null>(null)
-  const [iframeError, setIframeError] = useState<boolean>(false)
+  const [desktopPreview, setDesktopPreview] = useState<string | null>(null)
+  const [mobilePreview, setMobilePreview] = useState<string | null>(null)
 
   useEffect(() => {
-    setMounted(true)
     loadResults()
   }, [])
 
@@ -34,19 +68,40 @@ export default function ScannerPage() {
 
       const storedResults = localStorage.getItem('scanResults')
       if (storedResults) {
-        const parsed = z.array(z.object({
-          ruleId: z.string(),
-          ruleTitle: z.string(),
-          passed: z.boolean(),
-          reason: z.string(),
-        })).parse(JSON.parse(storedResults))
+        const parsed = z
+          .array(
+            z.object({
+              ruleId: z.string(),
+              ruleTitle: z.string(),
+              passed: z.boolean(),
+              reason: z.string(),
+              checkpoint: z
+                .object({
+                  requiredActions: z.string(),
+                  justificationsBenefits: z.string(),
+                  examples: z.array(
+                    z.object({
+                      url: z.string(),
+                      filename: z.string(),
+                      thumbnailUrl: z.string(),
+                    }),
+                  ),
+                })
+                .optional(),
+            }),
+          )
+          .parse(JSON.parse(storedResults))
         setResults(parsed)
       }
 
       const lastScreenshot = sessionStorage.getItem('lastScreenshot')
-      if (lastScreenshot) {
-        setWebsiteScreenshot(lastScreenshot)
-      }
+      const scanDesktop =
+        sessionStorage.getItem('scanPreviewDesktop') ?? localStorage.getItem('scanPreviewDesktop')
+      const scanMobile =
+        sessionStorage.getItem('scanPreviewMobile') ?? localStorage.getItem('scanPreviewMobile')
+      // Prefer analyze-step preview (top-of-page viewport); batch AI screenshots are often mid-page.
+      setDesktopPreview(scanDesktop || lastScreenshot || null)
+      setMobilePreview(scanMobile && scanMobile.length > 0 ? scanMobile : null)
     } catch (error) {
       console.error('Error loading scanner data:', error)
       setResults(null)
@@ -55,7 +110,6 @@ export default function ScannerPage() {
 
 
   const toggleRule = (ruleId: string) => {
-    ``
     setExpandedRules(prev => {
       const newSet = new Set(prev)
       if (newSet.has(ruleId)) {
@@ -74,11 +128,16 @@ export default function ScannerPage() {
   const visibleResults = results ? results.slice(0, visibleCount) : []
   const hasMore = results ? visibleCount < results.length : false
   const passedCount = results ? results.filter(r => r.passed).length : 0
+  const failedCount = results ? results.filter(r => !r.passed).length : 0
   const totalCount = results ? results.length : 0
+  const failRatio = totalCount > 0 ? failedCount / totalCount : 0
+  const passRatio = totalCount > 0 ? passedCount / totalCount : 0
+  const scanHost = hostnameFromUrl(url)
+  const mobilePreviewSrc = mobilePreview || desktopPreview
 
   return (
-    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-hidden">
-      <div className="max-w-[1000px] w-full mx-auto px-4 sm:px-6">
+    <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-visible">
+      <div className="max-w-[1000px] w-full mx-auto px-4 pb-6 sm:px-6 sm:pb-8">
         {/* Logo */}
         <div className="text-center my-[34px]">
           <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
@@ -89,47 +148,94 @@ export default function ScannerPage() {
           Your results are in!
         </h2>
 
-        {/* Desktop browser preview only */}
+        {/* Hero preview: desktop canvas + overlapped mobile frame */}
         {url && (
-          <div className="mb-8 rounded-2xl overflow-hidden p-4 sm:p-5">
-            <div className="flex justify-center">
-              {/* Desktop - browser window: traffic lights, address bar, site content */}
-              <div className="w-full max-w-2xl h-[400px]">
-                <div className="rounded-lg overflow-hidden bg-[#2a2a2d] border border-[#3f3f46] shadow-xl h-full flex flex-col">
-                  {/* Title bar: traffic lights */}
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0 relative z-10">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+          <div className="relative mb-10 overflow-visible px-2 sm:px-3">
+            <div
+              className="pointer-events-none absolute inset-x-3 inset-y-3 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-7"
+              aria-hidden
+            />
+            <motion.div
+              className="relative mx-auto flex w-full max-w-[920px] flex-col items-center pt-2 pb-8"
+              variants={previewContainerVariants}
+              initial="hidden"
+              animate="show"
+            >
+              {/* Desktop browser */}
+              <motion.div
+                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-0"
+                variants={previewItemVariants}
+              >
+                <div className="overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+                  <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" aria-hidden />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" aria-hidden />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" aria-hidden />
                   </div>
-                  {/* Address bar - site looks like it's open in browser */}
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-[#3f3f46] bg-[#2a2a2d] shrink-0">
-                    <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#18181b] border border-[#3f3f46] text-zinc-400 text-xs font-medium">
-                      <svg className="w-3.5 h-3.5 shrink-0 text-zinc-500" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg>
+                  <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50/90 px-4 py-2.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-500">
+                      <svg className="h-3.5 w-3.5 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+                      </svg>
                       <span className="truncate">{url.startsWith('http') ? url : `https://${url}`}</span>
                     </div>
                   </div>
-                  {/* Site content - website loads here inside desktop browser */}
-                  <div className="flex-1 min-h-0 overflow-hidden bg-white">
-                    {!iframeError ? (
-                      <iframe
-                        src={`/api/proxy?url=${encodeURIComponent(url.startsWith('http') ? url : `https://${url}`)}`}
-                        className="w-full h-full min-h-0 border-0"
-                        style={{ blockSize: '100%', minHeight: 0 }}
-                        title="Website inside desktop browser"
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                        loading="lazy"
-                        onError={() => setIframeError(true)}
+                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-100">
+                    {desktopPreview ? (
+                      <img
+                        src={desktopPreview}
+                        alt="Desktop view of scanned site"
+                        className="absolute inset-0 h-full w-full object-cover object-top"
                       />
-                    ) : websiteScreenshot ? (
-                      <img src={websiteScreenshot} alt="Desktop" className="w-full h-full object-cover object-top" />
                     ) : (
-                      <div className="w-full h-full bg-[#18181b] flex items-center justify-center text-zinc-500 text-sm">No preview</div>
+                      <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-zinc-400">
+                        No desktop capture yet — run a scan from the home page.
+                      </div>
                     )}
                   </div>
                 </div>
-              </div>
-            </div>
+              </motion.div>
+
+              <motion.div
+                className="mt-4 w-full max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2"
+                variants={previewItemVariants}
+              >
+                <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05] ">
+                  <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
+                    <div className="flex shrink-0 justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">
+                      <div
+                        className="h-[1.15rem] w-[4.25rem] rounded-full bg-zinc-900"
+                        aria-hidden
+                      />
+                    </div>
+                    <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100 max-h-[420px] overflow-y-scroll hide-scrollbar">
+                      {mobilePreviewSrc ? (
+                        <img
+                          src={mobilePreviewSrc}
+                          alt="Mobile view of scanned site"
+                          className="h-full w-full bg-white object-contain object-top"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex h-full min-h-[180px] items-center justify-center px-3 text-center text-xs text-zinc-400">
+                          Mobile capture unavailable for this run.
+                        </div>
+                      )}
+                    </div>
+                    <div className="shrink-0 bg-white px-2 pb-2.5 pt-1.5 text-center">
+                      <p className="text-[0.7rem] font-bold leading-tight text-violet-950 sm:text-xs">
+                        Mobile view
+                      </p>
+                      {scanHost ? (
+                        <p className="mt-0.5 truncate text-[0.62rem] text-zinc-500" title={url}>
+                          {scanHost}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
           </div>
         )}
 
@@ -166,10 +272,59 @@ export default function ScannerPage() {
             </p>
 
 
-            {/* Summary Box - Yellow */}
-            <div className="bg-[#FFF3CD] rounded-[10px] p-4 mb-6 border border-[#FFC107]">
-              <p className="text-base font-semibold text-black text-center m-0">
-                {passedCount} of {totalCount} rules passed.
+            {/* Checkpoints bar: green (passed) start / left, red (failed) end / right */}
+            <div className="mb-6 rounded-xl border border-zinc-200 bg-zinc-100/90 px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
+                <p className="m-0 shrink-0 text-base font-bold text-black">
+                  {totalCount} checkpoints:
+                </p>
+                <div className="relative min-w-0 flex-1" dir="ltr">
+                  <div className="flex h-3.5 w-full flex-row overflow-hidden rounded-full bg-zinc-200 shadow-inner">
+                    {passRatio > 0 && (
+                      <motion.div
+                        className="h-full shrink-0 bg-emerald-500"
+                        initial={{ width: '0%' }}
+                        animate={{ width: `${passRatio * 100}%` }}
+                        transition={greenBarTransition}
+                      />
+                    )}
+                    {failRatio > 0 && (
+                      <motion.div
+                        className="h-full shrink-0 bg-red-500"
+                        initial={{ width: '0%' }}
+                        animate={{ width: `${failRatio * 100}%` }}
+                        transition={redBarTransition}
+                      />
+                    )}
+                  </div>
+                  {/* Avatar rides the green→red boundary, moves forward with green fill */}
+                  {totalCount > 0 && failRatio > 0 && passRatio > 0 && (
+                    <motion.div
+                      className="pointer-events-none absolute left-0 top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2"
+                      initial={{ left: '0%' }}
+                      animate={{ left: `${passRatio * 100}%` }}
+                      transition={greenBarTransition}
+                    >
+                      <motion.div
+                        className="h-9 w-9 overflow-hidden rounded-full border-2 border-white bg-zinc-200 shadow-md ring-1 ring-zinc-300"
+                        initial={{ opacity: 0, scale: 0.85 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ ...greenBarTransition, delay: 0.12 }}
+                      >
+                        <img
+                          src="/client_first.png"
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+              <p className="mt-3 mb-0 text-center text-sm text-zinc-600 sm:text-left" dir="ltr">
+                <span className="font-semibold text-emerald-700">{passedCount} passed</span>
+                <span className="mx-2 text-zinc-400">·</span>
+                <span className="font-semibold text-red-600">{failedCount} failed</span>
               </p>
             </div>
 
@@ -211,28 +366,49 @@ export default function ScannerPage() {
 
                     {/* Expanded Content */}
                     {isExpanded && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <div className={`p-3 rounded-lg ${result.passed
-                          ? 'bg-green-50'
-                          : 'bg-orange-50'
-                          }`}>
-                          <div className={`flex items-center gap-2 mb-2 ${result.passed ? 'text-green-700' : 'text-orange-700'
-                            }`}>
-                            {result.passed ? (
-                              <>
-                                <Check size={16} className="shrink-0" />
-                                <strong className="text-sm font-semibold">Why it Passed:</strong>
-                              </>
-                            ) : (
-                              <>
-                                <X size={16} className="shrink-0" />
-                                <strong className="text-sm font-semibold">Why it Failed:</strong>
-                              </>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap m-0">
-                            {result.reason}
-                          </p>
+                      <div className="mt-4 border-t border-gray-200 pt-4">
+                        <div
+                          className={`rounded-lg p-3 ${
+                            result.passed ? 'bg-green-50' : 'bg-orange-50'
+                          }`}
+                        >
+                          {result.checkpoint ? (
+                            <>
+                              <div
+                                className={`mb-3 flex items-center gap-2 ${
+                                  result.passed ? 'text-green-700' : 'text-orange-800'
+                                }`}
+                              >
+                              </div>
+                              <CheckpointResultBody
+                                checkpoint={result.checkpoint}
+                                passed={result.passed}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <div
+                                className={`mb-2 flex items-center gap-2 ${
+                                  result.passed ? 'text-green-700' : 'text-orange-700'
+                                }`}
+                              >
+                                {result.passed ? (
+                                  <>
+                                    <Check size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Why it Passed:</strong>
+                                  </>
+                                ) : (
+                                  <>
+                                    <X size={16} className="shrink-0" />
+                                    <strong className="text-sm font-semibold">Why it Failed:</strong>
+                                  </>
+                                )}
+                              </div>
+                              <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
+                                {result.reason}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}

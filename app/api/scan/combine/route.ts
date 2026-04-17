@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-interface ScanResult {
-  ruleId: string
-  ruleTitle: string
-  passed: boolean
-  reason: string
-}
+const checkpointSchema = z.object({
+  requiredActions: z.string(),
+  justificationsBenefits: z.string(),
+  examples: z.array(
+    z.object({
+      url: z.string(),
+      filename: z.string(),
+      thumbnailUrl: z.string(),
+    }),
+  ),
+})
 
 const CombineRequestSchema = z.object({
-  results: z.array(z.object({
-    ruleId: z.string(),
-    ruleTitle: z.string(),
-    passed: z.boolean(),
-    reason: z.string(),
-  })),
+  results: z.array(
+    z.object({
+      ruleId: z.string(),
+      ruleTitle: z.string(),
+      passed: z.boolean(),
+      reason: z.string(),
+      checkpoint: checkpointSchema.optional(),
+    }),
+  ),
 })
 
 export async function POST(request: NextRequest) {
