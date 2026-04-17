@@ -28,7 +28,7 @@ Return only valid JSON:
 10. Material/composition: material or composition information is clear.
 11. Video testimonials: testimonial-style video in reviews/UGC area when relevant.
 12. Free shipping threshold: threshold or shipping incentive visible near purchase area.
-13. Trust near CTA: trust/payment signals near primary purchase actions.
+13. Trust near CTA: **icons, logos, and badges only** (payment marks, security seals, guarantee graphics) in the **same purchase block** as the primary action (Add to cart, Add to bag, Buy, etc.) — not only in the footer. Plain text (“secure checkout”, “money-back guarantee”) without an icon does not count. If KEY ELEMENTS says **Visual trust icons near CTA (DOM): YES**, treat that as strong PASS evidence for this rule.
 14. Price clarity: price and any discount/promo presentation is clear.
 15. Mobile gallery: product gallery is navigable on mobile (swipe/arrows).
 16. Breadcrumbs: breadcrumb or clear hierarchy when expected on PDP.
@@ -56,6 +56,7 @@ Return only valid JSON:
 - Lazy loading detected YES → PASS for lazy-loading rule.
 - Breadcrumbs “Not found” → FAIL for breadcrumb rule; otherwise PASS when present.
 - Variant default/selection signals → PASS for preselection when present.
+- Trust near CTA: **Visual trust icons near CTA (DOM): YES** (or listed visual trust marks near CTA) → PASS for that rule when the checkpoint is about icons/badges near the buy action.
 
 ## Visual-first rules
 

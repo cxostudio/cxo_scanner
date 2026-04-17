@@ -193,10 +193,10 @@ export default function Home() {
     return Math.min(100, Math.round((progress.current / progress.total) * 100))
   }, [showAnalyze, progress])
 
-  /** Time to show checkmark + "Finished" before the row exits (ms). 0 hides Finished — never paints. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 650
-  /** Extra delay per step index so rows exit in a short cascade instead of all at once. */
-  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 80
+  /** Long enough to read “Finished”; short enough not to block batch progress feel. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 280
+  /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
   useEffect(() => {
     // Load rules on component mount
@@ -218,7 +218,7 @@ export default function Home() {
     }
   }, [showAnalyze])
 
-  // Remove completed steps immediately when they become Finished (or after delay, if configured).
+  // After each batch, show “Finished” briefly (ANALYSIS_STEP_REMOVE_DELAY_MS), then remove the row.
   useEffect(() => {
     if (!showAnalyze || mounted <= 0) return
 
@@ -700,10 +700,8 @@ export default function Home() {
       analysisStepRemoveTimeoutsRef.current = []
       analysisStepRemovalScheduledRef.current = new Set()
   
-      // ✅ Wait for UI render
-      await new Promise((r) =>
-        requestAnimationFrame(() => setTimeout(r, 200))
-      )
+      // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
       void startWebsitePreviewStream(validUrl)
   
@@ -763,24 +761,24 @@ export default function Home() {
         }
 
         // ✅ EmailJS (non-blocking)
-        // emailjs.send(
-        //   EMAILJS_SERVICE_ID,
-        //   EMAILJS_TEMPLATE_ID,
-        //   {
-        //     level: selectedChallenge ?? '',
-        //     price: selectedRevenue ?? '',
-        //     url: validUrl,
-        //     email: emailTrimmed,
-        //     ip_address: ipAddress,
-        //     browser,
-        //     screen_size: screenSize,
-        //     time_zone: timeZone,
-        //     browser_data: browserData,
-        //     pass_result: passResult,
-        //     fail_result: failResult,
-        //   },
-        //   { publicKey: EMAILJS_PUBLIC_KEY }
-        // ).catch(err => console.error('EmailJS failed:', err))
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -1170,7 +1168,7 @@ export default function Home() {
                           </div>
                           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                             <div
-                              className="h-full rounded-full bg-gray-600 transition-[width] duration-300 ease-out"
+                              className="h-full rounded-full bg-gray-600 transition-[width] duration-100 ease-out"
                               style={{ width: `${analyzeProgressPercent}%` }}
                             />
                           </div>
@@ -1191,8 +1189,8 @@ export default function Home() {
                                     key={id}
                                     initial={{ opacity: 0, y: 16 }}
                                     animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                                    exit={{ x: 160, opacity: 0 }}
-                                    transition={{ duration: 0.42, ease: [0.25, 0.1, 0.25, 1] }}
+                                    exit={{ x: 32, opacity: 0 }}
+                                    transition={{ duration: 0.16, ease: [0.25, 0.1, 0.25, 1] }}
                                     className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
                                   >
                                     {isCompleted ? (
@@ -1223,7 +1221,7 @@ export default function Home() {
                                     )}
                                     {isActive && (
                                       <span className="max-w-[6.5rem] shrink-0 truncate text-xs font-medium text-gray-700 sm:max-w-[11rem] sm:text-sm">
-                                        Analyzing…
+                                        Analyzing this url...
                                       </span>
                                     )}
                                   </motion.div>

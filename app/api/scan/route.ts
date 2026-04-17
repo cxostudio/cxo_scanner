@@ -496,10 +496,10 @@ export async function POST(request: NextRequest) {
     let trustBadgesContext: {
       ctaFound: boolean
       ctaText: string
-      /** Payment / trust signals in the purchase block near the primary CTA (Visa, SSL, etc.). */
+      /** True only when img/svg/iframe (or svg use) trust marks are near the primary CTA — not plain text. */
       domStructureFound: boolean
       paymentBrandsFound: string[]
-      /** Same signals detected elsewhere (e.g. footer only) — does NOT satisfy "near CTA". */
+      /** Visual trust marks elsewhere (e.g. footer) — does NOT satisfy "near CTA". */
       paymentBrandsElsewhere: string[]
       trustBadgesCount: number
       trustBadgesElsewhereCount: number
@@ -545,6 +545,12 @@ export async function POST(request: NextRequest) {
       menuControlFound: boolean
       essentialNavLikely: boolean
       sample: string
+    } | null = null
+    /** Top announcement / promo bar (deals + urgency near top — homepage rule; same signal on PDP). */
+    let topOfPageDealsPromoContext: {
+      promoAtTopLikely: boolean
+      matchedLabels: string[]
+      evidenceSnippet: string
     } | null = null
     let galleryNavDOMFound = false
     let galleryNavDOMEvidence = ''
@@ -1351,19 +1357,84 @@ export async function POST(request: NextRequest) {
           'wero', 'ideal', 'bancontact', 'sofort', 'sepa', 'giropay', 'jcb',
           'revolut', 'twint', 'przelewy24', 'eps', 'blik', 'pay later',
         ]
-        const TRUST_KEYWORDS = [
-          'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-          'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
-          'guaranteed safe', 'safe & secure', 'encrypted', 'norton secured',
-          'mcafee secure', 'trusted shop', 'comodo', 'security badge',
-        ]
-        const BRAND_SCAN = [
-          'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
-          'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
-          'clearpay', 'stripe', 'discover',
-        ]
+        /** Prefer visible product-form CTAs over header/footer duplicates for stable scans. */
+        function findPrimaryPurchaseCta(): HTMLElement | null {
+          const ctaPatterns = [
+            'add to bag',
+            'add to basket',
+            'add to cart',
+            'add to order',
+            'buy now',
+            'buy it now',
+            'purchase',
+            'checkout',
+            'pay now',
+            'order now',
+            'complete order',
+            'place order',
+            'add pack',
+            'get it now',
+          ]
+          const selectors =
+            'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+          let best: HTMLElement | null = null
+          let bestScore = 0
+          for (const el of candidates) {
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+            const val =
+              el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+            const combined = `${text} ${aria} ${val}`
+            if (!ctaPatterns.some((p) => combined.includes(p))) continue
+            const st = window.getComputedStyle(el)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+              continue
+            const r = el.getBoundingClientRect()
+            if (r.width < 4 || r.height < 4) continue
+            const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+            const inHeaderOnly =
+              !!el.closest('header, [class*="header" i], nav') &&
+              !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+            const inProduct = !!(
+              el.closest('form[action*="cart" i]') ||
+              el.closest('[class*="product-form" i]') ||
+              el.closest('[class*="product__" i]') ||
+              el.closest('[class*="product-info" i]') ||
+              el.closest('[class*="product-details" i]') ||
+              el.closest('[data-product-form]') ||
+              el.closest('[id*="product-form" i]') ||
+              el.closest('[class*="purchase" i]') ||
+              el.closest('[name="add"]') ||
+              el.closest('[class*="shopify" i]')
+            )
+            let score = r.width * r.height + (inProduct ? 800000 : 0)
+            if (inFooter) score *= 0.02
+            if (inHeaderOnly && !inProduct) score *= 0.05
+            if (score > bestScore) {
+              bestScore = score
+              best = el
+            }
+          }
+          return best
+        }
 
-        function elementMatchesTrust(el: Element): string | null {
+        /** Icons/logos/badges only: IMG, SVG, USE (sprite), IFRAME — not plain text nodes. */
+        function elementMatchesVisualTrust(el: Element): string | null {
+          const tag = el.tagName
+          if (tag === 'IFRAME') {
+            const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
+            const title = (el.getAttribute('title') || '').toLowerCase()
+            const combined = `${src} ${title}`
+            const PAYMENT_IFRAME_PATTERNS = [
+              'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
+              'payment', 'checkout', 'trust', 'badge', 'secure',
+            ]
+            const match = PAYMENT_IFRAME_PATTERNS.find((p) => combined.includes(p))
+            return match ? `iframe:${match}` : null
+          }
+          if (tag !== 'IMG' && tag !== 'SVG' && tag !== 'USE') return null
+
           const img = el as HTMLImageElement
           const hel = el as HTMLElement
           const texts = [
@@ -1375,66 +1446,111 @@ export async function POST(request: NextRequest) {
             hel.getAttribute?.('data-brand') || '',
             hel.getAttribute?.('data-method') || '',
             img.src || img.getAttribute?.('data-src') || img.getAttribute?.('data-lazy-src') || '',
-            el.tagName === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
+            tag === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
             hel.className?.toString() || '',
             el.id || '',
-          ].map(t => t.toLowerCase())
+          ].map((t) => t.toLowerCase())
           const combined = texts.join(' ')
-
-          const brandMatch = PAYMENT_BRANDS.find(b => combined.includes(b))
+          const brandMatch = PAYMENT_BRANDS.find((b) => combined.includes(b))
           if (brandMatch) return brandMatch
 
           const svgTitle = (el.querySelector?.('title')?.textContent || '').toLowerCase()
-          const svgBrand = PAYMENT_BRANDS.find(b => svgTitle.includes(b))
+          const svgBrand = PAYMENT_BRANDS.find((b) => svgTitle.includes(b))
           if (svgBrand) return svgBrand
 
-          const trustMatch = TRUST_KEYWORDS.find(k => combined.includes(k))
-          if (trustMatch) return trustMatch
+          const sealHints = [
+            'ssl',
+            'secure checkout',
+            'secure payment',
+            'encrypted',
+            'norton',
+            'mcafee',
+            'comodo',
+            'trust badge',
+            'safe checkout',
+            'protected checkout',
+            'padlock',
+            'truste',
+          ]
+          const forSeal = `${combined} ${svgTitle}`
+          if (sealHints.some((h) => forSeal.includes(h)) || /lock|shield|padlock|ssl|secure|trust.?badge/i.test(forSeal)) {
+            const r = hel.getBoundingClientRect()
+            const reasonableSize = r.width > 0 && r.height > 0 && r.width <= 400 && r.height <= 400
+            if (tag === 'USE' || reasonableSize) return 'security-seal'
+          }
 
-          const directText = (hel.childElementCount === 0 ? hel.textContent?.trim() : '')?.toLowerCase() || ''
-          if (directText && directText.length < 40) {
-            const textBrand = PAYMENT_BRANDS.find(b => directText.includes(b))
-            if (textBrand) return textBrand
-            const textTrust = TRUST_KEYWORDS.find(k => directText.includes(k))
-            if (textTrust) return textTrust
+          const r = hel.getBoundingClientRect()
+          const smallVisual = r.width > 0 && r.height > 0 && r.width <= 200 && r.height <= 200
+          if (
+            /money\s*-?\s*back|moneyback|guarantee|60\s*-?\s*day|90\s*-?\s*day/.test(forSeal) &&
+            (/icon|badge|stamp|seal|shield|ribbon|guarantee|svg|img/.test(forSeal) || smallVisual)
+          ) {
+            return 'guarantee-badge'
           }
 
           return null
         }
 
-        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
-          if (!cta) return false
+        /** Footer / global chrome — never counts as “near CTA”. */
+        function isExcludedFarFromBuy(el: Element): boolean {
+          return !!el.closest(
+            'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+              '[class*="site-footer" i], [data-section-type="footer" i]',
+          )
+        }
+
+        /** ±4 sibling DOM nodes from the button (or its 1–2 wrappers); not the whole main landmark. */
+        function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
           if (cta === el || cta.contains(el)) return true
-          const roots = [
-            cta.closest('form[action*="cart"]'),
-            cta.closest('[class*="product-form"]'),
-            cta.closest('[class*="product__info"]'),
-            cta.closest('[class*="product-details"]'),
-            cta.closest('[class*="product-info"]'),
-            cta.closest('[data-product-blocks]'),
-            cta.closest('[id*="ProductInfo"]'),
-            cta.closest('[id*="product-template"]'),
-            cta.closest('[data-section-type="product-template"]'),
-            cta.closest('main'),
-          ].filter((n): n is HTMLElement => !!n)
-          for (const root of roots) {
-            if (root.contains(el)) return true
+          const tryAnchor = (anchor: HTMLElement): boolean => {
+            const parent = anchor.parentElement
+            if (!parent) return false
+            const kids = Array.from(parent.children) as Element[]
+            const idx = kids.indexOf(anchor)
+            if (idx < 0) return false
+            for (let off = -range; off <= range; off++) {
+              if (off === 0) continue
+              const sib = kids[idx + off]
+              if (sib && (sib === el || sib.contains(el))) return true
+            }
+            return false
           }
+          if (tryAnchor(cta)) return true
+          const wrap = cta.parentElement
+          if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
+          const wrap2 = wrap?.parentElement
+          if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
+          return false
+        }
+
+        function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
           const c = cta.getBoundingClientRect()
           const t = (el as HTMLElement).getBoundingClientRect()
           if (c.height < 4 || t.height < 1) return false
           const hz = t.left < c.right + 200 && t.right > c.left - 200
-          const v = t.top < c.bottom + 400 && t.bottom > c.top - 160
-          return hz && v
+          const gapBelow = t.top - c.bottom
+          const gapAbove = c.top - t.bottom
+          const nearBelow = gapBelow >= -48 && gapBelow <= 200
+          const nearAbove = gapAbove >= -36 && gapAbove <= 72
+          return hz && (nearBelow || nearAbove)
         }
 
-        const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
-        const cta = Array.from(document.querySelectorAll<HTMLElement>(
-          'button, [type="submit"], a[href*="/cart"]',
-        )).find(el => {
-          const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
-          return ctaPatterns.some(p => text.includes(p))
-        }) || null
+        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
+          if (!cta) return false
+          if (isExcludedFarFromBuy(el)) return false
+          if (cta === el || cta.contains(el)) return true
+          if (isWithinSiblingBandOfCta(cta, el, 4)) return true
+          return pixelNearBuyButton(cta, el)
+        }
+
+        const cta = findPrimaryPurchaseCta()
+        if (cta) {
+          try {
+            cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+          } catch {
+            /* ignore */
+          }
+        }
 
         const ctaText = cta
           ? (cta.textContent || cta.getAttribute('aria-label') || 'CTA').trim()
@@ -1443,73 +1559,18 @@ export async function POST(request: NextRequest) {
         const foundNear = new Map<string, string>()
         const foundElsewhere = new Map<string, string>()
 
-        const allElements = Array.from(document.querySelectorAll(
-          'img, svg, use, iframe, [class*="payment" i], [class*="badge" i], [class*="trust" i], ' +
-          '[class*="visa" i], [class*="paypal" i], [class*="mastercard" i], [class*="amex" i], ' +
-          '[class*="apple-pay" i], [class*="google-pay" i], [class*="klarna" i], ' +
-          '[class*="shop-pay" i], [class*="stripe" i], [class*="secure" i], ' +
-          '[id*="payment" i], [id*="badge" i], [id*="trust" i], ' +
-          '[data-payment], [data-brand], [data-method]',
-        ))
+        const allElements = Array.from(
+          document.querySelectorAll('img, picture img, svg, svg use, iframe'),
+        )
 
         for (const el of allElements) {
-          let label: string | null = null
-          if (el.tagName === 'IFRAME') {
-            const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
-            const title = (el.getAttribute('title') || '').toLowerCase()
-            const combined = `${src} ${title}`
-            const PAYMENT_IFRAME_PATTERNS = [
-              'shopify', 'paypal', 'stripe', 'klarna', 'afterpay',
-              'payment', 'checkout', 'trust', 'badge', 'secure',
-            ]
-            const match = PAYMENT_IFRAME_PATTERNS.find(p => combined.includes(p))
-            if (match) label = `iframe:${match}`
-          } else {
-            label = elementMatchesTrust(el)
-          }
+          const label = elementMatchesVisualTrust(el)
           if (!label) continue
           const desc = (el as HTMLImageElement).alt || (el as HTMLElement).title || el.tagName
           const near = nearPrimaryCta(cta, el)
           const bucket = near ? foundNear : foundElsewhere
           if (!bucket.has(label)) bucket.set(label, desc)
-          if (foundNear.size + foundElsewhere.size >= 20) break
-        }
-
-        if (foundNear.size === 0 && cta) {
-          const purchaseRoot =
-            cta.closest('form[action*="cart"]') ||
-            cta.closest('[class*="product-form"]') ||
-            cta.closest('[class*="product__info"]') ||
-            cta.closest('[class*="product-details"]') ||
-            cta.closest('[class*="product-info"]') ||
-            cta.parentElement?.parentElement?.parentElement
-          if (purchaseRoot) {
-            const chunk = (purchaseRoot.textContent || '').toLowerCase()
-            for (const brand of BRAND_SCAN) {
-              if (chunk.includes(brand) && !foundNear.has(brand)) {
-                foundNear.set(brand, 'text-in-purchase-block')
-                break
-              }
-            }
-            for (const k of TRUST_KEYWORDS) {
-              if (chunk.includes(k) && !foundNear.has(k)) {
-                foundNear.set(k, 'text-in-purchase-block')
-                break
-              }
-            }
-          }
-        }
-
-        if (foundNear.size === 0) {
-          const everything = Array.from(document.querySelectorAll('*'))
-          for (const el of everything) {
-            const label = elementMatchesTrust(el)
-            if (!label) continue
-            const near = nearPrimaryCta(cta, el)
-            const bucket = near ? foundNear : foundElsewhere
-            if (!bucket.has(label)) bucket.set(label, el.tagName)
-            if (foundNear.size + foundElsewhere.size >= 24) break
-          }
+          if (foundNear.size + foundElsewhere.size >= 24) break
         }
 
         const brandsNear = Array.from(foundNear.keys())
@@ -1527,11 +1588,13 @@ export async function POST(request: NextRequest) {
           trustBadgesCount: countNear,
           trustBadgesElsewhereCount: countElse,
           trustBadgesInfo: domStructureFound
-            ? `Near primary CTA: ${brandsNear.join(', ')}`
+            ? `Visual icons/logos near primary CTA: ${brandsNear.join(', ')}`
             : countElse > 0
-              ? `No trust signals near CTA; elsewhere only: ${brandsElse.join(', ')}`
-              : 'No payment/trust badges detected near the primary CTA',
-          containerDescription: cta ? 'purchase block + proximity to primary CTA' : 'CTA not found — cannot verify proximity',
+              ? `No visual trust icons near CTA; elsewhere only: ${brandsElse.join(', ')}`
+              : 'No payment/security/guarantee icons detected near the primary CTA',
+          containerDescription: cta
+            ? '±4 sibling nodes around buy button or tight pixel band; footer excluded'
+            : 'CTA not found — cannot verify proximity',
         }
       })
 
@@ -1819,6 +1882,80 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        topOfPageDealsPromoContext = await page.evaluate(() => {
+          window.scrollTo(0, 0)
+          const chunks: string[] = []
+          const push = (s: string) => {
+            const t = s.replace(/\s+/g, ' ').trim()
+            if (t.length < 4 || t.length > 700) return
+            chunks.push(t)
+          }
+          const selectors = [
+            '[class*="announcement" i]',
+            '[class*="promo-bar" i]',
+            '[id*="announcement" i]',
+            '[data-announcement]',
+            '[class*="utility-bar" i]',
+            '[class*="top-bar" i]',
+            '[class*="marketing-banner" i]',
+            '[class*="sale-banner" i]',
+            '[class*="countdown" i]',
+          ]
+          for (const sel of selectors) {
+            try {
+              document.querySelectorAll(sel).forEach(el => {
+                if (el.closest('footer')) return
+                const r = el.getBoundingClientRect()
+                if (r.bottom > -30 && r.top < 280) push((el.textContent || '').trim())
+              })
+            } catch { /* ignore */ }
+          }
+          try {
+            document.querySelectorAll('body > *').forEach(el => {
+              if (el.closest('footer')) return
+              const r = el.getBoundingClientRect()
+              if (r.top >= -15 && r.top < 160 && r.height > 5 && r.height < 140 && r.width > 140) {
+                push((el.textContent || '').trim())
+              }
+            })
+          } catch { /* ignore */ }
+
+          const dedup = [...new Set(chunks)]
+          const topBlob = `${dedup.join(' \n ')}\n${(document.body.innerText || '').slice(0, 4800)}`
+
+          const checks: { name: string; ok: boolean }[] = [
+            { name: 'percent-off', ok: /\d+\s*%\s*off|up to\s+\d+\s*%|at least\s+\d+\s*%\s*off/i.test(topBlob) },
+            { name: 'free-gift', ok: /free\s+gifts?|gift\s+worth|\+free\s+gifts?|free\s+gift/i.test(topBlob) },
+            { name: 'season-or-flash-offer', ok: /spring\s+offer|summer\s+sale|black\s+friday|cyber\s+monday|flash\s+sale|special\s+offer/i.test(topBlob) },
+            { name: 'limited-urgency', ok: /limited\s+time|ends?\s+(today|tonight|soon)|last\s+chance|hurry|while\s+supplies/i.test(topBlob) },
+            { name: 'launch-new', ok: /\bnew\s+flavo?u?r\s+launch|\bjust\s+dropped|now\s+live\b/i.test(topBlob) },
+            { name: 'save-deal', ok: /\bsave\s+\d+|extra\s+\$?\d+\s+off|extra\s+£?\d+\s+off|%\s*off\s*\+/i.test(topBlob) },
+          ]
+          const hitNames = checks.filter(c => c.ok).map(c => c.name)
+          const promoAtTopLikely = hitNames.length >= 1
+          return {
+            promoAtTopLikely,
+            matchedLabels: hitNames,
+            evidenceSnippet: topBlob.replace(/\s+/g, ' ').trim().slice(0, 400),
+          }
+        })
+        const promoBlock = [
+          '',
+          '--- TOP OF PAGE DEALS / PROMO (DOM scan) ---',
+          `Deal or urgency messaging near top (DOM): ${topOfPageDealsPromoContext.promoAtTopLikely ? 'YES' : 'NO'}`,
+          `Matched signals: ${topOfPageDealsPromoContext.matchedLabels.length ? topOfPageDealsPromoContext.matchedLabels.join(', ') : 'None'}`,
+          `Snippet: ${topOfPageDealsPromoContext.evidenceSnippet || 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${promoBlock}`
+        console.log(
+          `[scan] top deals/promo DOM: likely=${topOfPageDealsPromoContext.promoAtTopLikely} hits=${topOfPageDealsPromoContext.matchedLabels.join(',') || 'none'}`,
+        )
+      } catch (topPromoErr) {
+        console.warn('[scan] top-of-page deals/promo DOM snapshot failed:', topPromoErr)
+        topOfPageDealsPromoContext = null
+      }
+
+      try {
         mainNavContext = await page.evaluate(() => {
           const shoppingKeywordHit = (label: string): boolean => {
             const low = label.toLowerCase()
@@ -1929,7 +2066,7 @@ export async function POST(request: NextRequest) {
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
         (trustBadgesContext
-          ? `\n\n--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nTrust signals NEAR primary CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nPayment / trust brands near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nTrust signals elsewhere only (footer, etc. — does NOT pass rule): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nTrust Badges Count (near CTA): ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
           : '') +
         (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
@@ -3173,69 +3310,175 @@ export async function POST(request: NextRequest) {
 
           const reScanResult = await page.evaluate(() => {
             const PAYMENT_BRANDS = [
-              'visa', 'mastercard', 'paypal', 'apple pay', 'google pay', 'amex',
+              'visa', 'mastercard', 'master card', 'paypal', 'apple pay', 'google pay', 'amex',
               'american express', 'klarna', 'shop pay', 'maestro', 'afterpay',
               'clearpay', 'stripe', 'discover', 'union pay', 'wero', 'ideal',
             ]
-            const TRUST_KEYWORDS = [
-              'ssl', 'secure checkout', 'safe checkout', 'money-back guarantee',
-              'money back guarantee', '100% safe', 'protected checkout', 'secure payment',
-              'guaranteed safe', 'safe & secure', 'encrypted',
-            ]
-            const ctaPatterns = ['add to bag', 'add to cart', 'buy now', 'buy it now', 'purchase']
-            const cta = Array.from(document.querySelectorAll<HTMLElement>(
-              'button, [type="submit"], a[href*="/cart"]',
-            )).find(el => {
-              const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase().trim()
-              return ctaPatterns.some(p => text.includes(p))
-            }) || null
-
-            function nearPrimaryCta(ctaEl: HTMLElement | null, el: Element): boolean {
-              if (!ctaEl) return false
-              if (ctaEl === el || ctaEl.contains(el)) return true
-              const roots = [
-                ctaEl.closest('form[action*="cart"]'),
-                ctaEl.closest('[class*="product-form"]'),
-                ctaEl.closest('[class*="product__info"]'),
-                ctaEl.closest('[class*="product-details"]'),
-                ctaEl.closest('[class*="product-info"]'),
-                ctaEl.closest('main'),
-              ].filter((n): n is HTMLElement => !!n)
-              for (const root of roots) {
-                if (root.contains(el)) return true
+            function matchVisualTrust(el: Element): string | null {
+              const tag = el.tagName
+              if (tag === 'IFRAME') {
+                const src = (el.getAttribute('src') || el.getAttribute('data-src') || '').toLowerCase()
+                const title = (el.getAttribute('title') || '').toLowerCase()
+                const combined = `${src} ${title}`
+                const patterns = ['shopify', 'paypal', 'stripe', 'klarna', 'afterpay', 'payment', 'checkout', 'trust', 'badge', 'secure']
+                const m = patterns.find((p) => combined.includes(p))
+                return m ? `iframe:${m}` : null
               }
-              const c = ctaEl.getBoundingClientRect()
+              if (tag !== 'IMG' && tag !== 'SVG' && tag !== 'USE') return null
+              const img = el as HTMLImageElement
+              const hel = el as HTMLElement
+              const texts = [
+                img.alt || '',
+                hel.title || '',
+                hel.getAttribute?.('aria-label') || '',
+                img.src || img.getAttribute?.('data-src') || '',
+                tag === 'USE' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '',
+                hel.className?.toString() || '',
+                el.id || '',
+              ]
+                .join(' ')
+                .toLowerCase()
+              const svgT = (el.querySelector?.('title')?.textContent || '').toLowerCase()
+              const forSeal = `${texts} ${svgT}`
+              const brand = PAYMENT_BRANDS.find((b) => forSeal.includes(b))
+              if (brand) return brand
+              const sealHints = ['ssl', 'secure checkout', 'secure payment', 'encrypted', 'norton', 'mcafee', 'comodo', 'trust badge', 'safe checkout', 'protected checkout', 'padlock', 'truste']
+              if (sealHints.some((h) => forSeal.includes(h)) || /lock|shield|padlock|ssl|secure|trust.?badge/i.test(forSeal)) {
+                const r = hel.getBoundingClientRect()
+                if (tag === 'USE' || (r.width > 0 && r.height > 0 && r.width <= 400 && r.height <= 400))
+                  return 'security-seal'
+              }
+              const r = hel.getBoundingClientRect()
+              const small = r.width > 0 && r.height > 0 && r.width <= 200 && r.height <= 200
+              if (
+                /money\s*-?\s*back|moneyback|guarantee|60\s*-?\s*day|90\s*-?\s*day/.test(forSeal) &&
+                (/icon|badge|stamp|seal|shield|ribbon|guarantee|svg|img/.test(forSeal) || small)
+              )
+                return 'guarantee-badge'
+              return null
+            }
+            function findPrimaryPurchaseCta(): HTMLElement | null {
+              const ctaPatterns = [
+                'add to bag',
+                'add to basket',
+                'add to cart',
+                'add to order',
+                'buy now',
+                'buy it now',
+                'purchase',
+                'checkout',
+                'pay now',
+                'order now',
+                'complete order',
+                'place order',
+                'add pack',
+                'get it now',
+              ]
+              const selectors =
+                'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+              const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+              let best: HTMLElement | null = null
+              let bestScore = 0
+              for (const el of candidates) {
+                const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+                const val =
+                  el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+                const combined = `${text} ${aria} ${val}`
+                if (!ctaPatterns.some((p) => combined.includes(p))) continue
+                const st = window.getComputedStyle(el)
+                if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+                  continue
+                const r = el.getBoundingClientRect()
+                if (r.width < 4 || r.height < 4) continue
+                const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+                const inHeaderOnly =
+                  !!el.closest('header, [class*="header" i], nav') &&
+                  !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+                const inProduct = !!(
+                  el.closest('form[action*="cart" i]') ||
+                  el.closest('[class*="product-form" i]') ||
+                  el.closest('[class*="product__" i]') ||
+                  el.closest('[class*="product-info" i]') ||
+                  el.closest('[class*="product-details" i]') ||
+                  el.closest('[data-product-form]') ||
+                  el.closest('[id*="product-form" i]') ||
+                  el.closest('[class*="purchase" i]') ||
+                  el.closest('[name="add"]') ||
+                  el.closest('[class*="shopify" i]')
+                )
+                let score = r.width * r.height + (inProduct ? 800000 : 0)
+                if (inFooter) score *= 0.02
+                if (inHeaderOnly && !inProduct) score *= 0.05
+                if (score > bestScore) {
+                  bestScore = score
+                  best = el
+                }
+              }
+              return best
+            }
+
+            const cta = findPrimaryPurchaseCta()
+            if (cta) {
+              try {
+                cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+              } catch {
+                /* ignore */
+              }
+            }
+
+            function isExcludedFarFromBuy(el: Element): boolean {
+              return !!el.closest(
+                'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+                  '[class*="site-footer" i], [data-section-type="footer" i]',
+              )
+            }
+            function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
+              if (cta === el || cta.contains(el)) return true
+              const tryAnchor = (anchor: HTMLElement): boolean => {
+                const parent = anchor.parentElement
+                if (!parent) return false
+                const kids = Array.from(parent.children) as Element[]
+                const idx = kids.indexOf(anchor)
+                if (idx < 0) return false
+                for (let off = -range; off <= range; off++) {
+                  if (off === 0) continue
+                  const sib = kids[idx + off]
+                  if (sib && (sib === el || sib.contains(el))) return true
+                }
+                return false
+              }
+              if (tryAnchor(cta)) return true
+              const wrap = cta.parentElement
+              if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
+              const wrap2 = wrap?.parentElement
+              if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
+              return false
+            }
+            function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
+              const c = cta.getBoundingClientRect()
               const t = (el as HTMLElement).getBoundingClientRect()
               if (c.height < 4 || t.height < 1) return false
               const hz = t.left < c.right + 200 && t.right > c.left - 200
-              const v = t.top < c.bottom + 400 && t.bottom > c.top - 160
-              return hz && v
+              const gapBelow = t.top - c.bottom
+              const gapAbove = c.top - t.bottom
+              const nearBelow = gapBelow >= -48 && gapBelow <= 200
+              const nearAbove = gapAbove >= -36 && gapAbove <= 72
+              return hz && (nearBelow || nearAbove)
+            }
+            function nearPrimaryCta(ctaEl: HTMLElement | null, el: Element): boolean {
+              if (!ctaEl) return false
+              if (isExcludedFarFromBuy(el)) return false
+              if (ctaEl === el || ctaEl.contains(el)) return true
+              if (isWithinSiblingBandOfCta(ctaEl, el, 4)) return true
+              return pixelNearBuyButton(ctaEl, el)
             }
 
             const foundNear = new Map<string, string>()
             const foundElse = new Map<string, string>()
-            const allEls = Array.from(document.querySelectorAll('*'))
+            const allEls = Array.from(document.querySelectorAll('img, picture img, svg, svg use, iframe'))
             for (const el of allEls) {
-              const hel = el as HTMLElement
-              const img = el as HTMLImageElement
-              const texts = [
-                img.alt || '', hel.title || '',
-                hel.getAttribute?.('aria-label') || '',
-                img.src || img.getAttribute?.('data-src') || '',
-                hel.className?.toString() || '',
-                el.id || '',
-                hel.childElementCount === 0 ? (hel.textContent?.trim().substring(0, 40) || '') : '',
-              ].join(' ').toLowerCase()
-              const svgT = el.querySelector?.('title')?.textContent?.toLowerCase() || ''
-              const combined = `${texts} ${svgT}`
-              let label: string | null = PAYMENT_BRANDS.find(b => combined.includes(b)) || null
-              if (!label) label = TRUST_KEYWORDS.find(k => combined.includes(k)) || null
-              if (!label && el.tagName === 'IFRAME') {
-                const src = (el.getAttribute('src') || '').toLowerCase()
-                const IFRAME_PAY = ['shopify', 'paypal', 'stripe', 'klarna', 'payment', 'checkout', 'trust']
-                const m = IFRAME_PAY.find(p => src.includes(p))
-                if (m) label = `iframe:${m}`
-              }
+              const label = matchVisualTrust(el)
               if (!label) continue
               const bucket = nearPrimaryCta(cta, el) ? foundNear : foundElse
               if (!bucket.has(label)) bucket.set(label, el.tagName)
@@ -3260,9 +3503,9 @@ export async function POST(request: NextRequest) {
               trustBadgesCount: mergedNear.length,
               trustBadgesElsewhereCount: mergedElse.length,
               trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
-              containerDescription: 'second-pass scan (purchase area)',
+              containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
             }
-            const trustBlock = `\n\n--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nTrust signals NEAR primary CTA (DOM): YES\nPayment / trust brands near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nTrust signals elsewhere only (footer, etc. — does NOT pass rule): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nTrust Badges Count (near CTA): ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
             websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
           }
         } catch (e) {
@@ -3844,6 +4087,26 @@ export async function POST(request: NextRequest) {
               (d.includes('main navigation') && (d.includes('essential') || d.includes('important')))
             )
           })()
+          const isTopOfPageDealsUrgencyPromoRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            if (t.includes('breadcrumb')) return false
+            const mentionsDealFamily =
+              t.includes('deal') ||
+              t.includes('special offer') ||
+              (t.includes('urgency') && (t.includes('offer') || t.includes('highlight'))) ||
+              (d.includes('special offer') && d.includes('homepage')) ||
+              (d.includes('urgency') && d.includes('promotion'))
+            const mentionsTopPlacement =
+              t.includes('homepage') ||
+              t.includes('near the top') ||
+              t.includes('top of') ||
+              t.includes('above the fold') ||
+              d.includes('top of') ||
+              d.includes('above the fold') ||
+              d.includes('near the top')
+            return mentionsDealFamily && mentionsTopPlacement
+          })()
           // Build concise prompt - only include relevant instructions
           let specialInstructions = ''
           if (isBreadcrumbRule) {
@@ -3912,6 +4175,42 @@ Shopping-related labels detected in header/menu chrome: ${navLabels}
 
 ✅ PASS: "Header / menu includes Shop all, Bundles, and Reviews—key shopping destinations are in primary navigation."
 ❌ FAIL: "No shop or category links appear in the header or primary menu—users cannot reach the catalog from main navigation."
+`
+          } else if (isTopOfPageDealsUrgencyPromoRule) {
+            const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
+            const promoHits = topOfPageDealsPromoContext?.matchedLabels?.length
+              ? topOfPageDealsPromoContext.matchedLabels.join(', ')
+              : 'none'
+            const promoDomLine = topOfPageDealsPromoContext
+              ? `TOP_PROMO_DOM_LIKELY=${promoLikely}; matched=${promoHits}`
+              : 'TOP_PROMO_DOM=unavailable'
+            specialInstructions = `
+TOP OF PAGE — Deals, special offers, or urgency (often titled "homepage" in the checkpoint)
+
+DOM PRE-SCAN (authoritative when positive — repeated here because KEY ELEMENTS / page text in your context may be truncated):
+${promoDomLine}
+
+━━━━ SCOPE ━━━━
+
+• If the scanned URL is the STORE HOMEPAGE, judge the TOP of that page.
+• If the scanned URL is a PRODUCT or other landing page, judge the TOP of THIS PAGE the same way (announcement bar above the header, hero promo strip, etc.). Do NOT fail only because the URL path is not "/".
+• A coloured top bar with "% off", "Spring offer", "Free gifts", "Limited time", countdown, or "Shop now" style messaging COUNTS.
+
+━━━━ PASS ━━━━
+
+✅ PASS if ANY of these is true:
+1. TOP_PROMO_DOM_LIKELY=true → PASS immediately (DOM/text near top shows deal or urgency signals).
+2. The SCREENSHOT shows a prominent offer strip, banner, or hero at the very top (even thin full-width bars count).
+3. Clear percentage off + gift / offer language is readable at the top of the screenshot.
+
+━━━━ FAIL ━━━━
+
+❌ FAIL only if: TOP_PROMO_DOM_LIKELY is false AND the screenshot shows no promotional / urgency / deal messaging in the top area (only neutral nav with no offer).
+
+━━━━ EXAMPLES ━━━━
+
+✅ PASS: "A top announcement bar shows 'Spring offer: up to 58% off + free gifts' — deals are highlighted at the top."
+❌ FAIL: "No offer or urgency messaging appears at the top of the page; only the logo and menu are visible."
 `
           } else if (isColorRule) {
             specialInstructions = `\nCOLOR RULE: Check "Pure black (#000000) detected:" in KEY ELEMENTS. If "YES" → FAIL, if "NO" → PASS.`
@@ -4301,29 +4600,29 @@ CRITICAL INSTRUCTIONS:
               `
           } else if (isTrustBadgesRule) {
             specialInstructions = `
-TRUST SIGNALS NEAR THE CTA (secure checkout / payment badges)
+TRUST SIGNALS NEAR THE PRIMARY CTA — VISUAL ONLY (CRO audit)
 
-This rule matches the checkpoint title: trust signals must appear NEAR the primary purchase action (Add to cart, Buy now, Checkout), not only in the distant footer.
+Count ONLY icons, logos, and badges (payment marks, security seals, guarantee badge graphics) in the immediate area around Add to cart / Add to bag / Buy. Do NOT count plain text (e.g. "secure checkout" or "money-back guarantee" as words only with no icon). Footer-only icons do not pass.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOM CHECK FIRST (KEY ELEMENTS — authoritative)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Read "--- TRUST BADGES CHECK (must be NEAR primary Add to cart / Buy CTA) ---":
-- If "Trust signals NEAR primary CTA (DOM): YES" → PASS (DOM already verified proximity).
-- If "Payment / trust brands near CTA:" lists brands or iframe:* near CTA → PASS.
-- If "Trust signals NEAR primary CTA (DOM): NO" but "Trust signals elsewhere only" lists brands → those are NOT sufficient → FAIL unless the SCREENSHOT clearly shows payment/security badges immediately beside or below the main Add to cart / Buy area (same visual block as the CTA).
+Read "--- TRUST BADGES CHECK (icons/logos/badges only":
+- If "Visual trust icons near CTA (DOM): YES" → PASS (DOM detected img/svg/iframe-class trust marks near the CTA).
+- If "Visual trust marks near CTA" lists payment brands, security-seal, guarantee-badge, or iframe:* → PASS (same meaning).
+- If "Visual trust icons near CTA (DOM): NO" and marks exist only under "elsewhere only" → FAIL unless the SCREENSHOT clearly shows at least one icon/logo/badge beside or directly under the primary purchase button (same block as the CTA).
 
-If "CTA Found: NO" and DOM says NO near-CTA signals → rely on screenshot; if still no badges adjacent to an obvious primary purchase button → FAIL.
+If "CTA Found: NO" and DOM says NO → use screenshot; FAIL if no visible trust icons near an obvious primary purchase control.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCREENSHOT CHECK (same rule — proximity matters)
+SCREENSHOT CHECK (same strict rule)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PASS from the image only if payment logos, SSL/secure checkout, or trust badges appear in the SAME purchase block as the main Add to cart / Buy button (immediately under/beside that button, or inside the same product-buy card). Icons only in the far footer or unrelated sections do NOT pass.
+PASS only if you clearly see at least one trust ICON or LOGO or BADGE near the primary CTA (above, beside, or directly below — same purchase block). Text-only trust copy does not count.
 
-FAIL if trust signals exist only in the footer or far from purchase when DOM also says near-CTA = NO.
+FAIL if only text appears near the CTA, or icons exist only in the footer / far from the buy area.
 
-PASS reason example: "Visa, Mastercard and Shop Pay icons sit directly under the Add to cart button in the product buy area."
-FAIL reason example: "Payment logos appear only in the site footer, not next to the Add to cart button—move trust badges into the purchase block near the CTA."
+PASS reason example: "Visa, Mastercard and Shop Pay logos appear as icons directly under the Add to bag button."
+FAIL reason example: "No payment or trust icons appear near the Add to bag button—only body copy; footer logos are too far from the CTA."
               `
           } else if (isProductComparisonRule) {
             specialInstructions = `
@@ -4402,7 +4701,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
-          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS NEAR CTA RULE ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. The rule is: payment / secure-checkout trust badges must appear NEAR the primary Add to cart (or Buy) control—not only in the footer.\n\nPASS from the image if payment logos, SSL, or trust text sit in the same purchase block as the main CTA (directly under/beside that button).\n\nFAIL if logos appear only in the distant footer or unrelated sections while the buy area shows none.\n\nIf the image is ambiguous, use KEY ELEMENTS "Trust signals NEAR primary CTA (DOM)" — YES means PASS; NO with brands only "elsewhere" means FAIL unless the screenshot clearly shows badges next to the CTA.\n\nNow analyze the screenshot:\n\n` : ''
+          const trustBadgesPrefix = isTrustBadgesRule ? `\n\n⚠️⚠️⚠️ TRUST SIGNALS NEAR CTA (VISUAL ONLY) ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. Icons, logos, or badges (payment, SSL/seal, guarantee graphic) must appear NEAR the primary purchase button (Add to cart, Add to bag, Buy, etc.). Plain text alone does NOT pass. Footer-only icons do NOT pass.\n\nPASS from the image only if you see actual icons/logos/badges in the same purchase block as the main CTA.\n\nFAIL if trust is text-only near the CTA, or icons appear only in the footer.\n\nIf ambiguous, use KEY ELEMENTS "Visual trust icons near CTA (DOM)" — YES means PASS; NO with marks only "elsewhere" means FAIL unless the screenshot clearly shows icons next to the CTA.\n\nNow analyze the screenshot:\n\n` : ''
           const benefitsNearTitlePrefix = isBenefitsNearTitleRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BENEFITS NEAR TITLE RULE ⚠️⚠️⚠️\n\nTHIS IS THE BENEFITS NEAR TITLE RULE. You are receiving a SCREENSHOT IMAGE. You MUST look at the image FIRST.\n\nIn the screenshot, look for KEY BENEFITS near the product title:\n- A short description or bullet list BELOW the product title (e.g. "Reveal radiant skin...", "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance")\n- Checkmarks (✓) or bullets with benefit points in the same column/section as the title\n- Any 2-3 benefit-like statements above, beside, or below the title in the product info block\n\nCRITICAL - IF YOU SEE BENEFITS BELOW OR NEAR THE TITLE → PASS:\n- If the IMAGE shows benefit text or a list with checkmarks/bullets (e.g. "Fades dark spots", "Evens skin tone", "radiance") in the product section near the title → you MUST output passed: true.\n- Do NOT fail if benefits are clearly visible below the title in the screenshot. Trust the SCREENSHOT.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const thumbnailsPrefix = isThumbnailsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR THUMBNAILS RULE ⚠️⚠️⚠️\n\nTHIS IS THE THUMBNAILS IN GALLERY RULE. You are receiving a SCREENSHOT IMAGE. Look at it FIRST.\n\nIn the screenshot, look for THUMBNAILS in the product gallery:\n- A row of SMALL images below or beside the main product image (thumbnail strip/carousel)\n- Left/right arrows to scroll through more thumbnails\n- Multiple small clickable/selectable preview images in the gallery area\n\nCRITICAL - IF YOU SEE THUMBNAILS → PASS:\n- If the IMAGE shows any thumbnail strip, carousel of small images, or scrollable row of gallery previews below/near the main image → you MUST output passed: true.\n- It does NOT matter if some thumbnails are off-screen or require scrolling. Thumbnails present = PASS. Only fail if there is literally no thumbnail row/carousel at all.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
@@ -4414,7 +4713,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -4869,6 +5169,23 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = true
               analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
             }
+          } else if (isTopOfPageDealsUrgencyPromoRule) {
+            const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()
+            const textFallback =
+              /\d+\s*%\s*off|up to\s+\d+\s*%|at least\s+\d+\s*%\s*off|free\s+gifts?|spring\s+offer|limited\s+time|flash\s+sale|special\s+offer|extra\s+£?\d+|extra\s+\$?\d+/.test(
+                topSlice,
+              )
+            if (
+              !analysis.passed &&
+              (topOfPageDealsPromoContext?.promoAtTopLikely || textFallback)
+            ) {
+              const hits = topOfPageDealsPromoContext?.matchedLabels?.length
+                ? topOfPageDealsPromoContext.matchedLabels.join(', ')
+                : 'top-of-page offer text'
+              console.log(`Top deals/promo rule: DOM or text fallback matched (${hits}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = `Deal or urgency messaging appears near the top of the page (e.g. announcement bar with offers; signals: ${hits}).`
+            }
           } else if (isVideoTestimonialRule) {
             // Video testimonials rule validation - STRICT CHECK
             // Only pass if AI explicitly says videos ARE present (not just mentions "video" in general)
@@ -5269,7 +5586,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 .join(', ')
               console.log(`Trust badges rule: DOM found payment/trust signals near CTA (${brands}). Forcing PASS.`)
               analysis.passed = true
-              analysis.reason = `Payment and security trust badges (${brands}) appear near the main Add to cart / purchase area, which supports checkout confidence.`
+              analysis.reason = `Payment or trust icons (${brands}) appear near the main purchase button (e.g. Add to cart or Add to bag), which supports checkout confidence.`
             }
 
             // Sanity check: warn only, never force a false FAIL
