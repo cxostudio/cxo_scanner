@@ -1020,12 +1020,13 @@ export default function Home() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
+                  className='flex'
                 >
                   <motion.button
                     type="button"
                     onClick={handleNext}
                     disabled={!isStepValid()}
-                    className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!isStepValid()
+                    className={`w-full my-[18px] flex items-center justify-center gap-1 h-[50px] rounded-[10px] py-[9px] pr-[12px] pl-[16px] text-[16px] font-bold cursor-pointer flex-[1_0_0] items-center justify-center gap-1 transition-colors ${!isStepValid()
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                       : 'bg-black text-white'
                       }`}
@@ -1033,7 +1034,6 @@ export default function Home() {
                     whileTap={isStepValid() ? { scale: 0.985 } : {}}
                     transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                   >
-                    <p className="my-[18px] flex items-center justify-center gap-2">
                       <span>Continue</span>
                       <span>
                       <svg
@@ -1044,7 +1044,6 @@ export default function Home() {
     <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
   </svg>
                       </span>
-                    </p>
                   </motion.button>
                 </motion.div>
               ) : (
@@ -1052,6 +1051,7 @@ export default function Home() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1], delay: 0.28 }}
+                  className='flex'
                 >
                   {isStartingScan ? (
                     <div className="w-full py-6 rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
@@ -1068,7 +1068,7 @@ export default function Home() {
                       type="button"
                       onClick={handleStartScan}
                       disabled={!websiteUrl || !email}
-                      className={`w-full h-[50px] rounded-[10px] pl-[16px] pr-[12px] py-[9px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!websiteUrl || !email
+                      className={`w-full my-[18px] flex items-center justify-center gap-2 h-[50px] flex-[1_0_0] rounded-[10px] py-[9px] pr-[12px] pl-[16px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${!websiteUrl || !email
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-black text-white shadow-2xl'
                         }`}
@@ -1076,7 +1076,6 @@ export default function Home() {
                       whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
                       transition={{ type: 'tween', duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                     >
-                      <p className="my-[18px] flex items-center justify-center gap-2">
                       <span>Access my results</span>
                       <span>
                          <svg
@@ -1087,7 +1086,6 @@ export default function Home() {
     <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
   </svg>
                       </span>
-                      </p>
                     </motion.button>
                   )}
                 </motion.div>
@@ -1268,9 +1266,9 @@ export default function Home() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1], delay: 0.35 }}
           >
-            <div className="flex justify-center gap-3">
+            <div className="flex justify-center gap-3 items-center">
               {/* Start: Profile Images */}
-              <div className="flex -space-x-2 mt-[8px]">
+              <div className="flex -space-x-2">
                 {['/client_first.png', '/client_second.png', '/client_third.png'].map((src, i) => (
                   <motion.div
                     key={src}
@@ -1305,7 +1303,7 @@ export default function Home() {
                   ))}
                 </div>
                 <motion.p
-                  className="text-xs font-semibold text-[#71717A] mt-[6px]"
+                  className="text-xs font-semibold text-[#71717A] mt-[2px]"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1], delay: 0.92 }}
