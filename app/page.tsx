@@ -193,8 +193,10 @@ export default function Home() {
     return Math.min(100, Math.round((progress.current / progress.total) * 100))
   }, [showAnalyze, progress])
 
-  /** Long enough to read “Finished”; short enough not to block batch progress feel. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 280
+  /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 900
+  /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 750
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
@@ -729,6 +731,8 @@ export default function Home() {
       // ✅ Main processing — results are written to localStorage inside processBatches
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
+
+      await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS))
 
       // Replace (no extra history entry); toast/email deferred so navigation isn't blocked.
       router.replace('/scanner')
