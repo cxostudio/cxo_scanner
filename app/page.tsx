@@ -886,8 +886,8 @@ export default function Home() {
   }, [isLoading]);
 
   return (
-    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
-      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-[1400px]' : 'max-w-[600px]'}`}>
+    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden  bg-gray-100">
+      <div className={`w-full mx-auto px-4 sm:px-6  ${showAnalyze ? 'max-w-[1400px]' : 'sm:h-screen md:h-auto max-w-[600px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -932,14 +932,14 @@ export default function Home() {
           </>
         )}
         {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
-        <div className="w-full h-full mx-auto">
+        <div className="w-full mx-auto">
           {!showAnalyze ? (
             <>
               <AnimatePresence mode="wait">
                 {currentStep === 1 && (
                   <motion.div
                     key="step1"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
@@ -976,7 +976,7 @@ export default function Home() {
                 {currentStep === 2 && (
                   <motion.div
                     key="step2"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
@@ -1013,7 +1013,7 @@ export default function Home() {
                 {currentStep === 3 && (
                   <motion.div
                     key="step3"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
