@@ -344,6 +344,17 @@ export default function Home() {
       }),
     )
 
+    const parseApiErrorMessage = async (response: Response, fallback: string) => {
+      let message = fallback
+      try {
+        const errorData = await response.json()
+        message = (errorData as { error?: string }).error || message
+      } catch {
+        /* ignore JSON parse errors */
+      }
+      return message
+    }
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
 
@@ -360,18 +371,13 @@ export default function Home() {
             body: JSON.stringify({
               url: batch.url,
               rules: batch.rules,
-              captureScreenshot: true, // Capture screenshot for every batch to show progress
+              // Capture once for preview; doing this every batch increases timeout risk on Vercel.
+              captureScreenshot: i === 0,
             }),
           })
 
           if (!response.ok) {
-            let message = `Failed to scan batch ${i + 1}`
-            try {
-              const errorData = await response.json()
-              message = (errorData as { error?: string }).error || message
-            } catch {
-              /* ignore JSON parse errors */
-            }
+            const message = await parseApiErrorMessage(response, `Failed to scan batch ${i + 1}`)
             throw new Error(message)
           }
 
@@ -421,14 +427,70 @@ export default function Home() {
 
       if (!batchSucceeded) {
         console.error(`Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`)
-        batch.rules.forEach(rule => {
-          allResults.push({
-            ruleId: rule.id,
-            ruleTitle: rule.title,
-            passed: false,
-            reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
+        // Fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
+        if (batch.rules.length > 1) {
+          console.warn(`Attempting single-rule fallback for batch ${i + 1}...`)
+          for (const rule of batch.rules) {
+            let singleRuleSucceeded = false
+            let singleRuleError: unknown = null
+            for (let singleAttempt = 1; singleAttempt <= BATCH_MAX_ATTEMPTS; singleAttempt++) {
+              try {
+                const singleRes = await fetch('/api/scan', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    url: batch.url,
+                    rules: [rule],
+                    captureScreenshot: false,
+                  }),
+                })
+                if (!singleRes.ok) {
+                  const msg = await parseApiErrorMessage(singleRes, `Failed single-rule scan for ${rule.id}`)
+                  throw new Error(msg)
+                }
+                const singleData = await singleRes.json()
+                const parsed = ScanResultsSchema.parse(singleData.results)
+                const result = parsed[0]
+                if (!result) {
+                  throw new Error('No single-rule result returned')
+                }
+                if (!allResults.some((r) => r.ruleId === result.ruleId)) {
+                  allResults.push(result)
+                }
+                singleRuleSucceeded = true
+                break
+              } catch (singleErr) {
+                singleRuleError = singleErr
+                console.error(
+                  `Single-rule fallback failed for ${rule.id} (attempt ${singleAttempt}/${BATCH_MAX_ATTEMPTS}):`,
+                  singleErr
+                )
+                if (singleAttempt < BATCH_MAX_ATTEMPTS) {
+                  await new Promise((r) => setTimeout(r, 800))
+                }
+              }
+            }
+            if (!singleRuleSucceeded) {
+              allResults.push({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: false,
+                reason: `Error processing rule ${rule.id} in fallback: ${singleRuleError instanceof Error ? singleRuleError.message : 'Unknown error'}`,
+              })
+            }
+          }
+        } else {
+          batch.rules.forEach(rule => {
+            allResults.push({
+              ruleId: rule.id,
+              ruleTitle: rule.title,
+              passed: false,
+              reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
+            })
           })
-        })
+        }
       }
 
       const remainingBatches = batches.slice(i + 1)
