@@ -1046,7 +1046,7 @@ export default function Home() {
                           if (urlError) setUrlError('')
                         }}
                         placeholder="Enter the URL of your main product page"
-                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
+                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
                         required
                         aria-invalid={!!urlError}
                         aria-describedby={urlError ? 'url-error' : undefined}
@@ -1066,7 +1066,7 @@ export default function Home() {
                             if (emailError) setEmailError('')
                           }}
                           placeholder="Enter your best email address"
-                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
+                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
                           required
                           aria-invalid={!!emailError}
                           aria-describedby={emailError ? 'email-error' : undefined}
