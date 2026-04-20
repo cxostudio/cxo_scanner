@@ -1047,7 +1047,87 @@ export async function POST(request: NextRequest) {
           tabsInfo.push('Tabs/Accordions detection: Unable to extract')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}`
+        // Header logo clickability/home-link check (deterministic signal for logo-homepage rule)
+        const logoInfo = []
+        try {
+          const host = window.location.host
+          const normalizeHref = (raw: string | null): string => {
+            if (!raw) return ''
+            try {
+              return new URL(raw, window.location.origin).href
+            } catch {
+              return raw
+            }
+          }
+          const isHomepageHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            try {
+              const u = new URL(raw, window.location.origin)
+              if (u.host !== host) return false
+              const p = (u.pathname || '/').replace(/\/+$/, '') || '/'
+              return p === '/' || /^\/[a-z]{2}(?:-[a-z]{2})?$/i.test(p)
+            } catch {
+              const s = raw.trim()
+              return s === '/' || s === '' || /^\/[a-z]{2}(?:-[a-z]{2})?\/?$/.test(s)
+            }
+          }
+
+          const headerRoots = Array.from(
+            document.querySelectorAll('header, [role="banner"], .site-header, #shopify-section-header, .header'),
+          ) as Element[]
+          const scopedRoots = headerRoots.length > 0 ? headerRoots : [document.body]
+          const anchorSet = new Set<HTMLAnchorElement>()
+          for (const root of scopedRoots) {
+            const links = Array.from(root.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+            links.forEach((a) => anchorSet.add(a))
+          }
+          const anchors = Array.from(anchorSet)
+
+          const getScore = (a: HTMLAnchorElement): number => {
+            const hrefRaw = a.getAttribute('href')
+            const href = (hrefRaw || '').toLowerCase()
+            const text = (a.textContent || '').trim().toLowerCase()
+            const aria = (a.getAttribute('aria-label') || '').toLowerCase()
+            const cls = (a.className || '').toString().toLowerCase()
+            const id = (a.id || '').toLowerCase()
+            const title = (a.getAttribute('title') || '').toLowerCase()
+            const attrs = `${aria} ${cls} ${id} ${title}`
+            const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+            const hasLogoImage = !!a.querySelector('img, svg, picture')
+            const brandText = /(spacegoods|brand|logo|home|store)/.test(text)
+            const isHomeHref = isHomepageHref(hrefRaw)
+            const navUtility = /(cart|bag|basket|checkout|account|login|search|menu|wishlist|help|contact)/.test(
+              `${href} ${attrs} ${text}`,
+            )
+
+            let score = 0
+            if (isHomeHref) score += 220
+            if (hasLogoClass) score += 140
+            if (hasLogoImage) score += 90
+            if (brandText) score += 80
+            if (/(logo|brand)/.test(attrs)) score += 60
+            if (navUtility) score -= 140
+            return score
+          }
+
+          const picked = anchors
+            .map((a) => ({ a, score: getScore(a) }))
+            .sort((x, y) => y.score - x.score)[0]?.a || null
+          const href = picked ? picked.getAttribute('href') : null
+          const clickable = !!picked
+          const homeLinked = isHomepageHref(href)
+          const resolved = normalizeHref(href)
+
+          logoInfo.push(`Logo clickable in header: ${clickable ? 'YES' : 'NO'}`)
+          logoInfo.push(`Logo homepage link: ${homeLinked ? 'YES' : 'NO'}`)
+          logoInfo.push(`Logo href: ${resolved || 'Not found'}`)
+        } catch (e) {
+          logoInfo.push('Logo clickable in header: UNKNOWN')
+          logoInfo.push('Logo homepage link: UNKNOWN')
+          logoInfo.push('Logo href: Unknown')
+        }
+
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}`
       })
 
       // Lazy loading detection (loading="lazy", data-src, data-lazy, lazy classes; exclude small icons)
@@ -1499,47 +1579,52 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        /** ±4 sibling DOM nodes from the button (or its 1–2 wrappers); not the whole main landmark. */
-        function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
-          if (cta === el || cta.contains(el)) return true
-          const tryAnchor = (anchor: HTMLElement): boolean => {
-            const parent = anchor.parentElement
-            if (!parent) return false
-            const kids = Array.from(parent.children) as Element[]
-            const idx = kids.indexOf(anchor)
-            if (idx < 0) return false
-            for (let off = -range; off <= range; off++) {
-              if (off === 0) continue
-              const sib = kids[idx + off]
-              if (sib && (sib === el || sib.contains(el))) return true
-            }
-            return false
-          }
-          if (tryAnchor(cta)) return true
-          const wrap = cta.parentElement
-          if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
-          const wrap2 = wrap?.parentElement
-          if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
-          return false
-        }
-
         function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
           const c = cta.getBoundingClientRect()
           const t = (el as HTMLElement).getBoundingClientRect()
           if (c.height < 4 || t.height < 1) return false
-          const hz = t.left < c.right + 200 && t.right > c.left - 200
+          const hz = t.left < c.right + 80 && t.right > c.left - 80
           const gapBelow = t.top - c.bottom
           const gapAbove = c.top - t.bottom
-          const nearBelow = gapBelow >= -48 && gapBelow <= 200
-          const nearAbove = gapAbove >= -36 && gapAbove <= 72
+          const nearBelow = gapBelow >= -24 && gapBelow <= 120
+          const nearAbove = gapAbove >= -20 && gapAbove <= 48
           return hz && (nearBelow || nearAbove)
+        }
+
+        function isElementActuallyVisible(el: Element): boolean {
+          const h = el as HTMLElement
+          if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+          const st = window.getComputedStyle(h)
+          if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
+          const r = h.getBoundingClientRect()
+          return r.width >= 4 && r.height >= 4
+        }
+
+        function getPurchaseBlock(el: Element | null): Element | null {
+          if (!el) return null
+          return (
+            el.closest('form[action*="cart" i]') ||
+            el.closest('[class*="product-form" i]') ||
+            el.closest('[class*="product__info" i]') ||
+            el.closest('[class*="product-info" i]') ||
+            el.closest('[class*="purchase" i]') ||
+            el.closest('[data-product-form]') ||
+            el.closest('[id*="product-form" i]')
+          )
+        }
+
+        function isInSamePurchaseBlock(cta: HTMLElement, el: Element): boolean {
+          const ctaBlock = getPurchaseBlock(cta)
+          const elBlock = getPurchaseBlock(el)
+          return !!ctaBlock && !!elBlock && ctaBlock === elBlock
         }
 
         function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
           if (!cta) return false
           if (isExcludedFarFromBuy(el)) return false
+          if (!isElementActuallyVisible(el)) return false
           if (cta === el || cta.contains(el)) return true
-          if (isWithinSiblingBandOfCta(cta, el, 4)) return true
+          if (isInSamePurchaseBlock(cta, el)) return true
           return pixelNearBuyButton(cta, el)
         }
 
@@ -4011,6 +4096,19 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes('video review') ||
             rule.description.toLowerCase().includes('real customer video');
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
+          const isLogoHomepageRule =
+            rule.id === 'recYUxusypKnfViyM' ||
+            ((rule.title.toLowerCase().includes('logo') && rule.title.toLowerCase().includes('homepage')) ||
+              (rule.description.toLowerCase().includes('logo') && rule.description.toLowerCase().includes('homepage')))
+          const isGeneralCustomerReviewsRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            return (
+              rule.id === 'recUSgWqCEq0anlm2' ||
+              (t.includes('general customer reviews') && (t.includes('homepage') || t.includes('home page'))) ||
+              (d.includes('general customer reviews') && (d.includes('homepage') || d.includes('home page')))
+            )
+          })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
@@ -4113,7 +4211,8 @@ export async function POST(request: NextRequest) {
             specialInstructions = `
 BREADCRUMB NAVIGATION RULE
 
-The DOM scanner could not find breadcrumbs in the HTML structure. You must now check the SCREENSHOT.
+Use the SCREENSHOT as the source of truth for this rule.
+Do NOT pass based only on DOM selectors, JSON-LD, or text patterns.
 
 ━━━━ WHAT TO LOOK FOR ━━━━
 
@@ -4133,8 +4232,8 @@ Breadcrumbs are a navigation trail near the TOP of the page, usually just below 
 ━━━━ DECISION ━━━━
 
 1. Look at the screenshot — scan the area near the TOP of the page
-2. If you see a path-style navigation → PASS
-3. If no navigation trail visible → FAIL
+2. If a path-style breadcrumb is clearly visible to users → PASS
+3. If no clearly visible breadcrumb trail appears in the screenshot → FAIL
 
 ✅ PASS reason: "Breadcrumb navigation ('Home / Mens / New Arrivals') is visible near the top of the page, helping users understand site hierarchy."
 ❌ FAIL reason: "No breadcrumb navigation was detected in the page header or top section. Add breadcrumb navigation (e.g. Home > Category > Product) to help users navigate."
@@ -4369,7 +4468,41 @@ Examples:
 `
           }
 
-          else if (isRatingRule) {
+          else if (isLogoHomepageRule) {
+            specialInstructions = `
+LOGO HOMEPAGE RULE — DOM SIGNAL IS AUTHORITATIVE
+
+Read KEY ELEMENTS section "--- LOGO LINK CHECK ---".
+
+PASS ONLY IF:
+- "Logo clickable in header: YES"
+- and "Logo homepage link: YES"
+
+FAIL if either value is NO.
+
+When available, mention detected href in the reason.
+`
+          } else if (isGeneralCustomerReviewsRule) {
+            specialInstructions = `
+GENERAL CUSTOMER REVIEWS RULE — ANY PAGE (NOT HOMEPAGE-ONLY)
+
+Treat this rule as: "Does the scanned page clearly show general customer reviews?"
+Do NOT fail only because the scanned URL is not the homepage.
+
+Use SCREENSHOT as primary evidence. Then use DOM/text evidence as fallback.
+
+PASS if ANY of these are visible:
+• A customer reviews section (e.g. "Customer Reviews", "What customers are saying", "Reviews")
+• Star rating + review text/cards/customer names
+• Trustpilot / Yotpo / Judge.me / Loox / Stamped / Okendo review widget content
+• Rating summary like "4.5 out of 5" with review context
+
+FAIL only if no customer review content is visible or detectable on the page.
+
+PASS reason example: "Customer reviews are visible on this page, including rating/review social proof, so the rule passes."
+FAIL reason example: "No general customer reviews or review widgets were found on this page."
+`
+          } else if (isRatingRule) {
             specialInstructions = `
 PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
@@ -4707,6 +4840,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
+          const logoHomepagePrefix = isLogoHomepageRule ? `\n\n⚠️ LOGO HOMEPAGE RULE ⚠️\n\nUse the KEY ELEMENTS block "--- LOGO LINK CHECK ---" as the primary source.\nIf it says clickable YES and homepage link YES, output passed:true.\n\nNow analyze:\n\n` : ''
+          const generalCustomerReviewsPrefix = isGeneralCustomerReviewsRule ? `\n\n⚠️⚠️⚠️ GENERAL CUSTOMER REVIEWS RULE — IMAGE FIRST ⚠️⚠️⚠️\n\nTreat this as ANY-PAGE validation (not homepage-only).\n\nLook at the screenshot first. PASS if you can see a reviews block, rating summary with review context, Trustpilot/review widget, or customer review cards.\nIf screenshot is unclear, use page text/DOM evidence. Review indicators like "Excellent", "4.x out of 5", "reviews", "what customers are saying", and review widget labels count.\n\nFAIL only when no review content is visible/detectable anywhere on the scanned page.\n\nNow analyze the screenshot:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
@@ -4714,7 +4849,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
           const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -5122,45 +5257,42 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Before-and-after or result imagery is present on the page (e.g. in product gallery or thumbnails with clinically proven results, percentage improvement, or comparison imagery). This meets the requirement for demonstrating product effectiveness.`
             }
           } else if (isBreadcrumbRule) {
-            // Override 1: DOM found breadcrumbs in KEY ELEMENTS → force PASS
-            const breadcrumbLine = (keyElements || '').split('\n').find(l => /^Breadcrumbs:/i.test(l))
-            const breadcrumbValue = breadcrumbLine?.replace(/^Breadcrumbs:\s*/i, '').trim() || ''
-            const domFoundBreadcrumbs = !!breadcrumbLine
-              && breadcrumbValue.toLowerCase() !== 'not found'
-              && breadcrumbValue !== ''
-              && breadcrumbValue.toLowerCase() !== 'n/a'
-
-            if (!analysis.passed && domFoundBreadcrumbs) {
-              console.log(`Breadcrumb rule: DOM found breadcrumbs ("${breadcrumbValue}") but AI failed. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `Breadcrumb navigation found: "${breadcrumbValue}". Rule passes.`
-            }
-
-            // Override 2: fullVisibleText contains a breadcrumb-style path → force PASS
-            // Catches "Home / Mens", "Home › Category", etc. missed by DOM selector scan
-            if (!analysis.passed) {
-              const pageText = fullVisibleText || websiteContent || ''
-              const breadcrumbTextPatterns = [
-                /\bHome\s+\/\s+\S/i,           // "Home / Mens" (most common)
-                /\bHome\s+›\s+\S/i,            // "Home › Category"
-                /\bHome\s+>\s+\S/i,            // "Home > Category"
-                /\bHome\s*[\/›>»]\s*\w/i,      // "Home/Mens" or "Home›Mens"
-                /\w+\s*›\s*\w+\s*›\s*\w+/,    // "X › Y › Z" (3-part with ›)
-                /\w+\s+\/\s+\w+\s+\/\s+\w+/,  // "X / Y / Z" (3-part with /)
-              ]
-              const matchedCrumb = breadcrumbTextPatterns.find(p => p.test(pageText))
-              if (matchedCrumb) {
-                const matchedText = (pageText.match(matchedCrumb) || [''])[0]
-                console.log(`Breadcrumb rule: Found breadcrumb pattern "${matchedText}" in page text. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Breadcrumb navigation ("${matchedText.trim()}") is visible on the page, helping users understand site hierarchy. Rule passes.`
-              }
-            }
-
-            // Sanity check: warn if reason doesn't mention breadcrumbs (but never force fail)
+            // Breadcrumb verdict should be based on visible screenshot evidence.
+            // Keep only a lightweight reason sanity check.
             if (!reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation') && !reasonLower.includes('trail')) {
               console.warn(`Warning: Breadcrumb rule reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
+            }
+          } else if (isLogoHomepageRule) {
+            const logoClickableYes = /Logo clickable in header:\s*YES/i.test(keyElements || '')
+            const logoHomeYes = /Logo homepage link:\s*YES/i.test(keyElements || '')
+            const href = (keyElements || '').match(/Logo href:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'Not found'
+
+            if (logoClickableYes && logoHomeYes) {
+              analysis.passed = true
+              analysis.reason = `The header logo is clickable and links to the homepage (${href}).`
+            } else {
+              analysis.passed = false
+              analysis.reason = logoClickableYes
+                ? `A clickable header logo was found, but it is not linked to the homepage (href: ${href}).`
+                : 'No clickable header logo linked to the homepage was detected.'
+            }
+          } else if (isGeneralCustomerReviewsRule) {
+            const reviewText = (fullVisibleText || websiteContent || '').toLowerCase()
+            const reviewSignals = [
+              /what\s+customers?\s+are\s+saying/i,
+              /\bcustomer reviews?\b/i,
+              /\breviews?\b/i,
+              /\btrustpilot\b/i,
+              /\bverified purchase\b/i,
+              /\b\d(?:\.\d)?\s*(?:out of 5|\/5)\b/i,
+              /\bexcellent\b(?:\s+\d(?:\.\d)?\s*(?:out of 5|\/5))?/i,
+            ]
+            const matchedSignals = reviewSignals.filter((p) => p.test(reviewText))
+            if (!analysis.passed && matchedSignals.length >= 2) {
+              console.log(`General customer reviews rule: found strong review signals (${matchedSignals.length}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = 'General customer reviews are present on this page (review/rating social-proof content is visible), so the rule passes.'
             }
           } else if (isMainNavImportantPagesRule) {
             if (!analysis.passed && mainNavContext?.essentialNavLikely) {
@@ -5587,6 +5719,21 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.log(`Trust badges rule: DOM found payment/trust signals near CTA (${brands}). Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Payment or trust icons (${brands}) appear near the main purchase button (e.g. Add to cart or Add to bag), which supports checkout confidence.`
+            }
+
+            // Strict near-CTA guardrail: if DOM says "not near CTA", do not allow random PASS.
+            // This prevents false passes caused by footer/global trust icons.
+            if (analysis.passed && trustBadgesContext && !trustBadgesContext.domStructureFound) {
+              const elsewhere = trustBadgesContext.paymentBrandsElsewhere
+              if (elsewhere.length > 0) {
+                console.log(`Trust badges rule: badges found only elsewhere (${elsewhere.join(', ')}). Forcing FAIL.`)
+                analysis.passed = false
+                analysis.reason = `Trust/payment icons are visible only away from the primary CTA (${elsewhere.join(', ')}). Place them directly near the Add to cart/Add to bag button.`
+              } else {
+                console.log(`Trust badges rule: no near-CTA trust icons detected. Forcing FAIL.`)
+                analysis.passed = false
+                analysis.reason = 'No trust/payment icons were detected near the primary CTA. Add recognizable trust badges directly beside or below the purchase button.'
+              }
             }
 
             // Sanity check: warn only, never force a false FAIL

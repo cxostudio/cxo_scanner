@@ -112,7 +112,7 @@
   {
     "id": "trust-badges-near-cta",
     "title": "Display trust signals near the CTA",
-    "description": "PASS if ANY payment logos (Visa, Mastercard, PayPal, Amex, Apple Pay, Google Pay, Klarna, Shop Pay, Stripe, Afterpay, Maestro, Discover) OR security/trust badges (SSL, padlock, Secure Checkout, money-back guarantee, 100% Safe, shield) are visible ANYWHERE on the product page — including near the CTA, in the footer, or below the checkout button. Detection uses both DOM analysis (element scan, image src/alt, iframe src URLs) and screenshot visual analysis. PASS if either source detects payment/trust signals. FAIL only if ZERO payment logos or trust badges are detected in both DOM and screenshot. Do NOT require badges to be within a specific pixel distance of the CTA."
+    "description": "PASS only if payment logos (Visa, Mastercard, PayPal, Amex, Apple Pay, Google Pay, Klarna, Shop Pay, Stripe, Afterpay, Maestro, Discover) or security/trust badges (SSL, padlock, Secure Checkout, money-back guarantee, 100% Safe, shield) are shown in the same purchase block as the primary CTA (Add to Cart/Add to Bag/Buy), directly above, below, or beside it. Footer-only or far-away trust icons do NOT pass. Use both DOM proximity detection and screenshot evidence. FAIL when no trust icons are positioned near the primary CTA."
   },
   {
     "id": "quantity-discounts",

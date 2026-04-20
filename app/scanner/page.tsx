@@ -306,7 +306,7 @@ export default function ScannerPage() {
                       transition={greenBarTransition}
                     >
                       <motion.div
-                        className="h-9 w-9 overflow-hidden rounded-full border-2 border-white bg-zinc-200 shadow-md ring-1 ring-zinc-300"
+                        className="h-9 w-9 overflow-hidden rounded-full border-2 object-cover border-white bg-zinc-200 shadow-md ring-1 ring-zinc-300"
                         initial={{ opacity: 0, scale: 0.85 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ ...greenBarTransition, delay: 0.12 }}

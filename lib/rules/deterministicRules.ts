@@ -24,6 +24,28 @@ export function isBreadcrumbRule(rule: ScanRule): boolean {
   return t.includes('breadcrumb') || d.includes('breadcrumb')
 }
 
+export function isLogoHomepageRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  return (
+    rule.id === 'recYUxusypKnfViyM' ||
+    (t.includes('logo') && t.includes('clickable') && t.includes('homepage')) ||
+    (d.includes('logo') && d.includes('clickable') && d.includes('homepage'))
+  )
+}
+
+export function isTrustBadgesNearCtaRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  return (
+    rule.id === 'trust-badges-near-cta' ||
+    rule.id === 'recihw16WgNwYG09z' ||
+    (t.includes('trust') && t.includes('cta')) ||
+    (t.includes('secure checkout') && t.includes('cta')) ||
+    (d.includes('trust') && d.includes('cta'))
+  )
+}
+
 export function isColorRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -214,19 +236,89 @@ export function evaluateLazyLoadingRule(
 }
 
 export function evaluateBreadcrumbRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
-  const notFound = /Breadcrumbs:\s*Not found/i.test(keyElementsString)
-  const hasLine = keyElementsString.includes('Breadcrumbs:')
+  void rule
+  void keyElementsString
+  // Breadcrumb visibility is now judged from screenshot evidence in the AI step.
+  // DOM/text-only signals can exist without a clearly visible breadcrumb trail.
+  return null
+}
 
-  if (!hasLine) return null
-  if (notFound) return null
+export function evaluateLogoHomepageRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  const hasBlock = keyElementsString.includes('--- LOGO LINK CHECK ---')
+  if (!hasBlock) return null
 
-  const match = keyElementsString.match(/Breadcrumbs:\s*(.+?)(?:\n|$)/)
-  const breadcrumbText = match?.[1]?.trim() || 'present'
+  const clickable = /Logo clickable in header:\s*YES/i.test(keyElementsString)
+  const homepageLinked = /Logo homepage link:\s*YES/i.test(keyElementsString)
+  const hrefMatch = keyElementsString.match(/Logo href:\s*(.+?)(?:\n|$)/i)
+  const href = hrefMatch?.[1]?.trim() || 'Not found'
+
+  if (clickable && homepageLinked) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `The header logo is clickable and links to the homepage (${href}).`,
+    }
+  }
+
+  if (!clickable) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: false,
+      reason: 'No clickable logo link was detected in the header. Make the logo clickable and link it to the homepage.',
+    }
+  }
+
   return {
     ruleId: rule.id,
     ruleTitle: rule.title,
-    passed: true,
-    reason: `Breadcrumb navigation found: "${breadcrumbText}". Rule passes.`,
+    passed: false,
+    reason: `A clickable header logo was found, but it does not link to the homepage (href: ${href}).`,
+  }
+}
+
+export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  const hasBlock = keyElementsString.includes('--- TRUST BADGES CHECK')
+  if (!hasBlock) return null
+
+  const nearCtaYes = /Visual trust icons near CTA \(DOM\):\s*YES/i.test(keyElementsString)
+  const ctaFound = /CTA Found:\s*YES/i.test(keyElementsString)
+  const nearMarks = keyElementsString.match(/Visual trust marks near CTA(?: \(payment logos, seals, guarantee icons\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+  const elsewhereMarks = keyElementsString.match(/Visual trust marks elsewhere only(?: \(footer, etc\. — does NOT pass\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+
+  if (nearCtaYes) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `Trust/payment icons are detected near the primary CTA (${nearMarks}).`,
+    }
+  }
+
+  if (!ctaFound) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: false,
+      reason: 'Primary purchase CTA was not detected, so trust badges near CTA could not be verified.',
+    }
+  }
+
+  if (elsewhereMarks && elsewhereMarks.toLowerCase() !== 'none') {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: false,
+      reason: `Trust/payment icons appear only away from the primary CTA (${elsewhereMarks}).`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason: 'No trust/payment icons were detected near the primary CTA.',
   }
 }
 
@@ -434,6 +526,14 @@ export function tryEvaluateDeterministic(
   if (isBreadcrumbRule(rule)) {
     const breadcrumbResult = evaluateBreadcrumbRule(rule, context.keyElementsString)
     if (breadcrumbResult !== null) return breadcrumbResult
+  }
+  if (isLogoHomepageRule(rule)) {
+    const logoResult = evaluateLogoHomepageRule(rule, context.keyElementsString)
+    if (logoResult !== null) return logoResult
+  }
+  if (isTrustBadgesNearCtaRule(rule)) {
+    const trustResult = evaluateTrustBadgesNearCtaRule(rule, context.keyElementsString)
+    if (trustResult !== null) return trustResult
   }
   if (isProductTitleRule(rule)) {
     const productTitleResult = evaluateProductTitleRule(rule, context.keyElementsString)
