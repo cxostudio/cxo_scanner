@@ -1,32 +1,30 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
-import { Check, X, ChevronDown, AlertCircle } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import type { CheckpointPresentation } from '../components/CheckpointResultBody'
 
-/** Slow, smooth bar fill (left → right) */
 const barEase = [0.4, 0, 0.2, 1] as const
-const greenBarTransition = { duration: 1.75, ease: barEase }
-const redBarTransition = { duration: 1.55, ease: barEase, delay: 0.45 }
-
-/** Desktop + mobile preview row — smooth staggered entrance */
 const previewEase = [0.4, 0, 0.2, 1] as const
-const previewContainerVariants = {
-  hidden: {},
-  show: {
-    transition: { staggerChildren: 0.16, delayChildren: 0.08 },
-  },
+
+/** Tailwind `sm` = 640px — no motion / CSS transitions on results UI below this width. */
+const MOBILE_MAX_WIDTH_QUERY = '(max-width: 639px)'
+
+function subscribeMobileLayout(callback: () => void) {
+  const mq = window.matchMedia(MOBILE_MAX_WIDTH_QUERY)
+  mq.addEventListener('change', callback)
+  return () => mq.removeEventListener('change', callback)
 }
-const previewItemVariants = {
-  hidden: { opacity: 0, y: 22 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.75, ease: previewEase },
-  },
+
+function getMobileLayoutSnapshot() {
+  return window.matchMedia(MOBILE_MAX_WIDTH_QUERY).matches
+}
+
+function useIsMobileLayoutNoTransitions() {
+  return useSyncExternalStore(subscribeMobileLayout, getMobileLayoutSnapshot, () => false)
 }
 
 interface ScanResult {
@@ -54,6 +52,39 @@ export default function ScannerPage() {
   const [visibleCount, setVisibleCount] = useState(8)
   const [desktopPreview, setDesktopPreview] = useState<string | null>(null)
   const [mobilePreview, setMobilePreview] = useState<string | null>(null)
+
+  const mobileNoTx = useIsMobileLayoutNoTransitions()
+
+  const previewContainerVariants = useMemo(
+    () => ({
+      hidden: {},
+      show: {
+        transition: mobileNoTx
+          ? { staggerChildren: 0, delayChildren: 0 }
+          : { staggerChildren: 0.16, delayChildren: 0.08 },
+      },
+    }),
+    [mobileNoTx],
+  )
+
+  const previewItemVariants = useMemo(
+    () => ({
+      hidden: mobileNoTx ? { opacity: 1, y: 0 } : { opacity: 0, y: 22 },
+      show: {
+        opacity: 1,
+        y: 0,
+        transition: mobileNoTx
+          ? { duration: 0 }
+          : { duration: 0.75, ease: previewEase },
+      },
+    }),
+    [mobileNoTx],
+  )
+
+  const greenBarTransition = mobileNoTx ? { duration: 0 } : { duration: 1.75, ease: barEase }
+  const redBarTransition = mobileNoTx
+    ? { duration: 0 }
+    : { duration: 1.55, ease: barEase, delay: 0.45 }
 
   useEffect(() => {
     loadResults()
@@ -165,6 +196,8 @@ export default function ScannerPage() {
               <motion.div
                 className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-full lg:min-w-0 sm:pe-[60px] lg:pe-0 hidden sm:block"
                 variants={previewItemVariants}
+                initial="hidden"
+                animate="show"
               >
                 <div className="overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/4">
                   <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
@@ -260,7 +293,7 @@ export default function ScannerPage() {
         text-sm text-gray-800
         shadow-xl
         opacity-0 invisible
-        transition-all duration-200 ease-out
+        max-sm:transition-none md:transition-all md:duration-200 md:ease-out
         group-hover:opacity-100 group-hover:visible
       "
                 >
@@ -323,7 +356,7 @@ export default function ScannerPage() {
                 return (
                   <div
                     key={result.ruleId}
-                    className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-gray-300 transition-colors"
+                    className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-gray-300 max-sm:transition-none md:transition-colors"
                     onClick={() => toggleRule(result.ruleId)}
                   >
                     <div className="flex items-center gap-3">
@@ -346,7 +379,7 @@ export default function ScannerPage() {
                       {/* Chevron */}
                       <div className="shrink-0 border border-[#E4E4E7] rounded-lg p-1">
                         <ChevronDown
-                          className={`w-5 h-5 text-[#09090B] shrink-0 transition-transform ${isExpanded ? 'transform rotate-180' : ''
+                          className={`w-5 h-5 text-[#09090B] shrink-0 max-sm:transition-none md:transition-transform ${isExpanded ? 'transform rotate-180' : ''
                             }`}
                         />
                       </div>
@@ -410,7 +443,7 @@ export default function ScannerPage() {
               <div className="flex justify-center mb-6">
                 <button
                   onClick={loadMore}
-                  className="w-full py-3 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-colors cursor-pointer"
+                  className="w-full py-3 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 max-sm:transition-none md:transition-colors cursor-pointer"
                 >
                   Load more results
                 </button>

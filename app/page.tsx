@@ -1165,7 +1165,7 @@ export default function Home() {
               <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
               </div>
                 <h2 className="text-center text-2xl md:text-[33px] font-semibold  text-[#757575] mb-2">
-                  Analyzing your url
+                  Analyzing Your URL
                 </h2>
 
                 {/* Preview + right-side progress panel (stacked on small screens). */}
