@@ -100,3 +100,16 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+.custom-list ul {
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 24px;
+}
+
+.custom-list a {
+  color: #000;
+  font-weight: 500;
+}

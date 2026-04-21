@@ -139,34 +139,34 @@ export default function ScannerPage() {
     <main className="flex items-center justify-center md:px-4 bg-[#FDFDFD] min-h-screen w-full overflow-x-visible">
       <div className="max-w-[1000px] w-full mx-auto px-4 pb-6 sm:px-6 sm:pb-8">
         {/* Logo */}
-        <div className="text-center my-[34px]">
+        <div className="text-center  mt-6 mb-2 sm:my-[34px]">
           <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] object-cover" />
         </div>
 
         {/* Title */}
-        <h2 className="text-[33px] leading-[48px] font-bold text-black text-center mb-4">
+        <h2 className="text-[26px] sm:text-[33px] leading-[48px] font-bold text-black text-center mb-0 sm:mb-4">
           Your results are in!
         </h2>
 
         {/* Hero preview: desktop canvas + overlapped mobile frame */}
         {url && (
-          <div className="relative mb-10 overflow-visible px-2 sm:px-3">
+          <div className="relative mb-0 sm:mb-10 overflow-visible px-2 sm:px-3">
             <div
               className="pointer-events-none absolute inset-x-3 inset-y-3 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-7"
               aria-hidden
             />
             <motion.div
-              className="relative mx-auto flex w-full max-w-[920px] flex-col items-center pt-2 pb-8"
+              className="relative mx-auto flex w-full max-w-[720px] flex-col pt-2 pb-0 sm:pb-8"
               variants={previewContainerVariants}
               initial="hidden"
               animate="show"
             >
               {/* Desktop browser */}
               <motion.div
-                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-0"
+                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-full lg:min-w-0 sm:pe-[60px] lg:pe-0 hidden sm:block"
                 variants={previewItemVariants}
               >
-                <div className="overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+                <div className="overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/4">
                   <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" aria-hidden />
                     <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" aria-hidden />
@@ -197,7 +197,7 @@ export default function ScannerPage() {
               </motion.div>
 
               <motion.div
-                className="mt-4 w-full max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2"
+                className="mt-4 w-full sm:max-w-[180px] md:max-w-[216px] lg:max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-0 top-2  sm:z-30 sm:mt-0 sm:max-w-[15.25rem] px-8  sm:px-0 "
                 variants={previewItemVariants}
               >
                 <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05] ">
@@ -241,7 +241,7 @@ export default function ScannerPage() {
 
         {results && (
           <div className="mt-6">
-            <p className="relative text-[15px] leading-[20px] font-semibold text-[#09090B] text-center mb-6">
+            <p className="relative text-[16px] leading-[20px] font-semibold text-[#09090B] text-center mb-6">
               Scan results for:
               <span className="relative group ml-1">
                 <a
@@ -305,18 +305,6 @@ export default function ScannerPage() {
                       animate={{ left: `${passRatio * 100}%` }}
                       transition={greenBarTransition}
                     >
-                      <motion.div
-                        className="h-9 w-9 overflow-hidden rounded-full border-2 object-cover border-white bg-zinc-200 shadow-md ring-1 ring-zinc-300"
-                        initial={{ opacity: 0, scale: 0.85 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ ...greenBarTransition, delay: 0.12 }}
-                      >
-                        <img
-                          src="/client_first.png"
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      </motion.div>
                     </motion.div>
                   )}
                 </div>

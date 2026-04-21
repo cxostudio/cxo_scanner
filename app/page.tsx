@@ -1164,10 +1164,6 @@ export default function Home() {
                 <div className="text-center mb-4">
               <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
               </div>
-                <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
-                  Analyzing Your URL
-                 
-                </h2>
 
                 {/* Preview + right-side progress panel (stacked on small screens). */}
                 {websiteUrl && (
@@ -1178,7 +1174,7 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="mx-auto grid w-full max-w-[1400px] gap-5 px-0 mt-[30px] sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
+                    <div className="mx-auto mt-[30px] grid w-full min-w-0 max-w-[1400px] gap-5 px-0 max-sm:px-3 sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
                       <div className="flex min-h-0 min-w-0 flex-col">
                         {isLoading && quadrants.length === 0 && (
                           <DualViewportLoader
@@ -1281,11 +1277,6 @@ export default function Home() {
                                     {isCompleted && (
                                       <span className="shrink-0 text-xs font-medium text-gray-600 sm:text-sm">
                                         Finished
-                                      </span>
-                                    )}
-                                    {isActive && (
-                                      <span className="max-w-[6.5rem] shrink-0 truncate text-xs font-medium text-gray-700 sm:max-w-[11rem] sm:text-sm">
-                                        Analyzing this url...
                                       </span>
                                     )}
                                   </motion.div>
