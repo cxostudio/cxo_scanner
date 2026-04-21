@@ -18,7 +18,7 @@ export type CheckpointPresentation = {
 }
 
 const mdClass =
-  'flex flex-col gap-2 text-sm text-gray-700 leading-relaxed [&_a]:font-medium [&_a]:text-violet-600 [&_a]:underline [&_strong]:font-semibold [&_strong]:text-gray-900 custom-list'
+  'flex flex-col gap-2 text-sm text-gray-700 leading-relaxed [&_a]:font-medium [&_a]:text-violet-600 [&_a]:underline [&_strong]:font-semibold custom-list'
 
 export function CheckpointResultBody({
   checkpoint,
@@ -31,7 +31,7 @@ export function CheckpointResultBody({
     <div className="space-y-5">
       {checkpoint.requiredActions?.trim() ? (
         <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200/80 bg-white/80 p-5 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-600">
+          <p className="text-sm  uppercase tracking-wide text-black font-bold ">
             Required actions
           </p>
           <div className={mdClass}>
@@ -44,7 +44,7 @@ export function CheckpointResultBody({
 
       {checkpoint.justificationsBenefits.trim() ? (
         <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200/80 bg-white/80 p-5 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-600">
+          <p className="text-sm  uppercase tracking-wide text-black font-bold ">
             Justifications &amp; benefits
           </p>
           <div className={mdClass}>
@@ -67,7 +67,7 @@ export function CheckpointResultBody({
                 href={ex.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 shadow-sm transition hover:border-violet-300 hover:shadow-md"
+                className="group overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 shadow-sm transition  hover:border-violet-300 hover:shadow-md"
               >
                 <div className="relative aspect-auto sm:aspect-video w-full overflow-hidden bg-zinc-100">
                   <img
