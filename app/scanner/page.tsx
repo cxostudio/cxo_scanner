@@ -330,9 +330,9 @@ export default function ScannerPage() {
                       {/* Icon */}
                       <div className="shrink-0">
                         {result.passed ? (
-                          <Check className="w-4 h-4 bg-green-500 rounded-full text-white font-bold" />
+                           <img src="/check.png" alt="passed" className="w-4 h-4" />
                         ) : (
-                          <AlertCircle className="bg-red-500 rounded-full w-5 h-5 text-white font-bold border-0" />
+                          <img src="/error_logo.png" alt="failed" className="w-4 h-4" />
                         )}
                       </div>
 
@@ -382,7 +382,7 @@ export default function ScannerPage() {
                               >
                                 {result.passed ? (
                                   <>
-                                    <Check size={16} className="shrink-0" />
+                                     <img src="/check.png" alt="passed" className="w-4 h-4" />
                                     <strong className="text-sm font-semibold">Why it Passed:</strong>
                                   </>
                                 ) : (
