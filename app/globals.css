@@ -113,3 +113,13 @@
   color: #2563eb; 
   font-weight: 500;
 }
+
+@media screen and (min-width: 320px) and (max-width: 499px) {
+  .mobile-view {
+    max-width: 160px;;
+  }
+
+  .mobile-set-height{
+    min-height: 380px;
+  }
+}

@@ -38,15 +38,15 @@ export function DualViewportLoader({
           
         </p>
       <div
-        className={`relative w-full max-w-[920px] pb-4 pt-1 ${isStart ? 'mx-0' : 'mx-auto'}`}
+        className={`relative mx-auto flex w-full pt-2 pb-0 sm:pb-8 ${isStart ? 'mx-0' : 'mx-auto'}`}
       >
         <div
           className="pointer-events-none absolute inset-x-3 inset-y-2 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-6"
           aria-hidden
         />
 
-        <div className="relative mx-auto w-full">
-          <div className="relative z-0 w-full max-w-[min(100%,40rem)] overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+        <div className="relative mx-auto w-full h-full md:h-auto min-h-[462px] mobile-set-height">
+          <div className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04] rounded-[1.8rem] overflow-hidden">
             <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
               <span className="h-3 w-3 rounded-full bg-[#ff5f57]" aria-hidden />
               <span className="h-3 w-3 rounded-full bg-[#febc2e]" aria-hidden />
@@ -93,7 +93,7 @@ export function DualViewportLoader({
             </div>
           </div>
 
-          <div className="mx-auto mt-4 w-full max-w-[14.2rem] sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2">
+          <div className="w-full max-w-[200px] sm:max-w-[190px] md:max-w-[216px] lg:max-w-[14.2rem] self-center absolute right-0 top-0 sm:z-30 sm:mt-0 mobile-view">
             <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05]">
               <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
                 <div className="flex justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">

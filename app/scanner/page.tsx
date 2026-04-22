@@ -187,14 +187,14 @@ export default function ScannerPage() {
               aria-hidden
             />
             <motion.div
-              className="relative mx-auto flex w-full max-w-[720px] flex-col pt-2 pb-0 sm:pb-8"
+              className="relative mx-auto flex w-full max-w-[720px] pt-2 pb-0 sm:pb-8"
               variants={previewContainerVariants}
               initial="hidden"
               animate="show"
             >
               {/* Desktop browser */}
               <motion.div
-                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 sm:min-w-full lg:min-w-0 sm:pe-[60px] lg:pe-0 hidden sm:block"
+                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 h-full md:h-auto min-h-[462px] mobile-set-height"
                 variants={previewItemVariants}
                 initial="hidden"
                 animate="show"
@@ -230,7 +230,7 @@ export default function ScannerPage() {
               </motion.div>
 
               <motion.div
-                className="mt-4 w-full sm:max-w-[180px] md:max-w-[216px] lg:max-w-[14.2rem] shrink-0 self-center sm:absolute sm:right-0 top-2  sm:z-30 sm:mt-0 sm:max-w-[15.25rem] px-8  sm:px-0 "
+                className="w-full max-w-[200px] sm:max-w-[190px] md:max-w-[216px] lg:max-w-[14.2rem] self-center absolute right-0 top-2 sm:z-30 sm:mt-0 mobile-view"
                 variants={previewItemVariants}
               >
                 <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05] ">
