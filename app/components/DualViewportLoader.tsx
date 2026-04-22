@@ -32,13 +32,8 @@ export function DualViewportLoader({
           : 'mx-auto w-full max-w-5xl px-3 sm:px-4'
       }
     >
-       <p
-          className={`mb-5 text-sm font-medium text-zinc-600 ${isStart ? 'text-left' : 'text-center'}`}
-        >
-          
-        </p>
       <div
-        className={`relative mx-auto flex w-full pt-2 pb-0 sm:pb-8 ${isStart ? 'mx-0' : 'mx-auto'}`}
+        className={`relative mx-auto flex w-full pb-0 ${isStart ? 'mx-0 pt-0 sm:pb-0' : 'pt-2 sm:pb-8'}`}
       >
         <div
           className="pointer-events-none absolute inset-x-3 inset-y-2 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-6"
@@ -151,7 +146,7 @@ export function DualViewportLoader({
 
       {scanning && (
         <div
-          className={`pointer-events-none mt-8 flex max-w-md ${isStart ? 'mx-0 justify-start' : 'mx-auto justify-center'}`}
+          className={`pointer-events-none mt-8 flex sm:max-w-md ${isStart ? 'mx-0 justify-center sm:justify-start' : 'mx-auto justify-center'}`}
         >
           <div className="flex max-w-[min(100%-1rem,28rem)] items-center gap-2.5 rounded-full border border-white/10 bg-zinc-950/90 px-4 py-2.5 text-sm text-white shadow-lg backdrop-blur-sm">
             <span

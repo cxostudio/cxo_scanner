@@ -85,7 +85,7 @@ export function QuadrantScanSequence({
     <LayoutGroup>
       <div className="mx-auto flex w-full max-w-full min-w-0 flex-col gap-4 px-0">
         {/* Single horizontal line: no wrap — scroll on small viewports (scrollbar hidden) */}
-        <div className="scrollbar-none flex w-full min-w-0 flex-nowrap items-end justify-start gap-2 overflow-x-auto pb-1 sm:gap-3">
+        <div className="scrollbar-auto sm:scrollbar-none flex w-full min-w-0 flex-nowrap items-end justify-start gap-2 overflow-x-auto md:overflow-x-visible sm:gap-3">
           <motion.div
             layout
             className="flex min-h-[120px] shrink-0 flex-row flex-nowrap items-end justify-start gap-2 sm:min-h-[140px]"
@@ -110,7 +110,7 @@ export function QuadrantScanSequence({
                     damping: 26,
                     mass: 0.55,
                   }}
-                  className="group relative h-28 w-28 shrink-0 overflow-hidden rounded-lg border border-zinc-200/90 bg-white shadow-md ring-1 ring-black/5 sm:h-32 sm:w-32"
+                  className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-zinc-200/90 bg-white shadow-md ring-1 ring-black/5 sm:h-32 sm:w-32"
                   title={item.label}
                 >
                   <figcaption className="absolute left-0 right-0 top-0 z-10 truncate bg-black/55 px-1 py-0.5 text-center text-[8px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 sm:text-[9px]">
@@ -128,7 +128,7 @@ export function QuadrantScanSequence({
 
           {/* Only mount while scanning — empty w-48/w-72 was stealing space and left-aligning the 4 thumbs */}
           {currentSrc !== null && activeIndex !== null && (
-            <div className="flex w-48 shrink-0 flex-col items-stretch sm:w-72">
+            <div className="flex w-20 shrink-0 flex-col items-stretch sm:w-32">
               <p className="mb-2 w-full text-center text-[11px] font-semibold uppercase tracking-wide text-violet-600 sm:text-xs">
                 In progress
               </p>
@@ -136,7 +136,7 @@ export function QuadrantScanSequence({
                 <motion.div
                   key={activeIndex}
                   layout
-                  className="relative w-full overflow-hidden rounded-xl border-2 border-violet-400/45 bg-white shadow-2xl ring-2 ring-violet-300/25"
+                  className="relative w-full overflow-hidden rounded-lg border border-violet-400/45 bg-white shadow-md ring-1 ring-violet-300/25"
                   initial={{ y: 110, opacity: 0, scale: 0.88 }}
                   animate={
                     phase === 'settle'
@@ -173,7 +173,7 @@ export function QuadrantScanSequence({
                   <div className="border-b border-zinc-100 bg-zinc-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 sm:text-[11px]">
                     {label(activeIndex)}
                   </div>
-                  <div className="relative aspect-4/3 w-full">
+                  <div className="relative aspect-square w-full">
                     <img
                       src={currentSrc}
                       alt=""

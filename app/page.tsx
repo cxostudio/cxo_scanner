@@ -194,7 +194,7 @@ export default function Home() {
   }, [showAnalyze, progress])
 
   /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 900
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 1200
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 750
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
@@ -1164,9 +1164,7 @@ export default function Home() {
                 <div className="text-center mb-4">
               <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
               </div>
-                <h2 className="text-center text-2xl md:text-[33px] font-semibold  text-[#757575] mb-2">
-                  Analyzing Your URL
-                </h2>
+     
 
                 {/* Preview + right-side progress panel (stacked on small screens). */}
                 {websiteUrl && (
@@ -1215,7 +1213,7 @@ export default function Home() {
                         )}
                       </div>
 
-                      <aside className="flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm max-h-[min(34rem,82vh)] lg:h-[min(34rem,76vh)] lg:max-h-none">
+                      <aside className="flex min-h-[462px] w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm lg:h-[462px] lg:min-h-[462px]">
                         <div
                           className="w-full shrink-0"
                           role="progressbar"
@@ -1231,14 +1229,14 @@ export default function Home() {
                           </div>
                           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                             <div
-                              className="h-full rounded-full bg-gray-600 transition-[width] duration-100 ease-out"
+                              className="h-full rounded-full bg-gray-600 transition-[width] duration-500 ease-in-out"
                               style={{ width: `${analyzeProgressPercent}%` }}
                             />
                           </div>
                         </div>
 
-                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
-                          <AnimatePresence mode="popLayout">
+                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain">
+                          <AnimatePresence mode="sync" initial={false}>
                             {analysisSteps
                               .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
                               .filter(({ index }) => !removedSteps.has(index))
@@ -1250,10 +1248,21 @@ export default function Home() {
                                 return (
                                   <motion.div
                                     key={id}
-                                    initial={{ opacity: 0, y: 16 }}
-                                    animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                                    exit={{ x: 32, opacity: 0 }}
-                                    transition={{ duration: 0.16, ease: [0.25, 0.1, 0.25, 1] }}
+                                    layout
+                                    initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                                    animate={{
+                                      opacity: isPending ? 0.45 : 1,
+                                      y: 0,
+                                      scale: 1,
+                                    }}
+                                    exit={{
+                                      x: 32,
+                                      opacity: [1, 0.7, 0],
+                                      y: 0,
+                                      scale: [1, 0.99, 0.985],
+                                      transition: { duration: 0.9, ease: [0.22, 1, 0.36, 1] },
+                                    }}
+                                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                                     className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
                                   >
                                     {isCompleted ? (
