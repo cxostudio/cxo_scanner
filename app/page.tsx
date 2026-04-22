@@ -140,6 +140,7 @@ export default function Home() {
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
+  const analyzeTopRef = useRef<HTMLDivElement | null>(null)
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -218,6 +219,21 @@ export default function Home() {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
     }
+  }, [showAnalyze])
+
+  // On mobile, ensure analyze screen starts from the CXO logo.
+  useEffect(() => {
+    if (!showAnalyze) return
+    if (typeof window === 'undefined') return
+    if (window.innerWidth >= 1024) return
+
+    const id = window.requestAnimationFrame(() => {
+      const el = analyzeTopRef.current
+      if (!el) return
+      const top = window.scrollY + el.getBoundingClientRect().top - 18
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(id)
   }, [showAnalyze])
 
   // After each batch, show “Finished” briefly (ANALYSIS_STEP_REMOVE_DELAY_MS), then remove the row.
@@ -1161,7 +1177,7 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
-                <div className="text-center mb-4">
+                <div ref={analyzeTopRef} className="text-center mb-4">
               <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
               </div>
      
