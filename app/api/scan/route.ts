@@ -1069,16 +1069,26 @@ export async function POST(request: NextRequest) {
               return raw
             }
           }
+          // / and single-segment locale or market roots (Shopify, etc.): /de, /en-gb, /en-int, /en-in
+          const isLocaleOrRootHomePath = (pathname: string): boolean => {
+            const p = (pathname || '/').replace(/\/+$/, '') || '/'
+            if (p === '/') return true
+            return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?$/i.test(p)
+          }
           const isHomepageHref = (raw: string | null): boolean => {
             if (!raw) return false
             try {
               const u = new URL(raw, window.location.origin)
               if (u.host !== host) return false
-              const p = (u.pathname || '/').replace(/\/+$/, '') || '/'
-              return p === '/' || /^\/[a-z]{2}(?:-[a-z]{2})?$/i.test(p)
+              return isLocaleOrRootHomePath(u.pathname || '/')
             } catch {
               const s = raw.trim()
-              return s === '/' || s === '' || /^\/[a-z]{2}(?:-[a-z]{2})?\/?$/.test(s)
+              if (s === '/' || s === '') return true
+              try {
+                return isLocaleOrRootHomePath(new URL(s, 'https://' + host + '/').pathname)
+              } catch {
+                return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?\/?$/i.test(s)
+              }
             }
           }
 
