@@ -11,6 +11,14 @@ import {
   collectFooterSocialSnapshot,
   emptyFooterSocialSnapshot,
 } from '@/lib/rules/footerSocialLinksRule'
+import {
+  collectFooterNewsletterSnapshot,
+  emptyFooterNewsletterSnapshot,
+} from '@/lib/rules/footerNewsletterRule'
+import {
+  collectFooterCustomerSupportSnapshot,
+  emptyFooterCustomerSupportSnapshot,
+} from '@/lib/rules/footerCustomerSupportRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -567,6 +575,8 @@ export async function POST(request: NextRequest) {
     let selectedVariant: string | null = null
     let fallbackRawHtml = ''
     let footerSocialSnapshot = emptyFooterSocialSnapshot()
+    let footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
+    let footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
     try {
       browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
@@ -1964,6 +1974,40 @@ export async function POST(request: NextRequest) {
       } catch (footerSnapErr) {
         console.warn('[scan] footer social DOM snapshot failed:', footerSnapErr)
         footerSocialSnapshot = emptyFooterSocialSnapshot()
+      }
+
+      try {
+        footerNewsletterSnapshot = await collectFooterNewsletterSnapshot(page)
+        const footerNewsletterBlock = [
+          '',
+          '--- FOOTER NEWSLETTER (DOM scan) ---',
+          `Footer element matched: ${footerNewsletterSnapshot.footerRootFound ? 'YES' : 'NO'}${footerNewsletterSnapshot.footerRootSelector ? ` (${footerNewsletterSnapshot.footerRootSelector})` : ''}`,
+          `Visible email input in footer: ${footerNewsletterSnapshot.hasVisibleEmailInputInFooter ? 'YES' : 'NO'}`,
+          `Visible submit control in footer: ${footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ? 'YES' : 'NO'}`,
+          `Newsletter copy in footer: ${footerNewsletterSnapshot.newsletterKeywordInFooter ? 'YES' : 'NO'}`,
+          `Footer newsletter form pair: ${footerNewsletterSnapshot.hasFormPairInFooter ? 'YES' : 'NO'}`,
+          `Matched signals: ${footerNewsletterSnapshot.matchedSignals.length ? footerNewsletterSnapshot.matchedSignals.join(', ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerNewsletterBlock}`
+      } catch (footerNewsletterErr) {
+        console.warn('[scan] footer newsletter DOM snapshot failed:', footerNewsletterErr)
+        footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
+      }
+
+      try {
+        footerCustomerSupportSnapshot = await collectFooterCustomerSupportSnapshot(page)
+        const footerSupportBlock = [
+          '',
+          '--- FOOTER CUSTOMER SUPPORT (DOM scan) ---',
+          `Footer element matched: ${footerCustomerSupportSnapshot.footerRootFound ? 'YES' : 'NO'}${footerCustomerSupportSnapshot.footerRootSelector ? ` (${footerCustomerSupportSnapshot.footerRootSelector})` : ''}`,
+          `Support kinds detected: ${footerCustomerSupportSnapshot.kinds.length ? footerCustomerSupportSnapshot.kinds.join(', ') : 'None'}`,
+          `Matched link labels: ${footerCustomerSupportSnapshot.matchedLabels.length ? footerCustomerSupportSnapshot.matchedLabels.join(' | ') : 'None'}`,
+          `Floating chat launcher (bottom-right heuristic): ${footerCustomerSupportSnapshot.hasFloatingChatLauncher ? 'YES' : 'NO'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerSupportBlock}`
+      } catch (footerSupportErr) {
+        console.warn('[scan] footer customer support DOM snapshot failed:', footerSupportErr)
+        footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
       }
 
       try {
@@ -4048,6 +4092,8 @@ export async function POST(request: NextRequest) {
           thumbnailGallery: thumbnailGalleryContext,
           beforeAfterTransformationExpected,
           footerSocial: footerSocialSnapshot,
+          footerNewsletter: footerNewsletterSnapshot,
+          footerCustomerSupport: footerCustomerSupportSnapshot,
         })
         if (detResult) {
           results.push(
@@ -5837,6 +5883,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               thumbnailGallery: thumbnailGalleryContext,
               beforeAfterTransformationExpected,
               footerSocial: footerSocialSnapshot,
+              footerNewsletter: footerNewsletterSnapshot,
+              footerCustomerSupport: footerCustomerSupportSnapshot,
             })
             if (repairedDetResult) {
               analysis.passed = repairedDetResult.passed

@@ -6,6 +6,10 @@
 import type { ScanRule, ScanResult, LazyLoadingResult, PageSnapshot } from '@/lib/scanner/types'
 import type { FooterSocialSnapshot } from '@/lib/rules/footerSocialLinksRule'
 import { evaluateFooterSocialLinksRule } from '@/lib/rules/footerSocialLinksRule'
+import type { FooterNewsletterSnapshot } from '@/lib/rules/footerNewsletterRule'
+import { evaluateFooterNewsletterRule } from '@/lib/rules/footerNewsletterRule'
+import type { FooterCustomerSupportSnapshot } from '@/lib/rules/footerCustomerSupportRule'
+import { evaluateFooterCustomerSupportRule } from '@/lib/rules/footerCustomerSupportRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
@@ -516,8 +520,14 @@ export function tryEvaluateDeterministic(
     /** Precomputed: expectsVisualTransformationContext(...) */
     beforeAfterTransformationExpected: boolean
     footerSocial: FooterSocialSnapshot
+    footerNewsletter: FooterNewsletterSnapshot
+    footerCustomerSupport: FooterCustomerSupportSnapshot
   }
 ): ScanResult | null {
+  const footerNewsletterResult = evaluateFooterNewsletterRule(rule, context.footerNewsletter)
+  if (footerNewsletterResult !== null) return footerNewsletterResult
+  const footerCustomerSupportResult = evaluateFooterCustomerSupportRule(rule, context.footerCustomerSupport)
+  if (footerCustomerSupportResult !== null) return footerCustomerSupportResult
   const footerResult = evaluateFooterSocialLinksRule(rule, context.footerSocial)
   if (footerResult !== null) return footerResult
   if (isLazyLoadingRule(rule)) {

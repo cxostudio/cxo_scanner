@@ -201,13 +201,6 @@ export default function Home() {
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
-  useEffect(() => {
-    // Load rules on component mount
-    loadRules()
-    // Screenshot is not stored in localStorage due to size limits
-    // It will be loaded from API response during scan
-  }, [])
-
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
     if (!showAnalyze) return
@@ -261,28 +254,6 @@ export default function Home() {
       }
     }
   }, [mounted, showAnalyze])
-
-  const loadRules = async () => {
-    try {
-      const response = await fetch('/api/conversion-checkpoints')
-      if (!response.ok) {
-        throw new Error('Failed to load conversion checkpoints')
-      }
-      const data = (await response.json()) as {
-        rules?: unknown
-        records?: unknown
-        foundCount?: number
-        notFoundIds?: string[]
-      }
-      // Browser console — full API payload (records + mapped rules)
-      console.log('[conversion-checkpoints]', data)
-      const validatedRules = z.array(RuleSchema).parse(data.rules ?? [])
-      setRules(validatedRules)
-    } catch (error) {
-      console.error('Error loading rules:', error)
-      setRules([])
-    }
-  }
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
     const BATCH_SIZE = 5
@@ -707,31 +678,44 @@ export default function Home() {
       return setEmailError(emailResult.error.errors[0]?.message || 'Invalid email')
     }
   
-    let rulesToUse = rules
-  
     try {
       setIsStartingScan(true)
-  
-      // ✅ Load rules from Airtable conversion-checkpoints (same as /api/conversion-checkpoints)
-      if (!rulesToUse.length) {
-        const res = await fetch('/api/conversion-checkpoints')
-        if (!res.ok) throw new Error('Failed to load conversion checkpoints')
-        const data = await res.json()
-        console.log('[conversion-checkpoints] scan refresh:', data)
-        rulesToUse = z.array(RuleSchema).parse(data.rules ?? [])
-        setRules(rulesToUse)
-      }
-  
-      if (!rulesToUse.length) {
-        throw new Error('No rules available')
-      }
-  
-      // ✅ Normalize URL
+
+      // ✅ Normalize URL (used for server-filtered checkpoints + scan)
       let validUrl = urlResult.data!
       if (!/^https?:\/\//i.test(validUrl)) {
         validUrl = `https://${validUrl}`
       }
-  
+
+      // ✅ Rules filtered on the server by `url` (detected page type + Airtable Page Type IDs)
+      const cpRes = await fetch(
+        `/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`,
+      )
+      if (!cpRes.ok) throw new Error('Failed to load conversion checkpoints')
+      const cpData = (await cpRes.json()) as {
+        rules?: unknown
+        records?: unknown
+        detectedPageType?: string
+        requiredPageTypeIds?: string[]
+        filteredRulesCount?: number
+        filterUsedFallback?: boolean
+      }
+      console.log('[conversion-checkpoints] for scan (server-filtered):', {
+        url: validUrl,
+        detectedPageType: cpData.detectedPageType,
+        requiredPageTypeIds: cpData.requiredPageTypeIds,
+        filteredRulesCount: cpData.filteredRulesCount,
+        filterUsedFallback: cpData.filterUsedFallback,
+        fullPayload: cpData,
+      })
+
+      const rulesToUse = z.array(RuleSchema).parse(cpData.rules ?? [])
+      setRules(rulesToUse)
+
+      if (!rulesToUse.length) {
+        throw new Error('No rules available for this URL')
+      }
+
       // ✅ Browser info
       const browser = navigator.userAgent
       const screenSize = `${window.screen.width}x${window.screen.height}`
@@ -806,14 +790,22 @@ export default function Home() {
         }
       })()
   
-      // ✅ Main processing — results are written to localStorage inside processBatches
+      // “Access my results” — URL / form payload (scan API disabled below)
+      console.log('[Access my results] URL / form data:', {
+        websiteUrlInput: urlTrimmed,
+        normalizedUrl: validUrl,
+        email: emailTrimmed,
+        challenge: selectedChallenge,
+        revenue: selectedRevenue,
+      })
+
+      // Main scan: POST /api/scan per batch, then /api/scan/combine
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
       await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS))
-
-      // Replace (no extra history entry); toast/email deferred so navigation isn't blocked.
       router.replace('/scanner')
+    
       setTimeout(() => {
         let passResult: string | number = 'N/A'
         let failResult: string | number = 'N/A'
@@ -842,29 +834,31 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
-  
+      
+
+      setShowAnalyze(false)
+
     } catch (err) {
       console.error(err)
       toast.error(err instanceof Error ? err.message : 'Something went wrong')
