@@ -179,13 +179,19 @@ export default function Home() {
     'Finalizing your audit report',
   ] as const
   const ANALYSIS_STEP_COUNT = analysisSteps.length
+  /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
+  const SCAN_PROGRESS_UNITS_PER_BATCH = 40
 
+  /**
+   * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
+   * plus one unit at the end for /api/scan/combine.
+   */
   const mounted = useMemo(() => {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
     if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
     return Math.min(
       ANALYSIS_STEP_COUNT - 1,
-      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT)
+      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT),
     )
   }, [showAnalyze, progress, ANALYSIS_STEP_COUNT])
 
@@ -256,32 +262,29 @@ export default function Home() {
   }, [mounted, showAnalyze])
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
-    const BATCH_SIZE = 5
     const batches: BatchData[] = []
     const timestamp = Date.now()
-
     const totalRules = rulesToScan.length
-    const remainder = totalRules % BATCH_SIZE
-    // Calculate total batches: first batch gets remainder, rest get BATCH_SIZE
-    const totalBatches = remainder > 0
-      ? 1 + Math.floor((totalRules - (BATCH_SIZE + remainder)) / BATCH_SIZE)
-      : Math.floor(totalRules / BATCH_SIZE)
 
-    let ruleIndex = 0
+    if (totalRules === 0) {
+      localStorage.setItem('scanBatches', JSON.stringify([]))
+      localStorage.setItem('scanResults', JSON.stringify([]))
+      return []
+    }
+
+    // One /api/scan call = one Puppeteer session. Default: all rules in one batch (fastest).
+    // On Vercel Hobby (60s function cap), set NEXT_PUBLIC_SCAN_BATCH_RULES=8 (or similar) to chunk.
+    const configuredChunk = parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10)
+    const chunkSize =
+      Number.isFinite(configuredChunk) && configuredChunk > 0
+        ? Math.min(configuredChunk, totalRules)
+        : totalRules
+
+    const totalBatches = Math.ceil(totalRules / chunkSize)
 
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      // First batch gets remainder if exists, otherwise BATCH_SIZE
-      let currentBatchSize = BATCH_SIZE
-      if (batchIndex === 0 && remainder > 0) {
-        currentBatchSize = BATCH_SIZE + remainder
-      }
-
-      // Stop if no more rules left
-      if (ruleIndex >= totalRules) {
-        break
-      }
-
-      const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
+      const start = batchIndex * chunkSize
+      const batchRules = rulesToScan.slice(start, start + chunkSize)
 
       batches.push({
         batchId: `batch-${timestamp}-${batchIndex}`,
@@ -291,8 +294,6 @@ export default function Home() {
         totalBatches: totalBatches,
         timestamp: timestamp,
       })
-
-      ruleIndex += currentBatchSize
     }
 
     localStorage.setItem('scanBatches', JSON.stringify(batches))
@@ -306,8 +307,8 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
-    // `current` = batches finished (not the batch currently scanning). Avoids 100% while last /api/scan is still in flight.
-    setProgress({ current: 0, total: batches.length })
+    const progressTotalUnits = Math.max(1, batches.length * SCAN_PROGRESS_UNITS_PER_BATCH + 1)
+    setProgress({ current: 0, total: progressTotalUnits })
 
     const ScanResultsSchema = z.array(
       z.object({
@@ -344,12 +345,31 @@ export default function Home() {
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
+      const segmentStart = i * SCAN_PROGRESS_UNITS_PER_BATCH
+      const segmentPulseCap = segmentStart + SCAN_PROGRESS_UNITS_PER_BATCH - 1
+      setProgress({ current: segmentStart, total: progressTotalUnits })
 
       let batchSucceeded = false
       let lastBatchError: unknown = null
 
       for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+        const pulseMs = Math.min(
+          6500,
+          Math.max(
+            700,
+            Math.floor((batch.rules.length * 3200) / SCAN_PROGRESS_UNITS_PER_BATCH),
+          ),
+        )
+        let pulseId: number | null = null
         try {
+          pulseId = window.setInterval(() => {
+            setProgress((prev) => {
+              if (!prev) return prev
+              const next = Math.min(prev.current + 1, segmentPulseCap)
+              return { current: Math.max(prev.current, next), total: prev.total }
+            })
+          }, pulseMs)
+
           const response = await fetch('/api/scan', {
             method: 'POST',
             headers: {
@@ -408,6 +428,11 @@ export default function Home() {
           if (attempt < BATCH_MAX_ATTEMPTS) {
             console.warn(`Retrying batch ${i + 1} once after error...`)
             await new Promise((r) => setTimeout(r, 1500))
+          }
+        } finally {
+          if (pulseId != null) {
+            window.clearInterval(pulseId)
+            pulseId = null
           }
         }
       }
@@ -489,7 +514,7 @@ export default function Home() {
 
       localStorage.setItem('scanResults', JSON.stringify(allResults))
 
-      setProgress({ current: i + 1, total: batches.length })
+      setProgress({ current: (i + 1) * SCAN_PROGRESS_UNITS_PER_BATCH, total: progressTotalUnits })
     }
 
     try {
@@ -544,11 +569,13 @@ export default function Home() {
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
+      setProgress({ current: progressTotalUnits, total: progressTotalUnits })
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
       localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
+      setProgress({ current: progressTotalUnits, total: progressTotalUnits })
     }
 
     // Don't set progress to null here (would reset the batch progress bar and step UI)
@@ -825,24 +852,24 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)

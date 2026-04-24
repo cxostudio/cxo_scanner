@@ -4,8 +4,10 @@
  */
 
 const SCROLL_STEP_RATIO = 0.4
-const STEP_DELAY_MS = 450
-const SETTLE_AFTER_SCROLL_MS = 5000
+/** Shorter steps = faster scroll through long pages (lazy content still loads). */
+const STEP_DELAY_MS = 320
+/** Post-scroll settle; lower = faster scans, slightly higher lazy-load miss risk. */
+const SETTLE_AFTER_SCROLL_MS = 2200
 
 export async function scrollPageToBottom(page: import('puppeteer-core').Page): Promise<void> {
   await page.evaluate(

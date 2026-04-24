@@ -34,7 +34,8 @@ import {
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+/** Full scan runs one Puppeteer session + all rules; needs headroom beyond Hobby 60s cap. */
+export const maxDuration = 300
 interface Rule {
   id: string
   title: string
@@ -605,7 +606,7 @@ export async function POST(request: NextRequest) {
       } catch {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
-      await new Promise((r) => setTimeout(r, 2000))
+      await new Promise((r) => setTimeout(r, 1200))
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
@@ -649,7 +650,7 @@ export async function POST(request: NextRequest) {
       fullVisibleText = visibleText
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
-      const colorWaitMs = process.env.VERCEL ? 1500 : 1500
+      const colorWaitMs = 1000
       await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
