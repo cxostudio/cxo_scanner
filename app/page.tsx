@@ -47,6 +47,7 @@ type NdComplete = {
   quadrants?: string[];
   quadrantLabels?: string[];
   url?: string;
+  previewDesktop?: string;
   previewMobile?: string;
   redirectWarning?: string;
 };
@@ -582,8 +583,15 @@ export default function Home() {
     // Toast + redirect happen in handleStartScan right after this returns
   }
 
-  /** Calls server `analyzeWebsiteStream` via POST /api/preview_website — NDJSON desktop/mobile preview + quadrants. Parallel to rule scanning. */
-  const startWebsitePreviewStream = async (captureUrl: string) => {
+  /**
+   * POST /api/preview_website — NDJSON desktop/mobile preview + quadrants.
+   * `onReadyForRuleScan` fires once when a usable preview exists (or on error / stream end) so rule-scan
+   * progress stays aligned with the left preview on slow networks (e.g. Vercel).
+   */
+  const startWebsitePreviewStream = async (
+    captureUrl: string,
+    gateHooks?: { onReadyForRuleScan?: () => void },
+  ) => {
     const trimmed = captureUrl.trim()
     if (!trimmed) {
       setError('Please enter a URL.')
@@ -599,6 +607,16 @@ export default function Home() {
     setLoaderMsgIndex(0)
     setPreviewDesktop(null)
     setPreviewMobile(null)
+
+    let gateReleased = false
+    const releaseRuleScanGate = () => {
+      if (gateReleased) return
+      gateReleased = true
+      gateHooks?.onReadyForRuleScan?.()
+    }
+
+    const previewLooksReady = (s: unknown) => typeof s === 'string' && s.length > 80
+
     try {
       const response = await fetch('/api/preview_website', {
         method: 'POST',
@@ -625,14 +643,17 @@ export default function Home() {
           if (typeof msg.previewDesktop === 'string') {
             setPreviewDesktop(msg.previewDesktop)
             persistScanPreview('scanPreviewDesktop', msg.previewDesktop)
+            if (previewLooksReady(msg.previewDesktop)) releaseRuleScanGate()
           }
           if (typeof msg.preview === 'string' && !msg.previewDesktop) {
             setPreviewDesktop(msg.preview)
             persistScanPreview('scanPreviewDesktop', msg.preview)
+            if (previewLooksReady(msg.preview)) releaseRuleScanGate()
           }
           if (typeof msg.previewMobile === 'string') {
             setPreviewMobile(msg.previewMobile)
             persistScanPreview('scanPreviewMobile', msg.previewMobile)
+            if (previewLooksReady(msg.previewMobile)) releaseRuleScanGate()
           }
         }
         if (msg.type === 'error') {
@@ -664,9 +685,15 @@ export default function Home() {
         }
       }
       const gotComplete = streamState.complete
+      if (typeof gotComplete?.previewDesktop === 'string' && gotComplete.previewDesktop.length > 0) {
+        setPreviewDesktop(gotComplete.previewDesktop)
+        persistScanPreview('scanPreviewDesktop', gotComplete.previewDesktop)
+        if (previewLooksReady(gotComplete.previewDesktop)) releaseRuleScanGate()
+      }
       if (typeof gotComplete?.previewMobile === 'string') {
         setPreviewMobile(gotComplete.previewMobile)
         persistScanPreview('scanPreviewMobile', gotComplete.previewMobile)
+        if (previewLooksReady(gotComplete.previewMobile)) releaseRuleScanGate()
       }
       if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
         setQuadrants(gotComplete.quadrants)
@@ -679,8 +706,10 @@ export default function Home() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
       console.error('Website preview stream error:', err)
+      releaseRuleScanGate()
     } finally {
       setIsLoading(false)
+      releaseRuleScanGate()
     }
   }
 
@@ -794,8 +823,27 @@ export default function Home() {
       // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
-      void startWebsitePreviewStream(validUrl)
-  
+      let resolvePreviewGate!: () => void
+      const previewReadyPromise = new Promise<void>((r) => {
+        resolvePreviewGate = r
+      })
+      let previewGateSettled = false
+      let previewGateTimeoutId = 0
+      const settlePreviewGate = () => {
+        if (previewGateSettled) return
+        previewGateSettled = true
+        if (previewGateTimeoutId !== 0) window.clearTimeout(previewGateTimeoutId)
+        resolvePreviewGate()
+      }
+      previewGateTimeoutId = window.setTimeout(settlePreviewGate, 60_000)
+
+      const streamPromise = startWebsitePreviewStream(validUrl, {
+        onReadyForRuleScan: settlePreviewGate,
+      })
+      void streamPromise.catch((e) => console.error('Preview stream:', e))
+
+      await previewReadyPromise
+
       // ✅ Screenshot (non-blocking, clean)
       ;(async () => {
         try {
@@ -817,7 +865,7 @@ export default function Home() {
         }
       })()
   
-      // Main scan: POST /api/scan per batch, then /api/scan/combine
+      // Main scan: POST /api/scan per batch, then /api/scan/combine (after preview is visible or gate timeout)
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
 
