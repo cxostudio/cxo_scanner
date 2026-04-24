@@ -790,15 +790,6 @@ export default function Home() {
         }
       })()
   
-      // “Access my results” — URL / form payload (scan API disabled below)
-      console.log('[Access my results] URL / form data:', {
-        websiteUrlInput: urlTrimmed,
-        normalizedUrl: validUrl,
-        email: emailTrimmed,
-        challenge: selectedChallenge,
-        revenue: selectedRevenue,
-      })
-
       // Main scan: POST /api/scan per batch, then /api/scan/combine
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
@@ -834,30 +825,28 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
       
-
-      setShowAnalyze(false)
 
     } catch (err) {
       console.error(err)

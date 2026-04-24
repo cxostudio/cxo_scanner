@@ -6,7 +6,12 @@ import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
-import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
+import {
+  tryEvaluateDeterministic,
+  expectsVisualTransformationContext,
+  isHeaderCartQuickAccessRule,
+  isCartIconItemCountRule,
+} from '@/lib/rules/deterministicRules'
 import {
   collectFooterSocialSnapshot,
   emptyFooterSocialSnapshot,
@@ -652,7 +657,8 @@ export async function POST(request: NextRequest) {
       keyElements = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
           .map(el => {
-            const text = el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || ''
+            const raw = el.textContent || el.getAttribute('href') || el.getAttribute('aria-label') || ''
+            const text = raw.replace(/\s+/g, ' ').trim()
             return text
           })
           .filter(text => text.length > 0)
@@ -661,7 +667,7 @@ export async function POST(request: NextRequest) {
           .join(' | ')
 
         const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-          .map(h => h.textContent?.trim())
+          .map(h => (h.textContent || '').replace(/\s+/g, ' ').trim())
           .filter(text => text && text.length > 0)
           .sort() // Sort alphabetically for consistency
           .slice(0, 15) // Increased limit
@@ -879,9 +885,25 @@ export async function POST(request: NextRequest) {
 
           const uniqueColors = new Set<string>()
           const pureBlackSources: string[] = [] // tagName for elements that have #000000
+          let meaningfulPureBlackCount = 0
+          let largeBlackBackgroundFound = false
 
           sampleElements.forEach(el => {
             try {
+              const node = el as HTMLElement
+              const style = window.getComputedStyle(node)
+              const rect = node.getBoundingClientRect()
+              // Ignore hidden/off-screen tiny utility elements (e.g., skip links) that create false positives.
+              if (
+                style.display === 'none' ||
+                style.visibility === 'hidden' ||
+                Number(style.opacity) <= 0 ||
+                rect.width < 2 ||
+                rect.height < 2
+              ) {
+                return
+              }
+
               const computedStyle = window.getComputedStyle(el)
               const textColor = computedStyle.color
               const bgColor = computedStyle.backgroundColor
@@ -902,27 +924,45 @@ export async function POST(request: NextRequest) {
               const textHex = rgbToHex(textColor)
               const bgHex = rgbToHex(bgColor)
               const tag = (el.tagName || '').toLowerCase()
+              const textSample = ((node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim() || '').slice(0, 120)
+              const utilityText = /^(skip to content|open menu|close menu|search|cart|bag|menu)$/i.test(textSample)
+              const utilityClass = /skip|sr-only|visually-hidden|screen-reader|icon|nav|menu|header__icon/i.test(
+                (node.className || '').toString(),
+              )
+              const meaningfulText = /[a-z]/i.test(textSample) && textSample.length >= 8 && !utilityText
+              const isMeaningful = !utilityClass && (meaningfulText || tag === 'body' || tag.startsWith('h'))
 
               if (textHex) {
                 uniqueColors.add(`text:${textHex}`)
-                if (textHex === '#000000') pureBlackSources.push(`text:${tag}`)
+                if (textHex === '#000000') {
+                  pureBlackSources.push(`text:${tag}`)
+                  if (isMeaningful) meaningfulPureBlackCount += 1
+                }
               }
               if (bgHex) {
                 uniqueColors.add(`bg:${bgHex}`)
-                if (bgHex === '#000000') pureBlackSources.push(`bg:${tag}`)
+                if (bgHex === '#000000') {
+                  pureBlackSources.push(`bg:${tag}`)
+                  const viewportArea = Math.max(1, window.innerWidth * window.innerHeight)
+                  const area = rect.width * rect.height
+                  if (area / viewportArea >= 0.2 && !utilityClass) {
+                    largeBlackBackgroundFound = true
+                  }
+                }
               }
             } catch (e) {
               // Ignore errors
             }
           })
 
-          // Only report pure black if a non-body element has it (body often defaults to black before CSS loads on Vercel)
-          const hasPureBlackOnNonBody = pureBlackSources.some(s => !s.endsWith('body'))
-          const hasPureBlack = hasPureBlackOnNonBody
+          // Only fail when pure black is meaningfully used (not tiny utility/skip-link artifacts).
+          const hasPureBlack = meaningfulPureBlackCount >= 3 || largeBlackBackgroundFound
 
           const colorList = Array.from(uniqueColors).slice(0, 15).join(', ')
           colorInfo.push(`Colors found: ${colorList || 'No colors detected'}`)
           colorInfo.push(`Pure black (#000000) detected: ${hasPureBlack ? 'YES' : 'NO'}`)
+          colorInfo.push(`Meaningful pure-black elements count: ${meaningfulPureBlackCount}`)
+          colorInfo.push(`Large pure-black background found: ${largeBlackBackgroundFound ? 'YES' : 'NO'}`)
         } catch (e) {
           colorInfo.push('Color detection: Unable to extract')
         }
@@ -1147,8 +1187,198 @@ export async function POST(request: NextRequest) {
           logoInfo.push('Logo href: Unknown')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}`
+        // Header cart / bag quick access (deterministic signal for cart-in-header rules)
+        const cartInfo: string[] = []
+        try {
+          const hostCart = window.location.host
+          const isCartViewHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            const low = raw.trim().toLowerCase()
+            if (low.startsWith('javascript:')) return false
+            try {
+              const u = new URL(raw, window.location.origin)
+              if (u.host !== hostCart) return false
+              const p = (u.pathname || '').toLowerCase()
+              if (p.includes('/cart/add') || p.includes('/cart/change')) return false
+              return /\/cart\/?$/.test(p) || /\/bag\/?$/.test(p) || /\/basket\/?$/.test(p)
+            } catch {
+              return /\/cart\/?$/i.test(raw) && !/\/cart\/add/i.test(raw)
+            }
+          }
+          const isCartHashHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            const s = raw.trim().toLowerCase()
+            if (!s.startsWith('#')) return false
+            return /cart|bag|basket|mini-cart|drawer/.test(s)
+          }
+          const headerRootsCart = Array.from(
+            document.querySelectorAll('header, [role="banner"], .site-header, #shopify-section-header, .header'),
+          ) as Element[]
+          const rootsCart = headerRootsCart.length > 0 ? headerRootsCart : [document.body]
+          let foundHref = ''
+          let foundKind = ''
+          outerCart: for (const root of rootsCart) {
+            const links = Array.from(root.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+            for (const a of links) {
+              const h = a.getAttribute('href')
+              if (isCartViewHref(h) || isCartHashHref(h)) {
+                foundHref = h || ''
+                foundKind = 'cart or bag link in header'
+                break outerCart
+              }
+            }
+            const ctrls = Array.from(root.querySelectorAll('button, [role="button"]')) as Element[]
+            for (const b of ctrls) {
+              const lab = (
+                (b.getAttribute('aria-label') || '') +
+                ' ' +
+                (b.getAttribute('title') || '') +
+                ' ' +
+                ((b.className || '') + '').toString()
+              ).toLowerCase()
+              if (
+                /(open|view|show)\s+(your\s+)?(shopping\s+)?(cart|bag|basket)/.test(lab) ||
+                lab.includes('cart-drawer') ||
+                lab.includes('mini-cart') ||
+                lab.includes('header__icon--cart') ||
+                (lab.includes('cart') && lab.includes('drawer'))
+              ) {
+                foundKind = (b.getAttribute('aria-label') || 'header cart control').trim()
+                foundHref = '(cart drawer or modal control)'
+                break outerCart
+              }
+            }
+          }
+          const cartPresent = !!(foundHref || foundKind)
+          cartInfo.push(`Header cart quick access present: ${cartPresent ? 'YES' : 'NO'}`)
+          cartInfo.push(
+            `Cart quick access detail: ${cartPresent ? `${foundKind ? `${foundKind} — ` : ''}${foundHref}`.trim() : 'Not found'}`,
+          )
+        } catch (e) {
+          cartInfo.push('Header cart quick access present: UNKNOWN')
+          cartInfo.push('Cart quick access detail: Unknown')
+        }
+
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
       })
+
+      // Cart icon item count / badge: empty cart = PASS; non-empty = PASS only with visible count badge
+      try {
+        const cartIconCountBlock = await page.evaluate(async () => {
+          const lines: string[] = []
+          let itemCount = -1
+          try {
+            const res = await fetch('/cart.js', { credentials: 'same-origin' })
+            if (res.ok) {
+              const j: { item_count?: number; items?: unknown[] } = await res.json()
+              if (typeof j.item_count === 'number') itemCount = j.item_count
+              else if (Array.isArray(j.items)) itemCount = j.items.length
+            }
+          } catch {
+            /* same-origin or blocked */
+          }
+          const headerRoots = Array.from(
+            document.querySelectorAll(
+              'header, [role="banner"], .site-header, #shopify-section-header, [class*="header" i]',
+            ),
+          ) as Element[]
+          const linkRoots: Element[] = headerRoots.length > 0 ? headerRoots : [document.body]
+          const allLinks: HTMLAnchorElement[] = []
+          const seen = new Set<HTMLAnchorElement>()
+          for (const root of linkRoots) {
+            root.querySelectorAll('a[href]').forEach((a) => {
+              if (!seen.has(a as HTMLAnchorElement)) {
+                seen.add(a as HTMLAnchorElement)
+                allLinks.push(a as HTMLAnchorElement)
+              }
+            })
+          }
+          let cartControl: HTMLAnchorElement | null = null
+          for (const a of allLinks) {
+            const h = a.getAttribute('href') || ''
+            if (/\/cart\/(add|change|clear)/i.test(h)) continue
+            try {
+              const u = new URL(h, window.location.origin)
+              const p = u.pathname
+              if (/\/(cart|bag|basket)\/?$/.test(p)) {
+                cartControl = a
+                break
+              }
+            } catch {
+              /* invalid href */
+            }
+          }
+          const isVis = (el: Element) => {
+            const h = el as HTMLElement
+            if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+            const st = window.getComputedStyle(h)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+              return false
+            const r = h.getBoundingClientRect()
+            return r.width > 0 && r.height > 0
+          }
+          const hasVisibleCountBadge = (anchor: HTMLAnchorElement | null) => {
+            if (!anchor) return false
+            const checkEl = (n: Element) => {
+              if (!isVis(n)) return false
+              const raw = (n.textContent || '').replace(/\s+/g, ' ').trim()
+              if (!/^\d{1,3}$/.test(raw)) {
+                const c =
+                  n.getAttribute('data-count') ||
+                  n.getAttribute('data-cart-count') ||
+                  n.getAttribute('data-item-count') ||
+                  ''
+                return !!(c && /^\d+$/.test(c) && c !== '0')
+              }
+              if (n === anchor) return true
+              const r = (n as HTMLElement).getBoundingClientRect()
+              return r.width > 0 && r.width < 220 && r.height > 0 && r.height < 220
+            }
+            if (checkEl(anchor)) return true
+            for (const n of Array.from(
+              anchor.querySelectorAll(
+                'span, small, b, [class*="count" i], [class*="badge" i], [class*="bubble" i], [data-count], [data-cart-count]',
+              ),
+            )) {
+              if (checkEl(n)) return true
+            }
+            return false
+          }
+          const badgeVisible = hasVisibleCountBadge(cartControl)
+          lines.push(`Storefront cart item count: ${itemCount < 0 ? 'unknown' : String(itemCount)}`)
+          lines.push(`Count badge visible on/near header cart control: ${badgeVisible ? 'YES' : 'NO'}`)
+          let verdict: 'PASS' | 'FAIL' | 'INDETERMINATE' = 'INDETERMINATE'
+          let detail = ''
+          if (itemCount < 0) {
+            if (badgeVisible) {
+              verdict = 'PASS'
+              detail =
+                'A count badge is visible; storefront cart count could not be read, but a numeric badge is present on the cart control.'
+            } else {
+              verdict = 'INDETERMINATE'
+              detail = 'Could not read /cart.js and no count badge was detected; re-scan or verify manually.'
+            }
+          } else if (itemCount === 0) {
+            verdict = 'PASS'
+            detail =
+              'The cart is empty, so a numeric badge is not required on the icon (themes often hide the bubble when count is 0).'
+          } else if (badgeVisible) {
+            verdict = 'PASS'
+            detail = 'The cart has items and a visible item-count bubble/badge is shown on the header cart control.'
+          } else {
+            verdict = 'FAIL'
+            detail =
+              'The cart has one or more items, but no visible item-count number/badge was detected on the header cart control.'
+          }
+          lines.push(`Cart icon item count rule verdict: ${verdict}`)
+          lines.push(`Cart icon item count rule detail: ${detail}`)
+          return lines.join('\n')
+        })
+        keyElements = (keyElements || '') + '\n\n--- CART ICON ITEM COUNT (DOM) ---\n' + cartIconCountBlock
+        console.log('[CART ICON COUNT] Block:', cartIconCountBlock.split('\n').join(' | '))
+      } catch (e) {
+        console.warn('Cart icon item count snapshot failed:', e)
+      }
 
       // Lazy loading detection (loading="lazy", data-src, data-lazy, lazy classes; exclude small icons)
       try {
@@ -4897,6 +5127,12 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
           const logoHomepagePrefix = isLogoHomepageRule ? `\n\n⚠️ LOGO HOMEPAGE RULE ⚠️\n\nUse the KEY ELEMENTS block "--- LOGO LINK CHECK ---" as the primary source.\nIf it says clickable YES and homepage link YES, output passed:true.\n\nNow analyze:\n\n` : ''
+          const headerCartQuickAccessPrefix = isHeaderCartQuickAccessRule(rule)
+            ? `\n\n⚠️ HEADER CART QUICK ACCESS RULE ⚠️\n\nUse the KEY ELEMENTS block "--- HEADER CART QUICK ACCESS (DOM) ---".\nIf "Header cart quick access present: YES", output passed: true (localized paths like /en-int/cart count).\n\nNow analyze:\n\n`
+            : ''
+          const cartIconItemCountPrefix = isCartIconItemCountRule(rule)
+            ? `\n\n⚠️ CART ICON ITEM COUNT / BADGE RULE ⚠️\n\nRead "--- CART ICON ITEM COUNT (DOM) ---":\n- If "Storefront cart item count" is 0, PASS (empty cart — no badge is required).\n- If count > 0, PASS only if "Count badge visible" is YES; otherwise FAIL.\nIf "Cart icon item count rule verdict: PASS", output passed: true.\n\nNow analyze:\n\n`
+            : ''
           const generalCustomerReviewsPrefix = isGeneralCustomerReviewsRule ? `\n\n⚠️⚠️⚠️ GENERAL CUSTOMER REVIEWS RULE — IMAGE FIRST ⚠️⚠️⚠️\n\nTreat this as ANY-PAGE validation (not homepage-only).\n\nLook at the screenshot first. PASS if you can see a reviews block, rating summary with review context, Trustpilot/review widget, or customer review cards.\nIf screenshot is unclear, use page text/DOM evidence. Review indicators like "Excellent", "4.x out of 5", "reviews", "what customers are saying", and review widget labels count.\n\nFAIL only when no review content is visible/detectable anywhere on the scanned page.\n\nNow analyze the screenshot:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
@@ -4905,7 +5141,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
           const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -5113,11 +5349,31 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Product ratings detected by DOM scan near the title: ${ev}. Star ratings or review indicators are present in the product title block.`
             }
 
-            // Hard guardrail: this rule must NOT pass unless rating evidence is near the title.
-            if (analysis.passed && !ratingContext?.nearTitle) {
+            // Hard guardrail: only force FAIL when we have explicit DOM evidence that rating is NOT near title.
+            // Do not fail on missing/unknown ratingContext (that caused false fails on some storefronts).
+            if (analysis.passed && ratingContext && !ratingContext.nearTitle) {
               console.log(`Rating rule: AI passed but DOM found no near-title rating evidence. Forcing FAIL.`)
               analysis.passed = false
               analysis.reason = `No star ratings, review counts, or rating widgets were detected near the product title. Add star ratings near the title block.`
+            }
+
+            // Fallback: if page text contains a rating signal close to the product title text, force PASS.
+            if (!analysis.passed) {
+              const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
+              const titleLine =
+                keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
+              const nearWindow = titleLine && fullText.includes(titleLine)
+                ? fullText.slice(Math.max(0, fullText.indexOf(titleLine) - 260), fullText.indexOf(titleLine) + 540)
+                : fullText.slice(0, 3800)
+              const hasRatingSignalNearTitle =
+                /\b(excellent|trustpilot|trustscore)\b/i.test(nearWindow) ||
+                /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(nearWindow) ||
+                /[★☆⭐]/.test(nearWindow)
+              if (hasRatingSignalNearTitle) {
+                console.log(`Rating rule: text fallback found rating near title window. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
+              }
             }
 
             // Sanity warning (never force fail based on missing count or link)
@@ -5333,6 +5589,35 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 ? `A clickable header logo was found, but it is not linked to the homepage (href: ${href}).`
                 : 'No clickable header logo linked to the homepage was detected.'
             }
+          } else if (isHeaderCartQuickAccessRule(rule)) {
+            const cartQuickYes = /Header cart quick access present:\s*YES/i.test(keyElements || '')
+            const detail =
+              (keyElements || '').match(/Cart quick access detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'header cart control'
+            if (cartQuickYes) {
+              analysis.passed = true
+              analysis.reason = `A cart quick access control is present in the site header (${detail}).`
+            } else {
+              analysis.passed = false
+              analysis.reason = 'No cart or bag quick access link or control was detected in the header.'
+            }
+          } else if (isCartIconItemCountRule(rule)) {
+            const v = (keyElements || '')
+              .match(/Cart icon item count rule verdict:\s*(PASS|FAIL|INDETERMINATE)/i)?.[1]
+              ?.toUpperCase()
+            const detail = (keyElements || '').match(
+              /Cart icon item count rule detail:\s*(.+?)(?:\n|$)/i,
+            )?.[1]?.trim()
+            if (v === 'PASS') {
+              analysis.passed = true
+              analysis.reason =
+                detail || 'Cart count display is acceptable for the current cart (empty = no badge required; with items a badge is shown).'
+            } else if (v === 'FAIL') {
+              analysis.passed = false
+              analysis.reason =
+                detail ||
+                'The cart has items but no visible item-count badge on the header cart control.'
+            }
+            // INDETERMINATE: leave model output; no forced override
           } else if (isGeneralCustomerReviewsRule) {
             const reviewText = (fullVisibleText || websiteContent || '').toLowerCase()
             const reviewSignals = [

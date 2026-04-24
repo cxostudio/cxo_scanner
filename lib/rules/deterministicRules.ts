@@ -38,6 +38,42 @@ export function isLogoHomepageRule(rule: ScanRule): boolean {
   )
 }
 
+/**
+ * "Does the cart icon show the number of items?" — empty cart: PASS (no badge required).
+ * Non-empty cart: PASS only if a visible count badge is present.
+ */
+export function isCartIconItemCountRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  if (t.includes('quick access') || t.includes('quick access link')) return false
+  if (t.includes('sticky') && t.includes('cart')) return false
+  const aboutIconAndCount =
+    (t.includes('cart') && t.includes('number') && t.includes('item')) ||
+    (t.includes('cart icon') && (t.includes('number') || t.includes('items') || t.includes('display'))) ||
+    (t.includes('badge') && t.includes('cart') && t.includes('item')) ||
+    (d.includes('cart icon') && d.includes('counter')) ||
+    (d.includes('cart') && d.includes('badge') && d.includes('number'))
+  return aboutIconAndCount
+}
+
+/** Quick cart / bag access in header (not sticky product "add to cart"). */
+export function isHeaderCartQuickAccessRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  if (t.includes('sticky') && (t.includes('add to cart') || t.includes('add to bag'))) return false
+  if (t.includes('quantity') || t.includes('discount')) return false
+  const cartInTitle = t.includes('cart') || d.includes('cart')
+  if (!cartInTitle) return false
+  if (isCartIconItemCountRule(rule)) return false
+  const quickOrAccess =
+    t.includes('quick access') ||
+    t.includes('quick') ||
+    (t.includes('access') && t.includes('link')) ||
+    (d.includes('quick access') && d.includes('cart')) ||
+    (d.includes('header') && d.includes('cart') && (d.includes('icon') || d.includes('link')))
+  return quickOrAccess
+}
+
 export function isTrustBadgesNearCtaRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -47,6 +83,21 @@ export function isTrustBadgesNearCtaRule(rule: ScanRule): boolean {
     (t.includes('trust') && t.includes('cta')) ||
     (t.includes('secure checkout') && t.includes('cta')) ||
     (d.includes('trust') && d.includes('cta'))
+  )
+}
+
+export function isVerbUrgencyCtaLabelRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  return (
+    (t.includes('button') && t.includes('link') && t.includes('verb') && t.includes('urgency')) ||
+    (d.includes('button') && d.includes('link') && d.includes('verb') && d.includes('urgency')) ||
+    (t.includes('action verb') && t.includes('label')) ||
+    (d.includes('action verb') && d.includes('label')) ||
+    (t.includes('cta') && t.includes('label') && (t.includes('verb') || t.includes('urgency'))) ||
+    (d.includes('cta') && d.includes('label') && (d.includes('verb') || d.includes('urgency'))) ||
+    (t.includes('shop now') && t.includes('button')) ||
+    (d.includes('shop now') && d.includes('label'))
   )
 }
 
@@ -282,6 +333,52 @@ export function evaluateLogoHomepageRule(rule: ScanRule, keyElementsString: stri
   }
 }
 
+export function evaluateHeaderCartQuickAccessRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  if (!keyElementsString.includes('--- HEADER CART QUICK ACCESS (DOM) ---')) return null
+  if (/Header cart quick access present:\s*UNKNOWN/i.test(keyElementsString)) return null
+  const present = /Header cart quick access present:\s*YES/i.test(keyElementsString)
+  const detail =
+    keyElementsString.match(/Cart quick access detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'header cart control'
+  if (present) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A cart quick access control is present in the site header (${detail}).`,
+    }
+  }
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason: 'No cart or bag quick access link or control was detected in the header.',
+  }
+}
+
+export function evaluateCartIconItemCountRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  if (!keyElementsString.includes('--- CART ICON ITEM COUNT (DOM) ---')) return null
+  const verdict = keyElementsString
+    .match(/Cart icon item count rule verdict:\s*(PASS|FAIL|INDETERMINATE)/i)?.[1]
+    ?.toUpperCase()
+  if (!verdict || verdict === 'INDETERMINATE') return null
+  const detail =
+    keyElementsString.match(/Cart icon item count rule detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || ''
+  if (verdict === 'PASS') {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: detail || 'Cart count display meets the rule for the current cart state.',
+    }
+  }
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason: detail || 'Cart has items but no visible item-count badge on the cart icon.',
+  }
+}
+
 export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
   const hasBlock = keyElementsString.includes('--- TRUST BADGES CHECK')
   if (!hasBlock) return null
@@ -326,12 +423,88 @@ export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString
   }
 }
 
+function extractButtonLinkLabelsFromKeyElements(keyElementsString: string): string[] {
+  const m = keyElementsString.match(/Buttons\/Links:\s*(.+?)(?:\n|$)/i)
+  if (!m?.[1]) return []
+  return m[1]
+    .split('|')
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((s) => s.length >= 2 && s.length <= 70)
+}
+
+export function evaluateVerbUrgencyCtaLabelRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  const labels = extractButtonLinkLabelsFromKeyElements(keyElementsString)
+  if (labels.length === 0) return null
+
+  const skipNoise = (s: string): boolean => {
+    const l = s.toLowerCase()
+    return (
+      l.includes('privacy') ||
+      l.includes('terms') ||
+      l.includes('return policy') ||
+      l.includes('shipping policy') ||
+      l.includes('store locator') ||
+      l.includes('afghanistan (') ||
+      /\b[a-z]{2,}\s+\([a-z]{3}\s/.test(l)
+    )
+  }
+
+  const filtered = labels.filter((s) => !skipNoise(s))
+  const actionVerbStart = [
+    'shop', 'buy', 'add', 'get', 'order', 'start', 'try', 'discover',
+    'explore', 'view', 'check', 'join', 'subscribe', 'learn', 'claim',
+  ]
+  const urgencyWords = ['now', 'today', 'limited', 'hurry', 'instant', 'immediately', 'last chance']
+  const purchaseIntent = [
+    'add to cart', 'add to bag', 'buy now', 'shop now', 'checkout', 'order now', 'get started', 'shop all',
+  ]
+
+  const startsWithVerb = filtered.filter((s) => {
+    const l = s.toLowerCase()
+    return actionVerbStart.some((v) => l === v || l.startsWith(v + ' '))
+  })
+  const urgent = filtered.filter((s) => urgencyWords.some((u) => s.toLowerCase().includes(u)))
+  const purchase = filtered.filter((s) => purchaseIntent.some((p) => s.toLowerCase().includes(p)))
+
+  // Lenient for ecommerce templates:
+  // PASS if at least one strong action label exists and either urgency OR purchase-intent wording appears.
+  const passed = startsWithVerb.length >= 1 && (urgent.length >= 1 || purchase.length >= 1)
+  if (passed) {
+    const examples = [...new Set([...startsWithVerb, ...urgent, ...purchase])].slice(0, 4).join(', ')
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `Action-oriented labels are present and start with strong verbs (e.g. ${examples}). This supports urgency and click intent.`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'Button/link labels do not consistently start with clear action verbs or urgency wording. Use labels such as "Shop now", "Buy now", or "Get yours today".',
+  }
+}
+
 export function evaluateColorRule(rule: ScanRule, keyElementsString: string): ScanResult {
   const hasPureBlack = /Pure black \(#000000\) detected:\s*YES/i.test(keyElementsString)
-  const passed = !hasPureBlack
+  const meaningfulCount = Number(
+    keyElementsString.match(/Meaningful pure-black elements count:\s*(\d+)/i)?.[1] || '0',
+  )
+  const largeBgYes = /Large pure-black background found:\s*YES/i.test(keyElementsString)
+
+  // Practical UX rule:
+  // - PASS when pure black is absent, OR present only in limited/non-harsh usage.
+  // - FAIL when pure black is materially overused or forms large dark backgrounds.
+  const passed = !hasPureBlack || (!largeBgYes && meaningfulCount <= 4)
   const reason = passed
-    ? 'Pure black (#000000) detected: NO. Page uses softer tones.'
-    : 'Pure black (#000000) detected: YES. Use softer dark tones (e.g. #333333, #121212) for text and backgrounds.'
+    ? hasPureBlack
+      ? `Pure black exists in limited usage (count=${meaningfulCount}) and does not create a harsh full-page background, so readability remains acceptable.`
+      : 'Pure black (#000000) detected: NO. Page uses softer tones.'
+    : 'Pure black (#000000) is materially overused in meaningful content/background areas. Use softer dark tones (e.g. #333333, #121212).'
   return {
     ruleId: rule.id,
     ruleTitle: rule.title,
@@ -541,9 +714,21 @@ export function tryEvaluateDeterministic(
     const logoResult = evaluateLogoHomepageRule(rule, context.keyElementsString)
     if (logoResult !== null) return logoResult
   }
+  if (isHeaderCartQuickAccessRule(rule)) {
+    const cartHeaderResult = evaluateHeaderCartQuickAccessRule(rule, context.keyElementsString)
+    if (cartHeaderResult !== null) return cartHeaderResult
+  }
+  if (isCartIconItemCountRule(rule)) {
+    const cartCountResult = evaluateCartIconItemCountRule(rule, context.keyElementsString)
+    if (cartCountResult !== null) return cartCountResult
+  }
   if (isTrustBadgesNearCtaRule(rule)) {
     const trustResult = evaluateTrustBadgesNearCtaRule(rule, context.keyElementsString)
     if (trustResult !== null) return trustResult
+  }
+  if (isVerbUrgencyCtaLabelRule(rule)) {
+    const ctaVerbResult = evaluateVerbUrgencyCtaLabelRule(rule, context.keyElementsString)
+    if (ctaVerbResult !== null) return ctaVerbResult
   }
   if (isProductTitleRule(rule)) {
     const productTitleResult = evaluateProductTitleRule(rule, context.keyElementsString)
