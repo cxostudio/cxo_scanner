@@ -956,24 +956,24 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        // emailjs.send(
-        //   EMAILJS_SERVICE_ID,
-        //   EMAILJS_TEMPLATE_ID,
-        //   {
-        //     level: selectedChallenge ?? '',
-        //     price: selectedRevenue ?? '',
-        //     url: validUrl,
-        //     email: emailTrimmed,
-        //     ip_address: ipAddress,
-        //     browser,
-        //     screen_size: screenSize,
-        //     time_zone: timeZone,
-        //     browser_data: browserData,
-        //     pass_result: passResult,
-        //     fail_result: failResult,
-        //   },
-        //   { publicKey: EMAILJS_PUBLIC_KEY }
-        // ).catch(err => console.error('EmailJS failed:', err))
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -1042,7 +1042,7 @@ export default function Home() {
               <motion.button
                 type="button"
                 onClick={handleBack}
-                className="w-[35px] h-[35px] rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
+                className="w-[35px] h-[35px]  rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.97 }}
                 transition={{ type: 'tween', duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
