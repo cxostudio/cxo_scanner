@@ -101,11 +101,36 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
       return classifySocialFromSignals(signals)
     }
 
+    function socialSignalsFromElement(el: Element): string {
+      const href = (el.getAttribute('href') || '').trim()
+      const aria = (el.getAttribute('aria-label') || '').trim()
+      const title = (el.getAttribute('title') || '').trim()
+      const rel = (el.getAttribute('rel') || '').trim()
+      const cls = (el.getAttribute('class') || '').trim()
+      const id = (el.getAttribute('id') || '').trim()
+      const dataSocial = (el.getAttribute('data-social') || '').trim()
+      const text = (el.textContent || '').trim()
+      // Many storefront icon controls expose social provider only via SVG/link references.
+      let svgHints = ''
+      try {
+        const svgRef = el.querySelector('use')?.getAttribute('href') || el.querySelector('use')?.getAttribute('xlink:href') || ''
+        const svgTitle = el.querySelector('svg title')?.textContent || ''
+        svgHints = `${svgRef} ${svgTitle}`.trim()
+      } catch {
+        /* ignore */
+      }
+      return [href, aria, title, rel, cls, id, dataSocial, text, svgHints]
+        .filter(Boolean)
+        .join(' | ')
+    }
+
     function hostsFromRoot(root: Element | null): string[] {
       const hosts = new Set<string>()
       if (!root) return []
-      root.querySelectorAll('a[href]').forEach((a) => {
-        const c = classifySocialFromElement(a)
+      root
+        .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
+        .forEach((el) => {
+        const c = classifySocialFromSignals(socialSignalsFromElement(el))
         if (c) hosts.add(c)
       })
       return Array.from(hosts)
@@ -165,12 +190,14 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
     const docH = document.documentElement.scrollHeight
     const yCut = docH * 0.68
     const bandHosts = new Set<string>()
-    document.querySelectorAll('a[href]').forEach((a) => {
-      if (!(a instanceof HTMLElement)) return
-      const r = a.getBoundingClientRect()
+    document
+      .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
+      .forEach((el) => {
+      if (!(el instanceof HTMLElement)) return
+      const r = el.getBoundingClientRect()
       const centerY = r.top + window.scrollY + r.height / 2
       if (centerY < yCut) return
-      const c = classifySocialFromElement(a)
+      const c = classifySocialFromSignals(socialSignalsFromElement(el))
       if (c) bandHosts.add(c)
     })
 
