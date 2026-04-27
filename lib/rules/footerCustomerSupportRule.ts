@@ -80,6 +80,14 @@ export function evaluateFooterCustomerSupportRule(
 /** Runs in browser context; avoid external closures. */
 export async function collectFooterCustomerSupportSnapshot(page: Page): Promise<FooterCustomerSupportSnapshot> {
   return page.evaluate(() => {
+    const isRenderable = (el: Element | null): el is HTMLElement => {
+      if (!(el instanceof HTMLElement)) return false
+      const style = window.getComputedStyle(el)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      const r = el.getBoundingClientRect()
+      return r.width >= 8 && r.height >= 8
+    }
+
     const isVisible = (el: Element | null): el is HTMLElement => {
       if (!(el instanceof HTMLElement)) return false
       const style = window.getComputedStyle(el)
@@ -103,7 +111,7 @@ export async function collectFooterCustomerSupportSnapshot(page: Page): Promise<
     for (const sel of FOOTER_SELECTORS) {
       try {
         const el = document.querySelector(sel)
-        if (isVisible(el)) {
+        if (isRenderable(el)) {
           footerRoot = el
           footerRootSelector = sel
           break
@@ -123,7 +131,7 @@ export async function collectFooterCustomerSupportSnapshot(page: Page): Promise<
         const r = el.getBoundingClientRect()
         const top = r.top + window.scrollY
         if (top < docH * 0.35) return
-        if (!isVisible(el)) return
+        if (!isRenderable(el)) return
         const score = r.width * r.height
         if (score > bestScore) {
           best = el
@@ -185,7 +193,7 @@ export async function collectFooterCustomerSupportSnapshot(page: Page): Promise<
     if (footerRoot) {
       footerRoot.querySelectorAll('a[href]').forEach((a) => {
         if (!(a instanceof HTMLAnchorElement)) return
-        if (!isVisible(a)) return
+        if (!isRenderable(a)) return
         const label = (a.innerText || a.textContent || '').trim()
         const href = a.getAttribute('href') || ''
         const kind = classify(label, href)

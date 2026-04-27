@@ -65,6 +65,14 @@ export function evaluateFooterNewsletterRule(
 /** Runs in browser context; avoid external closures. */
 export async function collectFooterNewsletterSnapshot(page: Page): Promise<FooterNewsletterSnapshot> {
   return page.evaluate(() => {
+    const isRenderable = (el: Element | null): el is HTMLElement => {
+      if (!(el instanceof HTMLElement)) return false
+      const style = window.getComputedStyle(el)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      const r = el.getBoundingClientRect()
+      return r.width >= 8 && r.height >= 8
+    }
+
     const isVisible = (el: Element | null): el is HTMLElement => {
       if (!(el instanceof HTMLElement)) return false
       const style = window.getComputedStyle(el)
@@ -88,7 +96,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
     for (const sel of FOOTER_SELECTORS) {
       try {
         const el = document.querySelector(sel)
-        if (isVisible(el)) {
+        if (isRenderable(el)) {
           footerRoot = el
           footerRootSelector = sel
           break
@@ -108,7 +116,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         const r = el.getBoundingClientRect()
         const top = r.top + window.scrollY
         if (top < docH * 0.35) return
-        if (!isVisible(el)) return
+        if (!isRenderable(el)) return
         const score = r.width * r.height
         if (score > bestScore) {
           best = el
@@ -145,11 +153,11 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       footerRoot.querySelectorAll(
         'input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]',
       ),
-    ).filter((el) => isVisible(el))
+    ).filter((el) => isRenderable(el))
 
     const allButtons = Array.from(
       footerRoot.querySelectorAll('button, input[type="submit"], input[type="button"]'),
-    ).filter((el) => isVisible(el))
+    ).filter((el) => isRenderable(el))
 
     const submitLikeInRoot = allButtons.filter((el) => {
       const text = (el.textContent || '').toLowerCase().trim()

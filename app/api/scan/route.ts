@@ -6081,6 +6081,12 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             // Strict near-CTA guardrail: if DOM says "not near CTA", do not allow random PASS.
             // This prevents false passes caused by footer/global trust icons.
             if (analysis.passed && trustBadgesContext && !trustBadgesContext.domStructureFound) {
+              const aiNearCtaVisualEvidence =
+                /(near|beside|next to|below).{0,40}(add to (cart|bag)|buy|purchase|checkout)/i.test(analysis.reason || '') &&
+                /(icon|icons|badge|badges|logo|logos|seal|seals|guarantee|secure|payment)/i.test(analysis.reason || '')
+              if (aiNearCtaVisualEvidence) {
+                console.log('Trust badges rule: AI reason shows clear near-CTA visual trust evidence; keeping PASS.')
+              } else {
               const elsewhere = trustBadgesContext.paymentBrandsElsewhere
               if (elsewhere.length > 0) {
                 console.log(`Trust badges rule: badges found only elsewhere (${elsewhere.join(', ')}). Forcing FAIL.`)
@@ -6090,6 +6096,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 console.log(`Trust badges rule: no near-CTA trust icons detected. Forcing FAIL.`)
                 analysis.passed = false
                 analysis.reason = 'No trust/payment icons were detected near the primary CTA. Add recognizable trust badges directly beside or below the purchase button.'
+              }
               }
             }
 
