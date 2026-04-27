@@ -238,10 +238,10 @@ export default function Home() {
 
   /** Long enough to read "Finished" before the row exits; keep modest so scans still feel responsive. */
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
-  /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
-  /** Do not redirect until step 4/5 visibly finish + remove on slower production UIs. */
-  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 45_000
+  /** Keep tiny pause so scanner route appears almost immediately. */
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 250
+  /** Cap UI-completion wait aggressively; this is UX-only and does not affect rule evaluation. */
+  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 5_000
   /** Keep a tiny stagger so users can see finish/remove sequence. */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
 
@@ -258,9 +258,8 @@ export default function Home() {
     const started = performance.now()
     while (performance.now() - started < ANALYSIS_UI_COMPLETION_MAX_WAIT_MS) {
       const allMounted = displayedMountedRef.current >= ANALYSIS_STEP_COUNT
-      const allRemoved = removedStepsCountRef.current >= ANALYSIS_STEP_COUNT
       const progressReady = displayProgressPercentRef.current >= 99.5
-      if (allMounted && allRemoved && progressReady) return
+      if (allMounted && progressReady) return
       await new Promise<void>((r) => window.setTimeout(r, 120))
     }
   }
