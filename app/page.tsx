@@ -156,6 +156,9 @@ export default function Home() {
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
   const [previewMobile, setPreviewMobile] = useState<string | null>(null);
   const [displayedMounted, setDisplayedMounted] = useState(0)
+  const [displayProgressPercent, setDisplayProgressPercent] = useState(0)
+  const displayProgressRafRef = useRef<number | null>(null)
+  const displayProgressTsRef = useRef<number | null>(null)
 
   const analyzeInstantPreview = useMemo(
     () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
@@ -212,32 +215,37 @@ export default function Home() {
    */
   const SCAN_PROGRESS_TAIL_TICKS = 6
   const SCAN_PROGRESS_FINAL_TICK_MS = 420
+  /**
+   * Use timestamp-based smoothing instead of timer chains so production/main-thread variance
+   * (Vercel build, throttling, render batching) doesn't skip late-stage progress.
+   */
+  const PROGRESS_MAX_PERCENT_PER_SEC = 14
+  const PROGRESS_SNAP_EPSILON = 0.12
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
    * plus tail ticks after combine for a smooth finish.
    */
-  const targetMounted = useMemo(() => {
-    if (!showAnalyze || !progress || progress.total <= 0) return 0
-    if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
-    return Math.min(
-      ANALYSIS_STEP_COUNT - 1,
-      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT),
-    )
-  }, [showAnalyze, progress, ANALYSIS_STEP_COUNT])
-
-  const analyzeProgressPercent = useMemo(() => {
+  const targetProgressPercent = useMemo(() => {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
     return Math.min(100, Math.round((progress.current / progress.total) * 100))
   }, [showAnalyze, progress])
-  const ANALYSIS_STEP_MIN_ADVANCE_MS = 700
 
-  /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
+  /** Long enough to read "Finished" before the row exits; keep modest so scans still feel responsive. */
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
+
+  const targetMounted = useMemo(() => {
+    if (!showAnalyze) return 0
+    if (displayProgressPercent >= 100) return ANALYSIS_STEP_COUNT
+    return Math.min(
+      ANALYSIS_STEP_COUNT - 1,
+      Math.floor((displayProgressPercent / 100) * ANALYSIS_STEP_COUNT),
+    )
+  }, [showAnalyze, displayProgressPercent, ANALYSIS_STEP_COUNT])
 
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
@@ -250,18 +258,65 @@ export default function Home() {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
       setDisplayedMounted(0)
+      setDisplayProgressPercent(0)
+      displayProgressTsRef.current = null
+      if (displayProgressRafRef.current != null) {
+        window.cancelAnimationFrame(displayProgressRafRef.current)
+        displayProgressRafRef.current = null
+      }
     }
   }, [showAnalyze])
 
-  // Throttle step index advancement so late-stage rows don't collapse together on slower environments.
+  // Timestamp-based progress interpolation keeps production and local behavior aligned.
   useEffect(() => {
     if (!showAnalyze) return
-    if (displayedMounted >= targetMounted) return
-    const id = window.setTimeout(() => {
-      setDisplayedMounted((prev) => Math.min(targetMounted, prev + 1))
-    }, ANALYSIS_STEP_MIN_ADVANCE_MS)
-    return () => window.clearTimeout(id)
-  }, [showAnalyze, displayedMounted, targetMounted, ANALYSIS_STEP_MIN_ADVANCE_MS])
+
+    const animate = (ts: number) => {
+      setDisplayProgressPercent((prev) => {
+        const lastTs = displayProgressTsRef.current ?? ts
+        const dtSec = Math.max(0, (ts - lastTs) / 1000)
+        displayProgressTsRef.current = ts
+        const maxDelta = PROGRESS_MAX_PERCENT_PER_SEC * dtSec
+        const remaining = targetProgressPercent - prev
+
+        if (Math.abs(remaining) <= PROGRESS_SNAP_EPSILON) {
+          return targetProgressPercent
+        }
+        if (remaining > 0) {
+          return prev + Math.min(remaining, maxDelta)
+        }
+        return targetProgressPercent
+      })
+      displayProgressRafRef.current = window.requestAnimationFrame(animate)
+    }
+
+    if (displayProgressRafRef.current == null) {
+      displayProgressTsRef.current = null
+      displayProgressRafRef.current = window.requestAnimationFrame(animate)
+    }
+
+    return () => {
+      if (displayProgressRafRef.current != null) {
+        window.cancelAnimationFrame(displayProgressRafRef.current)
+        displayProgressRafRef.current = null
+      }
+      displayProgressTsRef.current = null
+    }
+  }, [
+    showAnalyze,
+    targetProgressPercent,
+    PROGRESS_MAX_PERCENT_PER_SEC,
+    PROGRESS_SNAP_EPSILON,
+  ])
+
+  // Step activation follows smoothed progress thresholds (20/40/60/80/100).
+  useEffect(() => {
+    if (!showAnalyze) return
+    setDisplayedMounted((prev) => {
+      if (prev >= targetMounted) return prev
+      return prev + 1
+    })
+  }, [showAnalyze, targetMounted])
 
   // On mobile, ensure analyze screen starts from the CXO logo.
   useEffect(() => {
@@ -1348,20 +1403,20 @@ export default function Home() {
                         <div
                           className="w-full shrink-0"
                           role="progressbar"
-                          aria-valuenow={analyzeProgressPercent}
+                          aria-valuenow={Math.round(displayProgressPercent)}
                           aria-valuemin={0}
                           aria-valuemax={100}
                         >
                           <div className="mb-1.5 flex items-center justify-between gap-3">
                             <span className="text-xs font-medium text-zinc-600">Progress</span>
                             <span className="text-xs font-medium tabular-nums text-zinc-800">
-                              {analyzeProgressPercent}%
+                              {Math.round(displayProgressPercent)}%
                             </span>
                           </div>
                           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                             <div
-                              className="h-full rounded-full bg-gray-600 transition-[width] duration-500 ease-in-out"
-                              style={{ width: `${analyzeProgressPercent}%` }}
+                              className="h-full rounded-full bg-gray-600"
+                              style={{ width: `${displayProgressPercent}%` }}
                             />
                           </div>
                         </div>
