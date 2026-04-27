@@ -159,6 +159,9 @@ export default function Home() {
   const [displayProgressPercent, setDisplayProgressPercent] = useState(0)
   const displayProgressRafRef = useRef<number | null>(null)
   const displayProgressTsRef = useRef<number | null>(null)
+  const displayedMountedRef = useRef(0)
+  const removedStepsCountRef = useRef(0)
+  const displayProgressPercentRef = useRef(0)
 
   const analyzeInstantPreview = useMemo(
     () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
@@ -238,6 +241,8 @@ export default function Home() {
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
+  /** Do not redirect until step 4/5 visibly finish + remove on slower production UIs. */
+  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 45_000
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
@@ -250,6 +255,17 @@ export default function Home() {
     )
   }, [showAnalyze, displayProgressPercent, ANALYSIS_STEP_COUNT])
 
+  const waitForAnalyzeUiCompletion = async () => {
+    const started = performance.now()
+    while (performance.now() - started < ANALYSIS_UI_COMPLETION_MAX_WAIT_MS) {
+      const allMounted = displayedMountedRef.current >= ANALYSIS_STEP_COUNT
+      const allRemoved = removedStepsCountRef.current >= ANALYSIS_STEP_COUNT
+      const progressReady = displayProgressPercentRef.current >= 99.5
+      if (allMounted && allRemoved && progressReady) return
+      await new Promise<void>((r) => window.setTimeout(r, 120))
+    }
+  }
+
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
     if (!showAnalyze) return
@@ -258,10 +274,25 @@ export default function Home() {
 
   // While analyze UI is hidden, reset step row removal state.
   useEffect(() => {
+    displayedMountedRef.current = displayedMounted
+  }, [displayedMounted])
+
+  useEffect(() => {
+    removedStepsCountRef.current = removedSteps.size
+  }, [removedSteps])
+
+  useEffect(() => {
+    displayProgressPercentRef.current = displayProgressPercent
+  }, [displayProgressPercent])
+
+  useEffect(() => {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
       setDisplayedMounted(0)
       setDisplayProgressPercent(0)
+      displayedMountedRef.current = 0
+      removedStepsCountRef.current = 0
+      displayProgressPercentRef.current = 0
       displayProgressTsRef.current = null
       if (displayProgressRafRef.current != null) {
         window.cancelAnimationFrame(displayProgressRafRef.current)
@@ -990,6 +1021,7 @@ export default function Home() {
       // Main scan: POST /api/scan per batch, then /api/scan/combine (after preview is visible or gate timeout)
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
+      await waitForAnalyzeUiCompletion()
 
       await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS))
       router.replace('/scanner')
