@@ -14,6 +14,7 @@ export type FooterNewsletterSnapshot = {
   newsletterKeywordInFooter: boolean
   hasEmbeddedNewsletterWidgetInFooter: boolean
   hasStrongNewsletterIntentInFooter: boolean
+  hasEmailFieldHintInFooter: boolean
   hasFormPairInFooter: boolean
   matchedSignals: string[]
 }
@@ -27,6 +28,7 @@ export function emptyFooterNewsletterSnapshot(): FooterNewsletterSnapshot {
     newsletterKeywordInFooter: false,
     hasEmbeddedNewsletterWidgetInFooter: false,
     hasStrongNewsletterIntentInFooter: false,
+    hasEmailFieldHintInFooter: false,
     hasFormPairInFooter: false,
     matchedSignals: [],
   }
@@ -134,6 +136,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         newsletterKeywordInFooter: false,
         hasEmbeddedNewsletterWidgetInFooter: false,
         hasStrongNewsletterIntentInFooter: false,
+        hasEmailFieldHintInFooter: false,
         hasFormPairInFooter: false,
         matchedSignals: [],
       }
@@ -204,6 +207,10 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
     const hasStrongNewsletterIntentInFooter =
       newsletterKeywordInFooter && (strongIntentCopy || hasEmbeddedNewsletterWidgetInFooter)
 
+    const hasEmailFieldHintInFooter =
+      /your email|email address|enter (your )?email|e-mail/i.test(rootText) ||
+      footerRoot.querySelector('input[placeholder*="email" i], input[aria-label*="email" i]') !== null
+
     let hasFormPairInFooter = false
     for (const input of emailInputs) {
       const form = input.closest('form')
@@ -231,6 +238,10 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       // Production-safe fallback for embedded newsletter widgets where input is inside iframe/custom web component.
       hasFormPairInFooter = true
     }
+    if (!hasFormPairInFooter && hasStrongNewsletterIntentInFooter && hasEmailFieldHintInFooter) {
+      // Final fallback: footer explicitly asks for email in newsletter area, but field control is custom-rendered.
+      hasFormPairInFooter = true
+    }
 
     const matchedSignals: string[] = []
     if (hasVisibleEmailInputInFooter) matchedSignals.push('email-input')
@@ -238,6 +249,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
     if (newsletterKeywordInFooter) matchedSignals.push('newsletter-copy')
     if (hasEmbeddedNewsletterWidgetInFooter) matchedSignals.push('embedded-widget')
     if (hasStrongNewsletterIntentInFooter) matchedSignals.push('strong-newsletter-intent')
+    if (hasEmailFieldHintInFooter) matchedSignals.push('email-field-hint')
 
     return {
       footerRootFound: true,
@@ -247,6 +259,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       newsletterKeywordInFooter,
       hasEmbeddedNewsletterWidgetInFooter,
       hasStrongNewsletterIntentInFooter,
+      hasEmailFieldHintInFooter,
       hasFormPairInFooter,
       matchedSignals,
     }
