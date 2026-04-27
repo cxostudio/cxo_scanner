@@ -1,10 +1,17 @@
 'use client';
 
+export type InstantPreviewHint = {
+  host: string;
+  faviconUrl: string;
+};
+
 type DualViewportLoaderProps = {
   /** null = empty pane while URL capture is in flight */
   previewDesktop: string | null;
   /** null = empty mobile pane while URL capture is in flight */
   previewMobile?: string | null;
+  /** Shown immediately (favicon + host) before the first streamed desktop screenshot arrives */
+  instantPreview?: InstantPreviewHint | null;
   statusText?: string;
   scanning?: boolean;
   /** `start` = left-align mockups (analyze + progress layout); default centered */
@@ -12,9 +19,28 @@ type DualViewportLoaderProps = {
 };
 
 /** Desktop-only browser mockup with optional UX-Ray scan overlay on the viewport. */
+function InstantSitePlaceholder({ hint }: { hint: InstantPreviewHint }) {
+  return (
+    <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-zinc-50/95 via-zinc-100/95 to-zinc-200/95 px-4">
+      <img
+        src={hint.faviconUrl}
+        alt=""
+        width={56}
+        height={56}
+        className="h-14 w-14 rounded-xl border border-zinc-200/80 bg-white object-contain p-1.5 shadow-sm"
+      />
+      <p className="max-w-[90%] truncate text-center text-xs font-semibold text-zinc-700 sm:text-sm">
+        {hint.host}
+      </p>
+      <p className="text-center text-[0.65rem] font-medium text-zinc-500 sm:text-xs">Loading preview…</p>
+    </div>
+  );
+}
+
 export function DualViewportLoader({
   previewDesktop,
   previewMobile = null,
+  instantPreview = null,
   statusText = 'Capturing page screenshots',
   scanning = true,
   align = 'center',
@@ -22,6 +48,9 @@ export function DualViewportLoader({
   const desktopReady = previewDesktop != null && previewDesktop.length > 0;
   const mobileReady = previewMobile != null && previewMobile.length > 0;
   const mobileSrc = mobileReady ? previewMobile! : desktopReady ? previewDesktop! : null;
+  const instant = instantPreview ?? null
+  const showInstantDesktop = !desktopReady && instant != null
+  const showInstantMobile = !mobileSrc && instant != null
   const isStart = align === 'start';
 
   return (
@@ -60,6 +89,7 @@ export function DualViewportLoader({
                   aria-hidden
                 />
               )}
+              {showInstantDesktop && instant ? <InstantSitePlaceholder hint={instant} /> : null}
               {scanning && (
                 <div
                   className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
@@ -107,6 +137,7 @@ export function DualViewportLoader({
                       aria-hidden
                     />
                   )}
+                  {showInstantMobile && instant ? <InstantSitePlaceholder hint={instant} /> : null}
                   {scanning && (
                     <div
                       className="pointer-events-none absolute inset-0 z-10 overflow-hidden"

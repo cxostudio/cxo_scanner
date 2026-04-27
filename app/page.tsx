@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 import emailjs from '@emailjs/browser'
-import { DualViewportLoader } from './components/DualViewportLoader';
+import { DualViewportLoader, type InstantPreviewHint } from './components/DualViewportLoader';
 import { QuadrantScanSequence } from './components/QuadrantScanSequence';
 
 
@@ -71,6 +71,24 @@ const LOADER_MESSAGES = [
   'Scanning sections',
   'Almost ready',
 ] as const;
+
+/** Favicon + host for instant loading UI before the first streamed screenshot (desktop first, then mobile). */
+function instantPreviewFromWebsiteUrl(raw: string): InstantPreviewHint | null {
+  try {
+    const t = raw.trim()
+    if (!t) return null
+    const abs = /^https?:\/\//i.test(t) ? t : `https://${t}`
+    const u = new URL(abs)
+    const host = (u.hostname || '').replace(/^www\./, '') || u.hostname
+    if (!host) return null
+    return {
+      host,
+      faviconUrl: `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`,
+    }
+  } catch {
+    return null
+  }
+}
 
 const EMAILJS_SERVICE_ID = 'service_j08d36o'
 const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
@@ -138,6 +156,11 @@ export default function Home() {
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
   const [previewMobile, setPreviewMobile] = useState<string | null>(null);
 
+  const analyzeInstantPreview = useMemo(
+    () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
+    [showAnalyze, websiteUrl],
+  )
+
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
@@ -182,10 +205,16 @@ export default function Home() {
   const ANALYSIS_STEP_COUNT = analysisSteps.length
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
   const SCAN_PROGRESS_UNITS_PER_BATCH = 40
+  /**
+   * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
+   * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
+   */
+  const SCAN_PROGRESS_TAIL_TICKS = 2
+  const SCAN_PROGRESS_FINAL_TICK_MS = 340
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
-   * plus one unit at the end for /api/scan/combine.
+   * plus tail ticks after combine for a smooth finish.
    */
   const mounted = useMemo(() => {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
@@ -204,7 +233,7 @@ export default function Home() {
   /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 1200
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 750
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 1200
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
@@ -308,7 +337,19 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
-    const progressTotalUnits = Math.max(1, batches.length * SCAN_PROGRESS_UNITS_PER_BATCH + 1)
+    const progressTotalUnits = Math.max(
+      1,
+      batches.length * SCAN_PROGRESS_UNITS_PER_BATCH + 1 + SCAN_PROGRESS_TAIL_TICKS,
+    )
+    const scanBaseCompleteUnits = batches.length * SCAN_PROGRESS_UNITS_PER_BATCH
+
+    const tickProgressAfterCombine = async () => {
+      for (let s = 1; s <= SCAN_PROGRESS_TAIL_TICKS + 1; s++) {
+        setProgress({ current: scanBaseCompleteUnits + s, total: progressTotalUnits })
+        await new Promise((r) => setTimeout(r, SCAN_PROGRESS_FINAL_TICK_MS))
+      }
+    }
+
     setProgress({ current: 0, total: progressTotalUnits })
 
     const ScanResultsSchema = z.array(
@@ -570,13 +611,13 @@ export default function Home() {
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
-      setProgress({ current: progressTotalUnits, total: progressTotalUnits })
+      await tickProgressAfterCombine()
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
       localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
-      setProgress({ current: progressTotalUnits, total: progressTotalUnits })
+      await tickProgressAfterCombine()
     }
 
     // Don't set progress to null here (would reset the batch progress bar and step UI)
@@ -639,6 +680,7 @@ export default function Home() {
       const handleNdjsonLine = (line: string) => {
         if (!line.trim()) return
         const msg = JSON.parse(line) as Record<string, unknown>
+        if (msg.type === 'meta') return
         if (msg.type === 'preview') {
           if (typeof msg.previewDesktop === 'string') {
             setPreviewDesktop(msg.previewDesktop)
@@ -1256,6 +1298,7 @@ export default function Home() {
                             align="start"
                             previewDesktop={previewDesktop}
                             previewMobile={previewMobile}
+                            instantPreview={analyzeInstantPreview}
                             scanning
                             statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
                           />
