@@ -12,6 +12,8 @@ export type FooterNewsletterSnapshot = {
   hasVisibleEmailInputInFooter: boolean
   hasVisibleSubmitControlInFooter: boolean
   newsletterKeywordInFooter: boolean
+  hasEmbeddedNewsletterWidgetInFooter: boolean
+  hasStrongNewsletterIntentInFooter: boolean
   hasFormPairInFooter: boolean
   matchedSignals: string[]
 }
@@ -23,6 +25,8 @@ export function emptyFooterNewsletterSnapshot(): FooterNewsletterSnapshot {
     hasVisibleEmailInputInFooter: false,
     hasVisibleSubmitControlInFooter: false,
     newsletterKeywordInFooter: false,
+    hasEmbeddedNewsletterWidgetInFooter: false,
+    hasStrongNewsletterIntentInFooter: false,
     hasFormPairInFooter: false,
     matchedSignals: [],
   }
@@ -128,6 +132,8 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         hasVisibleEmailInputInFooter: false,
         hasVisibleSubmitControlInFooter: false,
         newsletterKeywordInFooter: false,
+        hasEmbeddedNewsletterWidgetInFooter: false,
+        hasStrongNewsletterIntentInFooter: false,
         hasFormPairInFooter: false,
         matchedSignals: [],
       }
@@ -140,6 +146,14 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       rootText.includes('subscription') ||
       rootText.includes('mailing list') ||
       rootText.includes('join our')
+
+    const strongIntentCopy =
+      rootText.includes('join our mailing list') ||
+      rootText.includes('sign up') ||
+      rootText.includes('signup') ||
+      rootText.includes('enter your email') ||
+      rootText.includes('10% off') ||
+      rootText.includes('discount code')
 
     const emailInputs = Array.from(
       footerRoot.querySelectorAll(
@@ -166,6 +180,30 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       )
     })
 
+    const hasEmbeddedNewsletterWidgetInFooter = (() => {
+      const widgetSelectors = [
+        'iframe[src*="klaviyo" i]',
+        'iframe[src*="mailchimp" i]',
+        'iframe[src*="subscribe" i]',
+        '[class*="newsletter" i]',
+        '[id*="newsletter" i]',
+        '[data-testid*="newsletter" i]',
+        'form[action*="subscribe" i]',
+      ]
+      for (const sel of widgetSelectors) {
+        try {
+          const nodes = Array.from(footerRoot.querySelectorAll(sel))
+          if (nodes.some((n) => isVisible(n))) return true
+        } catch {
+          /* ignore selector issues */
+        }
+      }
+      return false
+    })()
+
+    const hasStrongNewsletterIntentInFooter =
+      newsletterKeywordInFooter && (strongIntentCopy || hasEmbeddedNewsletterWidgetInFooter)
+
     let hasFormPairInFooter = false
     for (const input of emailInputs) {
       const form = input.closest('form')
@@ -185,11 +223,21 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       // Fallback for custom forms where button isn't semantically linked.
       hasFormPairInFooter = true
     }
+    if (
+      !hasFormPairInFooter &&
+      hasStrongNewsletterIntentInFooter &&
+      (hasEmbeddedNewsletterWidgetInFooter || hasVisibleSubmitControlInFooter)
+    ) {
+      // Production-safe fallback for embedded newsletter widgets where input is inside iframe/custom web component.
+      hasFormPairInFooter = true
+    }
 
     const matchedSignals: string[] = []
     if (hasVisibleEmailInputInFooter) matchedSignals.push('email-input')
     if (hasVisibleSubmitControlInFooter) matchedSignals.push('submit-control')
     if (newsletterKeywordInFooter) matchedSignals.push('newsletter-copy')
+    if (hasEmbeddedNewsletterWidgetInFooter) matchedSignals.push('embedded-widget')
+    if (hasStrongNewsletterIntentInFooter) matchedSignals.push('strong-newsletter-intent')
 
     return {
       footerRootFound: true,
@@ -197,6 +245,8 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       hasVisibleEmailInputInFooter,
       hasVisibleSubmitControlInFooter,
       newsletterKeywordInFooter,
+      hasEmbeddedNewsletterWidgetInFooter,
+      hasStrongNewsletterIntentInFooter,
       hasFormPairInFooter,
       matchedSignals,
     }
