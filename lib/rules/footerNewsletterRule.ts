@@ -12,9 +12,6 @@ export type FooterNewsletterSnapshot = {
   hasVisibleEmailInputInFooter: boolean
   hasVisibleSubmitControlInFooter: boolean
   newsletterKeywordInFooter: boolean
-  hasEmbeddedNewsletterWidgetInFooter: boolean
-  hasStrongNewsletterIntentInFooter: boolean
-  hasEmailFieldHintInFooter: boolean
   hasFormPairInFooter: boolean
   matchedSignals: string[]
 }
@@ -26,9 +23,6 @@ export function emptyFooterNewsletterSnapshot(): FooterNewsletterSnapshot {
     hasVisibleEmailInputInFooter: false,
     hasVisibleSubmitControlInFooter: false,
     newsletterKeywordInFooter: false,
-    hasEmbeddedNewsletterWidgetInFooter: false,
-    hasStrongNewsletterIntentInFooter: false,
-    hasEmailFieldHintInFooter: false,
     hasFormPairInFooter: false,
     matchedSignals: [],
   }
@@ -71,14 +65,6 @@ export function evaluateFooterNewsletterRule(
 /** Runs in browser context; avoid external closures. */
 export async function collectFooterNewsletterSnapshot(page: Page): Promise<FooterNewsletterSnapshot> {
   return page.evaluate(() => {
-    const isRenderable = (el: Element | null): el is HTMLElement => {
-      if (!(el instanceof HTMLElement)) return false
-      const style = window.getComputedStyle(el)
-      if (style.display === 'none' || style.visibility === 'hidden') return false
-      const r = el.getBoundingClientRect()
-      return r.width >= 8 && r.height >= 8
-    }
-
     const isVisible = (el: Element | null): el is HTMLElement => {
       if (!(el instanceof HTMLElement)) return false
       const style = window.getComputedStyle(el)
@@ -102,8 +88,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
     for (const sel of FOOTER_SELECTORS) {
       try {
         const el = document.querySelector(sel)
-        // Prefer renderable over strict visible so opacity transition states on production do not hide footer detection.
-        if (isRenderable(el)) {
+        if (isVisible(el)) {
           footerRoot = el
           footerRootSelector = sel
           break
@@ -123,7 +108,7 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         const r = el.getBoundingClientRect()
         const top = r.top + window.scrollY
         if (top < docH * 0.35) return
-        if (!isRenderable(el)) return
+        if (!isVisible(el)) return
         const score = r.width * r.height
         if (score > bestScore) {
           best = el
@@ -143,9 +128,6 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         hasVisibleEmailInputInFooter: false,
         hasVisibleSubmitControlInFooter: false,
         newsletterKeywordInFooter: false,
-        hasEmbeddedNewsletterWidgetInFooter: false,
-        hasStrongNewsletterIntentInFooter: false,
-        hasEmailFieldHintInFooter: false,
         hasFormPairInFooter: false,
         matchedSignals: [],
       }
@@ -159,23 +141,15 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       rootText.includes('mailing list') ||
       rootText.includes('join our')
 
-    const strongIntentCopy =
-      rootText.includes('join our mailing list') ||
-      rootText.includes('sign up') ||
-      rootText.includes('signup') ||
-      rootText.includes('enter your email') ||
-      rootText.includes('10% off') ||
-      rootText.includes('discount code')
-
     const emailInputs = Array.from(
       footerRoot.querySelectorAll(
         'input[type="email"], input[name*="email" i], input[id*="email" i], input[placeholder*="email" i]',
       ),
-    ).filter((el) => isRenderable(el))
+    ).filter((el) => isVisible(el))
 
     const allButtons = Array.from(
       footerRoot.querySelectorAll('button, input[type="submit"], input[type="button"]'),
-    ).filter((el) => isRenderable(el))
+    ).filter((el) => isVisible(el))
 
     const submitLikeInRoot = allButtons.filter((el) => {
       const text = (el.textContent || '').toLowerCase().trim()
@@ -191,35 +165,6 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
         aria.includes('submit')
       )
     })
-
-    const hasEmbeddedNewsletterWidgetInFooter = (() => {
-      const widgetSelectors = [
-        'iframe[src*="klaviyo" i]',
-        'iframe[src*="mailchimp" i]',
-        'iframe[src*="subscribe" i]',
-        '[class*="newsletter" i]',
-        '[id*="newsletter" i]',
-        '[data-testid*="newsletter" i]',
-        'form[action*="subscribe" i]',
-      ]
-      for (const sel of widgetSelectors) {
-        try {
-          const nodes = Array.from(footerRoot.querySelectorAll(sel))
-          // Existence in footer is enough for embedded widgets; some providers animate opacity from 0 after hydration.
-          if (nodes.some((n) => isRenderable(n) || n instanceof HTMLElement)) return true
-        } catch {
-          /* ignore selector issues */
-        }
-      }
-      return false
-    })()
-
-    const hasStrongNewsletterIntentInFooter =
-      newsletterKeywordInFooter && (strongIntentCopy || hasEmbeddedNewsletterWidgetInFooter)
-
-    const hasEmailFieldHintInFooter =
-      /your email|email address|enter (your )?email|e-mail/i.test(rootText) ||
-      footerRoot.querySelector('input[placeholder*="email" i], input[aria-label*="email" i]') !== null
 
     let hasFormPairInFooter = false
     for (const input of emailInputs) {
@@ -240,26 +185,11 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       // Fallback for custom forms where button isn't semantically linked.
       hasFormPairInFooter = true
     }
-    if (
-      !hasFormPairInFooter &&
-      hasStrongNewsletterIntentInFooter &&
-      (hasEmbeddedNewsletterWidgetInFooter || hasVisibleSubmitControlInFooter)
-    ) {
-      // Production-safe fallback for embedded newsletter widgets where input is inside iframe/custom web component.
-      hasFormPairInFooter = true
-    }
-    if (!hasFormPairInFooter && hasStrongNewsletterIntentInFooter && hasEmailFieldHintInFooter) {
-      // Final fallback: footer explicitly asks for email in newsletter area, but field control is custom-rendered.
-      hasFormPairInFooter = true
-    }
 
     const matchedSignals: string[] = []
     if (hasVisibleEmailInputInFooter) matchedSignals.push('email-input')
     if (hasVisibleSubmitControlInFooter) matchedSignals.push('submit-control')
     if (newsletterKeywordInFooter) matchedSignals.push('newsletter-copy')
-    if (hasEmbeddedNewsletterWidgetInFooter) matchedSignals.push('embedded-widget')
-    if (hasStrongNewsletterIntentInFooter) matchedSignals.push('strong-newsletter-intent')
-    if (hasEmailFieldHintInFooter) matchedSignals.push('email-field-hint')
 
     return {
       footerRootFound: true,
@@ -267,9 +197,6 @@ export async function collectFooterNewsletterSnapshot(page: Page): Promise<Foote
       hasVisibleEmailInputInFooter,
       hasVisibleSubmitControlInFooter,
       newsletterKeywordInFooter,
-      hasEmbeddedNewsletterWidgetInFooter,
-      hasStrongNewsletterIntentInFooter,
-      hasEmailFieldHintInFooter,
       hasFormPairInFooter,
       matchedSignals,
     }

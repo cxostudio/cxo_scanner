@@ -159,8 +159,6 @@ export default function Home() {
   const [displayProgressPercent, setDisplayProgressPercent] = useState(0)
   const displayProgressRafRef = useRef<number | null>(null)
   const displayProgressTsRef = useRef<number | null>(null)
-  const analyzeStartTsRef = useRef<number | null>(null)
-  const displayProgressPercentRef = useRef(0)
 
   const analyzeInstantPreview = useMemo(
     () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
@@ -223,9 +221,9 @@ export default function Home() {
    */
   const PROGRESS_MAX_PERCENT_PER_SEC = 14
   const PROGRESS_SNAP_EPSILON = 0.12
-  /** Keep each step in a stable 20s bucket: 0-20, 20-40, 40-60, 60-80, 80-100. */
-  const ANALYSIS_BUCKET_SECONDS = 20
-  const PROGRESS_TIME_GATED_PERCENT_PER_SEC = 100 / (ANALYSIS_STEP_COUNT * ANALYSIS_BUCKET_SECONDS)
+  /** Keep post-60% progression intentionally slow so step 4/5 don't collapse on fast prod responses. */
+  const PROGRESS_AFTER_60_PERCENT_PER_SEC = 1.1
+  const PROGRESS_AFTER_80_PERCENT_PER_SEC = 1.0
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -252,14 +250,6 @@ export default function Home() {
     )
   }, [showAnalyze, displayProgressPercent, ANALYSIS_STEP_COUNT])
 
-  const waitForDisplayProgressTarget = async (targetPercent: number, timeoutMs = 120_000) => {
-    const started = performance.now()
-    while (performance.now() - started < timeoutMs) {
-      if (displayProgressPercentRef.current >= targetPercent) return
-      await new Promise<void>((r) => window.setTimeout(r, 120))
-    }
-  }
-
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
     if (!showAnalyze) return
@@ -268,24 +258,10 @@ export default function Home() {
 
   // While analyze UI is hidden, reset step row removal state.
   useEffect(() => {
-    displayProgressPercentRef.current = displayProgressPercent
-  }, [displayProgressPercent])
-
-  useEffect(() => {
-    if (showAnalyze && analyzeStartTsRef.current == null) {
-      analyzeStartTsRef.current = performance.now()
-    }
-    if (!showAnalyze) {
-      analyzeStartTsRef.current = null
-    }
-  }, [showAnalyze])
-
-  useEffect(() => {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
       setDisplayedMounted(0)
       setDisplayProgressPercent(0)
-      displayProgressPercentRef.current = 0
       displayProgressTsRef.current = null
       if (displayProgressRafRef.current != null) {
         window.cancelAnimationFrame(displayProgressRafRef.current)
@@ -303,20 +279,22 @@ export default function Home() {
         const lastTs = displayProgressTsRef.current ?? ts
         const dtSec = Math.max(0, (ts - lastTs) / 1000)
         displayProgressTsRef.current = ts
-        const maxDelta = PROGRESS_MAX_PERCENT_PER_SEC * dtSec
-        const startTs = analyzeStartTsRef.current ?? ts
-        const elapsedSec = Math.max(0, (ts - startTs) / 1000)
-        const timeCap = Math.min(100, elapsedSec * PROGRESS_TIME_GATED_PERCENT_PER_SEC)
-        const gatedTarget = Math.min(targetProgressPercent, timeCap)
-        const remaining = gatedTarget - prev
+        const progressSpeedPerSec =
+          prev >= 80
+            ? PROGRESS_AFTER_80_PERCENT_PER_SEC
+            : prev >= 60
+              ? PROGRESS_AFTER_60_PERCENT_PER_SEC
+              : PROGRESS_MAX_PERCENT_PER_SEC
+        const maxDelta = progressSpeedPerSec * dtSec
+        const remaining = targetProgressPercent - prev
 
         if (Math.abs(remaining) <= PROGRESS_SNAP_EPSILON) {
-          return gatedTarget
+          return targetProgressPercent
         }
         if (remaining > 0) {
           return prev + Math.min(remaining, maxDelta)
         }
-        return gatedTarget
+        return targetProgressPercent
       })
       displayProgressRafRef.current = window.requestAnimationFrame(animate)
     }
@@ -337,8 +315,9 @@ export default function Home() {
     showAnalyze,
     targetProgressPercent,
     PROGRESS_MAX_PERCENT_PER_SEC,
+    PROGRESS_AFTER_60_PERCENT_PER_SEC,
+    PROGRESS_AFTER_80_PERCENT_PER_SEC,
     PROGRESS_SNAP_EPSILON,
-    PROGRESS_TIME_GATED_PERCENT_PER_SEC,
   ])
 
   // Step activation follows smoothed progress thresholds (20/40/60/80/100).
@@ -947,9 +926,6 @@ export default function Home() {
       setIframeError(false)
       setRemovedSteps(new Set())
       setDisplayedMounted(0)
-      setDisplayProgressPercent(0)
-      displayProgressPercentRef.current = 0
-      analyzeStartTsRef.current = performance.now()
       try {
         sessionStorage.removeItem('scanPreviewMobile')
         sessionStorage.removeItem('scanPreviewDesktop')
@@ -1014,7 +990,6 @@ export default function Home() {
       // Main scan: POST /api/scan per batch, then /api/scan/combine (after preview is visible or gate timeout)
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
-      await waitForDisplayProgressTarget(99.7)
 
       await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS))
       router.replace('/scanner')
