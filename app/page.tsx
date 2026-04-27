@@ -206,13 +206,11 @@ export default function Home() {
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
   const SCAN_PROGRESS_UNITS_PER_BATCH = 40
   /**
-   * Keep combine phase visible in UI so step 4/5 and percent do not jump.
-   * Reserve ticks while /api/scan/combine is in flight, then finish with tail ticks.
+   * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
+   * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
    */
-  const SCAN_PROGRESS_COMBINE_TICKS = 12
-  const SCAN_PROGRESS_COMBINE_PULSE_MS = 650
-  const SCAN_PROGRESS_TAIL_TICKS = 3
-  const SCAN_PROGRESS_FINAL_TICK_MS = 260
+  const SCAN_PROGRESS_TAIL_TICKS = 6
+  const SCAN_PROGRESS_FINAL_TICK_MS = 420
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -233,9 +231,9 @@ export default function Home() {
   }, [showAnalyze, progress])
 
   /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 900
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 1400
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
@@ -341,17 +339,13 @@ export default function Home() {
 
     const progressTotalUnits = Math.max(
       1,
-      batches.length * SCAN_PROGRESS_UNITS_PER_BATCH +
-        SCAN_PROGRESS_COMBINE_TICKS +
-        1 +
-        SCAN_PROGRESS_TAIL_TICKS,
+      batches.length * SCAN_PROGRESS_UNITS_PER_BATCH + 1 + SCAN_PROGRESS_TAIL_TICKS,
     )
     const scanBaseCompleteUnits = batches.length * SCAN_PROGRESS_UNITS_PER_BATCH
-    const combinePhaseMaxUnits = scanBaseCompleteUnits + SCAN_PROGRESS_COMBINE_TICKS
 
     const tickProgressAfterCombine = async () => {
       for (let s = 1; s <= SCAN_PROGRESS_TAIL_TICKS + 1; s++) {
-        setProgress({ current: combinePhaseMaxUnits + s, total: progressTotalUnits })
+        setProgress({ current: scanBaseCompleteUnits + s, total: progressTotalUnits })
         await new Promise((r) => setTimeout(r, SCAN_PROGRESS_FINAL_TICK_MS))
       }
     }
@@ -565,16 +559,7 @@ export default function Home() {
       setProgress({ current: (i + 1) * SCAN_PROGRESS_UNITS_PER_BATCH, total: progressTotalUnits })
     }
 
-    let combinePulseId: number | null = null
     try {
-      combinePulseId = window.setInterval(() => {
-        setProgress((prev) => {
-          if (!prev) return prev
-          const next = Math.min(prev.current + 1, combinePhaseMaxUnits)
-          return { current: Math.max(prev.current, next), total: prev.total }
-        })
-      }, SCAN_PROGRESS_COMBINE_PULSE_MS)
-
       const finalResponse = await fetch('/api/scan/combine', {
         method: 'POST',
         headers: {
@@ -626,22 +611,12 @@ export default function Home() {
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
-      if (combinePulseId != null) {
-        window.clearInterval(combinePulseId)
-        combinePulseId = null
-      }
-      setProgress({ current: combinePhaseMaxUnits, total: progressTotalUnits })
       await tickProgressAfterCombine()
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
       localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
-      if (combinePulseId != null) {
-        window.clearInterval(combinePulseId)
-        combinePulseId = null
-      }
-      setProgress({ current: combinePhaseMaxUnits, total: progressTotalUnits })
       await tickProgressAfterCombine()
     }
 
