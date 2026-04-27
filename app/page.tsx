@@ -155,14 +155,13 @@ export default function Home() {
   const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
   const [previewMobile, setPreviewMobile] = useState<string | null>(null);
-  const [displayedMounted, setDisplayedMounted] = useState(0)
 
   const analyzeInstantPreview = useMemo(
     () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
     [showAnalyze, websiteUrl],
   )
 
-  /** Step removal timeouts must not be cleared when displayed step index advances. */
+  /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
   const analyzeTopRef = useRef<HTMLDivElement | null>(null)
@@ -219,7 +218,7 @@ export default function Home() {
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
    * plus tail ticks after combine for a smooth finish.
    */
-  const targetMounted = useMemo(() => {
+  const mounted = useMemo(() => {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
     if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
     return Math.min(
@@ -232,7 +231,6 @@ export default function Home() {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
     return Math.min(100, Math.round((progress.current / progress.total) * 100))
   }, [showAnalyze, progress])
-  const ANALYSIS_STEP_MIN_ADVANCE_MS = 700
 
   /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
   const ANALYSIS_STEP_REMOVE_DELAY_MS = 900
@@ -247,23 +245,12 @@ export default function Home() {
     router.prefetch('/scanner')
   }, [showAnalyze, router])
 
-  // While analyze UI is hidden, reset step row removal state.
+  // While analyze UI is hidden, reset step row removal state (mounted is derived from `progress` while visible).
   useEffect(() => {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
-      setDisplayedMounted(0)
     }
   }, [showAnalyze])
-
-  // Throttle step index advancement so late-stage rows don't jump/vanish together on slower environments.
-  useEffect(() => {
-    if (!showAnalyze) return
-    if (displayedMounted >= targetMounted) return
-    const id = window.setTimeout(() => {
-      setDisplayedMounted((prev) => Math.min(targetMounted, prev + 1))
-    }, ANALYSIS_STEP_MIN_ADVANCE_MS)
-    return () => window.clearTimeout(id)
-  }, [showAnalyze, displayedMounted, targetMounted, ANALYSIS_STEP_MIN_ADVANCE_MS])
 
   // On mobile, ensure analyze screen starts from the CXO logo.
   useEffect(() => {
@@ -282,9 +269,9 @@ export default function Home() {
 
   // After each batch, show “Finished” briefly (ANALYSIS_STEP_REMOVE_DELAY_MS), then remove the row.
   useEffect(() => {
-    if (!showAnalyze || displayedMounted <= 0) return
+    if (!showAnalyze || mounted <= 0) return
 
-    for (let k = 0; k < displayedMounted; k++) {
+    for (let k = 0; k < mounted; k++) {
       if (analysisStepRemovalScheduledRef.current.has(k)) continue
       analysisStepRemovalScheduledRef.current.add(k)
 
@@ -304,7 +291,7 @@ export default function Home() {
         analysisStepRemoveTimeoutsRef.current.push(id)
       }
     }
-  }, [displayedMounted, showAnalyze])
+  }, [mounted, showAnalyze])
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
     const batches: BatchData[] = []
@@ -884,7 +871,6 @@ export default function Home() {
       setCurrentBatchNumber(0)
       setIframeError(false)
       setRemovedSteps(new Set())
-      setDisplayedMounted(0)
       try {
         sessionStorage.removeItem('scanPreviewMobile')
         sessionStorage.removeItem('scanPreviewDesktop')
@@ -1397,9 +1383,9 @@ export default function Home() {
                               .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
                               .filter(({ index }) => !removedSteps.has(index))
                               .map(({ title, index, id }) => {
-                                const isCompleted = index < displayedMounted
-                                const isActive = index === displayedMounted
-                                const isPending = index > displayedMounted
+                                const isCompleted = index < mounted
+                                const isActive = index === mounted
+                                const isPending = index > mounted
 
                                 return (
                                   <motion.div
