@@ -4325,6 +4325,20 @@ export async function POST(request: NextRequest) {
         }
         lastRequestTime = Date.now()
 
+        const ruleText = `${rule.title} ${rule.description}`.toLowerCase()
+        const isFooterSocialRule =
+          rule.id === 'recXqQmYLbyuIil2a' ||
+          ((ruleText.includes('footer') &&
+            (ruleText.includes('social') ||
+              ruleText.includes('instagram') ||
+              ruleText.includes('facebook'))) ||
+            (ruleText.includes('social') &&
+              ruleText.includes('media') &&
+              ruleText.includes('link')))
+        const footerSocialDomPass =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+
         // Deterministic rules: use frozen snapshot only; skip AI for consistent results
         const detResult = tryEvaluateDeterministic(rule, {
           lazyLoading: lazyLoadingResult ?? buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] }),
@@ -4337,7 +4351,7 @@ export async function POST(request: NextRequest) {
           footerNewsletter: footerNewsletterSnapshot,
           footerCustomerSupport: footerCustomerSupportSnapshot,
         })
-        if (detResult) {
+        if (detResult && !(isFooterSocialRule && !detResult.passed)) {
           results.push(
             withCheckpoint({
               ...detResult,
@@ -6187,6 +6201,25 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = repairedDetResult.passed
               analysis.reason = repairedDetResult.reason
               console.log(`Repaired mixed reason for rule ${rule.id} using deterministic fallback.`)
+            }
+          }
+
+          // Footer social links verdict must be DOM OR IMAGE.
+          // - If deterministic DOM already found links, always PASS.
+          // - If DOM didn't find links, AI/image can still PASS.
+          if (isFooterSocialRule) {
+            if (footerSocialDomPass && !analysis.passed) {
+              const hosts = [
+                ...new Set([
+                  ...footerSocialSnapshot.socialHostsInFooterRoot,
+                  ...footerSocialSnapshot.socialHostsInLowerBand,
+                ]),
+              ]
+              analysis.passed = true
+              analysis.reason =
+                hosts.length > 0
+                  ? `Social profile links are present in the footer area (${hosts.slice(0, 6).join(', ')}).`
+                  : 'Social profile links are present in the footer area.'
             }
           }
 
