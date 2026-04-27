@@ -606,7 +606,8 @@ export async function POST(request: NextRequest) {
       } catch {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
-      await new Promise((r) => setTimeout(r, 1200))
+      const hydrationSettleMs = process.env.VERCEL ? 1800 : 1200
+      await new Promise((r) => setTimeout(r, hydrationSettleMs))
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
@@ -650,7 +651,7 @@ export async function POST(request: NextRequest) {
       fullVisibleText = visibleText
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
-      const colorWaitMs = 1000
+      const colorWaitMs = process.env.VERCEL ? 1700 : 1000
       await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection

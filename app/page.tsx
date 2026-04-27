@@ -209,8 +209,8 @@ export default function Home() {
    * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
    * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
    */
-  const SCAN_PROGRESS_TAIL_TICKS = 2
-  const SCAN_PROGRESS_FINAL_TICK_MS = 340
+  const SCAN_PROGRESS_TAIL_TICKS = 6
+  const SCAN_PROGRESS_FINAL_TICK_MS = 420
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -231,9 +231,9 @@ export default function Home() {
   }, [showAnalyze, progress])
 
   /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 1200
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 1200
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
   /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
 
@@ -942,24 +942,24 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
