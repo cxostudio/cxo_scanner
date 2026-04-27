@@ -225,7 +225,7 @@ export default function Home() {
   const PROGRESS_MAX_PERCENT_PER_SEC = 14
   const PROGRESS_SNAP_EPSILON = 0.12
   /** Ensure each row remains visible briefly before next step mounts. */
-  const ANALYSIS_STEP_MIN_ADVANCE_MS = 520
+  const ANALYSIS_STEP_MIN_ADVANCE_MS = 620
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -237,13 +237,13 @@ export default function Home() {
   }, [showAnalyze, progress])
 
   /** Long enough to read "Finished" before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 1100
   /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
   /** Do not redirect until step 4/5 visibly finish + remove on slower production UIs. */
   const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 45_000
   /** Keep a tiny stagger so users can see finish/remove sequence. */
-  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 220
 
   const targetMounted = useMemo(() => {
     if (!showAnalyze) return 0
