@@ -11,8 +11,9 @@ const QUADRANT_LABELS = ['Top', 'Upper middle', 'Lower middle', 'Bottom'] as con
 /** Ecommerce sites rarely reach networkidle; domcontentloaded + settle is reliable for previews. */
 const PREVIEW_GOTO_TIMEOUT_MS = 60_000
 const PREVIEW_GOTO_RETRY_MS = 45_000
-const READY_COMPLETE_WAIT_MS = 15_000
-const POST_NAV_SETTLE_MS = 2_000
+/** Shorter than before so first desktop preview reaches the client sooner (tradeoff: rare mid-paint captures). */
+const READY_COMPLETE_WAIT_MS = 8_000
+const POST_NAV_SETTLE_MS = 1_100
 
 /**
  * Navigate for screenshot capture: prefer domcontentloaded (fast), wait for load where possible,
@@ -81,6 +82,9 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
     async start(controller) {
       let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
       try {
+        // First NDJSON chunk ASAP so the client can show URL / favicon strategy before Puppeteer cold start.
+        send(controller, { type: 'meta', url })
+
         browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' })
         const page = await browser.newPage()
 
@@ -108,15 +112,16 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           document.documentElement.scrollTop = 0
           document.body.scrollTop = 0
         })
-        await new Promise((r) => setTimeout(r, 200))
+        await new Promise((r) => setTimeout(r, 100))
 
         const desktopB64 = (await page.screenshot({
-          type: 'png',
+          type: 'jpeg',
+          quality: 82,
           encoding: 'base64',
           fullPage: false,
         })) as string
 
-        let desktopDataUrl = `data:image/png;base64,${desktopB64}`
+        let desktopDataUrl = `data:image/jpeg;base64,${desktopB64}`
         send(controller, {
           type: 'preview',
           previewDesktop: desktopDataUrl,
@@ -150,13 +155,14 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
             document.documentElement.scrollTop = 0
             document.body.scrollTop = 0
           })
-          await new Promise((r) => setTimeout(r, 600))
+          await new Promise((r) => setTimeout(r, 380))
           const mobB64 = (await mobilePage.screenshot({
-            type: 'png',
+            type: 'jpeg',
+            quality: 82,
             encoding: 'base64',
             fullPage: false,
           })) as string
-          mobileDataUrl = `data:image/png;base64,${mobB64}`
+          mobileDataUrl = `data:image/jpeg;base64,${mobB64}`
         } catch (mobileErr) {
           console.warn('Mobile viewport capture failed, using desktop frame for both:', mobileErr)
         } finally {
