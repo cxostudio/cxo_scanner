@@ -224,9 +224,8 @@ export default function Home() {
    */
   const PROGRESS_MAX_PERCENT_PER_SEC = 14
   const PROGRESS_SNAP_EPSILON = 0.12
-  /** Keep post-60% progression intentionally slow so step 4/5 don't collapse on fast prod responses. */
-  const PROGRESS_AFTER_60_PERCENT_PER_SEC = 1.1
-  const PROGRESS_AFTER_80_PERCENT_PER_SEC = 1.0
+  /** Ensure each row remains visible briefly before next step mounts. */
+  const ANALYSIS_STEP_MIN_ADVANCE_MS = 520
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -243,8 +242,8 @@ export default function Home() {
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 2200
   /** Do not redirect until step 4/5 visibly finish + remove on slower production UIs. */
   const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 45_000
-  /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
-  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
+  /** Keep a tiny stagger so users can see finish/remove sequence. */
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
 
   const targetMounted = useMemo(() => {
     if (!showAnalyze) return 0
@@ -310,13 +309,7 @@ export default function Home() {
         const lastTs = displayProgressTsRef.current ?? ts
         const dtSec = Math.max(0, (ts - lastTs) / 1000)
         displayProgressTsRef.current = ts
-        const progressSpeedPerSec =
-          prev >= 80
-            ? PROGRESS_AFTER_80_PERCENT_PER_SEC
-            : prev >= 60
-              ? PROGRESS_AFTER_60_PERCENT_PER_SEC
-              : PROGRESS_MAX_PERCENT_PER_SEC
-        const maxDelta = progressSpeedPerSec * dtSec
+        const maxDelta = PROGRESS_MAX_PERCENT_PER_SEC * dtSec
         const remaining = targetProgressPercent - prev
 
         if (Math.abs(remaining) <= PROGRESS_SNAP_EPSILON) {
@@ -346,19 +339,21 @@ export default function Home() {
     showAnalyze,
     targetProgressPercent,
     PROGRESS_MAX_PERCENT_PER_SEC,
-    PROGRESS_AFTER_60_PERCENT_PER_SEC,
-    PROGRESS_AFTER_80_PERCENT_PER_SEC,
     PROGRESS_SNAP_EPSILON,
   ])
 
-  // Step activation follows smoothed progress thresholds (20/40/60/80/100).
+  // Step activation follows progress thresholds with a minimum dwell per row.
   useEffect(() => {
     if (!showAnalyze) return
-    setDisplayedMounted((prev) => {
-      if (prev >= targetMounted) return prev
-      return prev + 1
-    })
-  }, [showAnalyze, targetMounted])
+    if (displayedMounted >= targetMounted) return
+    const id = window.setTimeout(() => {
+      setDisplayedMounted((prev) => {
+        if (prev >= targetMounted) return prev
+        return prev + 1
+      })
+    }, ANALYSIS_STEP_MIN_ADVANCE_MS)
+    return () => window.clearTimeout(id)
+  }, [showAnalyze, displayedMounted, targetMounted, ANALYSIS_STEP_MIN_ADVANCE_MS])
 
   // On mobile, ensure analyze screen starts from the CXO logo.
   useEffect(() => {
