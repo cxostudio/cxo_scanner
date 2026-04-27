@@ -1048,24 +1048,24 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        // emailjs.send(
-        //   EMAILJS_SERVICE_ID,
-        //   EMAILJS_TEMPLATE_ID,
-        //   {
-        //     level: selectedChallenge ?? '',
-        //     price: selectedRevenue ?? '',
-        //     url: validUrl,
-        //     email: emailTrimmed,
-        //     ip_address: ipAddress,
-        //     browser,
-        //     screen_size: screenSize,
-        //     time_zone: timeZone,
-        //     browser_data: browserData,
-        //     pass_result: passResult,
-        //     fail_result: failResult,
-        //   },
-        //   { publicKey: EMAILJS_PUBLIC_KEY }
-        // ).catch(err => console.error('EmailJS failed:', err))
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
@@ -1096,6 +1096,14 @@ export default function Home() {
       return websiteUrl.trim() !== '' && email.trim() !== ''
     }
     return false
+  }
+
+  const handleAccessResultsEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    if (currentStep !== totalSteps) return
+    e.preventDefault()
+    if (isStartingScan) return
+    void handleStartScan()
   }
 
 
@@ -1267,6 +1275,7 @@ export default function Home() {
                           setWebsiteUrl(e.target.value)
                           if (urlError) setUrlError('')
                         }}
+                        onKeyDown={handleAccessResultsEnter}
                         placeholder="Enter the URL of your main product page"
                         className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
                         required
@@ -1287,6 +1296,7 @@ export default function Home() {
                             setEmail(e.target.value)
                             if (emailError) setEmailError('')
                           }}
+                          onKeyDown={handleAccessResultsEnter}
                           placeholder="Enter your best email address"
                           className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
                           required
