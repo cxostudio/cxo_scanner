@@ -2120,6 +2120,43 @@ export async function POST(request: NextRequest) {
         console.warn('Customer media detection failed:', e)
       }
 
+      // Retry only for video-testimonial rule when first pass found nothing.
+      // Some Shopify UGC widgets hydrate late; a short extra settle avoids false FAIL on sites like Spacegoods.
+      const needsVideoTestimonialRule = rules.some((r) => {
+        const t = r.title.toLowerCase()
+        const d = r.description.toLowerCase()
+        return (
+          (t.includes('video') && (t.includes('testimonial') || t.includes('review') || t.includes('customer'))) ||
+          d.includes('video testimonial') ||
+          d.includes('customer video') ||
+          d.includes('video review') ||
+          d.includes('real customer video')
+        )
+      })
+      if (needsVideoTestimonialRule && !customerReviewVideoFound) {
+        try {
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+          await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2400 : 1700))
+          const mediaRetry = await detectCustomerMedia(page)
+          if (mediaRetry.videoFound) {
+            customerReviewVideoFound = true
+            customerReviewVideoEvidence = [
+              ...new Set([...customerReviewVideoEvidence, ...mediaRetry.videoEvidence]),
+            ]
+            console.log(
+              '[CUSTOMER MEDIA] Video retry succeeded. Evidence:',
+              customerReviewVideoEvidence.slice(0, 4).join(' | ') || 'n/a',
+            )
+            keyElements = (keyElements || '') +
+              '\n\n--- CUSTOMER VIDEO TESTIMONIALS RETRY ---\n' +
+              `Detected after retry: YES\n` +
+              `Evidence: ${customerReviewVideoEvidence.slice(0, 6).join(' | ')}`
+          }
+        } catch (e) {
+          console.warn('[CUSTOMER MEDIA] Video retry failed:', e)
+        }
+      }
+
       // QUANTITY / DISCOUNT CHECK: PASS if discount-type content appears ANYWHERE on the page. Log snippet to console for debugging.
       quantityDiscountContext = await page.evaluate(() => {
         const bodyText = document.body.innerText || ''
