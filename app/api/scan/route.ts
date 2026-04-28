@@ -440,6 +440,120 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   }
 }
 
+function detectFooterCustomerSupportFromHtml(rawHtml: string): {
+  footerRootFound: boolean
+  kinds: string[]
+  matchedLabels: string[]
+  hasFloatingChatLauncher: boolean
+} {
+  if (!rawHtml) {
+    return {
+      footerRootFound: false,
+      kinds: [],
+      matchedLabels: [],
+      hasFloatingChatLauncher: false,
+    }
+  }
+
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,9000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  addSlice(Math.floor(html.length * 0.62), html.length)
+  const searchArea = slices.join('\n')
+  const footerRootFound = /<footer[\s>]/i.test(searchArea) || /(?:id|class)=["'][^"']*footer[^"']*["']/i.test(searchArea)
+
+  const kinds = new Set<string>()
+  const matchedLabels: string[] = []
+  const pushKind = (kind: string, label: string) => {
+    if (kinds.has(kind)) return
+    kinds.add(kind)
+    const t = label.replace(/\s+/g, ' ').trim()
+    if (t && matchedLabels.length < 12) matchedLabels.push(t.slice(0, 80))
+  }
+
+  const classify = (label: string, href: string): string | null => {
+    const l = label.replace(/\s+/g, ' ').trim().toLowerCase()
+    const h = href.trim().toLowerCase()
+    if (/\bhelp\s*center\b|helpcentre|\/help\b|help-center|pages\/help/i.test(l) || /\/help|help-center|help_center|zendesk|intercom|freshdesk/i.test(h)) {
+      return 'help-center'
+    }
+    if (/\bcontact(\s+us)?\b|^contact$/i.test(l) || /\/contact|pages\/contact|mailto:/i.test(h)) {
+      return 'contact'
+    }
+    if (/\bfaqs?\b|\bquestions\b/i.test(l) || /\/faq|\/faqs/i.test(h)) {
+      return 'faq'
+    }
+    if (/\blive\s*chat\b|\bchat\s+with\b|\bonline\s*chat\b/i.test(l) || /\/chat\b|livechat|live-chat/i.test(h)) {
+      return 'live-chat'
+    }
+    if (/\bcustomer\s*(service|support|care)\b/i.test(l)) {
+      return 'customer-care'
+    }
+    if (/\bshipping\b/i.test(l) || /\/policies\/shipping|\/shipping/i.test(h)) {
+      return 'shipping'
+    }
+    if (/\breturns?\b|\brefunds?\b/i.test(l) || /\/policies\/refund|\/returns/i.test(h)) {
+      return 'returns'
+    }
+    if (/\bmanage\s+subscription\b/i.test(l) || (/\bmanage\b/i.test(l) && /\bsubscription\b/i.test(l))) {
+      return 'subscription-help'
+    }
+    if (/\bsubmit\s+review\b|\bwrite\s+a\s+review\b/i.test(l)) {
+      return 'review-help'
+    }
+    if (l === 'support' || /\bsupport\s+home\b/i.test(l)) {
+      return 'support-link'
+    }
+    return null
+  }
+
+  if (searchArea) {
+    const linkRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+    let m: RegExpExecArray | null
+    while ((m = linkRe.exec(searchArea)) !== null) {
+      const href = (m[1] || '').trim()
+      const label = (m[2] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      const kind = classify(label, href)
+      if (kind) pushKind(kind, label || href)
+      if (kinds.size >= 12) break
+    }
+  }
+
+  const hasFloatingChatLauncher =
+    /\b(intercom|zendesk|drift|tidio|crisp|gorgias|livechat|live-chat|chatwoot|tawk\.to|shopify\s*inbox|customer\s+chat|message\s+us)\b/i.test(
+      html,
+    )
+
+  return {
+    footerRootFound,
+    kinds: Array.from(kinds),
+    matchedLabels,
+    hasFloatingChatLauncher,
+  }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -2626,6 +2740,67 @@ export async function POST(request: NextRequest) {
 
       try {
         footerCustomerSupportSnapshot = await collectFooterCustomerSupportSnapshot(page)
+        const initialFooterSupportPass =
+          footerCustomerSupportSnapshot.kinds.length > 0 || footerCustomerSupportSnapshot.hasFloatingChatLauncher
+
+        if (!initialFooterSupportPass) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterSupport = await collectFooterCustomerSupportSnapshot(page)
+            footerCustomerSupportSnapshot = {
+              footerRootFound:
+                footerCustomerSupportSnapshot.footerRootFound || retryFooterSupport.footerRootFound,
+              footerRootSelector:
+                footerCustomerSupportSnapshot.footerRootSelector || retryFooterSupport.footerRootSelector,
+              kinds: [...new Set([...footerCustomerSupportSnapshot.kinds, ...retryFooterSupport.kinds])],
+              matchedLabels: [
+                ...new Set([
+                  ...footerCustomerSupportSnapshot.matchedLabels,
+                  ...retryFooterSupport.matchedLabels,
+                ]),
+              ],
+              hasFloatingChatLauncher:
+                footerCustomerSupportSnapshot.hasFloatingChatLauncher ||
+                retryFooterSupport.hasFloatingChatLauncher,
+            }
+          } catch (footerSupportRetryErr) {
+            console.warn('[scan] footer customer support retry failed:', footerSupportRetryErr)
+          }
+        }
+
+        if (
+          footerCustomerSupportSnapshot.kinds.length === 0 &&
+          !footerCustomerSupportSnapshot.hasFloatingChatLauncher
+        ) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackSupport = detectFooterCustomerSupportFromHtml(runtimeHtml)
+            if (htmlFallbackSupport.kinds.length > 0 || htmlFallbackSupport.hasFloatingChatLauncher) {
+              footerCustomerSupportSnapshot = {
+                footerRootFound:
+                  footerCustomerSupportSnapshot.footerRootFound || htmlFallbackSupport.footerRootFound,
+                footerRootSelector: footerCustomerSupportSnapshot.footerRootSelector || 'html-footer-fallback',
+                kinds: [...new Set([...footerCustomerSupportSnapshot.kinds, ...htmlFallbackSupport.kinds])],
+                matchedLabels: [
+                  ...new Set([
+                    ...footerCustomerSupportSnapshot.matchedLabels,
+                    ...htmlFallbackSupport.matchedLabels,
+                  ]),
+                ],
+                hasFloatingChatLauncher:
+                  footerCustomerSupportSnapshot.hasFloatingChatLauncher ||
+                  htmlFallbackSupport.hasFloatingChatLauncher,
+              }
+              console.log(
+                `[scan] footer support HTML fallback detected: kinds=${footerCustomerSupportSnapshot.kinds.join(', ') || 'none'} chat=${footerCustomerSupportSnapshot.hasFloatingChatLauncher}`,
+              )
+            }
+          } catch (footerSupportHtmlFallbackErr) {
+            console.warn('[scan] footer customer support HTML fallback failed:', footerSupportHtmlFallbackErr)
+          }
+        }
+
         const footerSupportBlock = [
           '',
           '--- FOOTER CUSTOMER SUPPORT (DOM scan) ---',
@@ -4388,6 +4563,19 @@ export async function POST(request: NextRequest) {
             containerDescription: htmlFallbackTrustNearCta.containerDescription,
           }
           console.log(`[FALLBACK] Trust near CTA from HTML: ${htmlFallbackTrustNearCta.paymentBrandsFound.join(', ')}`)
+        }
+        const htmlFallbackFooterSupport = detectFooterCustomerSupportFromHtml(rawHtml)
+        if (htmlFallbackFooterSupport.kinds.length > 0 || htmlFallbackFooterSupport.hasFloatingChatLauncher) {
+          footerCustomerSupportSnapshot = {
+            footerRootFound: htmlFallbackFooterSupport.footerRootFound,
+            footerRootSelector: 'html-footer-fallback',
+            kinds: htmlFallbackFooterSupport.kinds,
+            matchedLabels: htmlFallbackFooterSupport.matchedLabels,
+            hasFloatingChatLauncher: htmlFallbackFooterSupport.hasFloatingChatLauncher,
+          }
+          console.log(
+            `[FALLBACK] Footer support from HTML: kinds=${htmlFallbackFooterSupport.kinds.join(', ') || 'none'} chat=${htmlFallbackFooterSupport.hasFloatingChatLauncher}`,
+          )
         }
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
