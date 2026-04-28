@@ -77,15 +77,14 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
       if (!s || s.startsWith('mailto:') || s.startsWith('tel:') || s.startsWith('javascript:')) return null
       if (/instagram\.com|instagr\.am|(?:^|[\/\-_?=&\s])instagram(?:$|[\/\-_?=&\s])/i.test(s)) return 'Instagram'
       if (/facebook\.com|fb\.com|fb\.me|(?:^|[\/\-_?=&\s])facebook(?:$|[\/\-_?=&\s])/i.test(s)) return 'Facebook'
-      if (/twitter\.com|^https?:\/\/(www\.)?x\.com\/|(?:^|[\/\-_?=&\s])twitter(?:$|[\/\-_?=&\s])|(?:^|[\/\-_?=&\s])x(?:$|[\/\-_?=&\s])/i.test(s)) return 'X/Twitter'
+      if (/twitter\.com|^https?:\/\/(www\.)?x\.com\/|(?:^|[\/\-_?=&\s])twitter(?:$|[\/\-_?=&\s])/i.test(s)) return 'X/Twitter'
       if (/linkedin\.com|(?:^|[\/\-_?=&\s])linkedin(?:$|[\/\-_?=&\s])/i.test(s)) return 'LinkedIn'
       if (/tiktok\.com|(?:^|[\/\-_?=&\s])tiktok(?:$|[\/\-_?=&\s])/i.test(s)) return 'TikTok'
       if (/pinterest\.com|pin\.it|(?:^|[\/\-_?=&\s])pinterest(?:$|[\/\-_?=&\s])/i.test(s)) return 'Pinterest'
       if (/youtube\.com|youtu\.be|(?:^|[\/\-_?=&\s])youtube(?:$|[\/\-_?=&\s])|(?:^|[\/\-_?=&\s])yt(?:$|[\/\-_?=&\s])/i.test(s)) return 'YouTube'
       if (/threads\.net|(?:^|[\/\-_?=&\s])threads(?:$|[\/\-_?=&\s])/i.test(s)) return 'Threads'
       if (/snapchat\.com|(?:^|[\/\-_?=&\s])snapchat(?:$|[\/\-_?=&\s])/i.test(s)) return 'Snapchat'
-      if (/t\.me\/|telegram|(?:^|[\/\-_?=&\s])telegram(?:$|[\/\-_?=&\s])/i.test(s)) return 'Telegram'
-      if (/wa\.me|api\.whatsapp\.com|whatsapp\.com|(?:^|[\/\-_?=&\s])whatsapp(?:$|[\/\-_?=&\s])/i.test(s)) return 'WhatsApp'
+      // Intentional: Telegram/WhatsApp are support/contact channels, not social profile links for this rule.
       return null
     }
 
@@ -130,6 +129,15 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
       root
         .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
         .forEach((el) => {
+        const tag = el.tagName.toLowerCase()
+        const href = (el.getAttribute('href') || '').trim()
+        const hasExplicitSocialAttr =
+          /instagram|facebook|twitter|x|tiktok|linkedin|youtube|pinterest|threads|snapchat|telegram|whatsapp/i.test(
+            `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-social') || ''}`,
+          )
+        // Guardrail: only treat as social when it's a real link or explicit social control.
+        if (tag === 'a' && !href) return
+        if (tag !== 'a' && !hasExplicitSocialAttr) return
         const c = classifySocialFromSignals(socialSignalsFromElement(el))
         if (c) hosts.add(c)
       })
@@ -194,6 +202,14 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
       .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
       .forEach((el) => {
       if (!(el instanceof HTMLElement)) return
+      const tag = el.tagName.toLowerCase()
+      const href = (el.getAttribute('href') || '').trim()
+      const hasExplicitSocialAttr =
+        /instagram|facebook|twitter|x|tiktok|linkedin|youtube|pinterest|threads|snapchat|telegram|whatsapp/i.test(
+          `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-social') || ''}`,
+        )
+      if (tag === 'a' && !href) return
+      if (tag !== 'a' && !hasExplicitSocialAttr) return
       const r = el.getBoundingClientRect()
       const centerY = r.top + window.scrollY + r.height / 2
       if (centerY < yCut) return

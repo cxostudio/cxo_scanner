@@ -216,8 +216,8 @@ export default function Home() {
    * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
    * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
    */
-  const SCAN_PROGRESS_TAIL_TICKS = 6
-  const SCAN_PROGRESS_FINAL_TICK_MS = 420
+  const SCAN_PROGRESS_TAIL_TICKS = 3
+  const SCAN_PROGRESS_FINAL_TICK_MS = 260
   /**
    * Use timestamp-based smoothing instead of timer chains so production/main-thread variance
    * (Vercel build, throttling, render batching) doesn't skip late-stage progress.
@@ -225,7 +225,7 @@ export default function Home() {
   const PROGRESS_MAX_PERCENT_PER_SEC = 14
   const PROGRESS_SNAP_EPSILON = 0.12
   /** Ensure each row remains visible briefly before next step mounts. */
-  const ANALYSIS_STEP_MIN_ADVANCE_MS = 520
+  const ANALYSIS_STEP_MIN_ADVANCE_MS = 380
 
   /**
    * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
@@ -237,11 +237,11 @@ export default function Home() {
   }, [showAnalyze, progress])
 
   /** Long enough to read "Finished" before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 650
   /** Keep tiny pause so scanner route appears almost immediately. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 250
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 120
   /** Cap UI-completion wait aggressively; this is UX-only and does not affect rule evaluation. */
-  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 5_000
+  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 2_500
   /** Keep a tiny stagger so users can see finish/remove sequence. */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
 
@@ -982,7 +982,7 @@ export default function Home() {
         if (previewGateTimeoutId !== 0) window.clearTimeout(previewGateTimeoutId)
         resolvePreviewGate()
       }
-      previewGateTimeoutId = window.setTimeout(settlePreviewGate, 60_000)
+      previewGateTimeoutId = window.setTimeout(settlePreviewGate, 35_000)
 
       const streamPromise = startWebsitePreviewStream(validUrl, {
         onReadyForRuleScan: settlePreviewGate,
@@ -1048,24 +1048,24 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        // emailjs.send(
-        //   EMAILJS_SERVICE_ID,
-        //   EMAILJS_TEMPLATE_ID,
-        //   {
-        //     level: selectedChallenge ?? '',
-        //     price: selectedRevenue ?? '',
-        //     url: validUrl,
-        //     email: emailTrimmed,
-        //     ip_address: ipAddress,
-        //     browser,
-        //     screen_size: screenSize,
-        //     time_zone: timeZone,
-        //     browser_data: browserData,
-        //     pass_result: passResult,
-        //     fail_result: failResult,
-        //   },
-        //   { publicKey: EMAILJS_PUBLIC_KEY }
-        // ).catch(err => console.error('EmailJS failed:', err))
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            level: selectedChallenge ?? '',
+            price: selectedRevenue ?? '',
+            url: validUrl,
+            email: emailTrimmed,
+            ip_address: ipAddress,
+            browser,
+            screen_size: screenSize,
+            time_zone: timeZone,
+            browser_data: browserData,
+            pass_result: passResult,
+            fail_result: failResult,
+          },
+          { publicKey: EMAILJS_PUBLIC_KEY }
+        ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)

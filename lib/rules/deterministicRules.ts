@@ -74,6 +74,21 @@ export function isHeaderCartQuickAccessRule(rule: ScanRule): boolean {
   return quickOrAccess
 }
 
+export function isSearchAccessibilityRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  if (!(t.includes('search') || d.includes('search'))) return false
+  return (
+    t.includes('button') ||
+    t.includes('icon') ||
+    t.includes('accessible') ||
+    d.includes('button') ||
+    d.includes('icon') ||
+    d.includes('accessible') ||
+    d.includes('header')
+  )
+}
+
 export function isTrustBadgesNearCtaRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -376,6 +391,28 @@ export function evaluateCartIconItemCountRule(rule: ScanRule, keyElementsString:
     ruleTitle: rule.title,
     passed: false,
     reason: detail || 'Cart has items but no visible item-count badge on the cart icon.',
+  }
+}
+
+export function evaluateSearchAccessibilityRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
+  if (!keyElementsString.includes('--- SEARCH ACCESS CHECK ---')) return null
+  if (/Search accessible control:\s*UNKNOWN/i.test(keyElementsString)) return null
+  const present = /Search accessible control:\s*YES/i.test(keyElementsString)
+  const detail =
+    keyElementsString.match(/Search control detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'search control'
+  if (present) {
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A clear and accessible search control is present (${detail}).`,
+    }
+  }
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason: 'No clear and accessible search button/icon was detected in the header area.',
   }
 }
 
@@ -721,6 +758,10 @@ export function tryEvaluateDeterministic(
   if (isCartIconItemCountRule(rule)) {
     const cartCountResult = evaluateCartIconItemCountRule(rule, context.keyElementsString)
     if (cartCountResult !== null) return cartCountResult
+  }
+  if (isSearchAccessibilityRule(rule)) {
+    const searchResult = evaluateSearchAccessibilityRule(rule, context.keyElementsString)
+    if (searchResult !== null) return searchResult
   }
   if (isTrustBadgesNearCtaRule(rule)) {
     const trustResult = evaluateTrustBadgesNearCtaRule(rule, context.keyElementsString)
