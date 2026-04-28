@@ -5,9 +5,9 @@
 
 const SCROLL_STEP_RATIO = 0.4
 /** Shorter steps = faster scroll through long pages (lazy content still loads). */
-const STEP_DELAY_MS = process.env.VERCEL ? 380 : 320
+const STEP_DELAY_MS = process.env.VERCEL ? 300 : 240
 /** Post-scroll settle; lower = faster scans, slightly higher lazy-load miss risk. */
-const SETTLE_AFTER_SCROLL_MS = process.env.VERCEL ? 3200 : 2200
+const SETTLE_AFTER_SCROLL_MS = process.env.VERCEL ? 2000 : 1500
 
 export async function scrollPageToBottom(page: import('puppeteer-core').Page): Promise<void> {
   await page.evaluate(

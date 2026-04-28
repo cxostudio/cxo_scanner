@@ -178,7 +178,10 @@ function htmlSuggestsDesktopOnlyThumbnailStrip(rawHtml: string): boolean {
  */
 function detectFooterSocialHostsFromHtml(rawHtml: string): string[] {
   if (!rawHtml) return []
-  const html = rawHtml.toLowerCase()
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .toLowerCase()
   const slices: string[] = []
 
   const addSlice = (start: number, end: number) => {
@@ -205,32 +208,44 @@ function detectFooterSocialHostsFromHtml(rawHtml: string): string[] {
     if (slices.length >= 5) break
   }
 
-  // 3) Last part of document (footer commonly lives here)
-  const tailStart = Math.floor(html.length * 0.62)
-  addSlice(tailStart, html.length)
+  // 3) Last part fallback only when no explicit footer-like area was found.
+  if (slices.length === 0) {
+    const tailStart = Math.floor(html.length * 0.62)
+    addSlice(tailStart, html.length)
+  }
 
   const searchArea = slices.join('\n')
   if (!searchArea) return []
 
-  const providers: Array<{ name: string; re: RegExp }> = [
-    { name: 'Instagram', re: /instagram\.com|instagr\.am/ },
-    { name: 'Facebook', re: /facebook\.com|fb\.com|fb\.me/ },
-    { name: 'X/Twitter', re: /twitter\.com|x\.com\// },
-    { name: 'TikTok', re: /tiktok\.com/ },
-    { name: 'LinkedIn', re: /linkedin\.com/ },
-    { name: 'YouTube', re: /youtube\.com|youtu\.be/ },
-    { name: 'Pinterest', re: /pinterest\.com|pin\.it/ },
-    { name: 'Threads', re: /threads\.net/ },
-    { name: 'Snapchat', re: /snapchat\.com/ },
-    { name: 'Telegram', re: /t\.me\/|telegram/ },
-    { name: 'WhatsApp', re: /wa\.me|api\.whatsapp\.com|whatsapp\.com/ },
-  ]
-
-  const found: string[] = []
-  for (const p of providers) {
-    if (p.re.test(searchArea)) found.push(p.name)
+  const classifyFromBlob = (blob: string): string | null => {
+    const s = blob.toLowerCase()
+    if (/instagram\.com|instagr\.am/.test(s)) return 'Instagram'
+    if (/facebook\.com|fb\.com|fb\.me/.test(s)) return 'Facebook'
+    if (/twitter\.com|x\.com\//.test(s)) return 'X/Twitter'
+    if (/tiktok\.com/.test(s)) return 'TikTok'
+    if (/linkedin\.com/.test(s)) return 'LinkedIn'
+    if (/youtube\.com|youtu\.be/.test(s)) return 'YouTube'
+    if (/pinterest\.com|pin\.it/.test(s)) return 'Pinterest'
+    if (/threads\.net/.test(s)) return 'Threads'
+    if (/snapchat\.com/.test(s)) return 'Snapchat'
+    // Intentional: Telegram/WhatsApp are support/contact channels, not social profile links for this rule.
+    return null
   }
-  return [...new Set(found)]
+
+  const found = new Set<string>()
+  const linkRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi
+  let m: RegExpExecArray | null
+  while ((m = linkRe.exec(searchArea)) !== null) {
+    const tag = m[0]
+    const href = (m[1] || '').trim()
+    const aria = tag.match(/\baria-label=["']([^"']+)["']/i)?.[1] || ''
+    const title = tag.match(/\btitle=["']([^"']+)["']/i)?.[1] || ''
+    const cls = tag.match(/\bclass=["']([^"']+)["']/i)?.[1] || ''
+    const c = classifyFromBlob(`${href} ${aria} ${title} ${cls}`)
+    if (c) found.add(c)
+  }
+
+  return Array.from(found)
 }
 
 function detectFooterNewsletterFromHtml(rawHtml: string): {
@@ -748,6 +763,31 @@ function detectLogoHomepageFromHtml(rawHtml: string, baseUrl: string): {
   }
 }
 
+function detectSearchAccessibilityFromHtml(rawHtml: string): {
+  present: boolean
+  detail: string
+} {
+  if (!rawHtml) return { present: false, detail: 'Not found' }
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .toLowerCase()
+  const header = html.match(/<header[\s\S]*?<\/header>/i)?.[0] || html.slice(0, Math.min(html.length, 30000))
+
+  if (/<input\b[^>]*type=["']search["'][^>]*>/i.test(header)) {
+    return { present: true, detail: 'Header search input detected' }
+  }
+  if (
+    /<(button|a)\b[^>]*(aria-label|title|class|id)=["'][^"']*(search|header-search|predictive-search|icon-search)[^"']*["'][^>]*>/i.test(
+      header,
+    ) ||
+    /<(button|a)\b[^>]*>[\s\S]{0,40}search[\s\S]{0,40}<\/(button|a)>/i.test(header)
+  ) {
+    return { present: true, detail: 'Header search control/icon detected' }
+  }
+  return { present: false, detail: 'No clear search control in header HTML' }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -1183,7 +1223,7 @@ export async function POST(request: NextRequest) {
       } catch {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
-      const hydrationSettleMs = process.env.VERCEL ? 1800 : 1200
+      const hydrationSettleMs = process.env.VERCEL ? 1100 : 850
       await new Promise((r) => setTimeout(r, hydrationSettleMs))
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
@@ -1228,7 +1268,7 @@ export async function POST(request: NextRequest) {
       fullVisibleText = visibleText
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
-      const colorWaitMs = process.env.VERCEL ? 1700 : 1000
+      const colorWaitMs = process.env.VERCEL ? 1100 : 700
       await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
@@ -1816,6 +1856,52 @@ export async function POST(request: NextRequest) {
         }
 
         // Header cart / bag quick access (deterministic signal for cart-in-header rules)
+        const searchInfo: string[] = []
+        try {
+          const headerRootsSearch = Array.from(
+            document.querySelectorAll('header, [role="banner"], .site-header, #shopify-section-header, .header'),
+          ) as Element[]
+          const rootsSearch = headerRootsSearch.length > 0 ? headerRootsSearch : [document.body]
+          const isVisible = (el: Element): boolean => {
+            const h = el as HTMLElement
+            if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+            const st = window.getComputedStyle(h)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
+            const r = h.getBoundingClientRect()
+            return r.width >= 8 && r.height >= 8
+          }
+          let searchDetail = 'Not found'
+          let searchFound = false
+          outerSearch: for (const root of rootsSearch) {
+            const searchInput = root.querySelector(
+              'input[type="search"], input[aria-label*="search" i], input[name*="search" i], input[id*="search" i]',
+            )
+            if (searchInput && isVisible(searchInput)) {
+              searchFound = true
+              searchDetail = 'Visible search input in header'
+              break
+            }
+
+            const controls = Array.from(root.querySelectorAll('button, a, [role="button"], [role="link"]'))
+            for (const c of controls) {
+              if (!(c instanceof HTMLElement) || !isVisible(c)) continue
+              const blob =
+                `${c.getAttribute('aria-label') || ''} ${c.getAttribute('title') || ''} ${c.className || ''} ${c.id || ''} ${(c.textContent || '').trim()}`.toLowerCase()
+              if (/\bsearch\b|header-search|predictive-search|icon-search|open search/.test(blob)) {
+                searchFound = true
+                searchDetail = (c.getAttribute('aria-label') || c.getAttribute('title') || (c.textContent || '').trim() || 'search control').slice(0, 100)
+                break outerSearch
+              }
+            }
+          }
+          searchInfo.push(`Search accessible control: ${searchFound ? 'YES' : 'NO'}`)
+          searchInfo.push(`Search control detail: ${searchDetail}`)
+        } catch {
+          searchInfo.push('Search accessible control: UNKNOWN')
+          searchInfo.push('Search control detail: Unknown')
+        }
+
+        // Header cart / bag quick access (deterministic signal for cart-in-header rules)
         const cartInfo: string[] = []
         try {
           const hostCart = window.location.host
@@ -1887,7 +1973,7 @@ export async function POST(request: NextRequest) {
           cartInfo.push('Cart quick access detail: Unknown')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- SEARCH ACCESS CHECK ---\n${searchInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
       })
 
       // Cart icon item count / badge: empty cart = PASS; non-empty = PASS only with visible count badge
@@ -5023,6 +5109,7 @@ export async function POST(request: NextRequest) {
         const fallbackButtons = extractFallbackButtonsAndLinksFromHtml(rawHtml)
         const fallbackHeadings = extractFallbackHeadingsFromHtml(rawHtml)
         const fallbackLogo = detectLogoHomepageFromHtml(rawHtml, validUrl)
+        const fallbackSearch = detectSearchAccessibilityFromHtml(rawHtml)
         const fallbackButtonsLine = fallbackButtons.length > 0 ? fallbackButtons.join(' | ') : '[fetch fallback]'
         const fallbackHeadingsLine = fallbackHeadings.length > 0 ? fallbackHeadings.join(' | ') : '[fetch fallback]'
         keyElements =
@@ -5034,6 +5121,9 @@ export async function POST(request: NextRequest) {
           `Logo clickable in header: ${fallbackLogo.clickable ? 'YES' : 'NO'}\n` +
           `Logo homepage link: ${fallbackLogo.homepageLinked ? 'YES' : 'NO'}\n` +
           `Logo href: ${fallbackLogo.href || 'Not found'}\n` +
+          `--- SEARCH ACCESS CHECK ---\n` +
+          `Search accessible control: ${fallbackSearch.present ? 'YES' : 'NO'}\n` +
+          `Search control detail: ${fallbackSearch.detail}\n` +
           `--- LAZY LOADING ---\n${lazyKeyLine}`
 
         // Fallback rating-near-title check.
@@ -5320,6 +5410,20 @@ export async function POST(request: NextRequest) {
             rule.id === 'recYUxusypKnfViyM' ||
             ((rule.title.toLowerCase().includes('logo') && rule.title.toLowerCase().includes('homepage')) ||
               (rule.description.toLowerCase().includes('logo') && rule.description.toLowerCase().includes('homepage')))
+          const isSearchAccessibilityRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            if (!(t.includes('search') || d.includes('search'))) return false
+            return (
+              t.includes('button') ||
+              t.includes('icon') ||
+              t.includes('accessible') ||
+              d.includes('button') ||
+              d.includes('icon') ||
+              d.includes('accessible') ||
+              d.includes('header')
+            )
+          })()
           const isGeneralCustomerReviewsRule = (() => {
             const t = rule.title.toLowerCase()
             const d = rule.description.toLowerCase()
@@ -6296,17 +6400,18 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
               const titleLine =
                 keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
-              const nearWindow = titleLine && fullText.includes(titleLine)
-                ? fullText.slice(Math.max(0, fullText.indexOf(titleLine) - 260), fullText.indexOf(titleLine) + 540)
-                : fullText.slice(0, 3800)
-              const hasRatingSignalNearTitle =
-                /\b(excellent|trustpilot|trustscore)\b/i.test(nearWindow) ||
-                /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(nearWindow) ||
-                /[★☆⭐]/.test(nearWindow)
-              if (hasRatingSignalNearTitle) {
-                console.log(`Rating rule: text fallback found rating near title window. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
+              if (titleLine && fullText.includes(titleLine)) {
+                const idx = fullText.indexOf(titleLine)
+                const nearWindow = fullText.slice(Math.max(0, idx - 260), idx + Math.max(540, titleLine.length))
+                const hasRatingSignalNearTitle =
+                  /\b(excellent|trustpilot|trustscore)\b/i.test(nearWindow) ||
+                  /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(nearWindow) ||
+                  /[★☆⭐]/.test(nearWindow)
+                if (hasRatingSignalNearTitle) {
+                  console.log(`Rating rule: text fallback found rating near title window. Forcing PASS.`)
+                  analysis.passed = true
+                  analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
+                }
               }
             }
 
@@ -6523,6 +6628,17 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 ? `A clickable header logo was found, but it is not linked to the homepage (href: ${href}).`
                 : 'No clickable header logo linked to the homepage was detected.'
             }
+          } else if (isSearchAccessibilityRule) {
+            const searchYes = /Search accessible control:\s*YES/i.test(keyElements || '')
+            const detail =
+              (keyElements || '').match(/Search control detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'search control'
+            if (searchYes) {
+              analysis.passed = true
+              analysis.reason = `A clear and accessible search control is present (${detail}).`
+            } else {
+              analysis.passed = false
+              analysis.reason = 'No clear and accessible search button/icon was detected in the header area.'
+            }
           } else if (isHeaderCartQuickAccessRule(rule)) {
             const cartQuickYes = /Header cart quick access present:\s*YES/i.test(keyElements || '')
             const detail =
@@ -6638,17 +6754,16 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 )
               : hasConcreteVideoEvidence  // DOM says NO → only pass if AI sees concrete evidence
 
-            // Text-based backup: only force pass on EXPLICIT section headings/phrases (not just "video" + "review" anywhere)
+            // Text-based backup must be strict to avoid false PASS from generic marketing copy.
             const hasCustomerVideoTextSignal =
-              websiteTextLower.includes('video testimonials') ||
-              websiteTextLower.includes('customer videos') ||
-              websiteTextLower.includes('watch customer videos') ||
-              websiteTextLower.includes('customer video reviews') ||
-              websiteTextLower.includes('review videos') ||
-              /customers?\s+are\s+saying|what over\s+.*customers?\s+are\s+saying/i.test(websiteTextLower) ||
-              (websiteTextLower.includes('video') && websiteTextLower.includes('testimonial') && (websiteTextLower.includes('section') || websiteTextLower.includes('play'))) ||
-              /section.*video.*testimonial|video.*testimonial.*section/i.test(websiteTextLower)
-            // Do NOT use broad patterns like "review" + "video" - they match icon names (e.g. circle-play) and cause false pass
+              (
+                websiteTextLower.includes('video testimonials') ||
+                websiteTextLower.includes('customer videos') ||
+                websiteTextLower.includes('watch customer videos') ||
+                websiteTextLower.includes('customer video reviews') ||
+                websiteTextLower.includes('review videos')
+              ) &&
+              /\b(play\s*button|video\s*player|youtube|vimeo|watch\s+video|▶)\b/i.test(websiteTextLower)
 
             // reasonMentionsActualVideo: AI described concrete visual video evidence
             // Includes: classic play button/player terms + UGC-specific terms + visual confirmation phrases
@@ -6685,7 +6800,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `No video testimonials are visible. The page shows text-only customer reviews (e.g. Verified reviews) but no video players or play buttons in the review section. Add customer video testimonials to pass.`
             }
 
-            // Only auto-pass when page has EXPLICIT video testimonial section text (not just "video" somewhere)
+            // Only auto-pass when page has explicit video testimonial section text + player/play evidence.
             if (!analysis.passed && hasCustomerVideoTextSignal) {
               console.log(`Video testimonials rule: explicit video testimonial text found. Forcing PASS.`)
               analysis.passed = true
@@ -6714,20 +6829,18 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 : `Customer video testimonials are displayed in the customer reviews or UGC section of this page.`
             }
 
-            // OVERRIDE: Page has "customers are saying" section + video/UGC signals (e.g. Spacegoods when DOM missed lazy-loaded section)
-            if (!analysis.passed) {
-              const pageRawLower = ((websiteContent || '') + ' ' + (fullVisibleText || '')).toLowerCase()
-              const hasCustomersSaying = /customers?\s+are\s+saying|what over\s+.*customers?\s+are\s+saying/i.test(pageRawLower)
-              const hasVideoUgcSignals =
-                /ugc-video|ugc_video|preview_images|video.*poster.*preview/i.test(pageRawLower) ||
-                websiteTextLower.includes('video testimonial') ||
-                (websiteTextLower.includes('video') && websiteTextLower.includes('customer')) ||
-                /play\s*button|video\s+player|video\s+thumbnail/i.test(websiteTextLower)
-              if (hasCustomersSaying && hasVideoUgcSignals) {
-                console.log(`Video testimonials rule: "customers are saying" + video/UGC signals in page. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Customer video testimonials are displayed in the "What customers are saying" section, showing UGC videos from real customers.`
-              }
+            // Intentionally no broad UGC text-only auto-pass here.
+            // Require DOM confirmation or concrete visual evidence from AI response.
+            // Final guardrail: when DOM found no customer-review videos and the page has no explicit
+            // video-testimonial section evidence, never allow a PASS from ambiguous AI wording.
+            const hasStrictOnPageVideoEvidence =
+              hasCustomerVideoTextSignal ||
+              /\b(video testimonials?|customer videos?|review videos?)\b/i.test(websiteTextLower)
+            if (!customerReviewVideoFound && analysis.passed && !hasStrictOnPageVideoEvidence) {
+              console.log('Video testimonials rule: no DOM video evidence and no strict on-page video signals. Forcing FAIL.')
+              analysis.passed = false
+              analysis.reason =
+                'No customer video testimonials were detected on this product page. The page does not show a clear customer video/testimonial section with playable review videos.'
             }
 
             // Must mention video/testimonial
