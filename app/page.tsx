@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 import emailjs from '@emailjs/browser'
-import { DualViewportLoader } from './components/DualViewportLoader';
+import { DualViewportLoader, type InstantPreviewHint } from './components/DualViewportLoader';
 import { QuadrantScanSequence } from './components/QuadrantScanSequence';
 
 
@@ -47,6 +47,7 @@ type NdComplete = {
   quadrants?: string[];
   quadrantLabels?: string[];
   url?: string;
+  previewDesktop?: string;
   previewMobile?: string;
   redirectWarning?: string;
 };
@@ -70,6 +71,24 @@ const LOADER_MESSAGES = [
   'Scanning sections',
   'Almost ready',
 ] as const;
+
+/** Favicon + host for instant loading UI before the first streamed screenshot (desktop first, then mobile). */
+function instantPreviewFromWebsiteUrl(raw: string): InstantPreviewHint | null {
+  try {
+    const t = raw.trim()
+    if (!t) return null
+    const abs = /^https?:\/\//i.test(t) ? t : `https://${t}`
+    const u = new URL(abs)
+    const host = (u.hostname || '').replace(/^www\./, '') || u.hostname
+    if (!host) return null
+    return {
+      host,
+      faviconUrl: `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`,
+    }
+  } catch {
+    return null
+  }
+}
 
 const EMAILJS_SERVICE_ID = 'service_j08d36o'
 const EMAILJS_TEMPLATE_ID = 'template_fiqbjw9'
@@ -136,10 +155,23 @@ export default function Home() {
   const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
   const [previewMobile, setPreviewMobile] = useState<string | null>(null);
+  const [displayedMounted, setDisplayedMounted] = useState(0)
+  const [displayProgressPercent, setDisplayProgressPercent] = useState(0)
+  const displayProgressRafRef = useRef<number | null>(null)
+  const displayProgressTsRef = useRef<number | null>(null)
+  const displayedMountedRef = useRef(0)
+  const removedStepsCountRef = useRef(0)
+  const displayProgressPercentRef = useRef(0)
+
+  const analyzeInstantPreview = useMemo(
+    () => (showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null),
+    [showAnalyze, websiteUrl],
+  )
 
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([])
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set())
+  const analyzeTopRef = useRef<HTMLDivElement | null>(null)
   const totalSteps = 3
 
   // Step 1 buttons data
@@ -178,34 +210,59 @@ export default function Home() {
     'Finalizing your audit report',
   ] as const
   const ANALYSIS_STEP_COUNT = analysisSteps.length
+  /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
+  const SCAN_PROGRESS_UNITS_PER_BATCH = 40
+  /**
+   * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
+   * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
+   */
+  const SCAN_PROGRESS_TAIL_TICKS = 6
+  const SCAN_PROGRESS_FINAL_TICK_MS = 420
+  /**
+   * Use timestamp-based smoothing instead of timer chains so production/main-thread variance
+   * (Vercel build, throttling, render batching) doesn't skip late-stage progress.
+   */
+  const PROGRESS_MAX_PERCENT_PER_SEC = 14
+  const PROGRESS_SNAP_EPSILON = 0.12
+  /** Ensure each row remains visible briefly before next step mounts. */
+  const ANALYSIS_STEP_MIN_ADVANCE_MS = 520
 
-  const mounted = useMemo(() => {
-    if (!showAnalyze || !progress || progress.total <= 0) return 0
-    if (progress.current >= progress.total) return ANALYSIS_STEP_COUNT
-    return Math.min(
-      ANALYSIS_STEP_COUNT - 1,
-      Math.floor((progress.current / progress.total) * ANALYSIS_STEP_COUNT)
-    )
-  }, [showAnalyze, progress, ANALYSIS_STEP_COUNT])
-
-  const analyzeProgressPercent = useMemo(() => {
+  /**
+   * Progress uses display units: each batch spans SCAN_PROGRESS_UNITS_PER_BATCH ticks while /api/scan runs,
+   * plus tail ticks after combine for a smooth finish.
+   */
+  const targetProgressPercent = useMemo(() => {
     if (!showAnalyze || !progress || progress.total <= 0) return 0
     return Math.min(100, Math.round((progress.current / progress.total) * 100))
   }, [showAnalyze, progress])
 
-  /** Long enough to read “Finished” before the row exits; keep modest so scans still feel responsive. */
-  const ANALYSIS_STEP_REMOVE_DELAY_MS = 900
-  /** Brief pause after all batches + combine so the final “Finished” / 100% state is visible before /scanner. */
-  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 750
-  /** 0 = no extra wait per row (stagger used to add hundreds of ms per step). */
-  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 0
+  /** Long enough to read "Finished" before the row exits; keep modest so scans still feel responsive. */
+  const ANALYSIS_STEP_REMOVE_DELAY_MS = 950
+  /** Keep tiny pause so scanner route appears almost immediately. */
+  const POST_SCAN_UI_BEFORE_REDIRECT_MS = 250
+  /** Cap UI-completion wait aggressively; this is UX-only and does not affect rule evaluation. */
+  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 5_000
+  /** Keep a tiny stagger so users can see finish/remove sequence. */
+  const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
 
-  useEffect(() => {
-    // Load rules on component mount
-    loadRules()
-    // Screenshot is not stored in localStorage due to size limits
-    // It will be loaded from API response during scan
-  }, [])
+  const targetMounted = useMemo(() => {
+    if (!showAnalyze) return 0
+    if (displayProgressPercent >= 100) return ANALYSIS_STEP_COUNT
+    return Math.min(
+      ANALYSIS_STEP_COUNT - 1,
+      Math.floor((displayProgressPercent / 100) * ANALYSIS_STEP_COUNT),
+    )
+  }, [showAnalyze, displayProgressPercent, ANALYSIS_STEP_COUNT])
+
+  const waitForAnalyzeUiCompletion = async () => {
+    const started = performance.now()
+    while (performance.now() - started < ANALYSIS_UI_COMPLETION_MAX_WAIT_MS) {
+      const allMounted = displayedMountedRef.current >= ANALYSIS_STEP_COUNT
+      const progressReady = displayProgressPercentRef.current >= 99.5
+      if (allMounted && progressReady) return
+      await new Promise<void>((r) => window.setTimeout(r, 120))
+    }
+  }
 
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
@@ -213,18 +270,110 @@ export default function Home() {
     router.prefetch('/scanner')
   }, [showAnalyze, router])
 
-  // While analyze UI is hidden, reset step row removal state (mounted is derived from `progress` while visible).
+  // While analyze UI is hidden, reset step row removal state.
+  useEffect(() => {
+    displayedMountedRef.current = displayedMounted
+  }, [displayedMounted])
+
+  useEffect(() => {
+    removedStepsCountRef.current = removedSteps.size
+  }, [removedSteps])
+
+  useEffect(() => {
+    displayProgressPercentRef.current = displayProgressPercent
+  }, [displayProgressPercent])
+
   useEffect(() => {
     if (!showAnalyze) {
       setRemovedSteps(new Set())
+      setDisplayedMounted(0)
+      setDisplayProgressPercent(0)
+      displayedMountedRef.current = 0
+      removedStepsCountRef.current = 0
+      displayProgressPercentRef.current = 0
+      displayProgressTsRef.current = null
+      if (displayProgressRafRef.current != null) {
+        window.cancelAnimationFrame(displayProgressRafRef.current)
+        displayProgressRafRef.current = null
+      }
     }
+  }, [showAnalyze])
+
+  // Timestamp-based progress interpolation keeps production and local behavior aligned.
+  useEffect(() => {
+    if (!showAnalyze) return
+
+    const animate = (ts: number) => {
+      setDisplayProgressPercent((prev) => {
+        const lastTs = displayProgressTsRef.current ?? ts
+        const dtSec = Math.max(0, (ts - lastTs) / 1000)
+        displayProgressTsRef.current = ts
+        const maxDelta = PROGRESS_MAX_PERCENT_PER_SEC * dtSec
+        const remaining = targetProgressPercent - prev
+
+        if (Math.abs(remaining) <= PROGRESS_SNAP_EPSILON) {
+          return targetProgressPercent
+        }
+        if (remaining > 0) {
+          return prev + Math.min(remaining, maxDelta)
+        }
+        return targetProgressPercent
+      })
+      displayProgressRafRef.current = window.requestAnimationFrame(animate)
+    }
+
+    if (displayProgressRafRef.current == null) {
+      displayProgressTsRef.current = null
+      displayProgressRafRef.current = window.requestAnimationFrame(animate)
+    }
+
+    return () => {
+      if (displayProgressRafRef.current != null) {
+        window.cancelAnimationFrame(displayProgressRafRef.current)
+        displayProgressRafRef.current = null
+      }
+      displayProgressTsRef.current = null
+    }
+  }, [
+    showAnalyze,
+    targetProgressPercent,
+    PROGRESS_MAX_PERCENT_PER_SEC,
+    PROGRESS_SNAP_EPSILON,
+  ])
+
+  // Step activation follows progress thresholds with a minimum dwell per row.
+  useEffect(() => {
+    if (!showAnalyze) return
+    if (displayedMounted >= targetMounted) return
+    const id = window.setTimeout(() => {
+      setDisplayedMounted((prev) => {
+        if (prev >= targetMounted) return prev
+        return prev + 1
+      })
+    }, ANALYSIS_STEP_MIN_ADVANCE_MS)
+    return () => window.clearTimeout(id)
+  }, [showAnalyze, displayedMounted, targetMounted, ANALYSIS_STEP_MIN_ADVANCE_MS])
+
+  // On mobile, ensure analyze screen starts from the CXO logo.
+  useEffect(() => {
+    if (!showAnalyze) return
+    if (typeof window === 'undefined') return
+    if (window.innerWidth >= 1024) return
+
+    const id = window.requestAnimationFrame(() => {
+      const el = analyzeTopRef.current
+      if (!el) return
+      const top = window.scrollY + el.getBoundingClientRect().top - 18
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(id)
   }, [showAnalyze])
 
   // After each batch, show “Finished” briefly (ANALYSIS_STEP_REMOVE_DELAY_MS), then remove the row.
   useEffect(() => {
-    if (!showAnalyze || mounted <= 0) return
+    if (!showAnalyze || displayedMounted <= 0) return
 
-    for (let k = 0; k < mounted; k++) {
+    for (let k = 0; k < displayedMounted; k++) {
       if (analysisStepRemovalScheduledRef.current.has(k)) continue
       analysisStepRemovalScheduledRef.current.add(k)
 
@@ -244,57 +393,32 @@ export default function Home() {
         analysisStepRemoveTimeoutsRef.current.push(id)
       }
     }
-  }, [mounted, showAnalyze])
-
-  const loadRules = async () => {
-    try {
-      const response = await fetch('/api/conversion-checkpoints')
-      if (!response.ok) {
-        throw new Error('Failed to load conversion checkpoints')
-      }
-      const data = (await response.json()) as {
-        rules?: unknown
-        records?: unknown
-        foundCount?: number
-        notFoundIds?: string[]
-      }
-      // Browser console — full API payload (records + mapped rules)
-      console.log('[conversion-checkpoints]', data)
-      const validatedRules = z.array(RuleSchema).parse(data.rules ?? [])
-      setRules(validatedRules)
-    } catch (error) {
-      console.error('Error loading rules:', error)
-      setRules([])
-    }
-  }
+  }, [displayedMounted, showAnalyze])
 
   const prepareBatches = (urlToScan: string, rulesToScan: Rule[]): BatchData[] => {
-    const BATCH_SIZE = 5
     const batches: BatchData[] = []
     const timestamp = Date.now()
-
     const totalRules = rulesToScan.length
-    const remainder = totalRules % BATCH_SIZE
-    // Calculate total batches: first batch gets remainder, rest get BATCH_SIZE
-    const totalBatches = remainder > 0
-      ? 1 + Math.floor((totalRules - (BATCH_SIZE + remainder)) / BATCH_SIZE)
-      : Math.floor(totalRules / BATCH_SIZE)
 
-    let ruleIndex = 0
+    if (totalRules === 0) {
+      localStorage.setItem('scanBatches', JSON.stringify([]))
+      localStorage.setItem('scanResults', JSON.stringify([]))
+      return []
+    }
+
+    // One /api/scan call = one Puppeteer session. Default: all rules in one batch (fastest).
+    // On Vercel Hobby (60s function cap), set NEXT_PUBLIC_SCAN_BATCH_RULES=8 (or similar) to chunk.
+    const configuredChunk = parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10)
+    const chunkSize =
+      Number.isFinite(configuredChunk) && configuredChunk > 0
+        ? Math.min(configuredChunk, totalRules)
+        : totalRules
+
+    const totalBatches = Math.ceil(totalRules / chunkSize)
 
     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      // First batch gets remainder if exists, otherwise BATCH_SIZE
-      let currentBatchSize = BATCH_SIZE
-      if (batchIndex === 0 && remainder > 0) {
-        currentBatchSize = BATCH_SIZE + remainder
-      }
-
-      // Stop if no more rules left
-      if (ruleIndex >= totalRules) {
-        break
-      }
-
-      const batchRules = rulesToScan.slice(ruleIndex, ruleIndex + currentBatchSize)
+      const start = batchIndex * chunkSize
+      const batchRules = rulesToScan.slice(start, start + chunkSize)
 
       batches.push({
         batchId: `batch-${timestamp}-${batchIndex}`,
@@ -304,8 +428,6 @@ export default function Home() {
         totalBatches: totalBatches,
         timestamp: timestamp,
       })
-
-      ruleIndex += currentBatchSize
     }
 
     localStorage.setItem('scanBatches', JSON.stringify(batches))
@@ -319,8 +441,20 @@ export default function Home() {
   const processBatches = async (batches: BatchData[]) => {
     const allResults: ScanResult[] = []
 
-    // `current` = batches finished (not the batch currently scanning). Avoids 100% while last /api/scan is still in flight.
-    setProgress({ current: 0, total: batches.length })
+    const progressTotalUnits = Math.max(
+      1,
+      batches.length * SCAN_PROGRESS_UNITS_PER_BATCH + 1 + SCAN_PROGRESS_TAIL_TICKS,
+    )
+    const scanBaseCompleteUnits = batches.length * SCAN_PROGRESS_UNITS_PER_BATCH
+
+    const tickProgressAfterCombine = async () => {
+      for (let s = 1; s <= SCAN_PROGRESS_TAIL_TICKS + 1; s++) {
+        setProgress({ current: scanBaseCompleteUnits + s, total: progressTotalUnits })
+        await new Promise((r) => setTimeout(r, SCAN_PROGRESS_FINAL_TICK_MS))
+      }
+    }
+
+    setProgress({ current: 0, total: progressTotalUnits })
 
     const ScanResultsSchema = z.array(
       z.object({
@@ -344,14 +478,44 @@ export default function Home() {
       }),
     )
 
+    const parseApiErrorMessage = async (response: Response, fallback: string) => {
+      let message = fallback
+      try {
+        const errorData = await response.json()
+        message = (errorData as { error?: string }).error || message
+      } catch {
+        /* ignore JSON parse errors */
+      }
+      return message
+    }
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i]
+      const segmentStart = i * SCAN_PROGRESS_UNITS_PER_BATCH
+      const segmentPulseCap = segmentStart + SCAN_PROGRESS_UNITS_PER_BATCH - 1
+      setProgress({ current: segmentStart, total: progressTotalUnits })
 
       let batchSucceeded = false
       let lastBatchError: unknown = null
 
       for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+        const pulseMs = Math.min(
+          6500,
+          Math.max(
+            700,
+            Math.floor((batch.rules.length * 3200) / SCAN_PROGRESS_UNITS_PER_BATCH),
+          ),
+        )
+        let pulseId: number | null = null
         try {
+          pulseId = window.setInterval(() => {
+            setProgress((prev) => {
+              if (!prev) return prev
+              const next = Math.min(prev.current + 1, segmentPulseCap)
+              return { current: Math.max(prev.current, next), total: prev.total }
+            })
+          }, pulseMs)
+
           const response = await fetch('/api/scan', {
             method: 'POST',
             headers: {
@@ -360,18 +524,13 @@ export default function Home() {
             body: JSON.stringify({
               url: batch.url,
               rules: batch.rules,
-              captureScreenshot: true, // Capture screenshot for every batch to show progress
+              // Capture once for preview; doing this every batch increases timeout risk on Vercel.
+              captureScreenshot: i === 0,
             }),
           })
 
           if (!response.ok) {
-            let message = `Failed to scan batch ${i + 1}`
-            try {
-              const errorData = await response.json()
-              message = (errorData as { error?: string }).error || message
-            } catch {
-              /* ignore JSON parse errors */
-            }
+            const message = await parseApiErrorMessage(response, `Failed to scan batch ${i + 1}`)
             throw new Error(message)
           }
 
@@ -416,19 +575,80 @@ export default function Home() {
             console.warn(`Retrying batch ${i + 1} once after error...`)
             await new Promise((r) => setTimeout(r, 1500))
           }
+        } finally {
+          if (pulseId != null) {
+            window.clearInterval(pulseId)
+            pulseId = null
+          }
         }
       }
 
       if (!batchSucceeded) {
         console.error(`Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`)
-        batch.rules.forEach(rule => {
-          allResults.push({
-            ruleId: rule.id,
-            ruleTitle: rule.title,
-            passed: false,
-            reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
+        // Fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
+        if (batch.rules.length > 1) {
+          console.warn(`Attempting single-rule fallback for batch ${i + 1}...`)
+          for (const rule of batch.rules) {
+            let singleRuleSucceeded = false
+            let singleRuleError: unknown = null
+            for (let singleAttempt = 1; singleAttempt <= BATCH_MAX_ATTEMPTS; singleAttempt++) {
+              try {
+                const singleRes = await fetch('/api/scan', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    url: batch.url,
+                    rules: [rule],
+                    captureScreenshot: false,
+                  }),
+                })
+                if (!singleRes.ok) {
+                  const msg = await parseApiErrorMessage(singleRes, `Failed single-rule scan for ${rule.id}`)
+                  throw new Error(msg)
+                }
+                const singleData = await singleRes.json()
+                const parsed = ScanResultsSchema.parse(singleData.results)
+                const result = parsed[0]
+                if (!result) {
+                  throw new Error('No single-rule result returned')
+                }
+                if (!allResults.some((r) => r.ruleId === result.ruleId)) {
+                  allResults.push(result)
+                }
+                singleRuleSucceeded = true
+                break
+              } catch (singleErr) {
+                singleRuleError = singleErr
+                console.error(
+                  `Single-rule fallback failed for ${rule.id} (attempt ${singleAttempt}/${BATCH_MAX_ATTEMPTS}):`,
+                  singleErr
+                )
+                if (singleAttempt < BATCH_MAX_ATTEMPTS) {
+                  await new Promise((r) => setTimeout(r, 800))
+                }
+              }
+            }
+            if (!singleRuleSucceeded) {
+              allResults.push({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: false,
+                reason: `Error processing rule ${rule.id} in fallback: ${singleRuleError instanceof Error ? singleRuleError.message : 'Unknown error'}`,
+              })
+            }
+          }
+        } else {
+          batch.rules.forEach(rule => {
+            allResults.push({
+              ruleId: rule.id,
+              ruleTitle: rule.title,
+              passed: false,
+              reason: `Error processing batch ${i + 1}: ${lastBatchError instanceof Error ? lastBatchError.message : 'Unknown error'}`,
+            })
           })
-        })
+        }
       }
 
       const remainingBatches = batches.slice(i + 1)
@@ -440,7 +660,7 @@ export default function Home() {
 
       localStorage.setItem('scanResults', JSON.stringify(allResults))
 
-      setProgress({ current: i + 1, total: batches.length })
+      setProgress({ current: (i + 1) * SCAN_PROGRESS_UNITS_PER_BATCH, total: progressTotalUnits })
     }
 
     try {
@@ -495,19 +715,28 @@ export default function Home() {
         localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
         localStorage.removeItem('scanBatches')
       }
+      await tickProgressAfterCombine()
     } catch (finalErr) {
       console.error('Final request error:', finalErr)
       localStorage.setItem('scanResults', JSON.stringify(allResults))
       localStorage.setItem('scanUrl', batches[0]?.url || websiteUrl)
       localStorage.removeItem('scanBatches')
+      await tickProgressAfterCombine()
     }
 
     // Don't set progress to null here (would reset the batch progress bar and step UI)
     // Toast + redirect happen in handleStartScan right after this returns
   }
 
-  /** Calls server `analyzeWebsiteStream` via POST /api/preview_website — NDJSON desktop/mobile preview + quadrants. Parallel to rule scanning. */
-  const startWebsitePreviewStream = async (captureUrl: string) => {
+  /**
+   * POST /api/preview_website — NDJSON desktop/mobile preview + quadrants.
+   * `onReadyForRuleScan` fires once when a usable preview exists (or on error / stream end) so rule-scan
+   * progress stays aligned with the left preview on slow networks (e.g. Vercel).
+   */
+  const startWebsitePreviewStream = async (
+    captureUrl: string,
+    gateHooks?: { onReadyForRuleScan?: () => void },
+  ) => {
     const trimmed = captureUrl.trim()
     if (!trimmed) {
       setError('Please enter a URL.')
@@ -523,6 +752,16 @@ export default function Home() {
     setLoaderMsgIndex(0)
     setPreviewDesktop(null)
     setPreviewMobile(null)
+
+    let gateReleased = false
+    const releaseRuleScanGate = () => {
+      if (gateReleased) return
+      gateReleased = true
+      gateHooks?.onReadyForRuleScan?.()
+    }
+
+    const previewLooksReady = (s: unknown) => typeof s === 'string' && s.length > 80
+
     try {
       const response = await fetch('/api/preview_website', {
         method: 'POST',
@@ -545,18 +784,22 @@ export default function Home() {
       const handleNdjsonLine = (line: string) => {
         if (!line.trim()) return
         const msg = JSON.parse(line) as Record<string, unknown>
+        if (msg.type === 'meta') return
         if (msg.type === 'preview') {
           if (typeof msg.previewDesktop === 'string') {
             setPreviewDesktop(msg.previewDesktop)
             persistScanPreview('scanPreviewDesktop', msg.previewDesktop)
+            if (previewLooksReady(msg.previewDesktop)) releaseRuleScanGate()
           }
           if (typeof msg.preview === 'string' && !msg.previewDesktop) {
             setPreviewDesktop(msg.preview)
             persistScanPreview('scanPreviewDesktop', msg.preview)
+            if (previewLooksReady(msg.preview)) releaseRuleScanGate()
           }
           if (typeof msg.previewMobile === 'string') {
             setPreviewMobile(msg.previewMobile)
             persistScanPreview('scanPreviewMobile', msg.previewMobile)
+            if (previewLooksReady(msg.previewMobile)) releaseRuleScanGate()
           }
         }
         if (msg.type === 'error') {
@@ -588,9 +831,15 @@ export default function Home() {
         }
       }
       const gotComplete = streamState.complete
+      if (typeof gotComplete?.previewDesktop === 'string' && gotComplete.previewDesktop.length > 0) {
+        setPreviewDesktop(gotComplete.previewDesktop)
+        persistScanPreview('scanPreviewDesktop', gotComplete.previewDesktop)
+        if (previewLooksReady(gotComplete.previewDesktop)) releaseRuleScanGate()
+      }
       if (typeof gotComplete?.previewMobile === 'string') {
         setPreviewMobile(gotComplete.previewMobile)
         persistScanPreview('scanPreviewMobile', gotComplete.previewMobile)
+        if (previewLooksReady(gotComplete.previewMobile)) releaseRuleScanGate()
       }
       if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
         setQuadrants(gotComplete.quadrants)
@@ -603,8 +852,10 @@ export default function Home() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.')
       console.error('Website preview stream error:', err)
+      releaseRuleScanGate()
     } finally {
       setIsLoading(false)
+      releaseRuleScanGate()
     }
   }
 
@@ -629,31 +880,44 @@ export default function Home() {
       return setEmailError(emailResult.error.errors[0]?.message || 'Invalid email')
     }
   
-    let rulesToUse = rules
-  
     try {
       setIsStartingScan(true)
-  
-      // ✅ Load rules from Airtable conversion-checkpoints (same as /api/conversion-checkpoints)
-      if (!rulesToUse.length) {
-        const res = await fetch('/api/conversion-checkpoints')
-        if (!res.ok) throw new Error('Failed to load conversion checkpoints')
-        const data = await res.json()
-        console.log('[conversion-checkpoints] scan refresh:', data)
-        rulesToUse = z.array(RuleSchema).parse(data.rules ?? [])
-        setRules(rulesToUse)
-      }
-  
-      if (!rulesToUse.length) {
-        throw new Error('No rules available')
-      }
-  
-      // ✅ Normalize URL
+
+      // ✅ Normalize URL (used for server-filtered checkpoints + scan)
       let validUrl = urlResult.data!
       if (!/^https?:\/\//i.test(validUrl)) {
         validUrl = `https://${validUrl}`
       }
-  
+
+      // ✅ Rules filtered on the server by `url` (detected page type + Airtable Page Type IDs)
+      const cpRes = await fetch(
+        `/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`,
+      )
+      if (!cpRes.ok) throw new Error('Failed to load conversion checkpoints')
+      const cpData = (await cpRes.json()) as {
+        rules?: unknown
+        records?: unknown
+        detectedPageType?: string
+        requiredPageTypeIds?: string[]
+        filteredRulesCount?: number
+        filterUsedFallback?: boolean
+      }
+      console.log('[conversion-checkpoints] for scan (server-filtered):', {
+        url: validUrl,
+        detectedPageType: cpData.detectedPageType,
+        requiredPageTypeIds: cpData.requiredPageTypeIds,
+        filteredRulesCount: cpData.filteredRulesCount,
+        filterUsedFallback: cpData.filterUsedFallback,
+        fullPayload: cpData,
+      })
+
+      const rulesToUse = z.array(RuleSchema).parse(cpData.rules ?? [])
+      setRules(rulesToUse)
+
+      if (!rulesToUse.length) {
+        throw new Error('No rules available for this URL')
+      }
+
       // ✅ Browser info
       const browser = navigator.userAgent
       const screenSize = `${window.screen.width}x${window.screen.height}`
@@ -686,6 +950,7 @@ export default function Home() {
       setCurrentBatchNumber(0)
       setIframeError(false)
       setRemovedSteps(new Set())
+      setDisplayedMounted(0)
       try {
         sessionStorage.removeItem('scanPreviewMobile')
         sessionStorage.removeItem('scanPreviewDesktop')
@@ -705,8 +970,27 @@ export default function Home() {
       // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
-      void startWebsitePreviewStream(validUrl)
-  
+      let resolvePreviewGate!: () => void
+      const previewReadyPromise = new Promise<void>((r) => {
+        resolvePreviewGate = r
+      })
+      let previewGateSettled = false
+      let previewGateTimeoutId = 0
+      const settlePreviewGate = () => {
+        if (previewGateSettled) return
+        previewGateSettled = true
+        if (previewGateTimeoutId !== 0) window.clearTimeout(previewGateTimeoutId)
+        resolvePreviewGate()
+      }
+      previewGateTimeoutId = window.setTimeout(settlePreviewGate, 60_000)
+
+      const streamPromise = startWebsitePreviewStream(validUrl, {
+        onReadyForRuleScan: settlePreviewGate,
+      })
+      void streamPromise.catch((e) => console.error('Preview stream:', e))
+
+      await previewReadyPromise
+
       // ✅ Screenshot (non-blocking, clean)
       ;(async () => {
         try {
@@ -728,14 +1012,14 @@ export default function Home() {
         }
       })()
   
-      // ✅ Main processing — results are written to localStorage inside processBatches
+      // Main scan: POST /api/scan per batch, then /api/scan/combine (after preview is visible or gate timeout)
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
+      await waitForAnalyzeUiCompletion()
 
       await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS))
-
-      // Replace (no extra history entry); toast/email deferred so navigation isn't blocked.
       router.replace('/scanner')
+    
       setTimeout(() => {
         let passResult: string | number = 'N/A'
         let failResult: string | number = 'N/A'
@@ -764,29 +1048,29 @@ export default function Home() {
           console.warn('Summary parsing failed')
         }
 
-        // ✅ EmailJS (non-blocking)
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            level: selectedChallenge ?? '',
-            price: selectedRevenue ?? '',
-            url: validUrl,
-            email: emailTrimmed,
-            ip_address: ipAddress,
-            browser,
-            screen_size: screenSize,
-            time_zone: timeZone,
-            browser_data: browserData,
-            pass_result: passResult,
-            fail_result: failResult,
-          },
-          { publicKey: EMAILJS_PUBLIC_KEY }
-        ).catch(err => console.error('EmailJS failed:', err))
+        // emailjs.send(
+        //   EMAILJS_SERVICE_ID,
+        //   EMAILJS_TEMPLATE_ID,
+        //   {
+        //     level: selectedChallenge ?? '',
+        //     price: selectedRevenue ?? '',
+        //     url: validUrl,
+        //     email: emailTrimmed,
+        //     ip_address: ipAddress,
+        //     browser,
+        //     screen_size: screenSize,
+        //     time_zone: timeZone,
+        //     browser_data: browserData,
+        //     pass_result: passResult,
+        //     fail_result: failResult,
+        //   },
+        //   { publicKey: EMAILJS_PUBLIC_KEY }
+        // ).catch(err => console.error('EmailJS failed:', err))
 
         toast.success('Scan completed successfully!')
       }, 0)
-  
+      
+
     } catch (err) {
       console.error(err)
       toast.error(err instanceof Error ? err.message : 'Something went wrong')
@@ -814,6 +1098,14 @@ export default function Home() {
     return false
   }
 
+  const handleAccessResultsEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    if (currentStep !== totalSteps) return
+    e.preventDefault()
+    if (isStartingScan) return
+    void handleStartScan()
+  }
+
 
   useEffect(() => {
     if (!isLoading) return;
@@ -824,8 +1116,8 @@ export default function Home() {
   }, [isLoading]);
 
   return (
-    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden pt-8 pb-12 bg-gray-100">
-      <div className={`w-full mx-auto px-4 sm:px-6 ${showAnalyze ? 'max-w-[1400px]' : 'max-w-[600px]'}`}>
+    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden  bg-gray-100">
+      <div className={`w-full mx-auto px-4 sm:px-6  ${showAnalyze ? 'max-w-[1400px]' : 'sm:h-screen md:h-auto max-w-[600px]'}`}>
         {/* Header with Logo and Progress */}
         {!showAnalyze && (
           <>
@@ -850,7 +1142,7 @@ export default function Home() {
               <motion.button
                 type="button"
                 onClick={handleBack}
-                className="w-[35px] h-[35px] rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
+                className="w-[35px] h-[35px]  rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.97 }}
                 transition={{ type: 'tween', duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
@@ -870,14 +1162,14 @@ export default function Home() {
           </>
         )}
         {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
-        <div className="w-full h-full mx-auto">
+        <div className="w-full mx-auto">
           {!showAnalyze ? (
             <>
               <AnimatePresence mode="wait">
                 {currentStep === 1 && (
                   <motion.div
                     key="step1"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
@@ -914,7 +1206,7 @@ export default function Home() {
                 {currentStep === 2 && (
                   <motion.div
                     key="step2"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
@@ -951,7 +1243,7 @@ export default function Home() {
                 {currentStep === 3 && (
                   <motion.div
                     key="step3"
-                    className="min-h-[400px]"
+                    className="min-h-[350px]"
                     initial={{ opacity: 0, x: 24 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -24 }}
@@ -983,8 +1275,9 @@ export default function Home() {
                           setWebsiteUrl(e.target.value)
                           if (urlError) setUrlError('')
                         }}
+                        onKeyDown={handleAccessResultsEnter}
                         placeholder="Enter the URL of your main product page"
-                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
+                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${urlError ? 'border-red-500' : 'border-gray-300'}`}
                         required
                         aria-invalid={!!urlError}
                         aria-describedby={urlError ? 'url-error' : undefined}
@@ -1003,8 +1296,9 @@ export default function Home() {
                             setEmail(e.target.value)
                             if (emailError) setEmailError('')
                           }}
+                          onKeyDown={handleAccessResultsEnter}
                           placeholder="Enter your best email address"
-                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-sm focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
+                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${emailError ? 'border-red-500' : 'border-gray-300'}`}
                           required
                           aria-invalid={!!emailError}
                           aria-describedby={emailError ? 'email-error' : undefined}
@@ -1099,13 +1393,10 @@ export default function Home() {
             <>
               {/* BYTEEX-style dark analyze screen */}
               <div className="pt-8 pb-12">
-                <div className="text-center mb-4">
+                <div ref={analyzeTopRef} className="text-center mb-4">
               <img src="/cxo_studio_logo.png" alt="logo" className="mx-auto w-[117.54px] h-[20px] object-cover" />
               </div>
-                <h2 className="text-2xl md:text-[33px] font-bold text-center mb-2 text-[#757575] flex items-baseline justify-center gap-2 flex-wrap">
-                  Analyzing Your URL
-                 
-                </h2>
+     
 
                 {/* Preview + right-side progress panel (stacked on small screens). */}
                 {websiteUrl && (
@@ -1116,13 +1407,14 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="mx-auto grid w-full max-w-[1400px] gap-5 px-0 mt-[30px] sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
+                    <div className="mx-auto mt-[30px] grid w-full min-w-0 max-w-[1400px] gap-5 px-0 max-sm:px-3 sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
                       <div className="flex min-h-0 min-w-0 flex-col">
                         {isLoading && quadrants.length === 0 && (
                           <DualViewportLoader
                             align="start"
                             previewDesktop={previewDesktop}
                             previewMobile={previewMobile}
+                            instantPreview={analyzeInstantPreview}
                             scanning
                             statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
                           />
@@ -1154,45 +1446,56 @@ export default function Home() {
                         )}
                       </div>
 
-                      <aside className="flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm max-h-[min(34rem,82vh)] lg:h-[min(34rem,76vh)] lg:max-h-none">
+                      <aside className="flex min-h-[462px] w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm lg:h-[462px] lg:min-h-[462px]">
                         <div
                           className="w-full shrink-0"
                           role="progressbar"
-                          aria-valuenow={analyzeProgressPercent}
+                          aria-valuenow={Math.round(displayProgressPercent)}
                           aria-valuemin={0}
                           aria-valuemax={100}
                         >
                           <div className="mb-1.5 flex items-center justify-between gap-3">
                             <span className="text-xs font-medium text-zinc-600">Progress</span>
                             <span className="text-xs font-medium tabular-nums text-zinc-800">
-                              {analyzeProgressPercent}%
+                              {Math.round(displayProgressPercent)}%
                             </span>
                           </div>
                           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                             <div
-                              className="h-full rounded-full bg-gray-600 transition-[width] duration-100 ease-out"
-                              style={{ width: `${analyzeProgressPercent}%` }}
+                              className="h-full rounded-full bg-gray-600"
+                              style={{ width: `${displayProgressPercent}%` }}
                             />
                           </div>
                         </div>
 
-                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
-                          <AnimatePresence mode="popLayout">
+                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain">
+                          <AnimatePresence mode="sync" initial={false}>
                             {analysisSteps
                               .map((title, index) => ({ title, index, id: `step-${index}-${title}` }))
                               .filter(({ index }) => !removedSteps.has(index))
                               .map(({ title, index, id }) => {
-                                const isCompleted = index < mounted
-                                const isActive = index === mounted
-                                const isPending = index > mounted
+                                const isCompleted = index < displayedMounted
+                                const isActive = index === displayedMounted
+                                const isPending = index > displayedMounted
 
                                 return (
                                   <motion.div
                                     key={id}
-                                    initial={{ opacity: 0, y: 16 }}
-                                    animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
-                                    exit={{ x: 32, opacity: 0 }}
-                                    transition={{ duration: 0.16, ease: [0.25, 0.1, 0.25, 1] }}
+                                    layout
+                                    initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                                    animate={{
+                                      opacity: isPending ? 0.45 : 1,
+                                      y: 0,
+                                      scale: 1,
+                                    }}
+                                    exit={{
+                                      x: 32,
+                                      opacity: [1, 0.7, 0],
+                                      y: 0,
+                                      scale: [1, 0.99, 0.985],
+                                      transition: { duration: 0.9, ease: [0.22, 1, 0.36, 1] },
+                                    }}
+                                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                                     className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
                                   >
                                     {isCompleted ? (
@@ -1219,11 +1522,6 @@ export default function Home() {
                                     {isCompleted && (
                                       <span className="shrink-0 text-xs font-medium text-gray-600 sm:text-sm">
                                         Finished
-                                      </span>
-                                    )}
-                                    {isActive && (
-                                      <span className="max-w-[6.5rem] shrink-0 truncate text-xs font-medium text-gray-700 sm:max-w-[11rem] sm:text-sm">
-                                        Analyzing this url...
                                       </span>
                                     )}
                                   </motion.div>

@@ -72,31 +72,65 @@ export function evaluateFooterSocialLinksRule(
 /** Runs in the browser — keep self-contained (no outer closures). */
 export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSocialSnapshot> {
   return page.evaluate(() => {
-    function classifySocial(href: string): string | null {
-      const h = href.trim().toLowerCase()
-      if (!h || h.startsWith('mailto:') || h.startsWith('tel:') || h.startsWith('javascript:')) {
-        return null
-      }
-      if (/instagram\.com|instagr\.am/i.test(h)) return 'Instagram'
-      if (/facebook\.com|fb\.com|fb\.me/i.test(h)) return 'Facebook'
-      if (/twitter\.com|^https?:\/\/(www\.)?x\.com\//i.test(h)) return 'X/Twitter'
-      if (/linkedin\.com/i.test(h)) return 'LinkedIn'
-      if (/tiktok\.com/i.test(h)) return 'TikTok'
-      if (/pinterest\.com|pin\.it/i.test(h)) return 'Pinterest'
-      if (/youtube\.com|youtu\.be/i.test(h)) return 'YouTube'
-      if (/threads\.net/i.test(h)) return 'Threads'
-      if (/snapchat\.com/i.test(h)) return 'Snapchat'
-      if (/t\.me\//i.test(h)) return 'Telegram'
-      if (/wa\.me|api\.whatsapp\.com|whatsapp\.com/i.test(h)) return 'WhatsApp'
+    function classifySocialFromSignals(signals: string): string | null {
+      const s = signals.toLowerCase()
+      if (!s || s.startsWith('mailto:') || s.startsWith('tel:') || s.startsWith('javascript:')) return null
+      if (/instagram\.com|instagr\.am|(?:^|[\/\-_?=&\s])instagram(?:$|[\/\-_?=&\s])/i.test(s)) return 'Instagram'
+      if (/facebook\.com|fb\.com|fb\.me|(?:^|[\/\-_?=&\s])facebook(?:$|[\/\-_?=&\s])/i.test(s)) return 'Facebook'
+      if (/twitter\.com|^https?:\/\/(www\.)?x\.com\/|(?:^|[\/\-_?=&\s])twitter(?:$|[\/\-_?=&\s])|(?:^|[\/\-_?=&\s])x(?:$|[\/\-_?=&\s])/i.test(s)) return 'X/Twitter'
+      if (/linkedin\.com|(?:^|[\/\-_?=&\s])linkedin(?:$|[\/\-_?=&\s])/i.test(s)) return 'LinkedIn'
+      if (/tiktok\.com|(?:^|[\/\-_?=&\s])tiktok(?:$|[\/\-_?=&\s])/i.test(s)) return 'TikTok'
+      if (/pinterest\.com|pin\.it|(?:^|[\/\-_?=&\s])pinterest(?:$|[\/\-_?=&\s])/i.test(s)) return 'Pinterest'
+      if (/youtube\.com|youtu\.be|(?:^|[\/\-_?=&\s])youtube(?:$|[\/\-_?=&\s])|(?:^|[\/\-_?=&\s])yt(?:$|[\/\-_?=&\s])/i.test(s)) return 'YouTube'
+      if (/threads\.net|(?:^|[\/\-_?=&\s])threads(?:$|[\/\-_?=&\s])/i.test(s)) return 'Threads'
+      if (/snapchat\.com|(?:^|[\/\-_?=&\s])snapchat(?:$|[\/\-_?=&\s])/i.test(s)) return 'Snapchat'
+      if (/t\.me\/|telegram|(?:^|[\/\-_?=&\s])telegram(?:$|[\/\-_?=&\s])/i.test(s)) return 'Telegram'
+      if (/wa\.me|api\.whatsapp\.com|whatsapp\.com|(?:^|[\/\-_?=&\s])whatsapp(?:$|[\/\-_?=&\s])/i.test(s)) return 'WhatsApp'
       return null
+    }
+
+    function classifySocialFromElement(el: Element): string | null {
+      const href = (el.getAttribute('href') || '').trim()
+      const aria = (el.getAttribute('aria-label') || '').trim()
+      const title = (el.getAttribute('title') || '').trim()
+      const rel = (el.getAttribute('rel') || '').trim()
+      const cls = (el.getAttribute('class') || '').trim()
+      const id = (el.getAttribute('id') || '').trim()
+      const text = (el.textContent || '').trim()
+      const signals = [href, aria, title, rel, cls, id, text].filter(Boolean).join(' | ')
+      return classifySocialFromSignals(signals)
+    }
+
+    function socialSignalsFromElement(el: Element): string {
+      const href = (el.getAttribute('href') || '').trim()
+      const aria = (el.getAttribute('aria-label') || '').trim()
+      const title = (el.getAttribute('title') || '').trim()
+      const rel = (el.getAttribute('rel') || '').trim()
+      const cls = (el.getAttribute('class') || '').trim()
+      const id = (el.getAttribute('id') || '').trim()
+      const dataSocial = (el.getAttribute('data-social') || '').trim()
+      const text = (el.textContent || '').trim()
+      // Many storefront icon controls expose social provider only via SVG/link references.
+      let svgHints = ''
+      try {
+        const svgRef = el.querySelector('use')?.getAttribute('href') || el.querySelector('use')?.getAttribute('xlink:href') || ''
+        const svgTitle = el.querySelector('svg title')?.textContent || ''
+        svgHints = `${svgRef} ${svgTitle}`.trim()
+      } catch {
+        /* ignore */
+      }
+      return [href, aria, title, rel, cls, id, dataSocial, text, svgHints]
+        .filter(Boolean)
+        .join(' | ')
     }
 
     function hostsFromRoot(root: Element | null): string[] {
       const hosts = new Set<string>()
       if (!root) return []
-      root.querySelectorAll('a[href]').forEach((a) => {
-        const href = a.getAttribute('href') || ''
-        const c = classifySocial(href)
+      root
+        .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
+        .forEach((el) => {
+        const c = classifySocialFromSignals(socialSignalsFromElement(el))
         if (c) hosts.add(c)
       })
       return Array.from(hosts)
@@ -156,13 +190,14 @@ export async function collectFooterSocialSnapshot(page: Page): Promise<FooterSoc
     const docH = document.documentElement.scrollHeight
     const yCut = docH * 0.68
     const bandHosts = new Set<string>()
-    document.querySelectorAll('a[href]').forEach((a) => {
-      if (!(a instanceof HTMLElement)) return
-      const r = a.getBoundingClientRect()
+    document
+      .querySelectorAll('a, button, [role="link"], [onclick], [data-social], [aria-label], [title]')
+      .forEach((el) => {
+      if (!(el instanceof HTMLElement)) return
+      const r = el.getBoundingClientRect()
       const centerY = r.top + window.scrollY + r.height / 2
       if (centerY < yCut) return
-      const href = a.getAttribute('href') || ''
-      const c = classifySocial(href)
+      const c = classifySocialFromSignals(socialSignalsFromElement(el))
       if (c) bandHosts.add(c)
     })
 

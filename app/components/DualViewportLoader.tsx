@@ -1,10 +1,17 @@
 'use client';
 
+export type InstantPreviewHint = {
+  host: string;
+  faviconUrl: string;
+};
+
 type DualViewportLoaderProps = {
   /** null = empty pane while URL capture is in flight */
   previewDesktop: string | null;
   /** null = empty mobile pane while URL capture is in flight */
   previewMobile?: string | null;
+  /** Shown immediately (favicon + host) before the first streamed desktop screenshot arrives */
+  instantPreview?: InstantPreviewHint | null;
   statusText?: string;
   scanning?: boolean;
   /** `start` = left-align mockups (analyze + progress layout); default centered */
@@ -12,9 +19,28 @@ type DualViewportLoaderProps = {
 };
 
 /** Desktop-only browser mockup with optional UX-Ray scan overlay on the viewport. */
+function InstantSitePlaceholder({ hint }: { hint: InstantPreviewHint }) {
+  return (
+    <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-zinc-50/95 via-zinc-100/95 to-zinc-200/95 px-4">
+      <img
+        src={hint.faviconUrl}
+        alt=""
+        width={56}
+        height={56}
+        className="h-14 w-14 rounded-xl border border-zinc-200/80 bg-white object-contain p-1.5 shadow-sm"
+      />
+      <p className="max-w-[90%] truncate text-center text-xs font-semibold text-zinc-700 sm:text-sm">
+        {hint.host}
+      </p>
+      <p className="text-center text-[0.65rem] font-medium text-zinc-500 sm:text-xs">Loading preview…</p>
+    </div>
+  );
+}
+
 export function DualViewportLoader({
   previewDesktop,
   previewMobile = null,
+  instantPreview = null,
   statusText = 'Capturing page screenshots',
   scanning = true,
   align = 'center',
@@ -22,6 +48,9 @@ export function DualViewportLoader({
   const desktopReady = previewDesktop != null && previewDesktop.length > 0;
   const mobileReady = previewMobile != null && previewMobile.length > 0;
   const mobileSrc = mobileReady ? previewMobile! : desktopReady ? previewDesktop! : null;
+  const instant = instantPreview ?? null
+  const showInstantDesktop = !desktopReady && instant != null
+  const showInstantMobile = !mobileSrc && instant != null
   const isStart = align === 'start';
 
   return (
@@ -32,21 +61,16 @@ export function DualViewportLoader({
           : 'mx-auto w-full max-w-5xl px-3 sm:px-4'
       }
     >
-       <p
-          className={`mb-5 text-sm font-medium text-zinc-600 ${isStart ? 'text-left' : 'text-center'}`}
-        >
-          
-        </p>
       <div
-        className={`relative w-full max-w-[920px] pb-4 pt-1 ${isStart ? 'mx-0' : 'mx-auto'}`}
+        className={`relative mx-auto flex w-full pb-0 ${isStart ? 'mx-0 pt-0 sm:pb-0' : 'pt-2 sm:pb-8'}`}
       >
         <div
           className="pointer-events-none absolute inset-x-3 inset-y-2 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-6"
           aria-hidden
         />
 
-        <div className="relative mx-auto w-full">
-          <div className="relative z-0 w-full max-w-[min(100%,40rem)] overflow-hidden rounded-[1.8rem] border border-zinc-200/90 bg-white shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04]">
+        <div className="relative mx-auto w-full h-full md:h-auto min-h-[462px] mobile-set-height">
+          <div className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04] rounded-[1.8rem] overflow-hidden">
             <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
               <span className="h-3 w-3 rounded-full bg-[#ff5f57]" aria-hidden />
               <span className="h-3 w-3 rounded-full bg-[#febc2e]" aria-hidden />
@@ -65,6 +89,7 @@ export function DualViewportLoader({
                   aria-hidden
                 />
               )}
+              {showInstantDesktop && instant ? <InstantSitePlaceholder hint={instant} /> : null}
               {scanning && (
                 <div
                   className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
@@ -93,7 +118,7 @@ export function DualViewportLoader({
             </div>
           </div>
 
-          <div className="mx-auto mt-4 w-full max-w-[14.2rem] sm:absolute sm:right-2 sm:top-1/2 sm:z-30 sm:mt-0 sm:max-w-[15.25rem] sm:-translate-y-1/2">
+          <div className="w-full max-w-[200px] sm:max-w-[190px] md:max-w-[216px] lg:max-w-[14.2rem] self-center absolute right-0 top-0 sm:z-30 sm:mt-0 mobile-view">
             <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05]">
               <div className="overflow-hidden rounded-[1.8rem] bg-white ring-1 ring-zinc-200/90">
                 <div className="flex justify-center border-b border-zinc-100 bg-white px-3 pb-2 pt-3">
@@ -112,6 +137,7 @@ export function DualViewportLoader({
                       aria-hidden
                     />
                   )}
+                  {showInstantMobile && instant ? <InstantSitePlaceholder hint={instant} /> : null}
                   {scanning && (
                     <div
                       className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
@@ -151,7 +177,7 @@ export function DualViewportLoader({
 
       {scanning && (
         <div
-          className={`pointer-events-none mt-8 flex max-w-md ${isStart ? 'mx-0 justify-start' : 'mx-auto justify-center'}`}
+          className={`pointer-events-none mt-8 flex sm:max-w-md ${isStart ? 'mx-0 justify-center sm:justify-start' : 'mx-auto justify-center'}`}
         >
           <div className="flex max-w-[min(100%-1rem,28rem)] items-center gap-2.5 rounded-full border border-white/10 bg-zinc-950/90 px-4 py-2.5 text-sm text-white shadow-lg backdrop-blur-sm">
             <span

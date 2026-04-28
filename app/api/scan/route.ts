@@ -6,11 +6,24 @@ import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
-import { tryEvaluateDeterministic, expectsVisualTransformationContext } from '@/lib/rules/deterministicRules'
+import {
+  tryEvaluateDeterministic,
+  expectsVisualTransformationContext,
+  isHeaderCartQuickAccessRule,
+  isCartIconItemCountRule,
+} from '@/lib/rules/deterministicRules'
 import {
   collectFooterSocialSnapshot,
   emptyFooterSocialSnapshot,
 } from '@/lib/rules/footerSocialLinksRule'
+import {
+  collectFooterNewsletterSnapshot,
+  emptyFooterNewsletterSnapshot,
+} from '@/lib/rules/footerNewsletterRule'
+import {
+  collectFooterCustomerSupportSnapshot,
+  emptyFooterCustomerSupportSnapshot,
+} from '@/lib/rules/footerCustomerSupportRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -21,7 +34,8 @@ import {
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+/** Full scan runs one Puppeteer session + all rules; needs headroom beyond Hobby 60s cap. */
+export const maxDuration = 300
 interface Rule {
   id: string
   title: string
@@ -155,6 +169,583 @@ function htmlSuggestsDesktopOnlyThumbnailStrip(rawHtml: string): boolean {
     if (patterns.some((p) => p.test(slice))) return true
   }
   return false
+}
+
+/**
+ * HTML fallback for footer-social rule.
+ * Used when runtime DOM snapshots are flaky (common on serverless/bot-challenged pages).
+ * We only scan footer-like/tail sections to avoid counting generic share links in body content.
+ */
+function detectFooterSocialHostsFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  // 1) Real footer nodes in source
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  // 2) Footer-ish wrappers by class/id
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,7000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  // 3) Last part of document (footer commonly lives here)
+  const tailStart = Math.floor(html.length * 0.62)
+  addSlice(tailStart, html.length)
+
+  const searchArea = slices.join('\n')
+  if (!searchArea) return []
+
+  const providers: Array<{ name: string; re: RegExp }> = [
+    { name: 'Instagram', re: /instagram\.com|instagr\.am/ },
+    { name: 'Facebook', re: /facebook\.com|fb\.com|fb\.me/ },
+    { name: 'X/Twitter', re: /twitter\.com|x\.com\// },
+    { name: 'TikTok', re: /tiktok\.com/ },
+    { name: 'LinkedIn', re: /linkedin\.com/ },
+    { name: 'YouTube', re: /youtube\.com|youtu\.be/ },
+    { name: 'Pinterest', re: /pinterest\.com|pin\.it/ },
+    { name: 'Threads', re: /threads\.net/ },
+    { name: 'Snapchat', re: /snapchat\.com/ },
+    { name: 'Telegram', re: /t\.me\/|telegram/ },
+    { name: 'WhatsApp', re: /wa\.me|api\.whatsapp\.com|whatsapp\.com/ },
+  ]
+
+  const found: string[] = []
+  for (const p of providers) {
+    if (p.re.test(searchArea)) found.push(p.name)
+  }
+  return [...new Set(found)]
+}
+
+function detectFooterNewsletterFromHtml(rawHtml: string): {
+  footerRootFound: boolean
+  hasVisibleEmailInputInFooter: boolean
+  hasVisibleSubmitControlInFooter: boolean
+  newsletterKeywordInFooter: boolean
+  hasFormPairInFooter: boolean
+  matchedSignals: string[]
+} {
+  if (!rawHtml) {
+    return {
+      footerRootFound: false,
+      hasVisibleEmailInputInFooter: false,
+      hasVisibleSubmitControlInFooter: false,
+      newsletterKeywordInFooter: false,
+      hasFormPairInFooter: false,
+      matchedSignals: [],
+    }
+  }
+
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,9000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  addSlice(Math.floor(html.length * 0.62), html.length)
+  const searchArea = slices.join('\n')
+  const footerRootFound = /<footer[\s>]/i.test(searchArea) || /(?:id|class)=["'][^"']*footer[^"']*["']/i.test(searchArea)
+  if (!searchArea) {
+    return {
+      footerRootFound,
+      hasVisibleEmailInputInFooter: false,
+      hasVisibleSubmitControlInFooter: false,
+      newsletterKeywordInFooter: false,
+      hasFormPairInFooter: false,
+      matchedSignals: [],
+    }
+  }
+
+  const hasVisibleEmailInputInFooter =
+    /<input[^>]+type=["']email["'][^>]*>/i.test(searchArea) ||
+    /<input[^>]+(?:name|id|placeholder)=["'][^"']*email[^"']*["'][^>]*>/i.test(searchArea)
+
+  const hasVisibleSubmitControlInFooter =
+    /<input[^>]+type=["']submit["'][^>]*>/i.test(searchArea) ||
+    /<button[^>]*>[\s\S]{0,80}?(?:subscribe|sign\s*up|signup|join|submit)[\s\S]{0,80}?<\/button>/i.test(searchArea) ||
+    /<button[^>]+(?:aria-label|title)=["'][^"']*(?:subscribe|sign\s*up|signup|join|submit)[^"']*["'][^>]*>/i.test(searchArea)
+
+  const newsletterKeywordInFooter =
+    /\bnewsletter\b|\bsubscribe\b|\bsubscription\b|\bmailing\s+list\b|\bjoin\s+our\b/i.test(searchArea)
+
+  let hasFormPairInFooter = false
+  let formMatch: RegExpExecArray | null
+  const formRe = /<form[\s\S]{0,6000}?<\/form>/gi
+  while ((formMatch = formRe.exec(searchArea)) !== null) {
+    const block = formMatch[0]
+    const hasEmail = /<input[^>]+type=["']email["'][^>]*>|<input[^>]+(?:name|id|placeholder)=["'][^"']*email[^"']*["'][^>]*>/i.test(block)
+    const hasSubmit =
+      /<input[^>]+type=["']submit["'][^>]*>/i.test(block) ||
+      /<button[^>]*>[\s\S]{0,80}?(?:subscribe|sign\s*up|signup|join|submit)[\s\S]{0,80}?<\/button>/i.test(block) ||
+      /<button[^>]*(?:type=["']submit["'])[^>]*>/i.test(block)
+    if (hasEmail && hasSubmit) {
+      hasFormPairInFooter = true
+      break
+    }
+  }
+
+  if (!hasFormPairInFooter && hasVisibleEmailInputInFooter && (hasVisibleSubmitControlInFooter || newsletterKeywordInFooter)) {
+    hasFormPairInFooter = true
+  }
+
+  const matchedSignals: string[] = []
+  if (hasVisibleEmailInputInFooter) matchedSignals.push('email-input')
+  if (hasVisibleSubmitControlInFooter) matchedSignals.push('submit-control')
+  if (newsletterKeywordInFooter) matchedSignals.push('newsletter-copy')
+  if (hasFormPairInFooter) matchedSignals.push('html-footer-form-pair')
+
+  return {
+    footerRootFound,
+    hasVisibleEmailInputInFooter,
+    hasVisibleSubmitControlInFooter,
+    newsletterKeywordInFooter,
+    hasFormPairInFooter,
+    matchedSignals,
+  }
+}
+
+function detectTrustNearCtaFromHtml(rawHtml: string): {
+  ctaFound: boolean
+  domStructureFound: boolean
+  paymentBrandsFound: string[]
+  paymentBrandsElsewhere: string[]
+  trustBadgesInfo: string
+  containerDescription: string
+} {
+  if (!rawHtml) {
+    return {
+      ctaFound: false,
+      domStructureFound: false,
+      paymentBrandsFound: [],
+      paymentBrandsElsewhere: [],
+      trustBadgesInfo: 'No HTML available for trust-near-CTA fallback.',
+      containerDescription: 'html-fallback',
+    }
+  }
+
+  const stripped = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const html = stripped.toLowerCase()
+
+  const CTA_RE = /\b(add to cart|add to bag|buy now|buy it now|checkout|pay now|order now|purchase)\b/i
+  const TRUST_LABELS: Array<{ label: string; re: RegExp }> = [
+    { label: 'Visa', re: /\bvisa\b/ },
+    { label: 'Mastercard', re: /\bmaster\s*card\b|\bmastercard\b/ },
+    { label: 'PayPal', re: /\bpaypal\b/ },
+    { label: 'Apple Pay', re: /\bapple\s*pay\b/ },
+    { label: 'Google Pay', re: /\bgoogle\s*pay\b/ },
+    { label: 'Amex', re: /\bamerican\s*express\b|\bamex\b/ },
+    { label: 'Klarna', re: /\bklarna\b/ },
+    { label: 'Afterpay', re: /\bafterpay\b|\bclearpay\b/ },
+    { label: 'Shop Pay', re: /\bshop\s*pay\b/ },
+    { label: 'Stripe', re: /\bstripe\b/ },
+    { label: 'Maestro', re: /\bmaestro\b/ },
+    { label: 'Discover', re: /\bdiscover\b/ },
+    { label: 'security-seal', re: /\bssl\b|\bsecure\s+checkout\b|\bsecure\s+payment\b|\btrust\s*badge\b|\bpadlock\b|\bprotected\s+checkout\b/ },
+    { label: 'guarantee-badge', re: /\bmoney\s*-?\s*back\b|\bguarantee\b|\bsecure\s+checkout\s+badge\b/ },
+  ]
+  const VISUAL_RE = /<(img|svg|iframe)\b|(?:id|class)=["'][^"']*(icon|badge|payment|secure|trust|checkout)[^"']*["']/i
+
+  const candidateBlocks: string[] = []
+  let blockMatch: RegExpExecArray | null
+  const blockRe = /<(?:form|section|div)[^>]*(?:product|purchase|cart|checkout|payment|buy|atc|cta)[^>]*>[\s\S]{0,16000}?<\/(?:form|section|div)>/gi
+  while ((blockMatch = blockRe.exec(html)) !== null) {
+    candidateBlocks.push(blockMatch[0])
+    if (candidateBlocks.length >= 28) break
+  }
+
+  const ctaFound = CTA_RE.test(html)
+  const nearFound = new Set<string>()
+  const elsewhereFound = new Set<string>()
+
+  const addMatchesFromArea = (source: string, bucket: Set<string>) => {
+    for (const item of TRUST_LABELS) {
+      if (item.re.test(source)) bucket.add(item.label)
+    }
+  }
+
+  const nearMatchedBlocks: string[] = []
+  for (const block of candidateBlocks) {
+    if (!CTA_RE.test(block)) continue
+    if (!VISUAL_RE.test(block)) continue
+    const localFound = new Set<string>()
+    addMatchesFromArea(block, localFound)
+    if (localFound.size === 0) continue
+    for (const name of localFound) nearFound.add(name)
+    nearMatchedBlocks.push(block)
+  }
+
+  const footerOnly = Array.from(html.matchAll(/<footer[\s\S]*?<\/footer>/gi))
+    .map((m) => m[0])
+    .join('\n')
+  addMatchesFromArea(footerOnly, elsewhereFound)
+
+  if (nearMatchedBlocks.length > 0) {
+    const combinedNear = nearMatchedBlocks.join('\n')
+    const outsideNear = html.replace(combinedNear, ' ')
+    addMatchesFromArea(outsideNear, elsewhereFound)
+  }
+
+  const paymentBrandsFound = Array.from(nearFound)
+  const paymentBrandsElsewhere = Array.from(elsewhereFound).filter((x) => !nearFound.has(x))
+  const domStructureFound = paymentBrandsFound.length > 0
+
+  return {
+    ctaFound,
+    domStructureFound,
+    paymentBrandsFound,
+    paymentBrandsElsewhere,
+    trustBadgesInfo: domStructureFound
+      ? `HTML fallback found trust/payment markers near CTA: ${paymentBrandsFound.join(', ')}`
+      : paymentBrandsElsewhere.length > 0
+        ? `HTML fallback found trust markers only outside CTA context: ${paymentBrandsElsewhere.join(', ')}`
+        : 'HTML fallback found no trust/payment markers near CTA.',
+    containerDescription: 'html-fallback: CTA/trust markers in same product/purchase block',
+  }
+}
+
+function detectFooterCustomerSupportFromHtml(rawHtml: string): {
+  footerRootFound: boolean
+  kinds: string[]
+  matchedLabels: string[]
+  hasFloatingChatLauncher: boolean
+} {
+  if (!rawHtml) {
+    return {
+      footerRootFound: false,
+      kinds: [],
+      matchedLabels: [],
+      hasFloatingChatLauncher: false,
+    }
+  }
+
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,9000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  addSlice(Math.floor(html.length * 0.62), html.length)
+  const searchArea = slices.join('\n')
+  const footerRootFound = /<footer[\s>]/i.test(searchArea) || /(?:id|class)=["'][^"']*footer[^"']*["']/i.test(searchArea)
+
+  const kinds = new Set<string>()
+  const matchedLabels: string[] = []
+  const pushKind = (kind: string, label: string) => {
+    if (kinds.has(kind)) return
+    kinds.add(kind)
+    const t = label.replace(/\s+/g, ' ').trim()
+    if (t && matchedLabels.length < 12) matchedLabels.push(t.slice(0, 80))
+  }
+
+  const classify = (label: string, href: string): string | null => {
+    const l = label.replace(/\s+/g, ' ').trim().toLowerCase()
+    const h = href.trim().toLowerCase()
+    if (/\bhelp\s*center\b|helpcentre|\/help\b|help-center|pages\/help/i.test(l) || /\/help|help-center|help_center|zendesk|intercom|freshdesk/i.test(h)) {
+      return 'help-center'
+    }
+    if (/\bcontact(\s+us)?\b|^contact$/i.test(l) || /\/contact|pages\/contact|mailto:/i.test(h)) {
+      return 'contact'
+    }
+    if (/\bfaqs?\b|\bquestions\b/i.test(l) || /\/faq|\/faqs/i.test(h)) {
+      return 'faq'
+    }
+    if (/\blive\s*chat\b|\bchat\s+with\b|\bonline\s*chat\b/i.test(l) || /\/chat\b|livechat|live-chat/i.test(h)) {
+      return 'live-chat'
+    }
+    if (/\bcustomer\s*(service|support|care)\b/i.test(l)) {
+      return 'customer-care'
+    }
+    if (/\bshipping\b/i.test(l) || /\/policies\/shipping|\/shipping/i.test(h)) {
+      return 'shipping'
+    }
+    if (/\breturns?\b|\brefunds?\b/i.test(l) || /\/policies\/refund|\/returns/i.test(h)) {
+      return 'returns'
+    }
+    if (/\bmanage\s+subscription\b/i.test(l) || (/\bmanage\b/i.test(l) && /\bsubscription\b/i.test(l))) {
+      return 'subscription-help'
+    }
+    if (/\bsubmit\s+review\b|\bwrite\s+a\s+review\b/i.test(l)) {
+      return 'review-help'
+    }
+    if (l === 'support' || /\bsupport\s+home\b/i.test(l)) {
+      return 'support-link'
+    }
+    return null
+  }
+
+  if (searchArea) {
+    const linkRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+    let m: RegExpExecArray | null
+    while ((m = linkRe.exec(searchArea)) !== null) {
+      const href = (m[1] || '').trim()
+      const label = (m[2] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      const kind = classify(label, href)
+      if (kind) pushKind(kind, label || href)
+      if (kinds.size >= 12) break
+    }
+  }
+
+  const hasFloatingChatLauncher =
+    /\b(intercom|zendesk|drift|tidio|crisp|gorgias|livechat|live-chat|chatwoot|tawk\.to|shopify\s*inbox|customer\s+chat|message\s+us)\b/i.test(
+      html,
+    )
+
+  return {
+    footerRootFound,
+    kinds: Array.from(kinds),
+    matchedLabels,
+    hasFloatingChatLauncher,
+  }
+}
+
+function decodeHtmlEntitiesMinimal(input: string): string {
+  return input
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+}
+
+function cleanHtmlText(input: string): string {
+  return decodeHtmlEntitiesMinimal(input.replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractFallbackButtonsAndLinksFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const labels: string[] = []
+
+  const push = (value: string) => {
+    const t = cleanHtmlText(value)
+    if (!t || t.length < 2 || t.length > 70) return
+    labels.push(t)
+  }
+
+  let m: RegExpExecArray | null
+  const buttonRe = /<button\b[^>]*>([\s\S]*?)<\/button>/gi
+  while ((m = buttonRe.exec(html)) !== null) {
+    push(m[1] || '')
+  }
+
+  const inputRe = /<input\b[^>]*(?:type=["'](?:submit|button)["'])[^>]*>/gi
+  while ((m = inputRe.exec(html)) !== null) {
+    const tag = m[0]
+    const value = tag.match(/\bvalue=["']([^"']+)["']/i)?.[1] || ''
+    const aria = tag.match(/\baria-label=["']([^"']+)["']/i)?.[1] || ''
+    const title = tag.match(/\btitle=["']([^"']+)["']/i)?.[1] || ''
+    push(value || aria || title)
+  }
+
+  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  while ((m = anchorRe.exec(html)) !== null) {
+    const href = (m[1] || '').trim()
+    const label = cleanHtmlText(m[2] || '')
+    const attrs = m[0]
+    const aria = attrs.match(/\baria-label=["']([^"']+)["']/i)?.[1] || ''
+    const title = attrs.match(/\btitle=["']([^"']+)["']/i)?.[1] || ''
+    const combined = `${label} ${aria} ${title}`.trim()
+    if (
+      /add to cart|add to bag|buy now|shop now|checkout|order now|get started|subscribe|join/i.test(combined) ||
+      /\/cart|\/checkout|\/collections|\/products|\/shop/i.test(href)
+    ) {
+      push(combined || href)
+    }
+  }
+
+  const skipNoise = (s: string): boolean => {
+    const l = s.toLowerCase()
+    return (
+      l.includes('privacy') ||
+      l.includes('terms') ||
+      l.includes('cookie') ||
+      l.includes('refund policy') ||
+      l.includes('shipping policy') ||
+      l.includes('store locator') ||
+      /\b[a-z]{2,}\s+\([a-z]{3}\s/.test(l)
+    )
+  }
+
+  const actionVerbStart = [
+    'shop', 'buy', 'add', 'get', 'order', 'start', 'try', 'discover',
+    'explore', 'view', 'check', 'join', 'subscribe', 'learn', 'claim',
+  ]
+  const urgencyWords = ['now', 'today', 'limited', 'hurry', 'instant', 'immediately', 'last chance']
+  const purchaseIntent = [
+    'add to cart', 'add to bag', 'buy now', 'shop now', 'checkout', 'order now', 'get started', 'shop all',
+  ]
+  const score = (s: string): number => {
+    const l = s.toLowerCase()
+    let n = 0
+    if (actionVerbStart.some((v) => l === v || l.startsWith(v + ' '))) n += 5
+    if (urgencyWords.some((u) => l.includes(u))) n += 3
+    if (purchaseIntent.some((p) => l.includes(p))) n += 5
+    if (/\bshop\b|\bbuy\b|\bcheckout\b|\badd to\b/.test(l)) n += 2
+    return n
+  }
+
+  return [...new Set(labels)]
+    .filter((s) => !skipNoise(s))
+    .sort((a, b) => score(b) - score(a) || a.localeCompare(b))
+    .slice(0, 30)
+}
+
+function extractFallbackHeadingsFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const headings: string[] = []
+  const push = (value: string) => {
+    const t = cleanHtmlText(value)
+    if (!t || t.length < 2 || t.length > 120) return
+    headings.push(t)
+  }
+  let m: RegExpExecArray | null
+  const headingRe = /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi
+  while ((m = headingRe.exec(rawHtml)) !== null) {
+    push(m[1] || '')
+    if (headings.length >= 15) break
+  }
+  return [...new Set(headings)].slice(0, 15)
+}
+
+function detectLogoHomepageFromHtml(rawHtml: string, baseUrl: string): {
+  clickable: boolean
+  homepageLinked: boolean
+  href: string
+} {
+  const fallback = { clickable: false, homepageLinked: false, href: 'Not found' }
+  if (!rawHtml) return fallback
+
+  let host = ''
+  try {
+    host = new URL(baseUrl).host
+  } catch {
+    return fallback
+  }
+
+  const isLocaleOrRootHomePath = (pathname: string): boolean => {
+    const p = (pathname || '/').replace(/\/+$/, '') || '/'
+    if (p === '/') return true
+    return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?$/i.test(p)
+  }
+
+  const isHomepageHref = (raw: string): boolean => {
+    if (!raw) return false
+    try {
+      const u = new URL(raw, baseUrl)
+      if (u.host !== host) return false
+      return isLocaleOrRootHomePath(u.pathname || '/')
+    } catch {
+      return false
+    }
+  }
+
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .toLowerCase()
+
+  const headerBlocks = Array.from(html.matchAll(/<header[\s\S]*?<\/header>/gi)).map((m) => m[0])
+  const searchAreas = headerBlocks.length > 0 ? headerBlocks.slice(0, 4) : [html.slice(0, Math.min(25000, html.length))]
+
+  let bestHref = ''
+  let bestScore = -1
+  for (const area of searchAreas) {
+    const anchorRe = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi
+    let m: RegExpExecArray | null
+    while ((m = anchorRe.exec(area)) !== null) {
+      const attrs = `${m[1] || ''} ${m[3] || ''}`.toLowerCase()
+      const href = (m[2] || '').trim()
+      const inner = m[4] || ''
+      const text = cleanHtmlText(inner).toLowerCase()
+      const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+      const hasLogoVisual = /<(img|svg|picture)\b/i.test(inner)
+      const isHomeHref = isHomepageHref(href)
+      let score = 0
+      if (isHomeHref) score += 250
+      if (hasLogoClass) score += 160
+      if (hasLogoVisual) score += 120
+      if (/\bhome\b/.test(text)) score += 40
+      if (/cart|checkout|account|search|menu|wishlist/.test(`${attrs} ${text}`)) score -= 120
+      if (score > bestScore) {
+        bestScore = score
+        bestHref = href
+      }
+    }
+  }
+
+  if (!bestHref) return fallback
+  return {
+    clickable: true,
+    homepageLinked: isHomepageHref(bestHref),
+    href: (() => {
+      try {
+        return new URL(bestHref, baseUrl).href
+      } catch {
+        return bestHref
+      }
+    })(),
+  }
 }
 
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
@@ -567,6 +1158,8 @@ export async function POST(request: NextRequest) {
     let selectedVariant: string | null = null
     let fallbackRawHtml = ''
     let footerSocialSnapshot = emptyFooterSocialSnapshot()
+    let footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
+    let footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
     try {
       browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
@@ -590,7 +1183,8 @@ export async function POST(request: NextRequest) {
       } catch {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
-      await new Promise((r) => setTimeout(r, 2000))
+      const hydrationSettleMs = process.env.VERCEL ? 1800 : 1200
+      await new Promise((r) => setTimeout(r, hydrationSettleMs))
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
@@ -634,24 +1228,54 @@ export async function POST(request: NextRequest) {
       fullVisibleText = visibleText
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
-      const colorWaitMs = process.env.VERCEL ? 1500 : 1500
+      const colorWaitMs = process.env.VERCEL ? 1700 : 1000
       await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
       keyElements = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
+        const rawButtons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
           .map(el => {
-            const text = el.textContent?.trim() || el.getAttribute('href') || el.getAttribute('aria-label') || ''
+            const raw = el.textContent || el.getAttribute('href') || el.getAttribute('aria-label') || ''
+            const text = raw.replace(/\s+/g, ' ').trim()
             return text
           })
-          .filter(text => text.length > 0)
-          .sort() // Sort alphabetically for consistency
-          .slice(0, 30) // Increased limit and sort first
+          .filter(text => text.length > 0 && text.length <= 70)
+        const isNoise = (s: string) => {
+          const l = s.toLowerCase()
+          return (
+            l.includes('privacy') ||
+            l.includes('terms') ||
+            l.includes('cookie') ||
+            l.includes('store locator') ||
+            l.includes('afghanistan (') ||
+            /\b[a-z]{2,}\s+\([a-z]{3}\s/.test(l)
+          )
+        }
+        const actionVerbStart = [
+          'shop', 'buy', 'add', 'get', 'order', 'start', 'try', 'discover',
+          'explore', 'view', 'check', 'join', 'subscribe', 'learn', 'claim',
+        ]
+        const urgencyWords = ['now', 'today', 'limited', 'hurry', 'instant', 'immediately', 'last chance']
+        const purchaseIntent = [
+          'add to cart', 'add to bag', 'buy now', 'shop now', 'checkout', 'order now', 'get started', 'shop all',
+        ]
+        const score = (s: string) => {
+          const l = s.toLowerCase()
+          let n = 0
+          if (actionVerbStart.some((v) => l === v || l.startsWith(v + ' '))) n += 5
+          if (urgencyWords.some((u) => l.includes(u))) n += 3
+          if (purchaseIntent.some((p) => l.includes(p))) n += 5
+          if (/\/cart|\/checkout|\/collections|\/products/.test(l)) n += 1
+          return n
+        }
+        const buttons = [...new Set(rawButtons.filter((s) => !isNoise(s)))]
+          .sort((a, b) => score(b) - score(a) || a.localeCompare(b))
+          .slice(0, 30)
           .join(' | ')
 
         const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-          .map(h => h.textContent?.trim())
+          .map(h => (h.textContent || '').replace(/\s+/g, ' ').trim())
           .filter(text => text && text.length > 0)
           .sort() // Sort alphabetically for consistency
           .slice(0, 15) // Increased limit
@@ -869,9 +1493,25 @@ export async function POST(request: NextRequest) {
 
           const uniqueColors = new Set<string>()
           const pureBlackSources: string[] = [] // tagName for elements that have #000000
+          let meaningfulPureBlackCount = 0
+          let largeBlackBackgroundFound = false
 
           sampleElements.forEach(el => {
             try {
+              const node = el as HTMLElement
+              const style = window.getComputedStyle(node)
+              const rect = node.getBoundingClientRect()
+              // Ignore hidden/off-screen tiny utility elements (e.g., skip links) that create false positives.
+              if (
+                style.display === 'none' ||
+                style.visibility === 'hidden' ||
+                Number(style.opacity) <= 0 ||
+                rect.width < 2 ||
+                rect.height < 2
+              ) {
+                return
+              }
+
               const computedStyle = window.getComputedStyle(el)
               const textColor = computedStyle.color
               const bgColor = computedStyle.backgroundColor
@@ -892,27 +1532,45 @@ export async function POST(request: NextRequest) {
               const textHex = rgbToHex(textColor)
               const bgHex = rgbToHex(bgColor)
               const tag = (el.tagName || '').toLowerCase()
+              const textSample = ((node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim() || '').slice(0, 120)
+              const utilityText = /^(skip to content|open menu|close menu|search|cart|bag|menu)$/i.test(textSample)
+              const utilityClass = /skip|sr-only|visually-hidden|screen-reader|icon|nav|menu|header__icon/i.test(
+                (node.className || '').toString(),
+              )
+              const meaningfulText = /[a-z]/i.test(textSample) && textSample.length >= 8 && !utilityText
+              const isMeaningful = !utilityClass && (meaningfulText || tag === 'body' || tag.startsWith('h'))
 
               if (textHex) {
                 uniqueColors.add(`text:${textHex}`)
-                if (textHex === '#000000') pureBlackSources.push(`text:${tag}`)
+                if (textHex === '#000000') {
+                  pureBlackSources.push(`text:${tag}`)
+                  if (isMeaningful) meaningfulPureBlackCount += 1
+                }
               }
               if (bgHex) {
                 uniqueColors.add(`bg:${bgHex}`)
-                if (bgHex === '#000000') pureBlackSources.push(`bg:${tag}`)
+                if (bgHex === '#000000') {
+                  pureBlackSources.push(`bg:${tag}`)
+                  const viewportArea = Math.max(1, window.innerWidth * window.innerHeight)
+                  const area = rect.width * rect.height
+                  if (area / viewportArea >= 0.2 && !utilityClass) {
+                    largeBlackBackgroundFound = true
+                  }
+                }
               }
             } catch (e) {
               // Ignore errors
             }
           })
 
-          // Only report pure black if a non-body element has it (body often defaults to black before CSS loads on Vercel)
-          const hasPureBlackOnNonBody = pureBlackSources.some(s => !s.endsWith('body'))
-          const hasPureBlack = hasPureBlackOnNonBody
+          // Only fail when pure black is meaningfully used (not tiny utility/skip-link artifacts).
+          const hasPureBlack = meaningfulPureBlackCount >= 3 || largeBlackBackgroundFound
 
           const colorList = Array.from(uniqueColors).slice(0, 15).join(', ')
           colorInfo.push(`Colors found: ${colorList || 'No colors detected'}`)
           colorInfo.push(`Pure black (#000000) detected: ${hasPureBlack ? 'YES' : 'NO'}`)
+          colorInfo.push(`Meaningful pure-black elements count: ${meaningfulPureBlackCount}`)
+          colorInfo.push(`Large pure-black background found: ${largeBlackBackgroundFound ? 'YES' : 'NO'}`)
         } catch (e) {
           colorInfo.push('Color detection: Unable to extract')
         }
@@ -1047,8 +1705,308 @@ export async function POST(request: NextRequest) {
           tabsInfo.push('Tabs/Accordions detection: Unable to extract')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}`
+        // Header logo clickability/home-link check (deterministic signal for logo-homepage rule)
+        const logoInfo = []
+        try {
+          const host = window.location.host
+          const normalizeHref = (raw: string | null): string => {
+            if (!raw) return ''
+            try {
+              return new URL(raw, window.location.origin).href
+            } catch {
+              return raw
+            }
+          }
+          // / and single-segment locale or market roots (Shopify, etc.): /de, /en-gb, /en-int, /en-in
+          const isLocaleOrRootHomePath = (pathname: string): boolean => {
+            const p = (pathname || '/').replace(/\/+$/, '') || '/'
+            if (p === '/') return true
+            return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?$/i.test(p)
+          }
+          const isHomepageHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            try {
+              const u = new URL(raw, window.location.origin)
+              if (u.host !== host) return false
+              return isLocaleOrRootHomePath(u.pathname || '/')
+            } catch {
+              const s = raw.trim()
+              if (s === '/' || s === '') return true
+              try {
+                return isLocaleOrRootHomePath(new URL(s, 'https://' + host + '/').pathname)
+              } catch {
+                return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?\/?$/i.test(s)
+              }
+            }
+          }
+
+          const headerRoots = Array.from(
+            document.querySelectorAll('header, [role="banner"], .site-header, #shopify-section-header, .header'),
+          ) as Element[]
+          const scopedRoots = headerRoots.length > 0 ? headerRoots : [document.body]
+          const anchorSet = new Set<HTMLAnchorElement>()
+          for (const root of scopedRoots) {
+            const links = Array.from(root.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+            links.forEach((a) => anchorSet.add(a))
+          }
+          const anchors = Array.from(anchorSet)
+
+          const getScore = (a: HTMLAnchorElement): number => {
+            const hrefRaw = a.getAttribute('href')
+            const href = (hrefRaw || '').toLowerCase()
+            const text = (a.textContent || '').trim().toLowerCase()
+            const aria = (a.getAttribute('aria-label') || '').toLowerCase()
+            const cls = (a.className || '').toString().toLowerCase()
+            const id = (a.id || '').toLowerCase()
+            const title = (a.getAttribute('title') || '').toLowerCase()
+            const attrs = `${aria} ${cls} ${id} ${title}`
+            const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+            const hasLogoImage = !!a.querySelector('img, svg, picture')
+            const brandText = /(spacegoods|brand|logo|home|store)/.test(text)
+            const isHomeHref = isHomepageHref(hrefRaw)
+            const navUtility = /(cart|bag|basket|checkout|account|login|search|menu|wishlist|help|contact)/.test(
+              `${href} ${attrs} ${text}`,
+            )
+
+            let score = 0
+            if (isHomeHref) score += 220
+            if (hasLogoClass) score += 140
+            if (hasLogoImage) score += 90
+            if (brandText) score += 80
+            if (/(logo|brand)/.test(attrs)) score += 60
+            if (navUtility) score -= 140
+            return score
+          }
+
+          const picked = anchors
+            .map((a) => ({ a, score: getScore(a) }))
+            .sort((x, y) => y.score - x.score)[0]?.a || null
+          const strongHomeLogoCandidates = anchors.filter((a) => {
+            const hrefRaw = a.getAttribute('href')
+            if (!isHomepageHref(hrefRaw)) return false
+            const text = (a.textContent || '').trim().toLowerCase()
+            const aria = (a.getAttribute('aria-label') || '').toLowerCase()
+            const cls = (a.className || '').toString().toLowerCase()
+            const id = (a.id || '').toLowerCase()
+            const title = (a.getAttribute('title') || '').toLowerCase()
+            const attrs = `${aria} ${cls} ${id} ${title}`
+            const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+            const hasLogoImage = !!a.querySelector('img, svg, picture')
+            const brandText = /(logo|brand|home|store|spacegoods)/.test(text)
+            return hasLogoClass || hasLogoImage || brandText
+          })
+
+          const preferredHomeLogo = strongHomeLogoCandidates
+            .map((a) => ({ a, score: getScore(a) + 400 }))
+            .sort((x, y) => y.score - x.score)[0]?.a || null
+
+          const finalLogo = preferredHomeLogo || picked
+          const href = finalLogo ? finalLogo.getAttribute('href') : null
+          const clickable = !!finalLogo
+          const homeLinked = isHomepageHref(href)
+          const resolved = normalizeHref(href)
+
+          logoInfo.push(`Logo clickable in header: ${clickable ? 'YES' : 'NO'}`)
+          logoInfo.push(`Logo homepage link: ${homeLinked ? 'YES' : 'NO'}`)
+          logoInfo.push(`Logo href: ${resolved || 'Not found'}`)
+        } catch (e) {
+          logoInfo.push('Logo clickable in header: UNKNOWN')
+          logoInfo.push('Logo homepage link: UNKNOWN')
+          logoInfo.push('Logo href: Unknown')
+        }
+
+        // Header cart / bag quick access (deterministic signal for cart-in-header rules)
+        const cartInfo: string[] = []
+        try {
+          const hostCart = window.location.host
+          const isCartViewHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            const low = raw.trim().toLowerCase()
+            if (low.startsWith('javascript:')) return false
+            try {
+              const u = new URL(raw, window.location.origin)
+              if (u.host !== hostCart) return false
+              const p = (u.pathname || '').toLowerCase()
+              if (p.includes('/cart/add') || p.includes('/cart/change')) return false
+              return /\/cart\/?$/.test(p) || /\/bag\/?$/.test(p) || /\/basket\/?$/.test(p)
+            } catch {
+              return /\/cart\/?$/i.test(raw) && !/\/cart\/add/i.test(raw)
+            }
+          }
+          const isCartHashHref = (raw: string | null): boolean => {
+            if (!raw) return false
+            const s = raw.trim().toLowerCase()
+            if (!s.startsWith('#')) return false
+            return /cart|bag|basket|mini-cart|drawer/.test(s)
+          }
+          const headerRootsCart = Array.from(
+            document.querySelectorAll('header, [role="banner"], .site-header, #shopify-section-header, .header'),
+          ) as Element[]
+          const rootsCart = headerRootsCart.length > 0 ? headerRootsCart : [document.body]
+          let foundHref = ''
+          let foundKind = ''
+          outerCart: for (const root of rootsCart) {
+            const links = Array.from(root.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+            for (const a of links) {
+              const h = a.getAttribute('href')
+              if (isCartViewHref(h) || isCartHashHref(h)) {
+                foundHref = h || ''
+                foundKind = 'cart or bag link in header'
+                break outerCart
+              }
+            }
+            const ctrls = Array.from(root.querySelectorAll('button, [role="button"]')) as Element[]
+            for (const b of ctrls) {
+              const lab = (
+                (b.getAttribute('aria-label') || '') +
+                ' ' +
+                (b.getAttribute('title') || '') +
+                ' ' +
+                ((b.className || '') + '').toString()
+              ).toLowerCase()
+              if (
+                /(open|view|show)\s+(your\s+)?(shopping\s+)?(cart|bag|basket)/.test(lab) ||
+                lab.includes('cart-drawer') ||
+                lab.includes('mini-cart') ||
+                lab.includes('header__icon--cart') ||
+                (lab.includes('cart') && lab.includes('drawer'))
+              ) {
+                foundKind = (b.getAttribute('aria-label') || 'header cart control').trim()
+                foundHref = '(cart drawer or modal control)'
+                break outerCart
+              }
+            }
+          }
+          const cartPresent = !!(foundHref || foundKind)
+          cartInfo.push(`Header cart quick access present: ${cartPresent ? 'YES' : 'NO'}`)
+          cartInfo.push(
+            `Cart quick access detail: ${cartPresent ? `${foundKind ? `${foundKind} — ` : ''}${foundHref}`.trim() : 'Not found'}`,
+          )
+        } catch (e) {
+          cartInfo.push('Header cart quick access present: UNKNOWN')
+          cartInfo.push('Cart quick access detail: Unknown')
+        }
+
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
       })
+
+      // Cart icon item count / badge: empty cart = PASS; non-empty = PASS only with visible count badge
+      try {
+        const cartIconCountBlock = await page.evaluate(async () => {
+          const lines: string[] = []
+          let itemCount = -1
+          try {
+            const res = await fetch('/cart.js', { credentials: 'same-origin' })
+            if (res.ok) {
+              const j: { item_count?: number; items?: unknown[] } = await res.json()
+              if (typeof j.item_count === 'number') itemCount = j.item_count
+              else if (Array.isArray(j.items)) itemCount = j.items.length
+            }
+          } catch {
+            /* same-origin or blocked */
+          }
+          const headerRoots = Array.from(
+            document.querySelectorAll(
+              'header, [role="banner"], .site-header, #shopify-section-header, [class*="header" i]',
+            ),
+          ) as Element[]
+          const linkRoots: Element[] = headerRoots.length > 0 ? headerRoots : [document.body]
+          const allLinks: HTMLAnchorElement[] = []
+          const seen = new Set<HTMLAnchorElement>()
+          for (const root of linkRoots) {
+            root.querySelectorAll('a[href]').forEach((a) => {
+              if (!seen.has(a as HTMLAnchorElement)) {
+                seen.add(a as HTMLAnchorElement)
+                allLinks.push(a as HTMLAnchorElement)
+              }
+            })
+          }
+          let cartControl: HTMLAnchorElement | null = null
+          for (const a of allLinks) {
+            const h = a.getAttribute('href') || ''
+            if (/\/cart\/(add|change|clear)/i.test(h)) continue
+            try {
+              const u = new URL(h, window.location.origin)
+              const p = u.pathname
+              if (/\/(cart|bag|basket)\/?$/.test(p)) {
+                cartControl = a
+                break
+              }
+            } catch {
+              /* invalid href */
+            }
+          }
+          const isVis = (el: Element) => {
+            const h = el as HTMLElement
+            if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+            const st = window.getComputedStyle(h)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05)
+              return false
+            const r = h.getBoundingClientRect()
+            return r.width > 0 && r.height > 0
+          }
+          const hasVisibleCountBadge = (anchor: HTMLAnchorElement | null) => {
+            if (!anchor) return false
+            const checkEl = (n: Element) => {
+              if (!isVis(n)) return false
+              const raw = (n.textContent || '').replace(/\s+/g, ' ').trim()
+              if (!/^\d{1,3}$/.test(raw)) {
+                const c =
+                  n.getAttribute('data-count') ||
+                  n.getAttribute('data-cart-count') ||
+                  n.getAttribute('data-item-count') ||
+                  ''
+                return !!(c && /^\d+$/.test(c) && c !== '0')
+              }
+              if (n === anchor) return true
+              const r = (n as HTMLElement).getBoundingClientRect()
+              return r.width > 0 && r.width < 220 && r.height > 0 && r.height < 220
+            }
+            if (checkEl(anchor)) return true
+            for (const n of Array.from(
+              anchor.querySelectorAll(
+                'span, small, b, [class*="count" i], [class*="badge" i], [class*="bubble" i], [data-count], [data-cart-count]',
+              ),
+            )) {
+              if (checkEl(n)) return true
+            }
+            return false
+          }
+          const badgeVisible = hasVisibleCountBadge(cartControl)
+          lines.push(`Storefront cart item count: ${itemCount < 0 ? 'unknown' : String(itemCount)}`)
+          lines.push(`Count badge visible on/near header cart control: ${badgeVisible ? 'YES' : 'NO'}`)
+          let verdict: 'PASS' | 'FAIL' | 'INDETERMINATE' = 'INDETERMINATE'
+          let detail = ''
+          if (itemCount < 0) {
+            if (badgeVisible) {
+              verdict = 'PASS'
+              detail =
+                'A count badge is visible; storefront cart count could not be read, but a numeric badge is present on the cart control.'
+            } else {
+              verdict = 'INDETERMINATE'
+              detail = 'Could not read /cart.js and no count badge was detected; re-scan or verify manually.'
+            }
+          } else if (itemCount === 0) {
+            verdict = 'PASS'
+            detail =
+              'The cart is empty, so a numeric badge is not required on the icon (themes often hide the bubble when count is 0).'
+          } else if (badgeVisible) {
+            verdict = 'PASS'
+            detail = 'The cart has items and a visible item-count bubble/badge is shown on the header cart control.'
+          } else {
+            verdict = 'FAIL'
+            detail =
+              'The cart has one or more items, but no visible item-count number/badge was detected on the header cart control.'
+          }
+          lines.push(`Cart icon item count rule verdict: ${verdict}`)
+          lines.push(`Cart icon item count rule detail: ${detail}`)
+          return lines.join('\n')
+        })
+        keyElements = (keyElements || '') + '\n\n--- CART ICON ITEM COUNT (DOM) ---\n' + cartIconCountBlock
+        console.log('[CART ICON COUNT] Block:', cartIconCountBlock.split('\n').join(' | '))
+      } catch (e) {
+        console.warn('Cart icon item count snapshot failed:', e)
+      }
 
       // Lazy loading detection (loading="lazy", data-src, data-lazy, lazy classes; exclude small icons)
       try {
@@ -1499,47 +2457,52 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        /** ±4 sibling DOM nodes from the button (or its 1–2 wrappers); not the whole main landmark. */
-        function isWithinSiblingBandOfCta(cta: HTMLElement, el: Element, range: number): boolean {
-          if (cta === el || cta.contains(el)) return true
-          const tryAnchor = (anchor: HTMLElement): boolean => {
-            const parent = anchor.parentElement
-            if (!parent) return false
-            const kids = Array.from(parent.children) as Element[]
-            const idx = kids.indexOf(anchor)
-            if (idx < 0) return false
-            for (let off = -range; off <= range; off++) {
-              if (off === 0) continue
-              const sib = kids[idx + off]
-              if (sib && (sib === el || sib.contains(el))) return true
-            }
-            return false
-          }
-          if (tryAnchor(cta)) return true
-          const wrap = cta.parentElement
-          if (wrap && wrap !== document.body && tryAnchor(wrap as HTMLElement)) return true
-          const wrap2 = wrap?.parentElement
-          if (wrap2 && wrap2 !== document.body && tryAnchor(wrap2 as HTMLElement)) return true
-          return false
-        }
-
         function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
           const c = cta.getBoundingClientRect()
           const t = (el as HTMLElement).getBoundingClientRect()
           if (c.height < 4 || t.height < 1) return false
-          const hz = t.left < c.right + 200 && t.right > c.left - 200
+          const hz = t.left < c.right + 80 && t.right > c.left - 80
           const gapBelow = t.top - c.bottom
           const gapAbove = c.top - t.bottom
-          const nearBelow = gapBelow >= -48 && gapBelow <= 200
-          const nearAbove = gapAbove >= -36 && gapAbove <= 72
+          const nearBelow = gapBelow >= -24 && gapBelow <= 120
+          const nearAbove = gapAbove >= -20 && gapAbove <= 48
           return hz && (nearBelow || nearAbove)
+        }
+
+        function isElementActuallyVisible(el: Element): boolean {
+          const h = el as HTMLElement
+          if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+          const st = window.getComputedStyle(h)
+          if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
+          const r = h.getBoundingClientRect()
+          return r.width >= 4 && r.height >= 4
+        }
+
+        function getPurchaseBlock(el: Element | null): Element | null {
+          if (!el) return null
+          return (
+            el.closest('form[action*="cart" i]') ||
+            el.closest('[class*="product-form" i]') ||
+            el.closest('[class*="product__info" i]') ||
+            el.closest('[class*="product-info" i]') ||
+            el.closest('[class*="purchase" i]') ||
+            el.closest('[data-product-form]') ||
+            el.closest('[id*="product-form" i]')
+          )
+        }
+
+        function isInSamePurchaseBlock(cta: HTMLElement, el: Element): boolean {
+          const ctaBlock = getPurchaseBlock(cta)
+          const elBlock = getPurchaseBlock(el)
+          return !!ctaBlock && !!elBlock && ctaBlock === elBlock
         }
 
         function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
           if (!cta) return false
           if (isExcludedFarFromBuy(el)) return false
+          if (!isElementActuallyVisible(el)) return false
           if (cta === el || cta.contains(el)) return true
-          if (isWithinSiblingBandOfCta(cta, el, 4)) return true
+          if (isInSamePurchaseBlock(cta, el)) return true
           return pixelNearBuyButton(cta, el)
         }
 
@@ -1868,6 +2831,64 @@ export async function POST(request: NextRequest) {
 
       try {
         footerSocialSnapshot = await collectFooterSocialSnapshot(page)
+        const initialFooterSocialFound =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+
+        // Serverless runtimes can snapshot before late footer widgets hydrate.
+        // Retry once from absolute bottom before we give up.
+        if (!initialFooterSocialFound) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterSocial = await collectFooterSocialSnapshot(page)
+            const mergedFooter = [
+              ...new Set([
+                ...footerSocialSnapshot.socialHostsInFooterRoot,
+                ...retryFooterSocial.socialHostsInFooterRoot,
+              ]),
+            ]
+            const mergedBand = [
+              ...new Set([
+                ...footerSocialSnapshot.socialHostsInLowerBand,
+                ...retryFooterSocial.socialHostsInLowerBand,
+              ]),
+            ]
+            footerSocialSnapshot = {
+              footerRootFound: footerSocialSnapshot.footerRootFound || retryFooterSocial.footerRootFound,
+              footerRootSelector: footerSocialSnapshot.footerRootSelector || retryFooterSocial.footerRootSelector,
+              socialHostsInFooterRoot: mergedFooter,
+              socialHostsInLowerBand: mergedBand,
+            }
+          } catch (footerRetryErr) {
+            console.warn('[scan] footer social retry failed:', footerRetryErr)
+          }
+        }
+
+        // HTML fallback: if runtime DOM is still empty, parse footer-ish source sections.
+        const afterRetryFooterSocialFound =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+        if (!afterRetryFooterSocialFound) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackHosts = detectFooterSocialHostsFromHtml(runtimeHtml)
+            if (htmlFallbackHosts.length > 0) {
+              footerSocialSnapshot = {
+                footerRootFound: footerSocialSnapshot.footerRootFound || /<footer[\s>]/i.test(runtimeHtml),
+                footerRootSelector: footerSocialSnapshot.footerRootSelector || 'html-footer-fallback',
+                socialHostsInFooterRoot: footerSocialSnapshot.socialHostsInFooterRoot,
+                socialHostsInLowerBand: [
+                  ...new Set([...footerSocialSnapshot.socialHostsInLowerBand, ...htmlFallbackHosts]),
+                ],
+              }
+              console.log(`[scan] footer social HTML fallback detected: ${htmlFallbackHosts.join(', ')}`)
+            }
+          } catch (footerHtmlFallbackErr) {
+            console.warn('[scan] footer social HTML fallback failed:', footerHtmlFallbackErr)
+          }
+        }
+
         const footerScanBlock = [
           '',
           '--- FOOTER SOCIAL LINKS (DOM scan) ---',
@@ -1879,6 +2900,162 @@ export async function POST(request: NextRequest) {
       } catch (footerSnapErr) {
         console.warn('[scan] footer social DOM snapshot failed:', footerSnapErr)
         footerSocialSnapshot = emptyFooterSocialSnapshot()
+      }
+
+      try {
+        footerNewsletterSnapshot = await collectFooterNewsletterSnapshot(page)
+        const initialFooterNewsletterPass = footerNewsletterSnapshot.hasFormPairInFooter
+
+        if (!initialFooterNewsletterPass) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterNewsletter = await collectFooterNewsletterSnapshot(page)
+            footerNewsletterSnapshot = {
+              footerRootFound: footerNewsletterSnapshot.footerRootFound || retryFooterNewsletter.footerRootFound,
+              footerRootSelector:
+                footerNewsletterSnapshot.footerRootSelector || retryFooterNewsletter.footerRootSelector,
+              hasVisibleEmailInputInFooter:
+                footerNewsletterSnapshot.hasVisibleEmailInputInFooter ||
+                retryFooterNewsletter.hasVisibleEmailInputInFooter,
+              hasVisibleSubmitControlInFooter:
+                footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ||
+                retryFooterNewsletter.hasVisibleSubmitControlInFooter,
+              newsletterKeywordInFooter:
+                footerNewsletterSnapshot.newsletterKeywordInFooter ||
+                retryFooterNewsletter.newsletterKeywordInFooter,
+              hasFormPairInFooter:
+                footerNewsletterSnapshot.hasFormPairInFooter || retryFooterNewsletter.hasFormPairInFooter,
+              matchedSignals: [
+                ...new Set([...footerNewsletterSnapshot.matchedSignals, ...retryFooterNewsletter.matchedSignals]),
+              ],
+            }
+          } catch (footerNewsletterRetryErr) {
+            console.warn('[scan] footer newsletter retry failed:', footerNewsletterRetryErr)
+          }
+        }
+
+        if (!footerNewsletterSnapshot.hasFormPairInFooter) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackNewsletter = detectFooterNewsletterFromHtml(runtimeHtml)
+            if (htmlFallbackNewsletter.hasFormPairInFooter) {
+              footerNewsletterSnapshot = {
+                footerRootFound:
+                  footerNewsletterSnapshot.footerRootFound || htmlFallbackNewsletter.footerRootFound,
+                footerRootSelector: footerNewsletterSnapshot.footerRootSelector || 'html-footer-fallback',
+                hasVisibleEmailInputInFooter:
+                  footerNewsletterSnapshot.hasVisibleEmailInputInFooter ||
+                  htmlFallbackNewsletter.hasVisibleEmailInputInFooter,
+                hasVisibleSubmitControlInFooter:
+                  footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ||
+                  htmlFallbackNewsletter.hasVisibleSubmitControlInFooter,
+                newsletterKeywordInFooter:
+                  footerNewsletterSnapshot.newsletterKeywordInFooter ||
+                  htmlFallbackNewsletter.newsletterKeywordInFooter,
+                hasFormPairInFooter: true,
+                matchedSignals: [
+                  ...new Set([...footerNewsletterSnapshot.matchedSignals, ...htmlFallbackNewsletter.matchedSignals]),
+                ],
+              }
+              console.log('[scan] footer newsletter HTML fallback detected form pair.')
+            }
+          } catch (footerNewsletterHtmlFallbackErr) {
+            console.warn('[scan] footer newsletter HTML fallback failed:', footerNewsletterHtmlFallbackErr)
+          }
+        }
+
+        const footerNewsletterBlock = [
+          '',
+          '--- FOOTER NEWSLETTER (DOM scan) ---',
+          `Footer element matched: ${footerNewsletterSnapshot.footerRootFound ? 'YES' : 'NO'}${footerNewsletterSnapshot.footerRootSelector ? ` (${footerNewsletterSnapshot.footerRootSelector})` : ''}`,
+          `Visible email input in footer: ${footerNewsletterSnapshot.hasVisibleEmailInputInFooter ? 'YES' : 'NO'}`,
+          `Visible submit control in footer: ${footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ? 'YES' : 'NO'}`,
+          `Newsletter copy in footer: ${footerNewsletterSnapshot.newsletterKeywordInFooter ? 'YES' : 'NO'}`,
+          `Footer newsletter form pair: ${footerNewsletterSnapshot.hasFormPairInFooter ? 'YES' : 'NO'}`,
+          `Matched signals: ${footerNewsletterSnapshot.matchedSignals.length ? footerNewsletterSnapshot.matchedSignals.join(', ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerNewsletterBlock}`
+      } catch (footerNewsletterErr) {
+        console.warn('[scan] footer newsletter DOM snapshot failed:', footerNewsletterErr)
+        footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
+      }
+
+      try {
+        footerCustomerSupportSnapshot = await collectFooterCustomerSupportSnapshot(page)
+        const initialFooterSupportPass =
+          footerCustomerSupportSnapshot.kinds.length > 0 || footerCustomerSupportSnapshot.hasFloatingChatLauncher
+
+        if (!initialFooterSupportPass) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterSupport = await collectFooterCustomerSupportSnapshot(page)
+            footerCustomerSupportSnapshot = {
+              footerRootFound:
+                footerCustomerSupportSnapshot.footerRootFound || retryFooterSupport.footerRootFound,
+              footerRootSelector:
+                footerCustomerSupportSnapshot.footerRootSelector || retryFooterSupport.footerRootSelector,
+              kinds: [...new Set([...footerCustomerSupportSnapshot.kinds, ...retryFooterSupport.kinds])],
+              matchedLabels: [
+                ...new Set([
+                  ...footerCustomerSupportSnapshot.matchedLabels,
+                  ...retryFooterSupport.matchedLabels,
+                ]),
+              ],
+              hasFloatingChatLauncher:
+                footerCustomerSupportSnapshot.hasFloatingChatLauncher ||
+                retryFooterSupport.hasFloatingChatLauncher,
+            }
+          } catch (footerSupportRetryErr) {
+            console.warn('[scan] footer customer support retry failed:', footerSupportRetryErr)
+          }
+        }
+
+        if (
+          footerCustomerSupportSnapshot.kinds.length === 0 &&
+          !footerCustomerSupportSnapshot.hasFloatingChatLauncher
+        ) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackSupport = detectFooterCustomerSupportFromHtml(runtimeHtml)
+            if (htmlFallbackSupport.kinds.length > 0 || htmlFallbackSupport.hasFloatingChatLauncher) {
+              footerCustomerSupportSnapshot = {
+                footerRootFound:
+                  footerCustomerSupportSnapshot.footerRootFound || htmlFallbackSupport.footerRootFound,
+                footerRootSelector: footerCustomerSupportSnapshot.footerRootSelector || 'html-footer-fallback',
+                kinds: [...new Set([...footerCustomerSupportSnapshot.kinds, ...htmlFallbackSupport.kinds])],
+                matchedLabels: [
+                  ...new Set([
+                    ...footerCustomerSupportSnapshot.matchedLabels,
+                    ...htmlFallbackSupport.matchedLabels,
+                  ]),
+                ],
+                hasFloatingChatLauncher:
+                  footerCustomerSupportSnapshot.hasFloatingChatLauncher ||
+                  htmlFallbackSupport.hasFloatingChatLauncher,
+              }
+              console.log(
+                `[scan] footer support HTML fallback detected: kinds=${footerCustomerSupportSnapshot.kinds.join(', ') || 'none'} chat=${footerCustomerSupportSnapshot.hasFloatingChatLauncher}`,
+              )
+            }
+          } catch (footerSupportHtmlFallbackErr) {
+            console.warn('[scan] footer customer support HTML fallback failed:', footerSupportHtmlFallbackErr)
+          }
+        }
+
+        const footerSupportBlock = [
+          '',
+          '--- FOOTER CUSTOMER SUPPORT (DOM scan) ---',
+          `Footer element matched: ${footerCustomerSupportSnapshot.footerRootFound ? 'YES' : 'NO'}${footerCustomerSupportSnapshot.footerRootSelector ? ` (${footerCustomerSupportSnapshot.footerRootSelector})` : ''}`,
+          `Support kinds detected: ${footerCustomerSupportSnapshot.kinds.length ? footerCustomerSupportSnapshot.kinds.join(', ') : 'None'}`,
+          `Matched link labels: ${footerCustomerSupportSnapshot.matchedLabels.length ? footerCustomerSupportSnapshot.matchedLabels.join(' | ') : 'None'}`,
+          `Floating chat launcher (bottom-right heuristic): ${footerCustomerSupportSnapshot.hasFloatingChatLauncher ? 'YES' : 'NO'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${footerSupportBlock}`
+      } catch (footerSupportErr) {
+        console.warn('[scan] footer customer support DOM snapshot failed:', footerSupportErr)
+        footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
       }
 
       try {
@@ -3513,6 +4690,53 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Third-pass trust fallback from runtime HTML ───────────────────────
+      // Some serverless runs miss late-hydrated visual nodes in DOM scans.
+      // Use strict source fallback: CTA markers + visual trust markers in same purchase block.
+      if (needsTrustReScan && page && !trustBadgesContext?.domStructureFound) {
+        try {
+          const runtimeHtml = await page.content()
+          const trustHtmlFallback = detectTrustNearCtaFromHtml(runtimeHtml)
+          if (trustBadgesContext && trustHtmlFallback.domStructureFound) {
+            const mergedNear = [
+              ...new Set([...trustBadgesContext.paymentBrandsFound, ...trustHtmlFallback.paymentBrandsFound]),
+            ]
+            const mergedElse = [
+              ...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...trustHtmlFallback.paymentBrandsElsewhere]),
+            ]
+            trustBadgesContext = {
+              ...trustBadgesContext,
+              ctaFound: trustBadgesContext.ctaFound || trustHtmlFallback.ctaFound,
+              ctaText:
+                trustBadgesContext.ctaText && trustBadgesContext.ctaText !== 'not found'
+                  ? trustBadgesContext.ctaText
+                  : trustHtmlFallback.ctaFound
+                    ? 'detected in HTML fallback'
+                    : trustBadgesContext.ctaText,
+              domStructureFound: true,
+              paymentBrandsFound: mergedNear,
+              paymentBrandsElsewhere: mergedElse,
+              trustBadgesCount: mergedNear.length,
+              trustBadgesElsewhereCount: mergedElse.length,
+              trustBadgesInfo: trustHtmlFallback.trustBadgesInfo,
+              containerDescription: trustHtmlFallback.containerDescription,
+            }
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
+            console.log(`[scan] trust badges HTML fallback detected near CTA: ${mergedNear.join(', ')}`)
+          } else if (trustBadgesContext && !trustBadgesContext.ctaFound && trustHtmlFallback.ctaFound) {
+            trustBadgesContext = {
+              ...trustBadgesContext,
+              ctaFound: true,
+              ctaText: 'detected in HTML fallback',
+              trustBadgesInfo: `${trustBadgesContext.trustBadgesInfo} | HTML fallback found CTA marker`,
+            }
+          }
+        } catch (trustHtmlFallbackErr) {
+          console.warn('[scan] trust badges HTML fallback failed:', trustHtmlFallbackErr)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -3545,6 +4769,57 @@ export async function POST(request: NextRequest) {
         })
         const rawHtml = await response.text()
         fallbackRawHtml = rawHtml
+        const htmlFallbackFooterSocialHosts = detectFooterSocialHostsFromHtml(rawHtml)
+        if (htmlFallbackFooterSocialHosts.length > 0) {
+          footerSocialSnapshot = {
+            footerRootFound: /<footer[\s>]/i.test(rawHtml),
+            footerRootSelector: 'html-footer-fallback',
+            socialHostsInFooterRoot: [],
+            socialHostsInLowerBand: htmlFallbackFooterSocialHosts,
+          }
+          console.log(`[FALLBACK] Footer social from HTML: ${htmlFallbackFooterSocialHosts.join(', ')}`)
+        }
+        const htmlFallbackFooterNewsletter = detectFooterNewsletterFromHtml(rawHtml)
+        if (htmlFallbackFooterNewsletter.hasFormPairInFooter) {
+          footerNewsletterSnapshot = {
+            footerRootFound: htmlFallbackFooterNewsletter.footerRootFound,
+            footerRootSelector: 'html-footer-fallback',
+            hasVisibleEmailInputInFooter: htmlFallbackFooterNewsletter.hasVisibleEmailInputInFooter,
+            hasVisibleSubmitControlInFooter: htmlFallbackFooterNewsletter.hasVisibleSubmitControlInFooter,
+            newsletterKeywordInFooter: htmlFallbackFooterNewsletter.newsletterKeywordInFooter,
+            hasFormPairInFooter: true,
+            matchedSignals: htmlFallbackFooterNewsletter.matchedSignals,
+          }
+          console.log('[FALLBACK] Footer newsletter form pair detected from HTML.')
+        }
+        const htmlFallbackTrustNearCta = detectTrustNearCtaFromHtml(rawHtml)
+        if (htmlFallbackTrustNearCta.domStructureFound) {
+          trustBadgesContext = {
+            ctaFound: htmlFallbackTrustNearCta.ctaFound,
+            ctaText: htmlFallbackTrustNearCta.ctaFound ? 'detected in HTML fallback' : 'not found',
+            domStructureFound: true,
+            paymentBrandsFound: htmlFallbackTrustNearCta.paymentBrandsFound,
+            paymentBrandsElsewhere: htmlFallbackTrustNearCta.paymentBrandsElsewhere,
+            trustBadgesCount: htmlFallbackTrustNearCta.paymentBrandsFound.length,
+            trustBadgesElsewhereCount: htmlFallbackTrustNearCta.paymentBrandsElsewhere.length,
+            trustBadgesInfo: htmlFallbackTrustNearCta.trustBadgesInfo,
+            containerDescription: htmlFallbackTrustNearCta.containerDescription,
+          }
+          console.log(`[FALLBACK] Trust near CTA from HTML: ${htmlFallbackTrustNearCta.paymentBrandsFound.join(', ')}`)
+        }
+        const htmlFallbackFooterSupport = detectFooterCustomerSupportFromHtml(rawHtml)
+        if (htmlFallbackFooterSupport.kinds.length > 0 || htmlFallbackFooterSupport.hasFloatingChatLauncher) {
+          footerCustomerSupportSnapshot = {
+            footerRootFound: htmlFallbackFooterSupport.footerRootFound,
+            footerRootSelector: 'html-footer-fallback',
+            kinds: htmlFallbackFooterSupport.kinds,
+            matchedLabels: htmlFallbackFooterSupport.matchedLabels,
+            hasFloatingChatLauncher: htmlFallbackFooterSupport.hasFloatingChatLauncher,
+          }
+          console.log(
+            `[FALLBACK] Footer support from HTML: kinds=${htmlFallbackFooterSupport.kinds.join(', ') || 'none'} chat=${htmlFallbackFooterSupport.hasFloatingChatLauncher}`,
+          )
+        }
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
         selectedVariant = extractSelectedVariantFromHtml(rawHtml)
@@ -3745,7 +5020,21 @@ export async function POST(request: NextRequest) {
         }
 
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
-        keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\nSelected Variant: ${selectedVariant || 'None'}\n--- LAZY LOADING ---\n${lazyKeyLine}`
+        const fallbackButtons = extractFallbackButtonsAndLinksFromHtml(rawHtml)
+        const fallbackHeadings = extractFallbackHeadingsFromHtml(rawHtml)
+        const fallbackLogo = detectLogoHomepageFromHtml(rawHtml, validUrl)
+        const fallbackButtonsLine = fallbackButtons.length > 0 ? fallbackButtons.join(' | ') : '[fetch fallback]'
+        const fallbackHeadingsLine = fallbackHeadings.length > 0 ? fallbackHeadings.join(' | ') : '[fetch fallback]'
+        keyElements =
+          `Buttons/Links: ${fallbackButtonsLine}\n` +
+          `Headings: ${fallbackHeadingsLine}\n` +
+          `Breadcrumbs: Not found\n` +
+          `Selected Variant: ${selectedVariant || 'None'}\n` +
+          `--- LOGO LINK CHECK ---\n` +
+          `Logo clickable in header: ${fallbackLogo.clickable ? 'YES' : 'NO'}\n` +
+          `Logo homepage link: ${fallbackLogo.homepageLinked ? 'YES' : 'NO'}\n` +
+          `Logo href: ${fallbackLogo.href || 'Not found'}\n` +
+          `--- LAZY LOADING ---\n${lazyKeyLine}`
 
         // Fallback rating-near-title check.
         // In fetch fallback we cannot rely on rendered DOM positions, so use strict text-neighborhood matching.
@@ -3954,6 +5243,20 @@ export async function POST(request: NextRequest) {
         }
         lastRequestTime = Date.now()
 
+        const ruleText = `${rule.title} ${rule.description}`.toLowerCase()
+        const isFooterSocialRule =
+          rule.id === 'recXqQmYLbyuIil2a' ||
+          ((ruleText.includes('footer') &&
+            (ruleText.includes('social') ||
+              ruleText.includes('instagram') ||
+              ruleText.includes('facebook'))) ||
+            (ruleText.includes('social') &&
+              ruleText.includes('media') &&
+              ruleText.includes('link')))
+        const footerSocialDomPass =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+
         // Deterministic rules: use frozen snapshot only; skip AI for consistent results
         const detResult = tryEvaluateDeterministic(rule, {
           lazyLoading: lazyLoadingResult ?? buildLazyLoadingSummary({ detected: false, lazyLoadedCount: 0, totalMediaCount: 0, examples: [] }),
@@ -3963,8 +5266,10 @@ export async function POST(request: NextRequest) {
           thumbnailGallery: thumbnailGalleryContext,
           beforeAfterTransformationExpected,
           footerSocial: footerSocialSnapshot,
+          footerNewsletter: footerNewsletterSnapshot,
+          footerCustomerSupport: footerCustomerSupportSnapshot,
         })
-        if (detResult) {
+        if (detResult && !(isFooterSocialRule && !detResult.passed)) {
           results.push(
             withCheckpoint({
               ...detResult,
@@ -4011,6 +5316,19 @@ export async function POST(request: NextRequest) {
             rule.description.toLowerCase().includes('video review') ||
             rule.description.toLowerCase().includes('real customer video');
           const isRatingRule = (rule.title.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('rating') || rule.description.toLowerCase().includes('review score') || rule.description.toLowerCase().includes('social proof')) && !rule.title.toLowerCase().includes('customer photo') && !rule.description.toLowerCase().includes('customer photo')
+          const isLogoHomepageRule =
+            rule.id === 'recYUxusypKnfViyM' ||
+            ((rule.title.toLowerCase().includes('logo') && rule.title.toLowerCase().includes('homepage')) ||
+              (rule.description.toLowerCase().includes('logo') && rule.description.toLowerCase().includes('homepage')))
+          const isGeneralCustomerReviewsRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            return (
+              rule.id === 'recUSgWqCEq0anlm2' ||
+              (t.includes('general customer reviews') && (t.includes('homepage') || t.includes('home page'))) ||
+              (d.includes('general customer reviews') && (d.includes('homepage') || d.includes('home page')))
+            )
+          })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
@@ -4113,7 +5431,8 @@ export async function POST(request: NextRequest) {
             specialInstructions = `
 BREADCRUMB NAVIGATION RULE
 
-The DOM scanner could not find breadcrumbs in the HTML structure. You must now check the SCREENSHOT.
+Use the SCREENSHOT as the source of truth for this rule.
+Do NOT pass based only on DOM selectors, JSON-LD, or text patterns.
 
 ━━━━ WHAT TO LOOK FOR ━━━━
 
@@ -4133,8 +5452,8 @@ Breadcrumbs are a navigation trail near the TOP of the page, usually just below 
 ━━━━ DECISION ━━━━
 
 1. Look at the screenshot — scan the area near the TOP of the page
-2. If you see a path-style navigation → PASS
-3. If no navigation trail visible → FAIL
+2. If a path-style breadcrumb is clearly visible to users → PASS
+3. If no clearly visible breadcrumb trail appears in the screenshot → FAIL
 
 ✅ PASS reason: "Breadcrumb navigation ('Home / Mens / New Arrivals') is visible near the top of the page, helping users understand site hierarchy."
 ❌ FAIL reason: "No breadcrumb navigation was detected in the page header or top section. Add breadcrumb navigation (e.g. Home > Category > Product) to help users navigate."
@@ -4369,7 +5688,41 @@ Examples:
 `
           }
 
-          else if (isRatingRule) {
+          else if (isLogoHomepageRule) {
+            specialInstructions = `
+LOGO HOMEPAGE RULE — DOM SIGNAL IS AUTHORITATIVE
+
+Read KEY ELEMENTS section "--- LOGO LINK CHECK ---".
+
+PASS ONLY IF:
+- "Logo clickable in header: YES"
+- and "Logo homepage link: YES"
+
+FAIL if either value is NO.
+
+When available, mention detected href in the reason.
+`
+          } else if (isGeneralCustomerReviewsRule) {
+            specialInstructions = `
+GENERAL CUSTOMER REVIEWS RULE — ANY PAGE (NOT HOMEPAGE-ONLY)
+
+Treat this rule as: "Does the scanned page clearly show general customer reviews?"
+Do NOT fail only because the scanned URL is not the homepage.
+
+Use SCREENSHOT as primary evidence. Then use DOM/text evidence as fallback.
+
+PASS if ANY of these are visible:
+• A customer reviews section (e.g. "Customer Reviews", "What customers are saying", "Reviews")
+• Star rating + review text/cards/customer names
+• Trustpilot / Yotpo / Judge.me / Loox / Stamped / Okendo review widget content
+• Rating summary like "4.5 out of 5" with review context
+
+FAIL only if no customer review content is visible or detectable on the page.
+
+PASS reason example: "Customer reviews are visible on this page, including rating/review social proof, so the rule passes."
+FAIL reason example: "No general customer reviews or review widgets were found on this page."
+`
+          } else if (isRatingRule) {
             specialInstructions = `
 PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
@@ -4707,6 +6060,14 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const beforeAfterPrefix = isBeforeAfterRule && beforeAfterTransformationExpected ? `\n\n⚠️⚠️⚠️ CRITICAL FOR BEFORE-AND-AFTER IMAGES RULE ⚠️⚠️⚠️\n\nTHIS IS THE BEFORE-AND-AFTER RULE (product type expects visual transformation). You are receiving a SCREENSHOT. You MUST look at the image FIRST.\n\nIn the screenshot, look for BEFORE-AND-AFTER or RESULT imagery:\n- MAIN IMAGE: split/comparison (before vs after), face/skin with labels, or percentage on image (e.g. -63%, -81%)\n- THUMBNAIL ROW: any small image showing split face, "Clinically proven" with %, or result percentages on thumbnails\n- Text on images: "Clinically proven", "-63%", "-81%", "results", "after 28 days", "before", "after"\n\nCRITICAL - IF YOU SEE ANY OF THE ABOVE → PASS:\n- Before/after can be in the MAIN image OR in THUMBNAILS. If you see comparison imagery, split face, or result percentages (-63%, -81%, etc.) in main image or thumbnail strip → you MUST output passed: true.\n- Do NOT say "no before-and-after found" when the screenshot shows thumbnails with result percentages or comparison imagery. Trust what you SEE in the image.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const freeShippingThresholdPrefix = isFreeShippingThresholdRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR FREE SHIPPING THRESHOLD RULE ⚠️⚠️⚠️\n\nSTEP 1 - SCREENSHOT: Look at the image. PASS immediately if you see any of:\n- "Free shipping" / "Free express shipping" / "Free express delivery" / "Free delivery"\n- Threshold text like "Free shipping over $X", "Add $X more for Free Shipping"\n\nSTEP 2 - DOM FALLBACK: If the screenshot is unclear, check the special instructions for FREE_SHIPPING_DOM_FOUND. If FREE_SHIPPING_DOM_FOUND=true → PASS (text exists on page, screenshot may have missed it).\n\nFAIL only if screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.\n\nNow analyze the screenshot image provided below:\n\n` : ''
           const imageAnnotationPrefix = isImageAnnotationsRule ? `\n\n⚠️⚠️⚠️ IMAGE ANNOTATIONS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your primary job is to look at the screenshot.\n\nScan the screenshot carefully for ANY of the following:\n✅ Text on or beside a product image: percentage claims (-63%, +30%), clinical claims ("Clinically proven results")\n✅ Badges or overlaid labels on product images ("Dermatologically tested", "Best Seller", "Award winning")\n✅ Baked-in text that is part of the image itself (not a separate HTML element)\n✅ Benefit callouts next to product photos ("colour intensity of dark spots after 1 bottle")\n\n→ If you see ANY such text or badge near/on any product image in the screenshot → PASS immediately.\n→ The annotation does NOT need to be a separate DOM element. Visual presence is sufficient.\n→ Only FAIL if product images are completely plain with zero annotation text or badges.\n\nNow carefully analyze the screenshot below:\n\n` : ''
+          const logoHomepagePrefix = isLogoHomepageRule ? `\n\n⚠️ LOGO HOMEPAGE RULE ⚠️\n\nUse the KEY ELEMENTS block "--- LOGO LINK CHECK ---" as the primary source.\nIf it says clickable YES and homepage link YES, output passed:true.\n\nNow analyze:\n\n` : ''
+          const headerCartQuickAccessPrefix = isHeaderCartQuickAccessRule(rule)
+            ? `\n\n⚠️ HEADER CART QUICK ACCESS RULE ⚠️\n\nUse the KEY ELEMENTS block "--- HEADER CART QUICK ACCESS (DOM) ---".\nIf "Header cart quick access present: YES", output passed: true (localized paths like /en-int/cart count).\n\nNow analyze:\n\n`
+            : ''
+          const cartIconItemCountPrefix = isCartIconItemCountRule(rule)
+            ? `\n\n⚠️ CART ICON ITEM COUNT / BADGE RULE ⚠️\n\nRead "--- CART ICON ITEM COUNT (DOM) ---":\n- If "Storefront cart item count" is 0, PASS (empty cart — no badge is required).\n- If count > 0, PASS only if "Count badge visible" is YES; otherwise FAIL.\nIf "Cart icon item count rule verdict: PASS", output passed: true.\n\nNow analyze:\n\n`
+            : ''
+          const generalCustomerReviewsPrefix = isGeneralCustomerReviewsRule ? `\n\n⚠️⚠️⚠️ GENERAL CUSTOMER REVIEWS RULE — IMAGE FIRST ⚠️⚠️⚠️\n\nTreat this as ANY-PAGE validation (not homepage-only).\n\nLook at the screenshot first. PASS if you can see a reviews block, rating summary with review context, Trustpilot/review widget, or customer review cards.\nIf screenshot is unclear, use page text/DOM evidence. Review indicators like "Excellent", "4.x out of 5", "reviews", "what customers are saying", and review widget labels count.\n\nFAIL only when no review content is visible/detectable anywhere on the scanned page.\n\nNow analyze the screenshot:\n\n` : ''
           const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
@@ -4714,7 +6075,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
           const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -4922,11 +6283,31 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Product ratings detected by DOM scan near the title: ${ev}. Star ratings or review indicators are present in the product title block.`
             }
 
-            // Hard guardrail: this rule must NOT pass unless rating evidence is near the title.
-            if (analysis.passed && !ratingContext?.nearTitle) {
+            // Hard guardrail: only force FAIL when we have explicit DOM evidence that rating is NOT near title.
+            // Do not fail on missing/unknown ratingContext (that caused false fails on some storefronts).
+            if (analysis.passed && ratingContext && !ratingContext.nearTitle) {
               console.log(`Rating rule: AI passed but DOM found no near-title rating evidence. Forcing FAIL.`)
               analysis.passed = false
               analysis.reason = `No star ratings, review counts, or rating widgets were detected near the product title. Add star ratings near the title block.`
+            }
+
+            // Fallback: if page text contains a rating signal close to the product title text, force PASS.
+            if (!analysis.passed) {
+              const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
+              const titleLine =
+                keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
+              const nearWindow = titleLine && fullText.includes(titleLine)
+                ? fullText.slice(Math.max(0, fullText.indexOf(titleLine) - 260), fullText.indexOf(titleLine) + 540)
+                : fullText.slice(0, 3800)
+              const hasRatingSignalNearTitle =
+                /\b(excellent|trustpilot|trustscore)\b/i.test(nearWindow) ||
+                /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(nearWindow) ||
+                /[★☆⭐]/.test(nearWindow)
+              if (hasRatingSignalNearTitle) {
+                console.log(`Rating rule: text fallback found rating near title window. Forcing PASS.`)
+                analysis.passed = true
+                analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
+              }
             }
 
             // Sanity warning (never force fail based on missing count or link)
@@ -5122,45 +6503,71 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Before-and-after or result imagery is present on the page (e.g. in product gallery or thumbnails with clinically proven results, percentage improvement, or comparison imagery). This meets the requirement for demonstrating product effectiveness.`
             }
           } else if (isBreadcrumbRule) {
-            // Override 1: DOM found breadcrumbs in KEY ELEMENTS → force PASS
-            const breadcrumbLine = (keyElements || '').split('\n').find(l => /^Breadcrumbs:/i.test(l))
-            const breadcrumbValue = breadcrumbLine?.replace(/^Breadcrumbs:\s*/i, '').trim() || ''
-            const domFoundBreadcrumbs = !!breadcrumbLine
-              && breadcrumbValue.toLowerCase() !== 'not found'
-              && breadcrumbValue !== ''
-              && breadcrumbValue.toLowerCase() !== 'n/a'
-
-            if (!analysis.passed && domFoundBreadcrumbs) {
-              console.log(`Breadcrumb rule: DOM found breadcrumbs ("${breadcrumbValue}") but AI failed. Forcing PASS.`)
-              analysis.passed = true
-              analysis.reason = `Breadcrumb navigation found: "${breadcrumbValue}". Rule passes.`
-            }
-
-            // Override 2: fullVisibleText contains a breadcrumb-style path → force PASS
-            // Catches "Home / Mens", "Home › Category", etc. missed by DOM selector scan
-            if (!analysis.passed) {
-              const pageText = fullVisibleText || websiteContent || ''
-              const breadcrumbTextPatterns = [
-                /\bHome\s+\/\s+\S/i,           // "Home / Mens" (most common)
-                /\bHome\s+›\s+\S/i,            // "Home › Category"
-                /\bHome\s+>\s+\S/i,            // "Home > Category"
-                /\bHome\s*[\/›>»]\s*\w/i,      // "Home/Mens" or "Home›Mens"
-                /\w+\s*›\s*\w+\s*›\s*\w+/,    // "X › Y › Z" (3-part with ›)
-                /\w+\s+\/\s+\w+\s+\/\s+\w+/,  // "X / Y / Z" (3-part with /)
-              ]
-              const matchedCrumb = breadcrumbTextPatterns.find(p => p.test(pageText))
-              if (matchedCrumb) {
-                const matchedText = (pageText.match(matchedCrumb) || [''])[0]
-                console.log(`Breadcrumb rule: Found breadcrumb pattern "${matchedText}" in page text. Forcing PASS.`)
-                analysis.passed = true
-                analysis.reason = `Breadcrumb navigation ("${matchedText.trim()}") is visible on the page, helping users understand site hierarchy. Rule passes.`
-              }
-            }
-
-            // Sanity check: warn if reason doesn't mention breadcrumbs (but never force fail)
+            // Breadcrumb verdict should be based on visible screenshot evidence.
+            // Keep only a lightweight reason sanity check.
             if (!reasonLower.includes('breadcrumb') && !reasonLower.includes('navigation') && !reasonLower.includes('trail')) {
               console.warn(`Warning: Breadcrumb rule reason doesn't mention breadcrumbs: ${analysis.reason.substring(0, 60)}`)
               isRelevant = false
+            }
+          } else if (isLogoHomepageRule) {
+            const logoClickableYes = /Logo clickable in header:\s*YES/i.test(keyElements || '')
+            const logoHomeYes = /Logo homepage link:\s*YES/i.test(keyElements || '')
+            const href = (keyElements || '').match(/Logo href:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'Not found'
+
+            if (logoClickableYes && logoHomeYes) {
+              analysis.passed = true
+              analysis.reason = `The header logo is clickable and links to the homepage (${href}).`
+            } else {
+              analysis.passed = false
+              analysis.reason = logoClickableYes
+                ? `A clickable header logo was found, but it is not linked to the homepage (href: ${href}).`
+                : 'No clickable header logo linked to the homepage was detected.'
+            }
+          } else if (isHeaderCartQuickAccessRule(rule)) {
+            const cartQuickYes = /Header cart quick access present:\s*YES/i.test(keyElements || '')
+            const detail =
+              (keyElements || '').match(/Cart quick access detail:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'header cart control'
+            if (cartQuickYes) {
+              analysis.passed = true
+              analysis.reason = `A cart quick access control is present in the site header (${detail}).`
+            } else {
+              analysis.passed = false
+              analysis.reason = 'No cart or bag quick access link or control was detected in the header.'
+            }
+          } else if (isCartIconItemCountRule(rule)) {
+            const v = (keyElements || '')
+              .match(/Cart icon item count rule verdict:\s*(PASS|FAIL|INDETERMINATE)/i)?.[1]
+              ?.toUpperCase()
+            const detail = (keyElements || '').match(
+              /Cart icon item count rule detail:\s*(.+?)(?:\n|$)/i,
+            )?.[1]?.trim()
+            if (v === 'PASS') {
+              analysis.passed = true
+              analysis.reason =
+                detail || 'Cart count display is acceptable for the current cart (empty = no badge required; with items a badge is shown).'
+            } else if (v === 'FAIL') {
+              analysis.passed = false
+              analysis.reason =
+                detail ||
+                'The cart has items but no visible item-count badge on the header cart control.'
+            }
+            // INDETERMINATE: leave model output; no forced override
+          } else if (isGeneralCustomerReviewsRule) {
+            const reviewText = (fullVisibleText || websiteContent || '').toLowerCase()
+            const reviewSignals = [
+              /what\s+customers?\s+are\s+saying/i,
+              /\bcustomer reviews?\b/i,
+              /\breviews?\b/i,
+              /\btrustpilot\b/i,
+              /\bverified purchase\b/i,
+              /\b\d(?:\.\d)?\s*(?:out of 5|\/5)\b/i,
+              /\bexcellent\b(?:\s+\d(?:\.\d)?\s*(?:out of 5|\/5))?/i,
+            ]
+            const matchedSignals = reviewSignals.filter((p) => p.test(reviewText))
+            if (!analysis.passed && matchedSignals.length >= 2) {
+              console.log(`General customer reviews rule: found strong review signals (${matchedSignals.length}). Forcing PASS.`)
+              analysis.passed = true
+              analysis.reason = 'General customer reviews are present on this page (review/rating social-proof content is visible), so the rule passes.'
             }
           } else if (isMainNavImportantPagesRule) {
             if (!analysis.passed && mainNavContext?.essentialNavLikely) {
@@ -5589,6 +6996,28 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Payment or trust icons (${brands}) appear near the main purchase button (e.g. Add to cart or Add to bag), which supports checkout confidence.`
             }
 
+            // Strict near-CTA guardrail: if DOM says "not near CTA", do not allow random PASS.
+            // This prevents false passes caused by footer/global trust icons.
+            if (analysis.passed && trustBadgesContext && !trustBadgesContext.domStructureFound) {
+              const aiNearCtaVisualEvidence =
+                /(near|beside|next to|below).{0,40}(add to (cart|bag)|buy|purchase|checkout)/i.test(analysis.reason || '') &&
+                /(icon|icons|badge|badges|logo|logos|seal|seals|guarantee|secure|payment)/i.test(analysis.reason || '')
+              if (aiNearCtaVisualEvidence) {
+                console.log('Trust badges rule: AI reason shows clear near-CTA visual trust evidence; keeping PASS.')
+              } else {
+              const elsewhere = trustBadgesContext.paymentBrandsElsewhere
+              if (elsewhere.length > 0) {
+                console.log(`Trust badges rule: badges found only elsewhere (${elsewhere.join(', ')}). Forcing FAIL.`)
+                analysis.passed = false
+                analysis.reason = `Trust/payment icons are visible only away from the primary CTA (${elsewhere.join(', ')}). Place them directly near the Add to cart/Add to bag button.`
+              } else {
+                console.log(`Trust badges rule: no near-CTA trust icons detected. Forcing FAIL.`)
+                analysis.passed = false
+                analysis.reason = 'No trust/payment icons were detected near the primary CTA. Add recognizable trust badges directly beside or below the purchase button.'
+              }
+              }
+            }
+
             // Sanity check: warn only, never force a false FAIL
             const hasTrustMention = reasonLower.includes('trust') || reasonLower.includes('badge') ||
               reasonLower.includes('payment') || reasonLower.includes('ssl') ||
@@ -5690,11 +7119,32 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               thumbnailGallery: thumbnailGalleryContext,
               beforeAfterTransformationExpected,
               footerSocial: footerSocialSnapshot,
+              footerNewsletter: footerNewsletterSnapshot,
+              footerCustomerSupport: footerCustomerSupportSnapshot,
             })
             if (repairedDetResult) {
               analysis.passed = repairedDetResult.passed
               analysis.reason = repairedDetResult.reason
               console.log(`Repaired mixed reason for rule ${rule.id} using deterministic fallback.`)
+            }
+          }
+
+          // Footer social links verdict must be DOM OR IMAGE.
+          // - If deterministic DOM already found links, always PASS.
+          // - If DOM didn't find links, AI/image can still PASS.
+          if (isFooterSocialRule) {
+            if (footerSocialDomPass && !analysis.passed) {
+              const hosts = [
+                ...new Set([
+                  ...footerSocialSnapshot.socialHostsInFooterRoot,
+                  ...footerSocialSnapshot.socialHostsInLowerBand,
+                ]),
+              ]
+              analysis.passed = true
+              analysis.reason =
+                hosts.length > 0
+                  ? `Social profile links are present in the footer area (${hosts.slice(0, 6).join(', ')}).`
+                  : 'Social profile links are present in the footer area.'
             }
           }
 
