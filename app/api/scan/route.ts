@@ -171,6 +171,68 @@ function htmlSuggestsDesktopOnlyThumbnailStrip(rawHtml: string): boolean {
   return false
 }
 
+/**
+ * HTML fallback for footer-social rule.
+ * Used when runtime DOM snapshots are flaky (common on serverless/bot-challenged pages).
+ * We only scan footer-like/tail sections to avoid counting generic share links in body content.
+ */
+function detectFooterSocialHostsFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  // 1) Real footer nodes in source
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  // 2) Footer-ish wrappers by class/id
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,7000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  // 3) Last part of document (footer commonly lives here)
+  const tailStart = Math.floor(html.length * 0.62)
+  addSlice(tailStart, html.length)
+
+  const searchArea = slices.join('\n')
+  if (!searchArea) return []
+
+  const providers: Array<{ name: string; re: RegExp }> = [
+    { name: 'Instagram', re: /instagram\.com|instagr\.am/ },
+    { name: 'Facebook', re: /facebook\.com|fb\.com|fb\.me/ },
+    { name: 'X/Twitter', re: /twitter\.com|x\.com\// },
+    { name: 'TikTok', re: /tiktok\.com/ },
+    { name: 'LinkedIn', re: /linkedin\.com/ },
+    { name: 'YouTube', re: /youtube\.com|youtu\.be/ },
+    { name: 'Pinterest', re: /pinterest\.com|pin\.it/ },
+    { name: 'Threads', re: /threads\.net/ },
+    { name: 'Snapchat', re: /snapchat\.com/ },
+    { name: 'Telegram', re: /t\.me\/|telegram/ },
+    { name: 'WhatsApp', re: /wa\.me|api\.whatsapp\.com|whatsapp\.com/ },
+  ]
+
+  const found: string[] = []
+  for (const p of providers) {
+    if (p.re.test(searchArea)) found.push(p.name)
+  }
+  return [...new Set(found)]
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -2205,6 +2267,64 @@ export async function POST(request: NextRequest) {
 
       try {
         footerSocialSnapshot = await collectFooterSocialSnapshot(page)
+        const initialFooterSocialFound =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+
+        // Serverless runtimes can snapshot before late footer widgets hydrate.
+        // Retry once from absolute bottom before we give up.
+        if (!initialFooterSocialFound) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterSocial = await collectFooterSocialSnapshot(page)
+            const mergedFooter = [
+              ...new Set([
+                ...footerSocialSnapshot.socialHostsInFooterRoot,
+                ...retryFooterSocial.socialHostsInFooterRoot,
+              ]),
+            ]
+            const mergedBand = [
+              ...new Set([
+                ...footerSocialSnapshot.socialHostsInLowerBand,
+                ...retryFooterSocial.socialHostsInLowerBand,
+              ]),
+            ]
+            footerSocialSnapshot = {
+              footerRootFound: footerSocialSnapshot.footerRootFound || retryFooterSocial.footerRootFound,
+              footerRootSelector: footerSocialSnapshot.footerRootSelector || retryFooterSocial.footerRootSelector,
+              socialHostsInFooterRoot: mergedFooter,
+              socialHostsInLowerBand: mergedBand,
+            }
+          } catch (footerRetryErr) {
+            console.warn('[scan] footer social retry failed:', footerRetryErr)
+          }
+        }
+
+        // HTML fallback: if runtime DOM is still empty, parse footer-ish source sections.
+        const afterRetryFooterSocialFound =
+          footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
+          footerSocialSnapshot.socialHostsInLowerBand.length > 0
+        if (!afterRetryFooterSocialFound) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackHosts = detectFooterSocialHostsFromHtml(runtimeHtml)
+            if (htmlFallbackHosts.length > 0) {
+              footerSocialSnapshot = {
+                footerRootFound: footerSocialSnapshot.footerRootFound || /<footer[\s>]/i.test(runtimeHtml),
+                footerRootSelector: footerSocialSnapshot.footerRootSelector || 'html-footer-fallback',
+                socialHostsInFooterRoot: footerSocialSnapshot.socialHostsInFooterRoot,
+                socialHostsInLowerBand: [
+                  ...new Set([...footerSocialSnapshot.socialHostsInLowerBand, ...htmlFallbackHosts]),
+                ],
+              }
+              console.log(`[scan] footer social HTML fallback detected: ${htmlFallbackHosts.join(', ')}`)
+            }
+          } catch (footerHtmlFallbackErr) {
+            console.warn('[scan] footer social HTML fallback failed:', footerHtmlFallbackErr)
+          }
+        }
+
         const footerScanBlock = [
           '',
           '--- FOOTER SOCIAL LINKS (DOM scan) ---',
@@ -3916,6 +4036,16 @@ export async function POST(request: NextRequest) {
         })
         const rawHtml = await response.text()
         fallbackRawHtml = rawHtml
+        const htmlFallbackFooterSocialHosts = detectFooterSocialHostsFromHtml(rawHtml)
+        if (htmlFallbackFooterSocialHosts.length > 0) {
+          footerSocialSnapshot = {
+            footerRootFound: /<footer[\s>]/i.test(rawHtml),
+            footerRootSelector: 'html-footer-fallback',
+            socialHostsInFooterRoot: [],
+            socialHostsInLowerBand: htmlFallbackFooterSocialHosts,
+          }
+          console.log(`[FALLBACK] Footer social from HTML: ${htmlFallbackFooterSocialHosts.join(', ')}`)
+        }
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
         selectedVariant = extractSelectedVariantFromHtml(rawHtml)
