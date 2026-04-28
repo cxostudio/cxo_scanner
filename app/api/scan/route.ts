@@ -554,6 +554,200 @@ function detectFooterCustomerSupportFromHtml(rawHtml: string): {
   }
 }
 
+function decodeHtmlEntitiesMinimal(input: string): string {
+  return input
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+}
+
+function cleanHtmlText(input: string): string {
+  return decodeHtmlEntitiesMinimal(input.replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractFallbackButtonsAndLinksFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const labels: string[] = []
+
+  const push = (value: string) => {
+    const t = cleanHtmlText(value)
+    if (!t || t.length < 2 || t.length > 70) return
+    labels.push(t)
+  }
+
+  let m: RegExpExecArray | null
+  const buttonRe = /<button\b[^>]*>([\s\S]*?)<\/button>/gi
+  while ((m = buttonRe.exec(html)) !== null) {
+    push(m[1] || '')
+  }
+
+  const inputRe = /<input\b[^>]*(?:type=["'](?:submit|button)["'])[^>]*>/gi
+  while ((m = inputRe.exec(html)) !== null) {
+    const tag = m[0]
+    const value = tag.match(/\bvalue=["']([^"']+)["']/i)?.[1] || ''
+    const aria = tag.match(/\baria-label=["']([^"']+)["']/i)?.[1] || ''
+    const title = tag.match(/\btitle=["']([^"']+)["']/i)?.[1] || ''
+    push(value || aria || title)
+  }
+
+  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  while ((m = anchorRe.exec(html)) !== null) {
+    const href = (m[1] || '').trim()
+    const label = cleanHtmlText(m[2] || '')
+    const attrs = m[0]
+    const aria = attrs.match(/\baria-label=["']([^"']+)["']/i)?.[1] || ''
+    const title = attrs.match(/\btitle=["']([^"']+)["']/i)?.[1] || ''
+    const combined = `${label} ${aria} ${title}`.trim()
+    if (
+      /add to cart|add to bag|buy now|shop now|checkout|order now|get started|subscribe|join/i.test(combined) ||
+      /\/cart|\/checkout|\/collections|\/products|\/shop/i.test(href)
+    ) {
+      push(combined || href)
+    }
+  }
+
+  const skipNoise = (s: string): boolean => {
+    const l = s.toLowerCase()
+    return (
+      l.includes('privacy') ||
+      l.includes('terms') ||
+      l.includes('cookie') ||
+      l.includes('refund policy') ||
+      l.includes('shipping policy') ||
+      l.includes('store locator') ||
+      /\b[a-z]{2,}\s+\([a-z]{3}\s/.test(l)
+    )
+  }
+
+  const actionVerbStart = [
+    'shop', 'buy', 'add', 'get', 'order', 'start', 'try', 'discover',
+    'explore', 'view', 'check', 'join', 'subscribe', 'learn', 'claim',
+  ]
+  const urgencyWords = ['now', 'today', 'limited', 'hurry', 'instant', 'immediately', 'last chance']
+  const purchaseIntent = [
+    'add to cart', 'add to bag', 'buy now', 'shop now', 'checkout', 'order now', 'get started', 'shop all',
+  ]
+  const score = (s: string): number => {
+    const l = s.toLowerCase()
+    let n = 0
+    if (actionVerbStart.some((v) => l === v || l.startsWith(v + ' '))) n += 5
+    if (urgencyWords.some((u) => l.includes(u))) n += 3
+    if (purchaseIntent.some((p) => l.includes(p))) n += 5
+    if (/\bshop\b|\bbuy\b|\bcheckout\b|\badd to\b/.test(l)) n += 2
+    return n
+  }
+
+  return [...new Set(labels)]
+    .filter((s) => !skipNoise(s))
+    .sort((a, b) => score(b) - score(a) || a.localeCompare(b))
+    .slice(0, 30)
+}
+
+function extractFallbackHeadingsFromHtml(rawHtml: string): string[] {
+  if (!rawHtml) return []
+  const headings: string[] = []
+  const push = (value: string) => {
+    const t = cleanHtmlText(value)
+    if (!t || t.length < 2 || t.length > 120) return
+    headings.push(t)
+  }
+  let m: RegExpExecArray | null
+  const headingRe = /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi
+  while ((m = headingRe.exec(rawHtml)) !== null) {
+    push(m[1] || '')
+    if (headings.length >= 15) break
+  }
+  return [...new Set(headings)].slice(0, 15)
+}
+
+function detectLogoHomepageFromHtml(rawHtml: string, baseUrl: string): {
+  clickable: boolean
+  homepageLinked: boolean
+  href: string
+} {
+  const fallback = { clickable: false, homepageLinked: false, href: 'Not found' }
+  if (!rawHtml) return fallback
+
+  let host = ''
+  try {
+    host = new URL(baseUrl).host
+  } catch {
+    return fallback
+  }
+
+  const isLocaleOrRootHomePath = (pathname: string): boolean => {
+    const p = (pathname || '/').replace(/\/+$/, '') || '/'
+    if (p === '/') return true
+    return /^\/[a-z]{2}(?:-[a-z0-9]{2,4})?$/i.test(p)
+  }
+
+  const isHomepageHref = (raw: string): boolean => {
+    if (!raw) return false
+    try {
+      const u = new URL(raw, baseUrl)
+      if (u.host !== host) return false
+      return isLocaleOrRootHomePath(u.pathname || '/')
+    } catch {
+      return false
+    }
+  }
+
+  const html = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .toLowerCase()
+
+  const headerBlocks = Array.from(html.matchAll(/<header[\s\S]*?<\/header>/gi)).map((m) => m[0])
+  const searchAreas = headerBlocks.length > 0 ? headerBlocks.slice(0, 4) : [html.slice(0, Math.min(25000, html.length))]
+
+  let bestHref = ''
+  let bestScore = -1
+  for (const area of searchAreas) {
+    const anchorRe = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi
+    let m: RegExpExecArray | null
+    while ((m = anchorRe.exec(area)) !== null) {
+      const attrs = `${m[1] || ''} ${m[3] || ''}`.toLowerCase()
+      const href = (m[2] || '').trim()
+      const inner = m[4] || ''
+      const text = cleanHtmlText(inner).toLowerCase()
+      const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+      const hasLogoVisual = /<(img|svg|picture)\b/i.test(inner)
+      const isHomeHref = isHomepageHref(href)
+      let score = 0
+      if (isHomeHref) score += 250
+      if (hasLogoClass) score += 160
+      if (hasLogoVisual) score += 120
+      if (/\bhome\b/.test(text)) score += 40
+      if (/cart|checkout|account|search|menu|wishlist/.test(`${attrs} ${text}`)) score -= 120
+      if (score > bestScore) {
+        bestScore = score
+        bestHref = href
+      }
+    }
+  }
+
+  if (!bestHref) return fallback
+  return {
+    clickable: true,
+    homepageLinked: isHomepageHref(bestHref),
+    href: (() => {
+      try {
+        return new URL(bestHref, baseUrl).href
+      } catch {
+        return bestHref
+      }
+    })(),
+  }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -1040,15 +1234,44 @@ export async function POST(request: NextRequest) {
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
       keyElements = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
+        const rawButtons = Array.from(document.querySelectorAll('button, a[href], [role="button"]'))
           .map(el => {
             const raw = el.textContent || el.getAttribute('href') || el.getAttribute('aria-label') || ''
             const text = raw.replace(/\s+/g, ' ').trim()
             return text
           })
-          .filter(text => text.length > 0)
-          .sort() // Sort alphabetically for consistency
-          .slice(0, 30) // Increased limit and sort first
+          .filter(text => text.length > 0 && text.length <= 70)
+        const isNoise = (s: string) => {
+          const l = s.toLowerCase()
+          return (
+            l.includes('privacy') ||
+            l.includes('terms') ||
+            l.includes('cookie') ||
+            l.includes('store locator') ||
+            l.includes('afghanistan (') ||
+            /\b[a-z]{2,}\s+\([a-z]{3}\s/.test(l)
+          )
+        }
+        const actionVerbStart = [
+          'shop', 'buy', 'add', 'get', 'order', 'start', 'try', 'discover',
+          'explore', 'view', 'check', 'join', 'subscribe', 'learn', 'claim',
+        ]
+        const urgencyWords = ['now', 'today', 'limited', 'hurry', 'instant', 'immediately', 'last chance']
+        const purchaseIntent = [
+          'add to cart', 'add to bag', 'buy now', 'shop now', 'checkout', 'order now', 'get started', 'shop all',
+        ]
+        const score = (s: string) => {
+          const l = s.toLowerCase()
+          let n = 0
+          if (actionVerbStart.some((v) => l === v || l.startsWith(v + ' '))) n += 5
+          if (urgencyWords.some((u) => l.includes(u))) n += 3
+          if (purchaseIntent.some((p) => l.includes(p))) n += 5
+          if (/\/cart|\/checkout|\/collections|\/products/.test(l)) n += 1
+          return n
+        }
+        const buttons = [...new Set(rawButtons.filter((s) => !isNoise(s)))]
+          .sort((a, b) => score(b) - score(a) || a.localeCompare(b))
+          .slice(0, 30)
           .join(' | ')
 
         const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
@@ -1558,8 +1781,28 @@ export async function POST(request: NextRequest) {
           const picked = anchors
             .map((a) => ({ a, score: getScore(a) }))
             .sort((x, y) => y.score - x.score)[0]?.a || null
-          const href = picked ? picked.getAttribute('href') : null
-          const clickable = !!picked
+          const strongHomeLogoCandidates = anchors.filter((a) => {
+            const hrefRaw = a.getAttribute('href')
+            if (!isHomepageHref(hrefRaw)) return false
+            const text = (a.textContent || '').trim().toLowerCase()
+            const aria = (a.getAttribute('aria-label') || '').toLowerCase()
+            const cls = (a.className || '').toString().toLowerCase()
+            const id = (a.id || '').toLowerCase()
+            const title = (a.getAttribute('title') || '').toLowerCase()
+            const attrs = `${aria} ${cls} ${id} ${title}`
+            const hasLogoClass = /(logo|brand|site-title|header__heading-link|navbar-brand)/.test(attrs)
+            const hasLogoImage = !!a.querySelector('img, svg, picture')
+            const brandText = /(logo|brand|home|store|spacegoods)/.test(text)
+            return hasLogoClass || hasLogoImage || brandText
+          })
+
+          const preferredHomeLogo = strongHomeLogoCandidates
+            .map((a) => ({ a, score: getScore(a) + 400 }))
+            .sort((x, y) => y.score - x.score)[0]?.a || null
+
+          const finalLogo = preferredHomeLogo || picked
+          const href = finalLogo ? finalLogo.getAttribute('href') : null
+          const clickable = !!finalLogo
           const homeLinked = isHomepageHref(href)
           const resolved = normalizeHref(href)
 
@@ -4777,7 +5020,21 @@ export async function POST(request: NextRequest) {
         }
 
         const lazyKeyLine = `Lazy loading detected: ${htmlLazyCount > 0 ? 'YES' : 'NO'}\nLazy loaded media count: ${htmlLazyCount}\nTotal media: ${htmlTotalImgs + htmlTotalVideos}`
-        keyElements = `Buttons/Links: [fetch fallback]\nHeadings: [fetch fallback]\nBreadcrumbs: Not found\nSelected Variant: ${selectedVariant || 'None'}\n--- LAZY LOADING ---\n${lazyKeyLine}`
+        const fallbackButtons = extractFallbackButtonsAndLinksFromHtml(rawHtml)
+        const fallbackHeadings = extractFallbackHeadingsFromHtml(rawHtml)
+        const fallbackLogo = detectLogoHomepageFromHtml(rawHtml, validUrl)
+        const fallbackButtonsLine = fallbackButtons.length > 0 ? fallbackButtons.join(' | ') : '[fetch fallback]'
+        const fallbackHeadingsLine = fallbackHeadings.length > 0 ? fallbackHeadings.join(' | ') : '[fetch fallback]'
+        keyElements =
+          `Buttons/Links: ${fallbackButtonsLine}\n` +
+          `Headings: ${fallbackHeadingsLine}\n` +
+          `Breadcrumbs: Not found\n` +
+          `Selected Variant: ${selectedVariant || 'None'}\n` +
+          `--- LOGO LINK CHECK ---\n` +
+          `Logo clickable in header: ${fallbackLogo.clickable ? 'YES' : 'NO'}\n` +
+          `Logo homepage link: ${fallbackLogo.homepageLinked ? 'YES' : 'NO'}\n` +
+          `Logo href: ${fallbackLogo.href || 'Not found'}\n` +
+          `--- LAZY LOADING ---\n${lazyKeyLine}`
 
         // Fallback rating-near-title check.
         // In fetch fallback we cannot rely on rendered DOM positions, so use strict text-neighborhood matching.
