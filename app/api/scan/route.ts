@@ -233,6 +233,213 @@ function detectFooterSocialHostsFromHtml(rawHtml: string): string[] {
   return [...new Set(found)]
 }
 
+function detectFooterNewsletterFromHtml(rawHtml: string): {
+  footerRootFound: boolean
+  hasVisibleEmailInputInFooter: boolean
+  hasVisibleSubmitControlInFooter: boolean
+  newsletterKeywordInFooter: boolean
+  hasFormPairInFooter: boolean
+  matchedSignals: string[]
+} {
+  if (!rawHtml) {
+    return {
+      footerRootFound: false,
+      hasVisibleEmailInputInFooter: false,
+      hasVisibleSubmitControlInFooter: false,
+      newsletterKeywordInFooter: false,
+      hasFormPairInFooter: false,
+      matchedSignals: [],
+    }
+  }
+
+  const html = rawHtml.toLowerCase()
+  const slices: string[] = []
+
+  const addSlice = (start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(html.length, end)
+    if (safeEnd <= safeStart) return
+    const chunk = html.slice(safeStart, safeEnd)
+    if (chunk.length > 0) slices.push(chunk)
+  }
+
+  let footerMatch: RegExpExecArray | null
+  const footerBlockRe = /<footer[\s\S]*?<\/footer>/gi
+  while ((footerMatch = footerBlockRe.exec(html)) !== null) {
+    addSlice(footerMatch.index, footerMatch.index + footerMatch[0].length)
+    if (slices.length >= 3) break
+  }
+
+  let footerLikeMatch: RegExpExecArray | null
+  const footerLikeRe = /<(?:div|section|nav)[^>]*(?:id|class)=["'][^"']*footer[^"']*["'][^>]*>[\s\S]{0,9000}?<\/(?:div|section|nav)>/gi
+  while ((footerLikeMatch = footerLikeRe.exec(html)) !== null) {
+    addSlice(footerLikeMatch.index, footerLikeMatch.index + footerLikeMatch[0].length)
+    if (slices.length >= 5) break
+  }
+
+  addSlice(Math.floor(html.length * 0.62), html.length)
+  const searchArea = slices.join('\n')
+  const footerRootFound = /<footer[\s>]/i.test(searchArea) || /(?:id|class)=["'][^"']*footer[^"']*["']/i.test(searchArea)
+  if (!searchArea) {
+    return {
+      footerRootFound,
+      hasVisibleEmailInputInFooter: false,
+      hasVisibleSubmitControlInFooter: false,
+      newsletterKeywordInFooter: false,
+      hasFormPairInFooter: false,
+      matchedSignals: [],
+    }
+  }
+
+  const hasVisibleEmailInputInFooter =
+    /<input[^>]+type=["']email["'][^>]*>/i.test(searchArea) ||
+    /<input[^>]+(?:name|id|placeholder)=["'][^"']*email[^"']*["'][^>]*>/i.test(searchArea)
+
+  const hasVisibleSubmitControlInFooter =
+    /<input[^>]+type=["']submit["'][^>]*>/i.test(searchArea) ||
+    /<button[^>]*>[\s\S]{0,80}?(?:subscribe|sign\s*up|signup|join|submit)[\s\S]{0,80}?<\/button>/i.test(searchArea) ||
+    /<button[^>]+(?:aria-label|title)=["'][^"']*(?:subscribe|sign\s*up|signup|join|submit)[^"']*["'][^>]*>/i.test(searchArea)
+
+  const newsletterKeywordInFooter =
+    /\bnewsletter\b|\bsubscribe\b|\bsubscription\b|\bmailing\s+list\b|\bjoin\s+our\b/i.test(searchArea)
+
+  let hasFormPairInFooter = false
+  let formMatch: RegExpExecArray | null
+  const formRe = /<form[\s\S]{0,6000}?<\/form>/gi
+  while ((formMatch = formRe.exec(searchArea)) !== null) {
+    const block = formMatch[0]
+    const hasEmail = /<input[^>]+type=["']email["'][^>]*>|<input[^>]+(?:name|id|placeholder)=["'][^"']*email[^"']*["'][^>]*>/i.test(block)
+    const hasSubmit =
+      /<input[^>]+type=["']submit["'][^>]*>/i.test(block) ||
+      /<button[^>]*>[\s\S]{0,80}?(?:subscribe|sign\s*up|signup|join|submit)[\s\S]{0,80}?<\/button>/i.test(block) ||
+      /<button[^>]*(?:type=["']submit["'])[^>]*>/i.test(block)
+    if (hasEmail && hasSubmit) {
+      hasFormPairInFooter = true
+      break
+    }
+  }
+
+  if (!hasFormPairInFooter && hasVisibleEmailInputInFooter && (hasVisibleSubmitControlInFooter || newsletterKeywordInFooter)) {
+    hasFormPairInFooter = true
+  }
+
+  const matchedSignals: string[] = []
+  if (hasVisibleEmailInputInFooter) matchedSignals.push('email-input')
+  if (hasVisibleSubmitControlInFooter) matchedSignals.push('submit-control')
+  if (newsletterKeywordInFooter) matchedSignals.push('newsletter-copy')
+  if (hasFormPairInFooter) matchedSignals.push('html-footer-form-pair')
+
+  return {
+    footerRootFound,
+    hasVisibleEmailInputInFooter,
+    hasVisibleSubmitControlInFooter,
+    newsletterKeywordInFooter,
+    hasFormPairInFooter,
+    matchedSignals,
+  }
+}
+
+function detectTrustNearCtaFromHtml(rawHtml: string): {
+  ctaFound: boolean
+  domStructureFound: boolean
+  paymentBrandsFound: string[]
+  paymentBrandsElsewhere: string[]
+  trustBadgesInfo: string
+  containerDescription: string
+} {
+  if (!rawHtml) {
+    return {
+      ctaFound: false,
+      domStructureFound: false,
+      paymentBrandsFound: [],
+      paymentBrandsElsewhere: [],
+      trustBadgesInfo: 'No HTML available for trust-near-CTA fallback.',
+      containerDescription: 'html-fallback',
+    }
+  }
+
+  const stripped = rawHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const html = stripped.toLowerCase()
+
+  const CTA_RE = /\b(add to cart|add to bag|buy now|buy it now|checkout|pay now|order now|purchase)\b/i
+  const TRUST_LABELS: Array<{ label: string; re: RegExp }> = [
+    { label: 'Visa', re: /\bvisa\b/ },
+    { label: 'Mastercard', re: /\bmaster\s*card\b|\bmastercard\b/ },
+    { label: 'PayPal', re: /\bpaypal\b/ },
+    { label: 'Apple Pay', re: /\bapple\s*pay\b/ },
+    { label: 'Google Pay', re: /\bgoogle\s*pay\b/ },
+    { label: 'Amex', re: /\bamerican\s*express\b|\bamex\b/ },
+    { label: 'Klarna', re: /\bklarna\b/ },
+    { label: 'Afterpay', re: /\bafterpay\b|\bclearpay\b/ },
+    { label: 'Shop Pay', re: /\bshop\s*pay\b/ },
+    { label: 'Stripe', re: /\bstripe\b/ },
+    { label: 'Maestro', re: /\bmaestro\b/ },
+    { label: 'Discover', re: /\bdiscover\b/ },
+    { label: 'security-seal', re: /\bssl\b|\bsecure\s+checkout\b|\bsecure\s+payment\b|\btrust\s*badge\b|\bpadlock\b|\bprotected\s+checkout\b/ },
+    { label: 'guarantee-badge', re: /\bmoney\s*-?\s*back\b|\bguarantee\b|\bsecure\s+checkout\s+badge\b/ },
+  ]
+  const VISUAL_RE = /<(img|svg|iframe)\b|(?:id|class)=["'][^"']*(icon|badge|payment|secure|trust|checkout)[^"']*["']/i
+
+  const candidateBlocks: string[] = []
+  let blockMatch: RegExpExecArray | null
+  const blockRe = /<(?:form|section|div)[^>]*(?:product|purchase|cart|checkout|payment|buy|atc|cta)[^>]*>[\s\S]{0,16000}?<\/(?:form|section|div)>/gi
+  while ((blockMatch = blockRe.exec(html)) !== null) {
+    candidateBlocks.push(blockMatch[0])
+    if (candidateBlocks.length >= 28) break
+  }
+
+  const ctaFound = CTA_RE.test(html)
+  const nearFound = new Set<string>()
+  const elsewhereFound = new Set<string>()
+
+  const addMatchesFromArea = (source: string, bucket: Set<string>) => {
+    for (const item of TRUST_LABELS) {
+      if (item.re.test(source)) bucket.add(item.label)
+    }
+  }
+
+  const nearMatchedBlocks: string[] = []
+  for (const block of candidateBlocks) {
+    if (!CTA_RE.test(block)) continue
+    if (!VISUAL_RE.test(block)) continue
+    const localFound = new Set<string>()
+    addMatchesFromArea(block, localFound)
+    if (localFound.size === 0) continue
+    for (const name of localFound) nearFound.add(name)
+    nearMatchedBlocks.push(block)
+  }
+
+  const footerOnly = Array.from(html.matchAll(/<footer[\s\S]*?<\/footer>/gi))
+    .map((m) => m[0])
+    .join('\n')
+  addMatchesFromArea(footerOnly, elsewhereFound)
+
+  if (nearMatchedBlocks.length > 0) {
+    const combinedNear = nearMatchedBlocks.join('\n')
+    const outsideNear = html.replace(combinedNear, ' ')
+    addMatchesFromArea(outsideNear, elsewhereFound)
+  }
+
+  const paymentBrandsFound = Array.from(nearFound)
+  const paymentBrandsElsewhere = Array.from(elsewhereFound).filter((x) => !nearFound.has(x))
+  const domStructureFound = paymentBrandsFound.length > 0
+
+  return {
+    ctaFound,
+    domStructureFound,
+    paymentBrandsFound,
+    paymentBrandsElsewhere,
+    trustBadgesInfo: domStructureFound
+      ? `HTML fallback found trust/payment markers near CTA: ${paymentBrandsFound.join(', ')}`
+      : paymentBrandsElsewhere.length > 0
+        ? `HTML fallback found trust markers only outside CTA context: ${paymentBrandsElsewhere.join(', ')}`
+        : 'HTML fallback found no trust/payment markers near CTA.',
+    containerDescription: 'html-fallback: CTA/trust markers in same product/purchase block',
+  }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -2340,6 +2547,67 @@ export async function POST(request: NextRequest) {
 
       try {
         footerNewsletterSnapshot = await collectFooterNewsletterSnapshot(page)
+        const initialFooterNewsletterPass = footerNewsletterSnapshot.hasFormPairInFooter
+
+        if (!initialFooterNewsletterPass) {
+          try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+            await new Promise((r) => setTimeout(r, process.env.VERCEL ? 1600 : 1100))
+            const retryFooterNewsletter = await collectFooterNewsletterSnapshot(page)
+            footerNewsletterSnapshot = {
+              footerRootFound: footerNewsletterSnapshot.footerRootFound || retryFooterNewsletter.footerRootFound,
+              footerRootSelector:
+                footerNewsletterSnapshot.footerRootSelector || retryFooterNewsletter.footerRootSelector,
+              hasVisibleEmailInputInFooter:
+                footerNewsletterSnapshot.hasVisibleEmailInputInFooter ||
+                retryFooterNewsletter.hasVisibleEmailInputInFooter,
+              hasVisibleSubmitControlInFooter:
+                footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ||
+                retryFooterNewsletter.hasVisibleSubmitControlInFooter,
+              newsletterKeywordInFooter:
+                footerNewsletterSnapshot.newsletterKeywordInFooter ||
+                retryFooterNewsletter.newsletterKeywordInFooter,
+              hasFormPairInFooter:
+                footerNewsletterSnapshot.hasFormPairInFooter || retryFooterNewsletter.hasFormPairInFooter,
+              matchedSignals: [
+                ...new Set([...footerNewsletterSnapshot.matchedSignals, ...retryFooterNewsletter.matchedSignals]),
+              ],
+            }
+          } catch (footerNewsletterRetryErr) {
+            console.warn('[scan] footer newsletter retry failed:', footerNewsletterRetryErr)
+          }
+        }
+
+        if (!footerNewsletterSnapshot.hasFormPairInFooter) {
+          try {
+            const runtimeHtml = await page.content()
+            const htmlFallbackNewsletter = detectFooterNewsletterFromHtml(runtimeHtml)
+            if (htmlFallbackNewsletter.hasFormPairInFooter) {
+              footerNewsletterSnapshot = {
+                footerRootFound:
+                  footerNewsletterSnapshot.footerRootFound || htmlFallbackNewsletter.footerRootFound,
+                footerRootSelector: footerNewsletterSnapshot.footerRootSelector || 'html-footer-fallback',
+                hasVisibleEmailInputInFooter:
+                  footerNewsletterSnapshot.hasVisibleEmailInputInFooter ||
+                  htmlFallbackNewsletter.hasVisibleEmailInputInFooter,
+                hasVisibleSubmitControlInFooter:
+                  footerNewsletterSnapshot.hasVisibleSubmitControlInFooter ||
+                  htmlFallbackNewsletter.hasVisibleSubmitControlInFooter,
+                newsletterKeywordInFooter:
+                  footerNewsletterSnapshot.newsletterKeywordInFooter ||
+                  htmlFallbackNewsletter.newsletterKeywordInFooter,
+                hasFormPairInFooter: true,
+                matchedSignals: [
+                  ...new Set([...footerNewsletterSnapshot.matchedSignals, ...htmlFallbackNewsletter.matchedSignals]),
+                ],
+              }
+              console.log('[scan] footer newsletter HTML fallback detected form pair.')
+            }
+          } catch (footerNewsletterHtmlFallbackErr) {
+            console.warn('[scan] footer newsletter HTML fallback failed:', footerNewsletterHtmlFallbackErr)
+          }
+        }
+
         const footerNewsletterBlock = [
           '',
           '--- FOOTER NEWSLETTER (DOM scan) ---',
@@ -4004,6 +4272,53 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Third-pass trust fallback from runtime HTML ───────────────────────
+      // Some serverless runs miss late-hydrated visual nodes in DOM scans.
+      // Use strict source fallback: CTA markers + visual trust markers in same purchase block.
+      if (needsTrustReScan && page && !trustBadgesContext?.domStructureFound) {
+        try {
+          const runtimeHtml = await page.content()
+          const trustHtmlFallback = detectTrustNearCtaFromHtml(runtimeHtml)
+          if (trustBadgesContext && trustHtmlFallback.domStructureFound) {
+            const mergedNear = [
+              ...new Set([...trustBadgesContext.paymentBrandsFound, ...trustHtmlFallback.paymentBrandsFound]),
+            ]
+            const mergedElse = [
+              ...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...trustHtmlFallback.paymentBrandsElsewhere]),
+            ]
+            trustBadgesContext = {
+              ...trustBadgesContext,
+              ctaFound: trustBadgesContext.ctaFound || trustHtmlFallback.ctaFound,
+              ctaText:
+                trustBadgesContext.ctaText && trustBadgesContext.ctaText !== 'not found'
+                  ? trustBadgesContext.ctaText
+                  : trustHtmlFallback.ctaFound
+                    ? 'detected in HTML fallback'
+                    : trustBadgesContext.ctaText,
+              domStructureFound: true,
+              paymentBrandsFound: mergedNear,
+              paymentBrandsElsewhere: mergedElse,
+              trustBadgesCount: mergedNear.length,
+              trustBadgesElsewhereCount: mergedElse.length,
+              trustBadgesInfo: trustHtmlFallback.trustBadgesInfo,
+              containerDescription: trustHtmlFallback.containerDescription,
+            }
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
+            console.log(`[scan] trust badges HTML fallback detected near CTA: ${mergedNear.join(', ')}`)
+          } else if (trustBadgesContext && !trustBadgesContext.ctaFound && trustHtmlFallback.ctaFound) {
+            trustBadgesContext = {
+              ...trustBadgesContext,
+              ctaFound: true,
+              ctaText: 'detected in HTML fallback',
+              trustBadgesInfo: `${trustBadgesContext.trustBadgesInfo} | HTML fallback found CTA marker`,
+            }
+          }
+        } catch (trustHtmlFallbackErr) {
+          console.warn('[scan] trust badges HTML fallback failed:', trustHtmlFallbackErr)
+        }
+      }
+
       // Close browser
       await browser.close()
 
@@ -4045,6 +4360,34 @@ export async function POST(request: NextRequest) {
             socialHostsInLowerBand: htmlFallbackFooterSocialHosts,
           }
           console.log(`[FALLBACK] Footer social from HTML: ${htmlFallbackFooterSocialHosts.join(', ')}`)
+        }
+        const htmlFallbackFooterNewsletter = detectFooterNewsletterFromHtml(rawHtml)
+        if (htmlFallbackFooterNewsletter.hasFormPairInFooter) {
+          footerNewsletterSnapshot = {
+            footerRootFound: htmlFallbackFooterNewsletter.footerRootFound,
+            footerRootSelector: 'html-footer-fallback',
+            hasVisibleEmailInputInFooter: htmlFallbackFooterNewsletter.hasVisibleEmailInputInFooter,
+            hasVisibleSubmitControlInFooter: htmlFallbackFooterNewsletter.hasVisibleSubmitControlInFooter,
+            newsletterKeywordInFooter: htmlFallbackFooterNewsletter.newsletterKeywordInFooter,
+            hasFormPairInFooter: true,
+            matchedSignals: htmlFallbackFooterNewsletter.matchedSignals,
+          }
+          console.log('[FALLBACK] Footer newsletter form pair detected from HTML.')
+        }
+        const htmlFallbackTrustNearCta = detectTrustNearCtaFromHtml(rawHtml)
+        if (htmlFallbackTrustNearCta.domStructureFound) {
+          trustBadgesContext = {
+            ctaFound: htmlFallbackTrustNearCta.ctaFound,
+            ctaText: htmlFallbackTrustNearCta.ctaFound ? 'detected in HTML fallback' : 'not found',
+            domStructureFound: true,
+            paymentBrandsFound: htmlFallbackTrustNearCta.paymentBrandsFound,
+            paymentBrandsElsewhere: htmlFallbackTrustNearCta.paymentBrandsElsewhere,
+            trustBadgesCount: htmlFallbackTrustNearCta.paymentBrandsFound.length,
+            trustBadgesElsewhereCount: htmlFallbackTrustNearCta.paymentBrandsElsewhere.length,
+            trustBadgesInfo: htmlFallbackTrustNearCta.trustBadgesInfo,
+            containerDescription: htmlFallbackTrustNearCta.containerDescription,
+          }
+          console.log(`[FALLBACK] Trust near CTA from HTML: ${htmlFallbackTrustNearCta.paymentBrandsFound.join(', ')}`)
         }
         websiteContent = htmlToPlainText(rawHtml)
         fullVisibleText = websiteContent
