@@ -5346,6 +5346,15 @@ export async function POST(request: NextRequest) {
         const footerSocialDomPass =
           footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
           footerSocialSnapshot.socialHostsInLowerBand.length > 0
+        const isVideoTestimonialRuleDet =
+          (rule.title.toLowerCase().includes('video') &&
+            (rule.title.toLowerCase().includes('testimonial') ||
+              rule.title.toLowerCase().includes('review') ||
+              rule.title.toLowerCase().includes('customer'))) ||
+          rule.description.toLowerCase().includes('video testimonial') ||
+          rule.description.toLowerCase().includes('customer video') ||
+          rule.description.toLowerCase().includes('video review') ||
+          rule.description.toLowerCase().includes('real customer video')
 
         // Deterministic rules: use frozen snapshot only; skip AI for consistent results
         const detResult = tryEvaluateDeterministic(rule, {
@@ -5366,6 +5375,53 @@ export async function POST(request: NextRequest) {
               reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
             }),
           )
+          continue
+        }
+
+        // Deterministic guard for video testimonials:
+        // avoid AI hallucinated PASS when no concrete video evidence exists.
+        if (isVideoTestimonialRuleDet) {
+          const websiteTextLower = (fullVisibleText || websiteContent || '').toLowerCase()
+          const hasStrictSectionText =
+            /\b(video testimonials?|customer videos?|watch customer videos|video reviews?)\b/i.test(
+              websiteTextLower,
+            )
+          const hasStrictPlayableSignal =
+            /\b(play\s*button|video\s*player|watch\s+video|youtube|vimeo|\.mp4|▶)\b/i.test(
+              websiteTextLower,
+            )
+          const hasStrongNonDomEvidence = hasStrictSectionText && hasStrictPlayableSignal
+
+          if (customerReviewVideoFound || hasStrongNonDomEvidence) {
+            const reason = customerReviewVideoFound
+              ? customerReviewVideoEvidence.length > 0
+                ? `Customer video testimonials were detected on the page: ${customerReviewVideoEvidence
+                    .slice(0, 2)
+                    .join('; ')}.`
+                : 'Customer video testimonials were detected on the product page.'
+              : 'Video testimonial section text and playable video signals were detected on the product page.'
+            results.push(
+              withCheckpoint({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: true,
+                reason: formatUserFriendlyRuleResult(rule, true, reason),
+              }),
+            )
+          } else {
+            results.push(
+              withCheckpoint({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: false,
+                reason: formatUserFriendlyRuleResult(
+                  rule,
+                  false,
+                  'No customer video testimonials were detected on the product page.',
+                ),
+              }),
+            )
+          }
           continue
         }
 
@@ -6831,13 +6887,26 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
             // Intentionally no broad UGC text-only auto-pass here.
             // Require DOM confirmation or concrete visual evidence from AI response.
-            // Final guardrail: when DOM found no customer-review videos and the page has no explicit
-            // video-testimonial section evidence, never allow a PASS from ambiguous AI wording.
-            const hasStrictOnPageVideoEvidence =
-              hasCustomerVideoTextSignal ||
-              /\b(video testimonials?|customer videos?|review videos?)\b/i.test(websiteTextLower)
-            if (!customerReviewVideoFound && analysis.passed && !hasStrictOnPageVideoEvidence) {
-              console.log('Video testimonials rule: no DOM video evidence and no strict on-page video signals. Forcing FAIL.')
+            // Final guardrail: when DOM found no customer-review videos, require strong combined evidence.
+            // This prevents false PASS from ambiguous AI wording on pages that only have text/photo reviews.
+            const hasStrictSectionText =
+              /\b(video testimonials?|customer videos?|watch customer videos|video reviews?)\b/i.test(
+                websiteTextLower,
+              )
+            const hasStrictPlayableSignal =
+              /\b(play\s*button|video\s*player|watch\s+video|youtube|vimeo|\.mp4|▶)\b/i.test(
+                websiteTextLower,
+              )
+            const hasStrongNonDomEvidence =
+              hasStrictSectionText &&
+              hasStrictPlayableSignal &&
+              reasonMentionsActualVideo &&
+              !hasNegativeIndicators
+
+            if (!customerReviewVideoFound && analysis.passed && !hasStrongNonDomEvidence) {
+              console.log(
+                'Video testimonials rule: DOM found no customer videos and non-DOM evidence is not strong enough. Forcing FAIL.',
+              )
               analysis.passed = false
               analysis.reason =
                 'No customer video testimonials were detected on this product page. The page does not show a clear customer video/testimonial section with playable review videos.'
