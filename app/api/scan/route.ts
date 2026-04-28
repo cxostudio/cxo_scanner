@@ -788,6 +788,31 @@ function detectSearchAccessibilityFromHtml(rawHtml: string): {
   return { present: false, detail: 'No clear search control in header HTML' }
 }
 
+function detectVideoHtmlMarkersFromHtml(rawHtml: string): {
+  strong: boolean
+  hits: string[]
+} {
+  if (!rawHtml) return { strong: false, hits: [] }
+  const html = rawHtml.toLowerCase()
+  const checks: Array<{ key: string; re: RegExp }> = [
+    { key: 'ugc-video', re: /ugc-video|ugc_video|ugcvideo/ },
+    { key: 'video-testimonial', re: /video-testimonial|testimonial-video|customer-video|review-video|video-review/ },
+    { key: 'preview-images', re: /preview_images|video[-_]?thumbnail|video[-_]?poster/ },
+    { key: 'play-button', re: /play-button|play_button|video-play|play-icon/ },
+    { key: 'html-video', re: /<video\b/ },
+    { key: 'video-iframe', re: /youtube\.com|vimeo\.com|wistia|loom/ },
+    { key: 'tolstoy', re: /\btolstoy\b/ },
+  ]
+  const hits = checks.filter((c) => c.re.test(html)).map((c) => c.key)
+  const hasUgcLike = hits.includes('ugc-video') || hits.includes('video-testimonial') || hits.includes('tolstoy')
+  const hasPlayableLike =
+    hits.includes('preview-images') ||
+    hits.includes('play-button') ||
+    hits.includes('html-video') ||
+    hits.includes('video-iframe')
+  return { strong: hasUgcLike && hasPlayableLike, hits }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -1119,6 +1144,7 @@ export async function POST(request: NextRequest) {
     // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
     let customerReviewVideoFound = false
     let customerReviewVideoEvidence: string[] = []
+    let videoHtmlFallbackContext: { strong: boolean; hits: string[] } | null = null
     let customerPhotoFound = false
     let customerPhotoEvidence: string[] = []
     let customerMediaSummary = ''
@@ -2154,6 +2180,19 @@ export async function POST(request: NextRequest) {
           }
         } catch (e) {
           console.warn('[CUSTOMER MEDIA] Video retry failed:', e)
+        }
+      }
+      if (!customerReviewVideoFound) {
+        try {
+          const runtimeHtml = await page.content()
+          videoHtmlFallbackContext = detectVideoHtmlMarkersFromHtml(runtimeHtml)
+          if (videoHtmlFallbackContext.strong) {
+            console.log(
+              `[CUSTOMER MEDIA] HTML video markers fallback matched: ${videoHtmlFallbackContext.hits.join(', ')}`,
+            )
+          }
+        } catch (e) {
+          console.warn('[CUSTOMER MEDIA] HTML video markers fallback failed:', e)
         }
       }
 
@@ -4892,6 +4931,7 @@ export async function POST(request: NextRequest) {
         })
         const rawHtml = await response.text()
         fallbackRawHtml = rawHtml
+        videoHtmlFallbackContext = detectVideoHtmlMarkersFromHtml(rawHtml)
         const htmlFallbackFooterSocialHosts = detectFooterSocialHostsFromHtml(rawHtml)
         if (htmlFallbackFooterSocialHosts.length > 0) {
           footerSocialSnapshot = {
@@ -5428,15 +5468,18 @@ export async function POST(request: NextRequest) {
               websiteTextLower,
             )
           const hasStrongNonDomEvidence = hasStrictSectionText && hasStrictPlayableSignal
+          const hasHtmlMarkerEvidence = !!videoHtmlFallbackContext?.strong
 
-          if (customerReviewVideoFound || hasStrongNonDomEvidence) {
+          if (customerReviewVideoFound || hasStrongNonDomEvidence || hasHtmlMarkerEvidence) {
             const reason = customerReviewVideoFound
               ? customerReviewVideoEvidence.length > 0
                 ? `Customer video testimonials were detected on the page: ${customerReviewVideoEvidence
                     .slice(0, 2)
                     .join('; ')}.`
                 : 'Customer video testimonials were detected on the product page.'
-              : 'Video testimonial section text and playable video signals were detected on the product page.'
+              : hasStrongNonDomEvidence
+                ? 'Video testimonial section text and playable video signals were detected on the product page.'
+                : `UGC video/testimonial HTML markers were detected (${(videoHtmlFallbackContext?.hits || []).slice(0, 4).join(', ')}).`
             results.push(
               withCheckpoint({
                 ruleId: rule.id,
