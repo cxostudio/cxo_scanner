@@ -187,14 +187,14 @@ export default function ScannerPage() {
               aria-hidden
             />
             <motion.div
-              className="relative mx-auto flex w-full max-w-[720px] pt-2 pb-0 sm:pb-8"
+              className="relative mx-auto min-h-[390px] sm:min-h-auto flex w-full max-w-[720px] pt-2 pb-0 sm:pb-8 sm:text-center items-center md:items-start"
               variants={previewContainerVariants}
               initial="hidden"
               animate="show"
             >
               {/* Desktop browser */}
               <motion.div
-                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 h-full md:h-auto min-h-[462px] mobile-set-height"
+                className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 md:h-auto min-h-auto h-full"
                 variants={previewItemVariants}
                 initial="hidden"
                 animate="show"
@@ -449,6 +449,80 @@ export default function ScannerPage() {
                 </button>
               </div>
             )}
+
+          <section className="mt-8 rounded-2xl p-5 sm:p-8">
+                    <div className="mb-5 flex justify-center">
+                <div className="inline-flex rounded-lg border border-zinc-300 bg-white px-3 py-1 text-xs font-semibold text-zinc-700">
+                  What&apos;s next?
+                </div>
+              </div>
+              <h3 className="mb-8 font-plus-jakarta text-center max-w-[720px] mx-auto text-5xl font-bold  leading-[67.2px] tracking-[-1.92px] text-[#09090B] sm:text-6xl">
+                You&apos;ve started the process - here&apos;s what happens next
+              </h3>
+
+              <div className="flex gap-4 sm:gap-8">
+                <div className="relative ml-1 mt-1 hidden w-10 sm:block">
+                  <div className="absolute left-4 top-1 h-[calc(100%-18px)] w-[4px] rounded-full bg-zinc-300" />
+                  <div className="absolute left-1 top-0 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white text-lg font-bold">
+                    ✓
+                  </div>
+                  <div className="absolute left-1 top-[205px] flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 bg-white text-sm">
+                    🔒
+                  </div>
+                  <div className="absolute left-1 top-[510px] flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 bg-white text-sm">
+                    🔒
+                  </div>
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-8 sm:space-y-10">
+                  <div>
+                    <p className="text-[28px] font-semibold text-zinc-900">Today: Product page audit</p>
+                    <p className="mt-1 text-[28px] leading-relaxed text-zinc-500">
+                      You&apos;ve completed a focused CRO audit covering <span className="font-semibold text-zinc-700">{totalCount || 40} product page checkpoints.</span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[28px] font-semibold text-zinc-900">Next: Full store CRO audit system</p>
+                    <p className="mt-1 text-[28px] leading-relaxed text-zinc-500">
+                      Access now our full 300+ conversion checkpoints covering your entire store:
+                    </p>
+                    <ul className="mt-2 space-y-1 text-[28px] font-semibold text-zinc-900">
+                      <li>✓ Homepage</li>
+                      <li>✓ Category page</li>
+                      <li>✓ Product page</li>
+                      <li>✓ Cart page</li>
+                      <li>✓ Checkout page</li>
+                      <li>✓ Thank you page</li>
+                    </ul>
+                    <p className="mt-2 text-[28px] leading-relaxed text-zinc-500">
+                      This is the full audit system we use internally at CXO studio.
+                    </p>
+                    <button className="mt-4 inline-flex items-center gap-3 rounded-xl bg-black px-6 py-3 text-base font-semibold text-white hover:bg-zinc-800">
+                      Continue with the full CRO system <span aria-hidden>›</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="text-[28px] font-semibold text-zinc-900">Then: Implementation & continuous CRO</p>
+                    <p className="mt-1 text-[28px] leading-relaxed text-zinc-500">
+                      For brands, ready to invest, that want strategy and execution support:
+                    </p>
+                    <ul className="mt-2 space-y-1 text-[28px] font-semibold text-zinc-900">
+                      <li>✓ Full-funnel CRO audit (from homepage to checkout)</li>
+                      <li>✓ Continuous A/B testing of offers, user experience & user interface</li>
+                      <li>✓ CRO strategy based on buyer psychology & data</li>
+                      <li>✓ Clean implementation & development support</li>
+                      <li>✓ Ongoing optimization to compound results</li>
+                      <li>✓ Weekly reports & strategy call</li>
+                    </ul>
+                    <button className="mt-4 inline-flex items-center gap-3 rounded-xl border border-zinc-300 bg-white px-6 py-3 text-base font-semibold text-zinc-900 hover:bg-zinc-50">
+                      See if we can help you <span aria-hidden>›</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         )}
 
