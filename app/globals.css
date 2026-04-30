@@ -153,3 +153,17 @@
     bottom: 0;
     left: 0;
 }
+
+@keyframes back-to-top-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.back-to-top-float {
+  animation: back-to-top-float 2s ease-in-out infinite;
+}

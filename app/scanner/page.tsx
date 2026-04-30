@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
-import { X, ChevronDown } from 'lucide-react'
+import { X, ChevronDown, ArrowUp } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import type { CheckpointPresentation } from '../components/CheckpointResultBody'
@@ -52,6 +52,7 @@ export default function ScannerPage() {
   const [visibleCount, setVisibleCount] = useState(8)
   const [desktopPreview, setDesktopPreview] = useState<string | null>(null)
   const [mobilePreview, setMobilePreview] = useState<string | null>(null)
+  const [showBackToTop, setShowBackToTop] = useState(false)
 
   const mobileNoTx = useIsMobileLayoutNoTransitions()
 
@@ -88,6 +89,19 @@ export default function ScannerPage() {
 
   useEffect(() => {
     loadResults()
+  }, [])
+
+  useEffect(() => {
+    const onScroll = () => {
+      setShowBackToTop(window.scrollY > 320)
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+    }
   }, [])
 
   const loadResults = () => {
@@ -154,6 +168,10 @@ export default function ScannerPage() {
 
   const loadMore = () => {
     setVisibleCount(prev => prev + 8)
+  }
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const visibleResults = results ? results.slice(0, visibleCount) : []
@@ -684,6 +702,16 @@ export default function ScannerPage() {
             </div>
         </div>
     </section>
+      {results && showBackToTop && (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-label="Back to top"
+          className="back-to-top-float fixed bottom-6 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 shadow-[0_14px_30px_-12px_rgba(0,0,0,0.35)] sm:bottom-8 sm:right-8 cursor-pointer"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
     </main >
     </>
   )
