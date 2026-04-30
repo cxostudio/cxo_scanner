@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
-import { X, ChevronDown, ArrowUp } from 'lucide-react'
+import { X, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import type { CheckpointPresentation } from '../components/CheckpointResultBody'
@@ -52,7 +52,8 @@ export default function ScannerPage() {
   const [visibleCount, setVisibleCount] = useState(8)
   const [desktopPreview, setDesktopPreview] = useState<string | null>(null)
   const [mobilePreview, setMobilePreview] = useState<string | null>(null)
-  const [showBackToTop, setShowBackToTop] = useState(false)
+  const [showScrollToggle, setShowScrollToggle] = useState(false)
+  const [isAtTop, setIsAtTop] = useState(true)
 
   const mobileNoTx = useIsMobileLayoutNoTransitions()
 
@@ -93,7 +94,9 @@ export default function ScannerPage() {
 
   useEffect(() => {
     const onScroll = () => {
-      setShowBackToTop(window.scrollY > 320)
+      const y = window.scrollY
+      setShowScrollToggle(y > 20)
+      setIsAtTop(y < 80)
     }
 
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -172,6 +175,10 @@ export default function ScannerPage() {
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
   }
 
   const visibleResults = results ? results.slice(0, visibleCount) : []
@@ -702,14 +709,14 @@ export default function ScannerPage() {
             </div>
         </div>
     </section>
-      {results && showBackToTop && (
+      {results && (showScrollToggle || isAtTop) && (
         <button
           type="button"
-          onClick={scrollToTop}
-          aria-label="Back to top"
+          onClick={isAtTop ? scrollToBottom : scrollToTop}
+          aria-label={isAtTop ? 'Scroll to bottom' : 'Back to top'}
           className="back-to-top-float fixed bottom-6 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 shadow-[0_14px_30px_-12px_rgba(0,0,0,0.35)] sm:bottom-8 sm:right-8 cursor-pointer"
         >
-          <ArrowUp className="h-5 w-5" />
+          {isAtTop ? <ArrowDown className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
         </button>
       )}
     </main >
