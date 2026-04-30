@@ -115,6 +115,17 @@
   font-weight: 500;
 }
 
+
+
+/* @media screen and (min-width: 450px) and (max-width: 639px) {
+  .mobile-view {
+    max-width: 180px;;
+  }
+
+  .mobile-height{
+    min-height: 424px;
+  }
+}
 @media screen and (min-width: 320px) and (max-width: 499px) {
   .mobile-view {
     max-width: 160px;;
@@ -123,7 +134,7 @@
   .mobile-set-height{
     min-height: 328px;
   }
-}
+} */
 .font-inter-light {
   font-family: "Inter", sans-serif;
 }

@@ -205,13 +205,13 @@ export default function ScannerPage() {
 
           {/* Hero preview: desktop canvas + overlapped mobile frame */}
           {url && (
-            <div className="relative mb-0 sm:mb-10 overflow-visible px-2 sm:px-3">
+            <div className="relative overflow-visible px-2 sm:px-3 mb-[40x] sm:mb-[80px]">
               <div
                 className="pointer-events-none absolute inset-x-3 inset-y-3 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-7"
                 aria-hidden
               />
               <motion.div
-                className="relative mx-auto min-h-[390px] sm:min-h-auto flex w-full max-w-[720px] pt-2 pb-0 sm:pb-8 sm:text-center items-center md:items-start"
+                className="relative mx-auto min-h-[380px] sm:min-h-auto flex w-full max-w-[380px] sm:max-w-[720px] pt-2 sm:text-center items-center md:items-start mobile-height"
                 variants={previewContainerVariants}
                 initial="hidden"
                 animate="show"
@@ -254,7 +254,7 @@ export default function ScannerPage() {
                 </motion.div>
 
                 <motion.div
-                  className="w-full max-w-[200px] sm:max-w-[190px] md:max-w-[216px] lg:max-w-[14.2rem] self-center absolute right-0 top-2 sm:z-30 sm:mt-0 mobile-view"
+                  className="w-full max-w-[160px] sm:max-w-[190px] md:max-w-[216px] lg:max-w-[14.2rem] self-center absolute right-0 top-2 sm:z-30 sm:mt-0 mobile-view"
                   variants={previewItemVariants}
                 >
                   <div className="rounded-[2.25rem] border border-zinc-200 bg-white p-2.5 shadow-none ring-1 ring-black/[0.05] ">
