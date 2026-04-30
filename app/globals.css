@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Inter+Tight:ital,wght@0,100..900;1,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
 .loading {
   display: inline-block;
   width: 20px;
@@ -122,4 +123,22 @@
   .mobile-set-height{
     min-height: 328px;
   }
+}
+.font-inter-light {
+  font-family: "Inter", sans-serif;
+}
+
+.gradient{
+  position: relative;
+  z-index: 1; 
+}
+
+.gradient:after{
+    content: "";
+    width: 100%; 
+    height: 214px;
+    background: linear-gradient(180deg, rgba(243, 244, 246, 0.00) 0%, #F3F4F6 71.63%);
+    position: absolute;
+    bottom: 0;
+    left: 0;
 }
