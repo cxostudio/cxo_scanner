@@ -367,10 +367,30 @@ export async function detectCustomerMedia(
     // ─────────────────────────────────────────────────────────────
     // BUILD RESULT
     // ─────────────────────────────────────────────────────────────
-    const videoFound = videoEvidence.length > 0
+    // IMPORTANT: only concrete media evidence can mark video testimonials as found.
+    // Text headings alone (e.g. "customers are saying") must not auto-pass.
+    const hasLooxVideoWidget = !!document.querySelector(
+      '[class*="loox"][class*="video"], [id*="loox"][class*="video"], loox-widget',
+    )
+    const videoFound =
+      ugcVideoEls.length > 0 ||
+      videosWithPreviewPoster.length > 0 ||
+      reviewVideos.length > 0 ||
+      videoIframes.length > 0 ||
+      previewImgs.length > 0 ||
+      playButtons.length > 0 ||
+      hasLooxVideoWidget ||
+      swiperInReview.length > 0
     const photoFound = photoEvidence.length > 0
 
-    const videoCount = ugcVideoEls.length + reviewVideos.length + previewImgs.length + playButtons.length
+    const videoCount =
+      ugcVideoEls.length +
+      videosWithPreviewPoster.length +
+      reviewVideos.length +
+      videoIframes.length +
+      previewImgs.length +
+      playButtons.length +
+      swiperInReview.length
     const photoCount = looxPhotos.length + yotpoPhotos.length + stampedPhotos.length +
       okendoPhotos.length + judgePhotos.length + shopifyCustomerPhotos.length + reviewSectionImgs.length +
       trustedShopsEls.length + lifestyleGalleryImgs.length +

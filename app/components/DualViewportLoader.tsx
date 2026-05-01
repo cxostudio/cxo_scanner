@@ -69,8 +69,8 @@ export function DualViewportLoader({
           aria-hidden
         />
 
-        <div className="relative mx-auto w-full h-full md:h-auto min-h-[462px] mobile-set-height">
-          <div className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04] rounded-[1.8rem] overflow-hidden">
+        <div className="relative mx-auto w-full h-full md:h-auto min-h-[406px] mobile-set-height flex items-center md:items-start">
+          <div className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04] rounded-[1.8rem] overflow-hidden h-full">
             <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
               <span className="h-3 w-3 rounded-full bg-[#ff5f57]" aria-hidden />
               <span className="h-3 w-3 rounded-full bg-[#febc2e]" aria-hidden />

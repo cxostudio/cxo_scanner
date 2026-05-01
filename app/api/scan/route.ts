@@ -788,6 +788,31 @@ function detectSearchAccessibilityFromHtml(rawHtml: string): {
   return { present: false, detail: 'No clear search control in header HTML' }
 }
 
+function detectVideoHtmlMarkersFromHtml(rawHtml: string): {
+  strong: boolean
+  hits: string[]
+} {
+  if (!rawHtml) return { strong: false, hits: [] }
+  const html = rawHtml.toLowerCase()
+  const checks: Array<{ key: string; re: RegExp }> = [
+    { key: 'ugc-video', re: /ugc-video|ugc_video|ugcvideo/ },
+    { key: 'video-testimonial', re: /video-testimonial|testimonial-video|customer-video|review-video|video-review/ },
+    { key: 'preview-images', re: /preview_images|video[-_]?thumbnail|video[-_]?poster/ },
+    { key: 'play-button', re: /play-button|play_button|video-play|play-icon/ },
+    { key: 'html-video', re: /<video\b/ },
+    { key: 'video-iframe', re: /youtube\.com|vimeo\.com|wistia|loom/ },
+    { key: 'tolstoy', re: /\btolstoy\b/ },
+  ]
+  const hits = checks.filter((c) => c.re.test(html)).map((c) => c.key)
+  const hasUgcLike = hits.includes('ugc-video') || hits.includes('video-testimonial') || hits.includes('tolstoy')
+  const hasPlayableLike =
+    hits.includes('preview-images') ||
+    hits.includes('play-button') ||
+    hits.includes('html-video') ||
+    hits.includes('video-iframe')
+  return { strong: hasUgcLike && hasPlayableLike, hits }
+}
+
 async function detectStickyCtaRuntime(validUrl: string): Promise<{
   desktopSticky: boolean
   mobileSticky: boolean
@@ -1119,6 +1144,7 @@ export async function POST(request: NextRequest) {
     // This helps on Vercel where screenshots can be null due to timeouts, and avoids relying purely on AI vision.
     let customerReviewVideoFound = false
     let customerReviewVideoEvidence: string[] = []
+    let videoHtmlFallbackContext: { strong: boolean; hits: string[] } | null = null
     let customerPhotoFound = false
     let customerPhotoEvidence: string[] = []
     let customerMediaSummary = ''
@@ -2118,6 +2144,56 @@ export async function POST(request: NextRequest) {
         if (mediaResult.photoEvidence.length) console.log('[CUSTOMER MEDIA] Photo evidence:', mediaResult.photoEvidence)
       } catch (e) {
         console.warn('Customer media detection failed:', e)
+      }
+
+      // Retry only for video-testimonial rule when first pass found nothing.
+      // Some Shopify UGC widgets hydrate late; a short extra settle avoids false FAIL on sites like Spacegoods.
+      const needsVideoTestimonialRule = rules.some((r) => {
+        const t = r.title.toLowerCase()
+        const d = r.description.toLowerCase()
+        return (
+          (t.includes('video') && (t.includes('testimonial') || t.includes('review') || t.includes('customer'))) ||
+          d.includes('video testimonial') ||
+          d.includes('customer video') ||
+          d.includes('video review') ||
+          d.includes('real customer video')
+        )
+      })
+      if (needsVideoTestimonialRule && !customerReviewVideoFound) {
+        try {
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+          await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2400 : 1700))
+          const mediaRetry = await detectCustomerMedia(page)
+          if (mediaRetry.videoFound) {
+            customerReviewVideoFound = true
+            customerReviewVideoEvidence = [
+              ...new Set([...customerReviewVideoEvidence, ...mediaRetry.videoEvidence]),
+            ]
+            console.log(
+              '[CUSTOMER MEDIA] Video retry succeeded. Evidence:',
+              customerReviewVideoEvidence.slice(0, 4).join(' | ') || 'n/a',
+            )
+            keyElements = (keyElements || '') +
+              '\n\n--- CUSTOMER VIDEO TESTIMONIALS RETRY ---\n' +
+              `Detected after retry: YES\n` +
+              `Evidence: ${customerReviewVideoEvidence.slice(0, 6).join(' | ')}`
+          }
+        } catch (e) {
+          console.warn('[CUSTOMER MEDIA] Video retry failed:', e)
+        }
+      }
+      if (!customerReviewVideoFound) {
+        try {
+          const runtimeHtml = await page.content()
+          videoHtmlFallbackContext = detectVideoHtmlMarkersFromHtml(runtimeHtml)
+          if (videoHtmlFallbackContext.strong) {
+            console.log(
+              `[CUSTOMER MEDIA] HTML video markers fallback matched: ${videoHtmlFallbackContext.hits.join(', ')}`,
+            )
+          }
+        } catch (e) {
+          console.warn('[CUSTOMER MEDIA] HTML video markers fallback failed:', e)
+        }
       }
 
       // QUANTITY / DISCOUNT CHECK: PASS if discount-type content appears ANYWHERE on the page. Log snippet to console for debugging.
@@ -4855,6 +4931,7 @@ export async function POST(request: NextRequest) {
         })
         const rawHtml = await response.text()
         fallbackRawHtml = rawHtml
+        videoHtmlFallbackContext = detectVideoHtmlMarkersFromHtml(rawHtml)
         const htmlFallbackFooterSocialHosts = detectFooterSocialHostsFromHtml(rawHtml)
         if (htmlFallbackFooterSocialHosts.length > 0) {
           footerSocialSnapshot = {
@@ -5346,6 +5423,15 @@ export async function POST(request: NextRequest) {
         const footerSocialDomPass =
           footerSocialSnapshot.socialHostsInFooterRoot.length > 0 ||
           footerSocialSnapshot.socialHostsInLowerBand.length > 0
+        const isVideoTestimonialRuleDet =
+          (rule.title.toLowerCase().includes('video') &&
+            (rule.title.toLowerCase().includes('testimonial') ||
+              rule.title.toLowerCase().includes('review') ||
+              rule.title.toLowerCase().includes('customer'))) ||
+          rule.description.toLowerCase().includes('video testimonial') ||
+          rule.description.toLowerCase().includes('customer video') ||
+          rule.description.toLowerCase().includes('video review') ||
+          rule.description.toLowerCase().includes('real customer video')
 
         // Deterministic rules: use frozen snapshot only; skip AI for consistent results
         const detResult = tryEvaluateDeterministic(rule, {
@@ -5366,6 +5452,56 @@ export async function POST(request: NextRequest) {
               reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
             }),
           )
+          continue
+        }
+
+        // Deterministic guard for video testimonials:
+        // avoid AI hallucinated PASS when no concrete video evidence exists.
+        if (isVideoTestimonialRuleDet) {
+          const websiteTextLower = (fullVisibleText || websiteContent || '').toLowerCase()
+          const hasStrictSectionText =
+            /\b(video testimonials?|customer videos?|watch customer videos|video reviews?)\b/i.test(
+              websiteTextLower,
+            )
+          const hasStrictPlayableSignal =
+            /\b(play\s*button|video\s*player|watch\s+video|youtube|vimeo|\.mp4|▶)\b/i.test(
+              websiteTextLower,
+            )
+          const hasStrongNonDomEvidence = hasStrictSectionText && hasStrictPlayableSignal
+          const hasHtmlMarkerEvidence = !!videoHtmlFallbackContext?.strong
+
+          if (customerReviewVideoFound || hasStrongNonDomEvidence || hasHtmlMarkerEvidence) {
+            const reason = customerReviewVideoFound
+              ? customerReviewVideoEvidence.length > 0
+                ? `Customer video testimonials were detected on the page: ${customerReviewVideoEvidence
+                    .slice(0, 2)
+                    .join('; ')}.`
+                : 'Customer video testimonials were detected on the product page.'
+              : hasStrongNonDomEvidence
+                ? 'Video testimonial section text and playable video signals were detected on the product page.'
+                : `UGC video/testimonial HTML markers were detected (${(videoHtmlFallbackContext?.hits || []).slice(0, 4).join(', ')}).`
+            results.push(
+              withCheckpoint({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: true,
+                reason: formatUserFriendlyRuleResult(rule, true, reason),
+              }),
+            )
+          } else {
+            results.push(
+              withCheckpoint({
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                passed: false,
+                reason: formatUserFriendlyRuleResult(
+                  rule,
+                  false,
+                  'No customer video testimonials were detected on the product page.',
+                ),
+              }),
+            )
+          }
           continue
         }
 
@@ -6831,13 +6967,26 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
             // Intentionally no broad UGC text-only auto-pass here.
             // Require DOM confirmation or concrete visual evidence from AI response.
-            // Final guardrail: when DOM found no customer-review videos and the page has no explicit
-            // video-testimonial section evidence, never allow a PASS from ambiguous AI wording.
-            const hasStrictOnPageVideoEvidence =
-              hasCustomerVideoTextSignal ||
-              /\b(video testimonials?|customer videos?|review videos?)\b/i.test(websiteTextLower)
-            if (!customerReviewVideoFound && analysis.passed && !hasStrictOnPageVideoEvidence) {
-              console.log('Video testimonials rule: no DOM video evidence and no strict on-page video signals. Forcing FAIL.')
+            // Final guardrail: when DOM found no customer-review videos, require strong combined evidence.
+            // This prevents false PASS from ambiguous AI wording on pages that only have text/photo reviews.
+            const hasStrictSectionText =
+              /\b(video testimonials?|customer videos?|watch customer videos|video reviews?)\b/i.test(
+                websiteTextLower,
+              )
+            const hasStrictPlayableSignal =
+              /\b(play\s*button|video\s*player|watch\s+video|youtube|vimeo|\.mp4|▶)\b/i.test(
+                websiteTextLower,
+              )
+            const hasStrongNonDomEvidence =
+              hasStrictSectionText &&
+              hasStrictPlayableSignal &&
+              reasonMentionsActualVideo &&
+              !hasNegativeIndicators
+
+            if (!customerReviewVideoFound && analysis.passed && !hasStrongNonDomEvidence) {
+              console.log(
+                'Video testimonials rule: DOM found no customer videos and non-DOM evidence is not strong enough. Forcing FAIL.',
+              )
               analysis.passed = false
               analysis.reason =
                 'No customer video testimonials were detected on this product page. The page does not show a clear customer video/testimonial section with playable review videos.'
