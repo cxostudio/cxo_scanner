@@ -627,8 +627,12 @@ export default function ScannerPage() {
                             data-cxo-btn="primary"
                             className="flex items-center justify-between w-full bg-[#09090B] text-white rounded-[10px] px-[15px] py-[16px] max-sm:transition-none md:transition-opacity"
                         >
-                            <span className="text-[14.8px] font-semibold leading-[16px] tracking-[0.48px]">Continue with
-                                the full CRO system</span>
+                            <span className="text-[14.8px] font-semibold leading-[16px] tracking-[0.48px] sm:hidden">
+                              Get the full CRO system
+                            </span>
+                            <span className="hidden text-[14.8px] font-semibold leading-[16px] tracking-[0.48px] sm:inline">
+                              Continue with the full CRO system
+                            </span>
                             <svg className="w-4 h-4 ml-2 shrink-0" fill="none" viewBox="0 0 24 24"
                                 stroke="currentColor" stroke-width="2.5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
