@@ -1,6 +1,6 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Inter+Tight:ital,wght@0,100..900;1,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
 .loading {
   display: inline-block;
   width: 20px;
@@ -111,7 +111,7 @@
 }
 
 .custom-list a {
-  color: #2563eb; 
+  color: #2563eb;
   font-weight: 500;
 }
 
@@ -141,12 +141,12 @@
 
 .gradient{
   position: relative;
-  z-index: 1; 
+  z-index: 1;
 }
 
 .gradient:after{
     content: "";
-    width: 100%; 
+    width: 100%;
     height: 214px;
     background: linear-gradient(180deg, rgba(243, 244, 246, 0.00) 0%, #F3F4F6 71.63%);
     position: absolute;
@@ -166,4 +166,243 @@
 
 .back-to-top-float {
   animation: back-to-top-float 2s ease-in-out infinite;
+}
+
+/* =============================================================================
+   CXO Typography Preview Script — v6 (production global)
+   v6 fix: primary button now stays BLACK regardless of which Tailwind
+            dark-bg class it uses (bg-black, bg-zinc-800/900/950,
+            bg-neutral-800/900, bg-stone-900, bg-gray-900, bg-slate-900,
+            bg-cxo-ink, or arbitrary bg-[#0...] values).
+   Container: [data-cxo-container="wide"] plus .cxo-container-wide (alias).
+   ============================================================================= */
+
+/* === FONT FAMILIES === */
+body, p, li, label, input, textarea, select {
+  font-family: 'Inter', sans-serif !important;
+}
+.font-plus-jakarta,
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+button, a.bg-black, a.bg-zinc-900, a.bg-zinc-950, a.bg-neutral-900,
+a.bg-white, a.border, .font-inter, [role="button"] {
+  font-family: 'Inter Tight', sans-serif !important;
+}
+
+/* === BODY === */
+body {
+  color: #4b5563;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+
+/* === HEADINGS === */
+h1, h2, h3, h4, h5, h6 {
+  color: #09090b !important;
+  font-weight: 600 !important;
+}
+h1 { font-size: 60px !important; letter-spacing: -0.03em !important; line-height: 1.2 !important; }
+h2 { font-size: 48px !important; letter-spacing: -0.04em !important; line-height: 1.4 !important; }
+h3 { font-size: 24px !important; letter-spacing: -0.03em !important; line-height: 1.4 !important; }
+h6 { font-size: 20px !important; letter-spacing: -0.01em !important; line-height: 1.5 !important; }
+
+@media (max-width: 1199px) and (min-width: 810px) {
+  h1 { font-size: 44px !important; }
+  h2 { font-size: 38px !important; }
+  h3 { font-size: 24px !important; }
+  h6 { font-size: 18px !important; }
+}
+
+@media (max-width: 809px) {
+  body { letter-spacing: 0.03em; }
+  h1 { font-size: 40px !important; }
+  h2 { font-size: 28px !important; }
+  h3 { font-size: 23px !important; letter-spacing: -0.03em !important; }
+  h6 { font-size: 16px !important; }
+}
+
+/* ============================================================
+   BUTTONS — shared layout (primary + secondary share these)
+   ============================================================ */
+button.bg-black, button.bg-zinc-900, button.bg-zinc-950, button.bg-neutral-900,
+a.bg-black, a.bg-zinc-900, a.bg-zinc-950, a.bg-neutral-900,
+button.bg-white, button.border, button.border-zinc-200, button.border-zinc-300,
+button.bg-zinc-50, button.bg-gray-50, button.bg-neutral-50,
+a.bg-white, a.border, a.border-zinc-200, a.border-zinc-300,
+a.bg-zinc-50, a.bg-gray-50, a.bg-neutral-50,
+a[class*="rounded"]:not([class*="bg-black"]):not([class*="bg-zinc-8"]):not([class*="bg-zinc-9"]):not([class*="bg-neutral-8"]):not([class*="bg-neutral-9"]):not([class*="bg-stone-9"]):not([class*="bg-gray-9"]):not([class*="bg-slate-9"]):not([class*="bg-cxo-ink"]):not([class*="bg-[#0"]),
+[data-cxo-btn="primary"], [data-cxo-btn="secondary"] {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  min-height: 47px !important;
+  height: auto !important;
+  padding: 14px 22px !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  font-family: 'Inter Tight', sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.03em !important;
+  line-height: 1.5 !important;
+  text-align: center !important;
+  transition: opacity 0.15s ease, background-color 0.15s ease !important;
+}
+
+/* === SECONDARY OUTLINE (default for non-dark-bg matches) === */
+button.bg-white, button.border, button.border-zinc-200, button.border-zinc-300,
+button.bg-zinc-50, button.bg-gray-50, button.bg-neutral-50,
+a.bg-white, a.border, a.border-zinc-200, a.border-zinc-300,
+a.bg-zinc-50, a.bg-gray-50, a.bg-neutral-50,
+a[class*="rounded"]:not([class*="bg-black"]):not([class*="bg-zinc-8"]):not([class*="bg-zinc-9"]):not([class*="bg-neutral-8"]):not([class*="bg-neutral-9"]):not([class*="bg-stone-9"]):not([class*="bg-gray-9"]):not([class*="bg-slate-9"]):not([class*="bg-cxo-ink"]):not([class*="bg-[#0"]),
+[data-cxo-btn="secondary"] {
+  background-color: #fff !important;
+  color: #09090b !important;
+  border: 1px solid #e4e4e7 !important;
+}
+
+button.bg-white:hover, a.bg-white:hover,
+[data-cxo-btn="secondary"]:hover {
+  background-color: #fafafa !important;
+}
+
+/* ============================================================
+   PRIMARY WINS — re-assert dark bg LAST so cascade favours it
+   Catches: bg-black, bg-zinc-800/900/950, bg-neutral-800/900,
+            bg-stone-900/950, bg-gray-900/950, bg-slate-900/950,
+            bg-cxo-ink, arbitrary bg-[#0...] values, [data-cxo-btn="primary"]
+   ============================================================ */
+button[class*="bg-black"], a[class*="bg-black"],
+button[class*="bg-zinc-9"], a[class*="bg-zinc-9"],
+button[class*="bg-zinc-8"], a[class*="bg-zinc-8"],
+button[class*="bg-neutral-9"], a[class*="bg-neutral-9"],
+button[class*="bg-neutral-8"], a[class*="bg-neutral-8"],
+button[class*="bg-stone-9"], a[class*="bg-stone-9"],
+button[class*="bg-gray-9"], a[class*="bg-gray-9"],
+button[class*="bg-slate-9"], a[class*="bg-slate-9"],
+button[class*="bg-cxo-ink"], a[class*="bg-cxo-ink"],
+button[class*="bg-[#0"], a[class*="bg-[#0"],
+[data-cxo-btn="primary"] {
+  background-color: #09090b !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+button[class*="bg-black"]:hover, a[class*="bg-black"]:hover,
+button[class*="bg-zinc-9"]:hover, a[class*="bg-zinc-9"]:hover,
+button[class*="bg-zinc-8"]:hover, a[class*="bg-zinc-8"]:hover,
+button[class*="bg-neutral-9"]:hover, a[class*="bg-neutral-9"]:hover,
+button[class*="bg-cxo-ink"]:hover, a[class*="bg-cxo-ink"]:hover,
+[data-cxo-btn="primary"]:hover {
+  opacity: 0.85 !important;
+  background-color: #09090b !important;
+}
+
+/* === Container width preview (optional) === */
+[data-cxo-container="wide"],
+.cxo-container-wide {
+  max-width: 560px !important;
+}
+@media (max-width: 1199px) and (min-width: 810px) {
+  [data-cxo-container="wide"],
+  .cxo-container-wide {
+    max-width: 480px !important;
+  }
+}
+@media (max-width: 809px) {
+  [data-cxo-container="wide"],
+  .cxo-container-wide {
+    max-width: 392px !important;
+  }
+}
+
+/* Scanner scroll FAB: exempt from CXO CTA rules — 48×54px, 10px radius (not a circle) */
+button.back-to-top-float {
+  min-height: unset !important;
+  width: 48px !important;
+  height: 54px !important;
+  min-width: 48px !important;
+  padding: 0 !important;
+  border-radius: 10px !important;
+  gap: 0 !important;
+  font-size: unset !important;
+  font-weight: unset !important;
+  letter-spacing: unset !important;
+  line-height: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease !important;
+}
+
+button.back-to-top-float:hover {
+  opacity: 1 !important;
+  background-color: #fafafa !important;
+  border-color: #d4d4d8 !important;
+  box-shadow:
+    0 20px 48px -18px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(0, 0, 0, 0.04) !important;
+}
+
+button.back-to-top-float:active {
+  background-color: #f4f4f5 !important;
+  box-shadow: 0 12px 28px -14px rgba(0, 0, 0, 0.28) !important;
+}
+
+button.back-to-top-float svg {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  min-width: 1.5rem !important;
+  min-height: 1.5rem !important;
+  flex-shrink: 0 !important;
+  display: block !important;
+  color: #18181b !important;
+  transition: transform 0.2s ease, color 0.2s ease !important;
+}
+
+button.back-to-top-float:hover svg {
+  transform: scale(1.08) !important;
+  color: #09090b !important;
+}
+
+button[data-cxo-btn]:focus-visible,
+a[data-cxo-btn]:focus-visible,
+button.back-to-top-float:focus-visible,
+button.bg-black:focus-visible {
+  outline: 2px solid #09090b !important;
+  outline-offset: 3px !important;
+}
+
+/* Choice rows (step 1 / 2): thin selected border + light hover (CXO secondary uses border !important) */
+button.cxo-select-option[data-selected='true'] {
+  border: 1px solid #09090b !important;
+  background-color: #fff !important;
+}
+
+button.cxo-select-option[data-selected='true'] p {
+  color: #09090b !important;
+  font-weight: 600 !important;
+}
+
+button.cxo-select-option[data-selected='true']:hover {
+  background-color: #fafafa !important;
+  border-color: #27272a !important;
+}
+
+button.cxo-select-option[data-selected='false']:hover {
+  background-color: #fafafa !important;
+  border-color: #d4d4d8 !important;
+}
+
+button.cxo-select-option:focus-visible {
+  outline: 2px solid #09090b !important;
+  outline-offset: 2px !important;
 }

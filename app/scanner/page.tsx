@@ -230,7 +230,7 @@ export default function ScannerPage() {
 
           {/* Hero preview: desktop canvas + overlapped mobile frame */}
           {url && (
-            <div className="relative overflow-visible px-2 sm:px-3 mb-[40x] sm:mb-[80px]">
+            <div className="relative overflow-visible px-2 sm:px-3 mb-[40px] sm:mb-[80px]">
               <div
                 className="pointer-events-none absolute inset-x-3 inset-y-3 -z-10 rounded-[2.2rem] bg-gradient-to-br from-zinc-200/70 via-zinc-100/45 to-white/20 blur-2xl sm:inset-x-7"
                 aria-hidden
@@ -372,7 +372,7 @@ export default function ScannerPage() {
                       )}
                       {remainingRatio > 0 && (
                         <motion.div
-                          className="h-full shrink-0 bg-zinc-300"
+                          className="h-full shrink-0 bg-red-500"
                           initial={{ width: '0%' }}
                           animate={{ width: `${remainingRatio * 100}%` }}
                           transition={redBarTransition}
@@ -491,6 +491,8 @@ export default function ScannerPage() {
               {hasMore && (
                 <div className="flex justify-center w-full md:max-w-[231px] mt-[-40px] mx-auto relative z-2">
                   <button
+                    type="button"
+                    data-cxo-btn="primary"
                     onClick={loadMore}
                     className="w-full py-3 px-6 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 max-sm:transition-none md:transition-colors cursor-pointer"
                   >
@@ -530,7 +532,7 @@ export default function ScannerPage() {
                     </h2>
                 </div>
 
-                <div className="relative pl-[58px] w-full max-w-[392px] mx-auto">
+                <div className="relative pl-[58px] w-full max-w-[392px] mx-auto cxo-container-wide">
                     <div className="absolute left-[13px] top-2 bottom-1 w-[7px] bg-[#D9D9D9] rounded-[10px]"></div>
                     <div className="absolute left-[13px] top-2 w-[7px] bg-[#757575] rounded-[10px] h-[110px]"></div>
                     <div className="relative mb-6">
@@ -620,8 +622,11 @@ export default function ScannerPage() {
                             className="text-[#757575] text-[14.5px] font-normal leading-[25.6px] tracking-[0.48px] mb-[11px]">
                             This is the full audit system we use internally at CXO studio.
                         </p>
-                        <a href="#"
-                            className="flex items-center justify-between w-full bg-[#09090B] text-white rounded-[10px] px-[15px] py-[16px] hover:bg-black/90 transition">
+                        <a
+                            href="#"
+                            data-cxo-btn="primary"
+                            className="flex items-center justify-between w-full bg-[#09090B] text-white rounded-[10px] px-[15px] py-[16px] max-sm:transition-none md:transition-opacity"
+                        >
                             <span className="text-[14.8px] font-semibold leading-[16px] tracking-[0.48px]">Continue with
                                 the full CRO system</span>
                             <svg className="w-4 h-4 ml-2 shrink-0" fill="none" viewBox="0 0 24 24"
@@ -695,8 +700,11 @@ export default function ScannerPage() {
                                 Weekly reports & strategy call
                             </li>
                         </ul>
-                        <a href="#"
-                            className="flex items-center justify-between w-full bg-white border border-gray-200 text-[#09090B] rounded-[10px] px-[15px] py-[16px] hover:bg-gray-50 transition">
+                        <a
+                            href="#"
+                            data-cxo-btn="secondary"
+                            className="flex items-center justify-between w-full bg-white border border-zinc-200 text-[#09090B] rounded-[10px] px-[15px] py-[16px] max-sm:transition-none md:transition-colors"
+                        >
                             <span className="text-[14.8px] font-semibold leading-[16px] tracking-[0.48px]">See if we can
                                 help you</span>
                             <svg className="w-4 h-4 ml-2 shrink-0" fill="none" viewBox="0 0 24 24"
@@ -714,9 +722,23 @@ export default function ScannerPage() {
           type="button"
           onClick={isAtTop ? scrollToBottom : scrollToTop}
           aria-label={isAtTop ? 'Scroll to bottom' : 'Back to top'}
-          className="back-to-top-float fixed bottom-6 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-900 shadow-[0_14px_30px_-12px_rgba(0,0,0,0.35)] sm:bottom-8 sm:right-8 cursor-pointer"
+          className="back-to-top-float fixed bottom-6 right-4 z-50 flex h-[54px] w-[48px] shrink-0 items-center justify-center rounded-[10px] border border-zinc-200 bg-white p-0 text-zinc-900 shadow-[0_14px_30px_-12px_rgba(0,0,0,0.35)] sm:bottom-8 sm:right-8 cursor-pointer"
         >
-          {isAtTop ? <ArrowDown className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
+          {isAtTop ? (
+            <ArrowDown
+              className="pointer-events-none shrink-0"
+              size={24}
+              strokeWidth={2.25}
+              aria-hidden
+            />
+          ) : (
+            <ArrowUp
+              className="pointer-events-none shrink-0"
+              size={24}
+              strokeWidth={2.25}
+              aria-hidden
+            />
+          )}
         </button>
       )}
     </main >

@@ -1183,7 +1183,7 @@ export default function Home() {
                     >
                       What's your biggest challenge right now?
                     </motion.h2>
-                    <div>
+                    <div role="radiogroup" aria-label="Biggest challenge">
                       {step1Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
@@ -1220,7 +1220,7 @@ export default function Home() {
                     >
                       What's your average online revenue?
                     </motion.h2>
-                    <div className="mt-8">
+                    <div className="mt-8" role="radiogroup" aria-label="Average online revenue">
                       {step2Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
