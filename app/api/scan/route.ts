@@ -1163,6 +1163,8 @@ export async function POST(request: NextRequest) {
       trustBadgesInfo: string
       containerDescription: string
     } | null = null
+    /** Save-for-later / wishlist / shopping list control beside primary buy CTA (deterministic rule). */
+    let wishlistNearCtaContext: { ctaFound: boolean; nearCta: boolean; evidence: string[] } | null = null
     let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
     let squareImageContext: {
       squareContainersFound: number
@@ -2723,6 +2725,261 @@ export async function POST(request: NextRequest) {
         }
       })
 
+      // Wishlist / save-for-later / shopping list near primary CTA (same scroll position as trust badges)
+      try {
+        wishlistNearCtaContext = await page.evaluate(() => {
+        function findPrimaryPurchaseCta(): HTMLElement | null {
+          const ctaPatterns = [
+            'add to bag',
+            'add to basket',
+            'add to cart',
+            'add to order',
+            'buy now',
+            'buy it now',
+            'purchase',
+            'checkout',
+            'pay now',
+            'order now',
+            'complete order',
+            'place order',
+            'add pack',
+            'get it now',
+          ]
+          const selectors =
+            'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+          let best: HTMLElement | null = null
+          let bestScore = 0
+          for (const el of candidates) {
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+            const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+            const combined = `${text} ${aria} ${val}`
+            if (!ctaPatterns.some((p) => combined.includes(p))) continue
+            const st = window.getComputedStyle(el)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
+            const r = el.getBoundingClientRect()
+            if (r.width < 4 || r.height < 4) continue
+            const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+            const inHeaderOnly =
+              !!el.closest('header, [class*="header" i], nav') &&
+              !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+            const inProduct = !!(
+              el.closest('form[action*="cart" i]') ||
+              el.closest('[class*="product-form" i]') ||
+              el.closest('[class*="product__" i]') ||
+              el.closest('[class*="product-info" i]') ||
+              el.closest('[class*="product-details" i]') ||
+              el.closest('[data-product-form]') ||
+              el.closest('[id*="product-form" i]') ||
+              el.closest('[class*="purchase" i]') ||
+              el.closest('[name="add"]') ||
+              el.closest('[class*="shopify" i]')
+            )
+            let score = r.width * r.height + (inProduct ? 800000 : 0)
+            if (inFooter) score *= 0.02
+            if (inHeaderOnly && !inProduct) score *= 0.05
+            if (score > bestScore) {
+              bestScore = score
+              best = el
+            }
+          }
+          return best
+        }
+
+        function isExcludedFarFromBuy(el: Element): boolean {
+          return !!el.closest(
+            'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+              '[class*="site-footer" i], [data-section-type="footer" i]',
+          )
+        }
+
+        function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
+          const c = cta.getBoundingClientRect()
+          const t = (el as HTMLElement).getBoundingClientRect()
+          if (c.height < 4 || t.height < 1) return false
+          const hz = t.left < c.right + 180 && t.right > c.left - 180
+          const gapBelow = t.top - c.bottom
+          const gapAbove = c.top - t.bottom
+          const nearBelow = gapBelow >= -40 && gapBelow <= 220
+          const nearAbove = gapAbove >= -32 && gapAbove <= 420
+          return hz && (nearBelow || nearAbove)
+        }
+
+        function isElementActuallyVisible(el: Element): boolean {
+          const h = el as HTMLElement
+          if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+          const st = window.getComputedStyle(h)
+          if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
+          const r = h.getBoundingClientRect()
+          return r.width >= 4 && r.height >= 4
+        }
+
+        function getPurchaseBlock(el: Element | null): Element | null {
+          if (!el) return null
+          return (
+            el.closest('form[action*="cart" i]') ||
+            el.closest('[class*="product-form" i]') ||
+            el.closest('[class*="product__info" i]') ||
+            el.closest('[class*="product-info" i]') ||
+            el.closest('[class*="purchase" i]') ||
+            el.closest('[data-product-form]') ||
+            el.closest('[id*="product-form" i]')
+          )
+        }
+
+        function isInSamePurchaseBlock(cta: HTMLElement, el: Element): boolean {
+          const ctaBlock = getPurchaseBlock(cta)
+          const elBlock = getPurchaseBlock(el)
+          return !!ctaBlock && !!elBlock && ctaBlock === elBlock
+        }
+
+        function getProductMerchRoot(cta: HTMLElement): Element | null {
+          return (
+            cta.closest('main, [role="main"]') ||
+            cta.closest('[class*="pip-product" i]') ||
+            cta.closest('[class*="product-information" i]') ||
+            cta.closest('[class*="product-details" i]') ||
+            cta.closest('[id*="product" i]') ||
+            cta.closest('article') ||
+            null
+          )
+        }
+
+        function inHeaderOnlyChrome(el: Element): boolean {
+          return !!(el.closest('header, [role="banner"]') && !el.closest('main, [role="main"]'))
+        }
+
+        /** Title / price / icon row through buy area — not global header-only links. */
+        function isEasilyVisibleNearBuyFlow(cta: HTMLElement, el: Element): boolean {
+          if (inHeaderOnlyChrome(el)) return false
+          const root = getProductMerchRoot(cta)
+          if (!root || !root.contains(el)) return false
+          const cr = cta.getBoundingClientRect()
+          const er = (el as HTMLElement).getBoundingClientRect()
+          const rr = (root as HTMLElement).getBoundingClientRect()
+          const hz = er.right >= cr.left - 220 && er.left <= cr.right + 220
+          const bandTop = Math.min(cr.top, rr.top) - 40
+          const bandBottom = cr.bottom + 480
+          const vertOverlap = er.bottom >= bandTop && er.top <= bandBottom
+          return hz && vertOverlap
+        }
+
+        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
+          if (!cta) return false
+          if (isExcludedFarFromBuy(el)) return false
+          if (!isElementActuallyVisible(el)) return false
+          if (cta === el || cta.contains(el)) return true
+          if (isInSamePurchaseBlock(cta, el)) return true
+          if (pixelNearBuyButton(cta, el)) return true
+          return isEasilyVisibleNearBuyFlow(cta, el)
+        }
+
+        function controlBlob(el: HTMLElement): string {
+          const attrs = Array.from(el.attributes || [])
+            .map((a) => `${a.name}=${a.value}`)
+            .join(' ')
+          return [
+            el.getAttribute('aria-label'),
+            el.getAttribute('title'),
+            el.getAttribute('href'),
+            (el.textContent || '').replace(/\s+/g, ' ').trim(),
+            (el.className || '').toString(),
+            el.id,
+            attrs,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+        }
+
+        function matchesSaveLater(h: string, el: HTMLElement): boolean {
+          const inner = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+          const lab = (el.getAttribute('aria-label') || '').toLowerCase()
+          const combined = `${inner} ${lab}`
+          if (
+            /\b(add to (cart|bag|basket)|buy it now|buy now|checkout|place order)\b/.test(combined) &&
+            !/\b(wishlist|list|save|favourite|favorite|later)\b/i.test(combined)
+          ) {
+            return false
+          }
+          const phrase =
+            /\b(wishlist|wish-list|wish_list|save for later|save-for-later|favourites?\b|favorites?\b|shopping list|shopping-list|shopping_list|shoppinglist|add to list|save to list|my lists?\b|love list|save item|saved items?)\b/i
+          const href = (el.getAttribute('href') || '').toLowerCase()
+          const hrefOk = /wishlist|favorites|favourites|saved[-_]items|shopping[-_]list|wish-list/i.test(href)
+          const dataOrClass = /wishlist|favorite|favourite|save[-_]for|shopping[-_\s]*list|shoppinglist/i.test(h)
+          return phrase.test(h) || hrefOk || dataOrClass
+        }
+
+        function svgHintBlob(el: HTMLElement): string {
+          let s = ''
+          el.querySelectorAll('svg title, svg [aria-label], use').forEach((n) => {
+            s +=
+              (n.textContent || '') +
+              ' ' +
+              (n.getAttribute?.('aria-label') || '') +
+              ' ' +
+              (n.getAttribute?.('href') || n.getAttribute?.('xlink:href') || '') +
+              ' '
+          })
+          return s.toLowerCase()
+        }
+
+        /** Text/href match OR icon-style control in the product buy flow (e.g. heart beside title). */
+        function matchesWishlistControl(cta: HTMLElement, h: string, el: HTMLElement): boolean {
+          if (matchesSaveLater(h, el)) return true
+          if (!isEasilyVisibleNearBuyFlow(cta, el)) return false
+          if (/\b(share|close|search|zoom|menu|play|video|more items|quantity)\b/i.test(h)) return false
+          const deep = `${h} ${svgHintBlob(el)} ${(el.innerHTML || '').slice(0, 500).toLowerCase()}`
+          if (
+            /wish|favor|shopping[\s_-]*list|add[\s_-]*to[\s_-]*list|save[\s_-]*for|save for later|save-for-later|bookmark|registry|remind|heart|love/i.test(
+              deep,
+            )
+          ) {
+            return true
+          }
+          const r = el.getBoundingClientRect()
+          const compact = r.width > 0 && r.height > 0 && r.width <= 92 && r.height <= 92
+          const hasSvg = !!el.querySelector('svg')
+          const textLen = (el.textContent || '').replace(/\s+/g, ' ').trim().length
+          if (compact && hasSvg && textLen <= 4) return true
+          return false
+        }
+
+        const cta = findPrimaryPurchaseCta()
+        if (!cta) {
+          return { ctaFound: false, nearCta: false, evidence: [] as string[] }
+        }
+        try {
+          cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+        } catch {
+          /* ignore */
+        }
+
+        const evidence: string[] = []
+        const controls = document.querySelectorAll('button, a[href], [role="button"], input[type="button"]')
+        for (const el of Array.from(controls) as HTMLElement[]) {
+          if (el === cta || cta.contains(el)) continue
+          if (!nearPrimaryCta(cta, el)) continue
+          const h = controlBlob(el)
+          if (!matchesWishlistControl(cta, h, el)) continue
+          const label = (
+            el.getAttribute('aria-label') ||
+            el.getAttribute('title') ||
+            (el.textContent || '').replace(/\s+/g, ' ').trim() ||
+            'Wishlist / save-for-later control'
+          ).slice(0, 120)
+          if (label) evidence.push(label)
+          if (evidence.length >= 5) break
+        }
+
+        return { ctaFound: true, nearCta: evidence.length > 0, evidence }
+        })
+      } catch (wishlistScanErr) {
+        console.warn('[scan] wishlist near CTA DOM snapshot failed:', wishlistScanErr)
+        wishlistNearCtaContext = null
+      }
+
       // Scroll variant/product form into view so client-side selection state is applied, then wait for JS
       await page.evaluate(() => {
         const form = document.querySelector('form[action*="/cart/add"], [id*="product-form"], [class*="product-form"], [class*="variant"]')
@@ -3397,6 +3654,20 @@ export async function POST(request: NextRequest) {
       } catch (mainNavErr) {
         console.warn('[scan] main navigation DOM snapshot failed:', mainNavErr)
         mainNavContext = null
+      }
+
+      if (wishlistNearCtaContext) {
+        const wishlistBlock = [
+          '',
+          '--- WISHLIST / SAVE FOR LATER NEAR CTA (DOM) ---',
+          `Primary CTA found: ${wishlistNearCtaContext.ctaFound ? 'YES' : 'NO'}`,
+          `Save-for-later control near primary CTA: ${wishlistNearCtaContext.nearCta ? 'YES' : 'NO'}`,
+          `Evidence: ${wishlistNearCtaContext.evidence.length ? wishlistNearCtaContext.evidence.join(' | ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${wishlistBlock}`
+        console.log(
+          `[scan] wishlist near CTA: cta=${wishlistNearCtaContext.ctaFound} near=${wishlistNearCtaContext.nearCta}`,
+        )
       }
 
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +

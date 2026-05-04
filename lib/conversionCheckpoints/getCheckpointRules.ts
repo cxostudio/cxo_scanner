@@ -110,6 +110,7 @@ export const TARGET_CHECKPOINT_RECORD_IDS = [
   'rec33A6aJXon8YXfR',
   'recLehZKzun1Rxv0Z',
   'recYUxusypKnfViyM',
+  'recSKgDYp5GAl0g7B'
 ] as const
 
 function buildRetrieveRecordUrl(listRecordsUrl: string, recordId: string): string {
