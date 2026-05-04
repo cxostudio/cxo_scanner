@@ -1750,6 +1750,63 @@ export async function POST(request: NextRequest) {
             })
           }
 
+          // Shopify / headless: section titles as buttons or <details> summaries (not always h2–h4)
+          try {
+            const navHits = new Set<string>()
+            const matchesDetailLabel = (raw: string): boolean => {
+              const t = raw.replace(/\s+/g, ' ').trim().toLowerCase()
+              if (!t || t.length > 72) return false
+              const patterns = [
+                /^product details?$/i,
+                /^description$/i,
+                /^ingredients?$/i,
+                /^nutritional information$/i,
+                /^nutrition info$/i,
+                /^shipping(\s+&?\s*returns?)?$/i,
+                /^delivery$/i,
+                /^returns?$/i,
+                /^reviews?$/i,
+                /^specifications?$/i,
+                /^how to use/i,
+                /^faq$/i,
+                /^benefits$/i,
+                /^features$/i,
+                /^what'?s inside$/i,
+              ]
+              if (patterns.some((p) => p.test(t))) return true
+              if (t.includes('nutritional') && t.includes('information')) return true
+              if (t.includes('product') && t.includes('detail')) return true
+              return false
+            }
+            const roots = Array.from(
+              document.querySelectorAll('main, [role="main"], [id*="product" i], [class*="product" i]'),
+            ) as HTMLElement[]
+            const seen = new Set<Element>()
+            for (const root of roots) {
+              root
+                .querySelectorAll(
+                  'button, [role="tab"], [role="button"], details > summary, a[class*="tab" i]',
+                )
+                .forEach((el) => {
+                  if (seen.has(el)) return
+                  if (el.closest('footer, [role="contentinfo"], header, [role="banner"]')) return
+                  const lab = (el.textContent || '').replace(/\s+/g, ' ').trim()
+                  if (!matchesDetailLabel(lab)) return
+                  seen.add(el)
+                  navHits.add(lab.slice(0, 48).toLowerCase())
+                })
+            }
+            if (navHits.size >= 2) {
+              foundTabs.push({
+                type: 'product-detail-nav',
+                count: navHits.size,
+                selector: 'main-section-buttons-or-summaries',
+              })
+            }
+          } catch {
+            /* ignore */
+          }
+
           // Check for collapsible content sections
           const collapsibleSections = document.querySelectorAll('[class*="content"], [class*="panel"], [class*="section"]')
           let collapsibleCount = 0

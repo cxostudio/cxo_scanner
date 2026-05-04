@@ -14,6 +14,10 @@ import {
   evaluateIncludedPackNearCtaRule,
   isIncludedPackNearCtaRule,
 } from '@/lib/rules/includedPackNearCtaRule'
+import {
+  evaluateProductTabsAccordionRule,
+  isProductTabsAccordionRule,
+} from '@/lib/rules/productTabsAccordionRule'
 import { evaluateWishlistNearCtaRule, isWishlistNearCtaRule } from '@/lib/rules/wishlistNearCtaRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
@@ -779,6 +783,10 @@ export function tryEvaluateDeterministic(
   if (isIncludedPackNearCtaRule(rule)) {
     const packResult = evaluateIncludedPackNearCtaRule(rule, context.keyElementsString)
     if (packResult !== null) return packResult
+  }
+  if (isProductTabsAccordionRule(rule)) {
+    const tabsResult = evaluateProductTabsAccordionRule(rule, context.keyElementsString)
+    if (tabsResult !== null) return tabsResult
   }
   if (isVerbUrgencyCtaLabelRule(rule)) {
     const ctaVerbResult = evaluateVerbUrgencyCtaLabelRule(rule, context.keyElementsString)
