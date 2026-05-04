@@ -1183,7 +1183,7 @@ export default function Home() {
                     >
                       What's your biggest challenge right now?
                     </motion.h2>
-                    <div>
+                    <div role="radiogroup" aria-label="Biggest challenge">
                       {step1Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
@@ -1220,7 +1220,7 @@ export default function Home() {
                     >
                       What's your average online revenue?
                     </motion.h2>
-                    <div className="mt-8">
+                    <div className="mt-8" role="radiogroup" aria-label="Average online revenue">
                       {step2Buttons.map((button, i) => (
                         <motion.div
                           key={button.value}
@@ -1352,7 +1352,7 @@ export default function Home() {
                   className='flex'
                 >
                   {isStartingScan ? (
-                    <div className="w-full py-6 rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
+                    <div className="w-full h-[50px] py-[12px] flex items-center justify-center rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
                       <span className="inline-flex items-center justify-center gap-2">
                         <span
                           className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"

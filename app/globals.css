@@ -1,6 +1,6 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Inter+Tight:ital,wght@0,100..900;1,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
 .loading {
   display: inline-block;
   width: 20px;
@@ -40,12 +40,7 @@
 .loader span:nth-child(2) {
   animation-delay: -0.16s;
 }
-.font-inter {
-  font-family: "Inter Tight", sans-serif;
-}
-.font-plus-jakarta {
-  font-family: "Plus Jakarta Sans", sans-serif;
-}
+
 .loader span:nth-child(3) {
   animation-delay: 0s;
 }
@@ -111,7 +106,7 @@
 }
 
 .custom-list a {
-  color: #2563eb; 
+  color: #2563eb;
   font-weight: 500;
 }
 
@@ -135,18 +130,15 @@
     min-height: 328px;
   }
 } */
-.font-inter-light {
-  font-family: "Inter", sans-serif;
-}
 
 .gradient{
   position: relative;
-  z-index: 1; 
+  z-index: 1;
 }
 
 .gradient:after{
     content: "";
-    width: 100%; 
+    width: 100%;
     height: 214px;
     background: linear-gradient(180deg, rgba(243, 244, 246, 0.00) 0%, #F3F4F6 71.63%);
     position: absolute;
@@ -166,4 +158,142 @@
 
 .back-to-top-float {
   animation: back-to-top-float 2s ease-in-out infinite;
+}
+
+/* =============================================================================
+   CXO typography — single source of truth (globals only).
+
+   Applies: font-family, letter-spacing, line-height (no font-size), font-weight
+   where specified, color. Omits margins, padding, borders, backgrounds, hovers,
+   flex/size/position. Fonts loaded once via @import above.
+
+   Body: Inter. Headings (h1–h6): Plus Jakarta Sans + CXO tracking/leading bands.
+   Buttons / button-like CTAs / .font-inter: Inter Tight + CXO tracking/leading.
+   Form fields: inherit text rhythm + color from body.
+   ============================================================================= */
+
+body {
+  font-family: 'Inter', sans-serif;
+  color: #4b5563;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+
+p,
+li,
+label {
+  font-family: 'Inter', sans-serif;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+/* Utility aliases (no duplicate stacks elsewhere in this file) */
+.font-inter-light {
+  font-family: 'Inter', sans-serif;
+}
+
+.font-plus-jakarta {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 600;
+  color: #09090b;
+}
+
+h1 {
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+h2 {
+  letter-spacing: -0.04em;
+  line-height: 1.4;
+}
+
+h3 {
+  letter-spacing: -0.03em;
+  line-height: 1.4;
+}
+
+h4,
+h5 {
+  letter-spacing: -0.03em;
+  line-height: 1.4;
+}
+
+h6 {
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+}
+
+/* Buttons & CTA anchors: Inter Tight (matches CXO “control” typography) */
+button,
+.font-inter,
+[role='button'],
+a.bg-black,
+a.bg-zinc-900,
+a.bg-zinc-950,
+a.bg-neutral-900,
+a.bg-white,
+a.border,
+a.border-zinc-200,
+a.border-zinc-300 {
+  font-family: 'Inter Tight', sans-serif;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+}
+
+@media (max-width: 809px) {
+  body {
+    letter-spacing: 0.03em;
+  }
+
+  /* CXO compact heading rhythm on small viewports — tracking only */
+  h1 {
+    letter-spacing: -0.03em;
+  }
+
+  h2 {
+    letter-spacing: -0.04em;
+  }
+
+  h3 {
+    letter-spacing: -0.03em;
+  }
+
+  h6 {
+    letter-spacing: -0.01em;
+  }
+}
+
+@media (min-width: 810px) and (max-width: 1199px) {
+  h1 {
+    letter-spacing: -0.03em;
+  }
+
+  h2 {
+    letter-spacing: -0.04em;
+  }
+
+  h3 {
+    letter-spacing: -0.03em;
+  }
+
+  h6 {
+    letter-spacing: -0.01em;
+  }
 }
