@@ -10,6 +10,10 @@ import type { FooterNewsletterSnapshot } from '@/lib/rules/footerNewsletterRule'
 import { evaluateFooterNewsletterRule } from '@/lib/rules/footerNewsletterRule'
 import type { FooterCustomerSupportSnapshot } from '@/lib/rules/footerCustomerSupportRule'
 import { evaluateFooterCustomerSupportRule } from '@/lib/rules/footerCustomerSupportRule'
+import {
+  evaluateIncludedPackNearCtaRule,
+  isIncludedPackNearCtaRule,
+} from '@/lib/rules/includedPackNearCtaRule'
 import { evaluateWishlistNearCtaRule, isWishlistNearCtaRule } from '@/lib/rules/wishlistNearCtaRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
@@ -771,6 +775,10 @@ export function tryEvaluateDeterministic(
   if (isWishlistNearCtaRule(rule)) {
     const wishlistResult = evaluateWishlistNearCtaRule(rule, context.keyElementsString)
     if (wishlistResult !== null) return wishlistResult
+  }
+  if (isIncludedPackNearCtaRule(rule)) {
+    const packResult = evaluateIncludedPackNearCtaRule(rule, context.keyElementsString)
+    if (packResult !== null) return packResult
   }
   if (isVerbUrgencyCtaLabelRule(rule)) {
     const ctaVerbResult = evaluateVerbUrgencyCtaLabelRule(rule, context.keyElementsString)

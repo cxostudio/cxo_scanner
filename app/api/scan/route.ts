@@ -1165,6 +1165,13 @@ export async function POST(request: NextRequest) {
     } | null = null
     /** Save-for-later / wishlist / shopping list control beside primary buy CTA (deterministic rule). */
     let wishlistNearCtaContext: { ctaFound: boolean; nearCta: boolean; evidence: string[] } | null = null
+    /** Bundle/kit: included or bonus items listed near primary buy CTA (deterministic rule). */
+    let includedPackNearCtaContext: {
+      ctaFound: boolean
+      bundleLikely: boolean
+      includedNearCta: boolean
+      evidence: string[]
+    } | null = null
     let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
     let squareImageContext: {
       squareContainersFound: number
@@ -2907,7 +2914,10 @@ export async function POST(request: NextRequest) {
             /\b(wishlist|wish-list|wish_list|save for later|save-for-later|favourites?\b|favorites?\b|shopping list|shopping-list|shopping_list|shoppinglist|add to list|save to list|my lists?\b|love list|save item|saved items?)\b/i
           const href = (el.getAttribute('href') || '').toLowerCase()
           const hrefOk = /wishlist|favorites|favourites|saved[-_]items|shopping[-_]list|wish-list/i.test(href)
-          const dataOrClass = /wishlist|favorite|favourite|save[-_]for|shopping[-_\s]*list|shoppinglist/i.test(h)
+          const dataOrClass =
+            /(wishlist|wish-list|wish_list|saved-for-later|save-for-later|shopping-list|shopping_list|shoppinglist|towishlist|add-to-wish|addtowish|smartwishlist|swym|icon-wish|wish-icon|wishlist-icon|favorite-btn|favourite-btn|favorites-btn|favourites-btn|save[-_]for[-_]later|heart-icon|icon-heart)/i.test(
+              h,
+            )
           return phrase.test(h) || hrefOk || dataOrClass
         }
 
@@ -2925,24 +2935,40 @@ export async function POST(request: NextRequest) {
           return s.toLowerCase()
         }
 
-        /** Text/href match OR icon-style control in the product buy flow (e.g. heart beside title). */
+        /**
+         * Text/href/class match OR strong wishlist tokens on the control only (no loose innerHTML —
+         * avoids false PASS from substrings like "Swiss" → "wish", or generic heart icons).
+         */
         function matchesWishlistControl(cta: HTMLElement, h: string, el: HTMLElement): boolean {
           if (matchesSaveLater(h, el)) return true
           if (!isEasilyVisibleNearBuyFlow(cta, el)) return false
-          if (/\b(share|close|search|zoom|menu|play|video|more items|quantity)\b/i.test(h)) return false
-          const deep = `${h} ${svgHintBlob(el)} ${(el.innerHTML || '').slice(0, 500).toLowerCase()}`
           if (
-            /wish|favor|shopping[\s_-]*list|add[\s_-]*to[\s_-]*list|save[\s_-]*for|save for later|save-for-later|bookmark|registry|remind|heart|love/i.test(
-              deep,
+            /\b(share|close|search|zoom|menu|play|video|more items|quantity|swiper|carousel|prev|next|thumbnail|minus|plus|trash|delete|remove|edit|sort|filter|accordion|payment|klarna|paypal|locale|language|country|size chart|compare|notify|tiktok|pinterest|whatsapp|copy|enlarge|360)\b/i.test(
+              h,
             )
+          ) {
+            return false
+          }
+          const svgPart = svgHintBlob(el)
+          const attrs = `${h} ${svgPart}`.toLowerCase()
+          const strictToken =
+            /wishlist|wish-list|wish_list|save for later|save-for-later|shopping[\s_-]*list|shoppinglist|add[\s_-]*to[\s_-]*list|save[\s_-]*to[\s_-]*list|my lists?\b|favorites?[-_\s]?(btn|button|icon)|favourites?[-_\s]?(btn|button|icon)|saved items?|bookmark|registry|towishlist|add-to-wish|smartwishlist|swym|icon-wish|wish-icon|icon-heart|heart-icon|wishlist-|back-in-stock|\bwish\b(?!bone)/i.test(
+              attrs,
+            )
+          if (strictToken) return true
+
+          const aria = (el.getAttribute('aria-label') || '').trim()
+          if (
+            aria.length >= 4 &&
+            aria.length <= 120 &&
+            /\b(wishlist|wish list|save for later|favorites?|favourites?|shopping list|add to list|save to list|remind me|save item)\b/i.test(
+              aria,
+            ) &&
+            !/\b(swiss|wish you well|wishbone)\b/i.test(aria.toLowerCase())
           ) {
             return true
           }
-          const r = el.getBoundingClientRect()
-          const compact = r.width > 0 && r.height > 0 && r.width <= 92 && r.height <= 92
-          const hasSvg = !!el.querySelector('svg')
-          const textLen = (el.textContent || '').replace(/\s+/g, ' ').trim().length
-          if (compact && hasSvg && textLen <= 4) return true
+
           return false
         }
 
@@ -2978,6 +3004,160 @@ export async function POST(request: NextRequest) {
       } catch (wishlistScanErr) {
         console.warn('[scan] wishlist near CTA DOM snapshot failed:', wishlistScanErr)
         wishlistNearCtaContext = null
+      }
+
+      // Bundle / kit: included or bonus items (e.g. free gifts list) near primary buy CTA
+      try {
+        includedPackNearCtaContext = await page.evaluate(() => {
+          function findPrimaryPurchaseCta(): HTMLElement | null {
+            const ctaPatterns = [
+              'add to bag',
+              'add to basket',
+              'add to cart',
+              'add to order',
+              'buy now',
+              'buy it now',
+              'purchase',
+              'checkout',
+              'pay now',
+              'order now',
+              'complete order',
+              'place order',
+              'add pack',
+              'get it now',
+            ]
+            const selectors =
+              'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+            const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+            let best: HTMLElement | null = null
+            let bestScore = 0
+            for (const el of candidates) {
+              const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+              const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+              const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+              const combined = `${text} ${aria} ${val}`
+              if (!ctaPatterns.some((p) => combined.includes(p))) continue
+              const st = window.getComputedStyle(el)
+              if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
+              const r = el.getBoundingClientRect()
+              if (r.width < 4 || r.height < 4) continue
+              const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+              const inHeaderOnly =
+                !!el.closest('header, [class*="header" i], nav') &&
+                !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+              const inProduct = !!(
+                el.closest('form[action*="cart" i]') ||
+                el.closest('[class*="product-form" i]') ||
+                el.closest('[class*="product__" i]') ||
+                el.closest('[class*="product-info" i]') ||
+                el.closest('[class*="product-details" i]') ||
+                el.closest('[data-product-form]') ||
+                el.closest('[id*="product-form" i]') ||
+                el.closest('[class*="purchase" i]') ||
+                el.closest('[name="add"]') ||
+                el.closest('[class*="shopify" i]')
+              )
+              let score = r.width * r.height + (inProduct ? 800000 : 0)
+              if (inFooter) score *= 0.02
+              if (inHeaderOnly && !inProduct) score *= 0.05
+              if (score > bestScore) {
+                bestScore = score
+                best = el
+              }
+            }
+            return best
+          }
+
+          function getProductMerchRoot(cta: HTMLElement): Element | null {
+            return (
+              cta.closest('main, [role="main"]') ||
+              cta.closest('[class*="pip-product" i]') ||
+              cta.closest('[class*="product-information" i]') ||
+              cta.closest('[class*="product-details" i]') ||
+              cta.closest('[id*="product" i]') ||
+              cta.closest('article') ||
+              null
+            )
+          }
+
+          const cta = findPrimaryPurchaseCta()
+          const path = window.location.pathname.toLowerCase()
+          const h1 = (document.querySelector('h1')?.textContent || '').toLowerCase()
+          const docTitle = (document.title || '').toLowerCase()
+          const pathTitle = `${path} ${h1} ${docTitle}`
+
+          const bundleLikely =
+            /starter-kit|starter kit|gift-set|sample-pack|value-pack|\/bundles\/|-bundle-|combo-pack|2-pack|3-pack|bogo|subscription-box/i.test(
+              pathTitle,
+            ) ||
+            /\b(starter kit|gift set|value pack|bundle deal|kit includes|pack includes)\b/i.test(pathTitle) ||
+            /\b(what'?s included|items included|everything you get)\b/i.test(h1 + docTitle)
+
+          const root = cta ? getProductMerchRoot(cta) : document.querySelector('main, [role="main"]')
+          const zoneFull = root
+            ? ((root as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            : (document.body.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+          const low = zoneFull
+          const idx = Math.max(
+            low.indexOf('add to bag'),
+            low.indexOf('add to cart'),
+            low.indexOf('buy it now'),
+            low.indexOf('buy now'),
+          )
+          const span = 1800
+          const nearWindow =
+            idx >= 0 ? low.slice(Math.max(0, idx - span), Math.min(low.length, idx + span)) : low.slice(0, 3200)
+
+          const textReinforcesBundle =
+            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting)\b/i.test(
+              nearWindow,
+            )
+          const bundleLikelyFinal = bundleLikely || (/\b(kit|bundle)\b/i.test(h1) && textReinforcesBundle)
+
+          const evidence: string[] = []
+          let score = 0
+          if (/what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|you'?re getting/i.test(nearWindow)) {
+            score += 4
+            evidence.push('explicit included / kit copy')
+          }
+          if (/free\s+gifts?\s*(with|worth)?|bonus|complimentary|free\s+sample/i.test(nearWindow)) {
+            score += 2
+            evidence.push('free gifts or bonus language')
+          }
+          const money = (nearWindow.match(/[$£€][\d.,]+/g) || []).length
+          if (money >= 4) {
+            score += 3
+            evidence.push(`${money} price lines in buy zone`)
+          } else if (money >= 2) {
+            score += 2
+            evidence.push(`${money} price lines in buy zone`)
+          }
+          if ((nearWindow.match(/✅|•|✓/g) || []).length >= 2) {
+            score += 1
+            evidence.push('bullet or check list near buy')
+          }
+          if (/\b(and|\+)\s+free\b|\+\s*free gifts|gifts worth|worth £|worth \$|worth €/i.test(nearWindow)) {
+            score += 1
+            evidence.push('stacked value / gifts worth copy')
+          }
+
+          const includedNearCta =
+            score >= 5 ||
+            (score >= 4 && money >= 2) ||
+            (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
+            (/what'?s included|kit includes|pack includes|bundle includes/i.test(nearWindow) && money >= 1 && score >= 3)
+
+          return {
+            ctaFound: !!cta,
+            bundleLikely: bundleLikelyFinal,
+            includedNearCta: !!cta && includedNearCta,
+            evidence,
+          }
+        })
+      } catch (includedPackErr) {
+        console.warn('[scan] included pack near CTA DOM snapshot failed:', includedPackErr)
+        includedPackNearCtaContext = null
       }
 
       // Scroll variant/product form into view so client-side selection state is applied, then wait for JS
@@ -3667,6 +3847,21 @@ export async function POST(request: NextRequest) {
         keyElements = `${keyElements || ''}${wishlistBlock}`
         console.log(
           `[scan] wishlist near CTA: cta=${wishlistNearCtaContext.ctaFound} near=${wishlistNearCtaContext.nearCta}`,
+        )
+      }
+
+      if (includedPackNearCtaContext) {
+        const packBlock = [
+          '',
+          '--- INCLUDED / BUNDLE ITEMS NEAR CTA (DOM) ---',
+          `Primary CTA found: ${includedPackNearCtaContext.ctaFound ? 'YES' : 'NO'}`,
+          `Bundle or kit style offer (DOM): ${includedPackNearCtaContext.bundleLikely ? 'YES' : 'NO'}`,
+          `Included items / bonus lineup near buy area (DOM): ${includedPackNearCtaContext.includedNearCta ? 'YES' : 'NO'}`,
+          `Evidence: ${includedPackNearCtaContext.evidence.length ? includedPackNearCtaContext.evidence.join(' | ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${packBlock}`
+        console.log(
+          `[scan] included pack near CTA: bundle=${includedPackNearCtaContext.bundleLikely} included=${includedPackNearCtaContext.includedNearCta} cta=${includedPackNearCtaContext.ctaFound}`,
         )
       }
 
