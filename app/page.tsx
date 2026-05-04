@@ -893,8 +893,28 @@ export default function Home() {
       const cpRes = await fetch(
         `/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`,
       )
-      if (!cpRes.ok) throw new Error('Failed to load conversion checkpoints')
-      const cpData = (await cpRes.json()) as {
+      const cpRaw = await cpRes.text()
+      if (!cpRes.ok) {
+        let detail = ''
+        try {
+          const errJson = JSON.parse(cpRaw) as {
+            error?: string
+            errors?: Array<{ message?: string; error?: string }>
+          }
+          const first = errJson.errors?.[0]
+          detail =
+            (typeof errJson.error === 'string' && errJson.error) ||
+            (typeof first?.message === 'string' && first.message) ||
+            (typeof first?.error === 'string' && first.error) ||
+            ''
+        } catch {
+          detail = cpRaw.slice(0, 120)
+        }
+        throw new Error(
+          detail ? `Failed to load conversion checkpoints: ${detail}` : 'Failed to load conversion checkpoints',
+        )
+      }
+      const cpData = JSON.parse(cpRaw) as {
         rules?: unknown
         records?: unknown
         detectedPageType?: string
