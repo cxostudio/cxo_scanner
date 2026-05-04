@@ -60,6 +60,7 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'annotation',
   'arrow',
   'back to top',
+  'badge',
   'before',
   'benefit',
   'breadcrumb',
@@ -102,9 +103,11 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'secure checkout',
   'sitewide',
   'size',
+  'selling',
   'subscription',
   'swipe',
   'terms',
+  'thumbnail',
   'title',
   'trust',
   'urgency',
@@ -117,6 +120,26 @@ function isActiveConversionRule(rule: Rule): boolean {
   return ACTIVE_CONVERSION_RULE_MATCHERS.some((keyword) => haystack.includes(keyword))
 }
 
+/**
+ * Rules about benefit copy, badges, or annotations on product imagery.
+ * Keeps DOM scan + AI "image annotations" overrides in sync (e.g. "key selling points on images").
+ */
+function isImageSellingPointsOrAnnotationRule(rule: Pick<Rule, 'id' | 'title' | 'description'>): boolean {
+  const t = (rule.title || '').toLowerCase()
+  const d = (rule.description || '').toLowerCase()
+  if (rule.id === 'image-annotations') return true
+  if (t.includes('annotation') && t.includes('image')) return true
+  if (d.includes('annotations') && d.includes('product images')) return true
+  if (t.includes('selling point') && t.includes('image')) return true
+  if (
+    (t.includes('badges') || t.includes('badge')) &&
+    t.includes('image') &&
+    (t.includes('selling') || t.includes('product') || t.includes('vegan') || t.includes('cruelty'))
+  ) {
+    return true
+  }
+  return false
+}
 
 
 // Zod schemas for validation
@@ -4261,16 +4284,15 @@ export async function POST(request: NextRequest) {
 
       // ── Image Annotations DOM Detection ──────────────────────────────────────
       // Detect overlay text, badges, labels on/near product images.
-      const needsAnnotationCheck = rules.some(r =>
-        r.id === 'image-annotations' ||
-        (r.title.toLowerCase().includes('annotation') && r.title.toLowerCase().includes('image')) ||
-        (r.description?.toLowerCase().includes('annotations') && r.description?.toLowerCase().includes('product images'))
-      )
+      const needsAnnotationCheck = rules.some(isImageSellingPointsOrAnnotationRule)
       if (needsAnnotationCheck && page) {
         try {
           const annoResult = await page.evaluate(() => {
             const evidence: string[] = []
             let found = false
+
+            const CALLOUT_RE =
+              /free\s+gifts?|worth\s*[£$€]|flavour\s+samples?|flavor\s+samples?|\d+x\s+flavou?r\s+samples?|free\s+whisk|free\s+mug|free\s+spoon|%\s*off\s+today|calmer\s+evenings?|better\s+sleep/i
 
             // ── 1. Elements absolutely positioned inside image containers ──────
             // Overlays are typically position:absolute children of a relative container
@@ -4296,6 +4318,25 @@ export async function POST(request: NextRequest) {
                 }
               }
               if (found) break
+            }
+
+            // ── 1b. Hero/gallery marketing callouts (not only position:absolute overlays)
+            if (!found) {
+              for (const container of IMAGE_CONTAINERS) {
+                const largeImgs = Array.from(container.querySelectorAll('img')).filter((img) => {
+                  const r = img.getBoundingClientRect()
+                  return r.width * r.height >= 35000
+                })
+                if (largeImgs.length === 0) continue
+                const inner = ((container as HTMLElement).innerText || '').trim()
+                if (inner.length > 4000) continue
+                if (CALLOUT_RE.test(inner)) {
+                  const m = inner.match(CALLOUT_RE)
+                  evidence.push(`Gallery/hero callout copy: "${(m && m[0]) || 'promotional text'}"`)
+                  found = true
+                  break
+                }
+              }
             }
 
             // ── 2. Badge / label / tag class names anywhere near images ─────────
@@ -4333,6 +4374,7 @@ export async function POST(request: NextRequest) {
                 /-\d+\s*%/,                                    // "-63%", "-25%"
                 /\+\d+\s*%/,                                   // "+30%"
                 /\d+\s*%\s+(?:improvement|reduction|increase|less|more)/i,
+                /\b\d+\s*%\s+off\b/i,
                 /dermatologically\s+tested/i,
                 /clinically\s+proven/i,
                 /ophthalmologist\s+tested/i,
@@ -4344,6 +4386,12 @@ export async function POST(request: NextRequest) {
                 /new\s+arrival/i,
                 /\bsale\b/i,
                 /\bnew\b/i,
+                /\bvegan\b/i,
+                /\bcruelty[-\s]?free\b/i,
+                /free\s+gifts?/i,
+                /\bfree\s+(?:mug|whisk|spoon|sample|samples)\b/i,
+                /worth\s*[£$€]/i,
+                CALLOUT_RE,
               ]
               // Check image alt attributes
               const imgs = Array.from(document.querySelectorAll('img'))
@@ -5009,7 +5057,9 @@ export async function POST(request: NextRequest) {
       const needsThumbnailGalleryCheck = rules.some(
         (r) =>
           r.id === 'image-thumbnails' ||
-          (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery'))
+          (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery')) ||
+          (r.description?.toLowerCase().includes('thumbnails') &&
+            r.description?.toLowerCase().includes('gallery'))
       )
       if (needsThumbnailGalleryCheck && page) {
         try {
@@ -5030,10 +5080,40 @@ export async function POST(request: NextRequest) {
                 return true
               }
 
+              /** Gift rows, upsells, and variant pickers often reuse small images / data-media-id — not gallery thumbs. */
+              function isExcludedThumbnailMerch(el: Element): boolean {
+                const selectors = [
+                  '[class*="free-gift" i]',
+                  '[class*="free_gift" i]',
+                  '[class*="gift-with" i]',
+                  '[class*="complementary" i]',
+                  '[class*="upsell" i]',
+                  '[class*="cross-sell" i]',
+                  '[class*="recommendations" i]',
+                  '[class*="product-form" i]',
+                  '[class*="product_form" i]',
+                  '[class*="variant-picker" i]',
+                  '[class*="variant_picker" i]',
+                  '[class*="sticky-atc" i]',
+                  '[id*="gift" i]',
+                ]
+                for (const s of selectors) {
+                  try {
+                    if (el.closest(s)) return true
+                  } catch {
+                    /* invalid selector in older engines */
+                  }
+                }
+                const cls = ((el as HTMLElement).className || '').toString().toLowerCase()
+                if (cls.includes('gift') && (cls.includes('icon') || cls.includes('row') || cls.includes('with-order')))
+                  return true
+                return false
+              }
+
               // Multiple selectable gallery media (Shopify) — require small previews so mobile
               // does not false-pass when only the main hero is visible or two large slides stack.
               const mediaEls = Array.from(document.querySelectorAll('[data-media-id]')) as HTMLElement[]
-              const visibleMedia = mediaEls.filter(isVisible)
+              const visibleMedia = mediaEls.filter((el) => isVisible(el) && !isExcludedThumbnailMerch(el))
               const maxSide = (el: HTMLElement) => {
                 const r = el.getBoundingClientRect()
                 return Math.max(r.width, r.height)
@@ -5074,8 +5154,10 @@ export async function POST(request: NextRequest) {
                 try {
                   const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
                   for (const el of els) {
-                    if (!isVisible(el)) continue
-                    const imgs = Array.from(el.querySelectorAll('img')).filter(isVisible)
+                    if (!isVisible(el) || isExcludedThumbnailMerch(el)) continue
+                    const imgs = Array.from(el.querySelectorAll('img')).filter(
+                      (img) => isVisible(img) && !isExcludedThumbnailMerch(img)
+                    )
                     if (imgs.length >= 2) {
                       return {
                         found: true,
@@ -5094,7 +5176,10 @@ export async function POST(request: NextRequest) {
                 )
               )
               for (const root of roots) {
-                const imgs = Array.from(root.querySelectorAll('img')).filter(isVisible)
+                if (isExcludedThumbnailMerch(root)) continue
+                const imgs = Array.from(root.querySelectorAll('img')).filter(
+                  (img) => isVisible(img) && !isExcludedThumbnailMerch(img)
+                )
                 if (imgs.length < 2) continue
                 const areas = imgs.map((img) => {
                   const r = img.getBoundingClientRect()
@@ -5105,7 +5190,7 @@ export async function POST(request: NextRequest) {
                 if (mainArea < 400) continue
                 let small = 0
                 for (let i = 1; i < areas.length; i++) {
-                  if (areas[i].area > 0 && areas[i].area <= mainArea * 0.4) small++
+                  if (areas[i].area > 0 && areas[i].area <= mainArea * 0.28) small++
                 }
                 if (small >= 2) {
                   return {
@@ -6133,10 +6218,7 @@ export async function POST(request: NextRequest) {
             rule.id === 'product-comparison' ||
             rule.title.toLowerCase().includes('product comparison') ||
             rule.description.toLowerCase().includes('product comparison');
-          const isImageAnnotationsRule =
-            rule.id === 'image-annotations' ||
-            (rule.title.toLowerCase().includes('annotation') && rule.title.toLowerCase().includes('image')) ||
-            (rule.description.toLowerCase().includes('annotations') && rule.description.toLowerCase().includes('product images'))
+          const isImageAnnotationsRule = isImageSellingPointsOrAnnotationRule(rule)
           const isThumbnailsRule =
             rule.id === 'image-thumbnails' ||
             (rule.title.toLowerCase().includes('thumbnail') && rule.title.toLowerCase().includes('gallery')) ||
@@ -7120,6 +7202,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               const ANNOTATION_TEXT_PATTERNS = [
                 /-\d+\s*%/,
                 /\+\d+\s*%/,
+                /\b\d+\s*%\s+off\b/i,
                 /dermatologically\s+tested/i,
                 /clinically\s+proven/i,
                 /ophthalmologist\s+tested/i,
@@ -7137,6 +7220,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 /\bfree\s+(?:mug|whisk|spoon|gift|sample|samples)\b/i,
                 /\b\d+x\s+flavour\s+samples?\b/i,
                 /\bflavour\s+samples?\b/i,
+                /calmer\s+evenings?/i,
+                /better\s+sleep/i,
               ]
               const matchedAnno = ANNOTATION_TEXT_PATTERNS.find(p => p.test(pageText))
               if (matchedAnno) {

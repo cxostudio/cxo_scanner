@@ -162,9 +162,11 @@ export function isProductTitleRule(rule: ScanRule): boolean {
 
 export function isThumbnailGalleryRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
   return (
     rule.id === 'image-thumbnails' ||
-    (t.includes('thumbnail') && t.includes('gallery'))
+    (t.includes('thumbnail') && t.includes('gallery')) ||
+    (d.includes('thumbnails') && d.includes('gallery'))
   )
 }
 
