@@ -403,6 +403,8 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   domStructureFound: boolean
   paymentBrandsFound: string[]
   paymentBrandsElsewhere: string[]
+  textSignalsNearCta: string[]
+  textSignalsElsewhere: string[]
   trustBadgesInfo: string
   containerDescription: string
 } {
@@ -412,6 +414,8 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
       domStructureFound: false,
       paymentBrandsFound: [],
       paymentBrandsElsewhere: [],
+      textSignalsNearCta: [],
+      textSignalsElsewhere: [],
       trustBadgesInfo: 'No HTML available for trust-near-CTA fallback.',
       containerDescription: 'html-fallback',
     }
@@ -440,6 +444,13 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     { label: 'guarantee-badge', re: /\bmoney\s*-?\s*back\b|\bguarantee\b|\bsecure\s+checkout\s+badge\b/ },
   ]
   const VISUAL_RE = /<(img|svg|iframe)\b|(?:id|class)=["'][^"']*(icon|badge|payment|secure|trust|checkout)[^"']*["']/i
+  const TEXT_SIGNAL_LABELS: Array<{ label: string; re: RegExp }> = [
+    { label: 'secure-checkout', re: /\bsecure\s+checkout\b|\bsafe\s+checkout\b|\bprotected\s+checkout\b/ },
+    { label: 'encrypted-payment', re: /\bssl\b|\bencrypted\b|\bsecure\s+payment\b/ },
+    { label: 'money-back-guarantee', re: /\bmoney\s*-?\s*back\b|\b\d{1,3}\s*-?\s*day\s+money\s*-?\s*back\b/ },
+    { label: 'trusted-authenticity', re: /\b100%\s+authentic\b|\bauthentic\s+(?:products?|skincare)\b/ },
+    { label: 'returns-policy-near-cta', re: /\breturn(?:s)?\b.{0,40}\b(?:day|days|refund)\b/ },
+  ]
 
   const candidateBlocks: string[] = []
   let blockMatch: RegExpExecArray | null
@@ -452,9 +463,16 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   const ctaFound = CTA_RE.test(html)
   const nearFound = new Set<string>()
   const elsewhereFound = new Set<string>()
+  const textNearFound = new Set<string>()
+  const textElsewhereFound = new Set<string>()
 
   const addMatchesFromArea = (source: string, bucket: Set<string>) => {
     for (const item of TRUST_LABELS) {
+      if (item.re.test(source)) bucket.add(item.label)
+    }
+  }
+  const addTextSignalMatchesFromArea = (source: string, bucket: Set<string>) => {
+    for (const item of TEXT_SIGNAL_LABELS) {
       if (item.re.test(source)) bucket.add(item.label)
     }
   }
@@ -462,11 +480,13 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   const nearMatchedBlocks: string[] = []
   for (const block of candidateBlocks) {
     if (!CTA_RE.test(block)) continue
-    if (!VISUAL_RE.test(block)) continue
     const localFound = new Set<string>()
-    addMatchesFromArea(block, localFound)
-    if (localFound.size === 0) continue
+    const localTextFound = new Set<string>()
+    if (VISUAL_RE.test(block)) addMatchesFromArea(block, localFound)
+    addTextSignalMatchesFromArea(block, localTextFound)
+    if (localFound.size === 0 && localTextFound.size === 0) continue
     for (const name of localFound) nearFound.add(name)
+    for (const name of localTextFound) textNearFound.add(name)
     nearMatchedBlocks.push(block)
   }
 
@@ -474,15 +494,19 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     .map((m) => m[0])
     .join('\n')
   addMatchesFromArea(footerOnly, elsewhereFound)
+  addTextSignalMatchesFromArea(footerOnly, textElsewhereFound)
 
   if (nearMatchedBlocks.length > 0) {
     const combinedNear = nearMatchedBlocks.join('\n')
     const outsideNear = html.replace(combinedNear, ' ')
     addMatchesFromArea(outsideNear, elsewhereFound)
+    addTextSignalMatchesFromArea(outsideNear, textElsewhereFound)
   }
 
   const paymentBrandsFound = Array.from(nearFound)
   const paymentBrandsElsewhere = Array.from(elsewhereFound).filter((x) => !nearFound.has(x))
+  const textSignalsNearCta = Array.from(textNearFound)
+  const textSignalsElsewhere = Array.from(textElsewhereFound).filter((x) => !textNearFound.has(x))
   const domStructureFound = paymentBrandsFound.length > 0
 
   return {
@@ -490,10 +514,12 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     domStructureFound,
     paymentBrandsFound,
     paymentBrandsElsewhere,
-    trustBadgesInfo: domStructureFound
-      ? `HTML fallback found trust/payment markers near CTA: ${paymentBrandsFound.join(', ')}`
-      : paymentBrandsElsewhere.length > 0
-        ? `HTML fallback found trust markers only outside CTA context: ${paymentBrandsElsewhere.join(', ')}`
+    textSignalsNearCta,
+    textSignalsElsewhere,
+    trustBadgesInfo: domStructureFound || textSignalsNearCta.length > 0
+      ? `HTML fallback found trust markers near CTA: ${(paymentBrandsFound.concat(textSignalsNearCta)).join(', ')}`
+      : paymentBrandsElsewhere.length > 0 || textSignalsElsewhere.length > 0
+        ? `HTML fallback found trust markers only outside CTA context: ${(paymentBrandsElsewhere.concat(textSignalsElsewhere)).join(', ')}`
         : 'HTML fallback found no trust/payment markers near CTA.',
     containerDescription: 'html-fallback: CTA/trust markers in same product/purchase block',
   }
@@ -1200,8 +1226,11 @@ export async function POST(request: NextRequest) {
       /** True only when img/svg/iframe (or svg use) trust marks are near the primary CTA — not plain text. */
       domStructureFound: boolean
       paymentBrandsFound: string[]
+      /** Strong trust wording near CTA when visual logos are missing/lazy (secure checkout, guarantee, returns). */
+      textSignalsNearCta: string[]
       /** Visual trust marks elsewhere (e.g. footer) — does NOT satisfy "near CTA". */
       paymentBrandsElsewhere: string[]
+      textSignalsElsewhere: string[]
       trustBadgesCount: number
       trustBadgesElsewhereCount: number
       trustBadgesInfo: string
@@ -2887,6 +2916,18 @@ export async function POST(request: NextRequest) {
           if (isInSamePurchaseBlock(cta, el)) return true
           return pixelNearBuyButton(cta, el)
         }
+        function collectTrustTextSignals(nearCtaText: string, pageText: string): { near: string[]; elsewhere: string[] } {
+          const defs: Array<{ id: string; re: RegExp }> = [
+            { id: 'secure-checkout', re: /\bsecure\s+checkout\b|\bsafe\s+checkout\b|\bprotected\s+checkout\b/i },
+            { id: 'encrypted-payment', re: /\bssl\b|\bencrypted\b|\bsecure\s+payment\b/i },
+            { id: 'money-back-guarantee', re: /\bmoney\s*-?\s*back\b|\b\d{1,3}\s*-?\s*day\s+money\s*-?\s*back\b/i },
+            { id: 'trusted-authenticity', re: /\b100%\s+authentic\b|\bauthentic\s+(?:products?|skincare)\b/i },
+            { id: 'returns-policy-near-cta', re: /\breturn(?:s)?\b.{0,48}\b(?:day|days|refund|unused|unopened)\b/i },
+          ]
+          const near = defs.filter((d) => d.re.test(nearCtaText)).map((d) => d.id)
+          const elsewhere = defs.filter((d) => !near.includes(d.id) && d.re.test(pageText)).map((d) => d.id)
+          return { near, elsewhere }
+        }
 
         const cta = findPrimaryPurchaseCta()
         if (cta) {
@@ -2920,6 +2961,26 @@ export async function POST(request: NextRequest) {
 
         const brandsNear = Array.from(foundNear.keys())
         const brandsElse = Array.from(foundElsewhere.keys())
+        const ctaBandText = cta
+          ? (
+              Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  'main p, main span, main div, main li, [role="main"] p, [role="main"] span, [role="main"] div, [role="main"] li',
+                ),
+              )
+                .filter((el) => {
+                  if (isExcludedFarFromBuy(el)) return false
+                  if (el === cta || cta.contains(el) || nearPrimaryCta(cta, el)) return true
+                  return false
+                })
+                .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
+                .filter((t) => t.length >= 4 && t.length <= 220)
+                .slice(0, 60)
+                .join(' ')
+            )
+          : ''
+        const pageText = (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 140000)
+        const trustTextSignals = collectTrustTextSignals(ctaBandText, pageText)
         const countNear = brandsNear.length
         const countElse = brandsElse.length
         const domStructureFound = countNear > 0
@@ -2929,14 +2990,16 @@ export async function POST(request: NextRequest) {
           ctaText,
           domStructureFound,
           paymentBrandsFound: brandsNear,
+          textSignalsNearCta: trustTextSignals.near,
           paymentBrandsElsewhere: brandsElse,
+          textSignalsElsewhere: trustTextSignals.elsewhere,
           trustBadgesCount: countNear,
           trustBadgesElsewhereCount: countElse,
-          trustBadgesInfo: domStructureFound
+          trustBadgesInfo: domStructureFound || trustTextSignals.near.length > 0
             ? `Visual icons/logos near primary CTA: ${brandsNear.join(', ')}`
-            : countElse > 0
-              ? `No visual trust icons near CTA; elsewhere only: ${brandsElse.join(', ')}`
-              : 'No payment/security/guarantee icons detected near the primary CTA',
+            : countElse > 0 || trustTextSignals.elsewhere.length > 0
+              ? `No visual trust icons near CTA; elsewhere only: ${(brandsElse.concat(trustTextSignals.elsewhere)).join(', ')}`
+              : 'No trust icons or strong trust text detected near the primary CTA',
           containerDescription: cta
             ? '±4 sibling nodes around buy button or tight pixel band; footer excluded'
             : 'CTA not found — cannot verify proximity',
@@ -4029,7 +4092,7 @@ export async function POST(request: NextRequest) {
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
         (trustBadgesContext
-          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
           : '') +
         (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
@@ -5730,7 +5793,7 @@ export async function POST(request: NextRequest) {
             const mergedElse = [...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...reScanResult.brandsElse])]
             trustBadgesContext = {
               ...trustBadgesContext,
-              domStructureFound: true,
+              domStructureFound: mergedNear.length > 0,
               paymentBrandsFound: mergedNear,
               paymentBrandsElsewhere: mergedElse,
               trustBadgesCount: mergedNear.length,
@@ -5738,7 +5801,7 @@ export async function POST(request: NextRequest) {
               trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
               containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
             }
-            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
             websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
           }
         } catch (e) {
@@ -5753,12 +5816,18 @@ export async function POST(request: NextRequest) {
         try {
           const runtimeHtml = await page.content()
           const trustHtmlFallback = detectTrustNearCtaFromHtml(runtimeHtml)
-          if (trustBadgesContext && trustHtmlFallback.domStructureFound) {
+          if (trustBadgesContext && (trustHtmlFallback.domStructureFound || trustHtmlFallback.textSignalsNearCta.length > 0)) {
             const mergedNear = [
               ...new Set([...trustBadgesContext.paymentBrandsFound, ...trustHtmlFallback.paymentBrandsFound]),
             ]
             const mergedElse = [
               ...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...trustHtmlFallback.paymentBrandsElsewhere]),
+            ]
+            const mergedTextNear = [
+              ...new Set([...trustBadgesContext.textSignalsNearCta, ...trustHtmlFallback.textSignalsNearCta]),
+            ]
+            const mergedTextElse = [
+              ...new Set([...trustBadgesContext.textSignalsElsewhere, ...trustHtmlFallback.textSignalsElsewhere]),
             ]
             trustBadgesContext = {
               ...trustBadgesContext,
@@ -5772,12 +5841,14 @@ export async function POST(request: NextRequest) {
               domStructureFound: true,
               paymentBrandsFound: mergedNear,
               paymentBrandsElsewhere: mergedElse,
+              textSignalsNearCta: mergedTextNear,
+              textSignalsElsewhere: mergedTextElse,
               trustBadgesCount: mergedNear.length,
               trustBadgesElsewhereCount: mergedElse.length,
               trustBadgesInfo: trustHtmlFallback.trustBadgesInfo,
               containerDescription: trustHtmlFallback.containerDescription,
             }
-            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
             websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
             console.log(`[scan] trust badges HTML fallback detected near CTA: ${mergedNear.join(', ')}`)
           } else if (trustBadgesContext && !trustBadgesContext.ctaFound && trustHtmlFallback.ctaFound) {
@@ -5850,13 +5921,15 @@ export async function POST(request: NextRequest) {
           console.log('[FALLBACK] Footer newsletter form pair detected from HTML.')
         }
         const htmlFallbackTrustNearCta = detectTrustNearCtaFromHtml(rawHtml)
-        if (htmlFallbackTrustNearCta.domStructureFound) {
+        if (htmlFallbackTrustNearCta.domStructureFound || htmlFallbackTrustNearCta.textSignalsNearCta.length > 0) {
           trustBadgesContext = {
             ctaFound: htmlFallbackTrustNearCta.ctaFound,
             ctaText: htmlFallbackTrustNearCta.ctaFound ? 'detected in HTML fallback' : 'not found',
-            domStructureFound: true,
+            domStructureFound: htmlFallbackTrustNearCta.domStructureFound,
             paymentBrandsFound: htmlFallbackTrustNearCta.paymentBrandsFound,
+            textSignalsNearCta: htmlFallbackTrustNearCta.textSignalsNearCta,
             paymentBrandsElsewhere: htmlFallbackTrustNearCta.paymentBrandsElsewhere,
+            textSignalsElsewhere: htmlFallbackTrustNearCta.textSignalsElsewhere,
             trustBadgesCount: htmlFallbackTrustNearCta.paymentBrandsFound.length,
             trustBadgesElsewhereCount: htmlFallbackTrustNearCta.paymentBrandsElsewhere.length,
             trustBadgesInfo: htmlFallbackTrustNearCta.trustBadgesInfo,

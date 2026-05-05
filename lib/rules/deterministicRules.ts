@@ -442,14 +442,23 @@ export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString
   const nearCtaYes = /Visual trust icons near CTA \(DOM\):\s*YES/i.test(keyElementsString)
   const ctaFound = /CTA Found:\s*YES/i.test(keyElementsString)
   const nearMarks = keyElementsString.match(/Visual trust marks near CTA(?: \(payment logos, seals, guarantee icons\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+  const textNearMarks =
+    keyElementsString.match(/Text trust signals near CTA(?: \(secure\/guarantee\/returns\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() ||
+    'None'
   const elsewhereMarks = keyElementsString.match(/Visual trust marks elsewhere only(?: \(footer, etc\. — does NOT pass\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+  const textElsewhereMarks =
+    keyElementsString.match(/Text trust signals elsewhere only:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
 
-  if (nearCtaYes) {
+  if (nearCtaYes || (textNearMarks && textNearMarks.toLowerCase() !== 'none')) {
+    const mergedNear =
+      nearMarks && nearMarks.toLowerCase() !== 'none'
+        ? nearMarks
+        : textNearMarks
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: true,
-      reason: `Trust/payment icons are detected near the primary CTA (${nearMarks}).`,
+      reason: `Trust signals are detected near the primary CTA (${mergedNear}).`,
     }
   }
 
@@ -462,12 +471,15 @@ export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString
     }
   }
 
-  if (elsewhereMarks && elsewhereMarks.toLowerCase() !== 'none') {
+  const elsewhereCombined = [elsewhereMarks, textElsewhereMarks]
+    .filter((v) => v && v.toLowerCase() !== 'none')
+    .join('; ')
+  if (elsewhereCombined) {
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: false,
-      reason: `Trust/payment icons appear only away from the primary CTA (${elsewhereMarks}).`,
+      reason: `Trust signals appear only away from the primary CTA (${elsewhereCombined}).`,
     }
   }
 
