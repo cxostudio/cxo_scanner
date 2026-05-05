@@ -13,6 +13,11 @@ import {
   isCartIconItemCountRule,
 } from '@/lib/rules/deterministicRules'
 import {
+  buildMultiAngleGalleryDomBlock,
+  countDistinctGalleryDataMediaIdsFromHtml,
+  isMultiAngleProductGalleryRule,
+} from '@/lib/rules/multiAngleProductImagesRule'
+import {
   collectFooterSocialSnapshot,
   emptyFooterSocialSnapshot,
 } from '@/lib/rules/footerSocialLinksRule'
@@ -57,6 +62,7 @@ interface ScanResult {
  */
 const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'after',
+  'angle',
   'annotation',
   'arrow',
   'back to top',
@@ -94,6 +100,7 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'navigation',
   'newsletter',
   'offer',
+  'perspective',
   'preselect',
   'price',
   'privacy',
@@ -2235,6 +2242,114 @@ export async function POST(request: NextRequest) {
         if (mediaResult.photoEvidence.length) console.log('[CUSTOMER MEDIA] Photo evidence:', mediaResult.photoEvidence)
       } catch (e) {
         console.warn('Customer media detection failed:', e)
+      }
+
+      // Product gallery demonstrative video only (not Trustpilot / review UGC / generic page <video>)
+      try {
+        const galleryVideoBlock = await page.evaluate(() => {
+          function isInsideReviewSection(el: Element): boolean {
+            let cur: Element | null = el
+            while (cur && cur !== document.body) {
+              const cls =
+                typeof (cur as HTMLElement).className === 'string'
+                  ? (cur as HTMLElement).className
+                  : ''
+              const hay = `${cls} ${cur.id || ''} ${cur.tagName}`.toLowerCase()
+              if (
+                /review|testimonial|ugc|trustpilot|judge\.me|loox|yotpo|stamped|okendo|junip/i.test(hay)
+              ) {
+                return true
+              }
+              cur = cur.parentElement
+            }
+            return false
+          }
+
+          const evidence: string[] = []
+          const seenMsg = new Set<string>()
+          const add = (msg: string) => {
+            if (seenMsg.has(msg)) return
+            seenMsg.add(msg)
+            evidence.push(msg)
+          }
+
+          const roots = new Set<Element>()
+          const rootSelectors = [
+            'main [class*="product__media" i]',
+            'main [class*="product-media" i]',
+            'main [class*="media-gallery" i]',
+            '[class*="product-gallery" i]',
+            '[data-media-gallery]',
+          ].join(', ')
+          try {
+            document.querySelectorAll(rootSelectors).forEach((n) => {
+              if (isInsideReviewSection(n)) return
+              roots.add(n)
+            })
+          } catch {
+            /* selector support */
+          }
+
+          function hasPlayableVideoOrEmbed(root: Element): void {
+            if (isInsideReviewSection(root)) return
+
+            root.querySelectorAll('[data-media-type="video" i], [data-media-type="external_video" i]').forEach((node) => {
+              if (isInsideReviewSection(node)) return
+              let ok = false
+              node.querySelectorAll('video').forEach((v) => {
+                const srcAttr = v.getAttribute('src') || ''
+                const cur = v.src || ''
+                const fromSource = v.querySelector('source[src]')
+                if (fromSource || srcAttr.length > 8 || (cur.length > 8 && !cur.startsWith('blob:'))) ok = true
+              })
+              node.querySelectorAll('iframe').forEach((f) => {
+                const s = `${f.src || f.getAttribute('data-src') || ''}`.toLowerCase()
+                if (/youtube\.com\/embed|youtube-nocookie|player\.vimeo|wistia|loom\.com\/embed/.test(s))
+                  ok = true
+              })
+              if (ok) add('Shopify product gallery video / external_video block')
+            })
+
+            root.querySelectorAll('video').forEach((v) => {
+              if (isInsideReviewSection(v)) return
+              const srcAttr = v.getAttribute('src') || ''
+              const vidSrc = v.src || ''
+              const fromSource = !!v.querySelector('source[src]')
+              const hasSrc =
+                fromSource ||
+                (srcAttr.length > 10 && !srcAttr.startsWith('data:')) ||
+                (vidSrc.length > 10 && !vidSrc.startsWith('data:') && !vidSrc.startsWith('blob:'))
+              if (hasSrc) add('HTML5 video with media URL in product gallery')
+            })
+
+            root.querySelectorAll('iframe').forEach((f) => {
+              if (isInsideReviewSection(f)) return
+              const s = `${f.src || f.getAttribute('data-src') || ''}`.toLowerCase()
+              if (
+                /youtube\.com\/embed|youtube-nocookie\.com\/embed|player\.vimeo\.com|fast\.wistia\.net|loom\.com\/embed/.test(
+                  s,
+                )
+              ) {
+                add('Embedded demo video iframe in product gallery')
+              }
+            })
+          }
+
+          roots.forEach((r) => hasPlayableVideoOrEmbed(r))
+
+          const found = evidence.length > 0
+          return [
+            '--- PRODUCT GALLERY VIDEO DEMO (DOM) ---',
+            `Videos in product gallery (DOM): ${found ? 'YES' : 'NO'}`,
+            found
+              ? `Evidence: ${evidence.join(' | ')}`
+              : 'Evidence: None — no playable video (<video src> / embed iframe) detected in main product gallery media roots',
+          ].join('\n')
+        })
+        keyElements = (keyElements || '') + '\n\n' + galleryVideoBlock
+        console.log('[PRODUCT GALLERY VIDEO]', galleryVideoBlock.split('\n').join(' | '))
+      } catch (galleryVideoErr) {
+        console.warn('[scan] Product gallery video DOM snapshot failed:', galleryVideoErr)
       }
 
       // Retry only for video-testimonial rule when first pass found nothing.
@@ -5329,6 +5444,166 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ── Multiple angles / complete gallery view (distinct main-gallery media ≥3) ──
+      const needsMultiAngleGalleryCheck = rules.some(isMultiAngleProductGalleryRule)
+      if (needsMultiAngleGalleryCheck && page) {
+        try {
+          await page.evaluate(() => window.scrollTo(0, 0))
+          await new Promise((r) => setTimeout(r, 300))
+
+          const multiAngleEval = await page.evaluate(() => {
+            const MIN_DISTINCT = 3
+
+            function isInsideReviewSection(el: Element): boolean {
+              let cur: Element | null = el
+              while (cur && cur !== document.body) {
+                const cls =
+                  typeof (cur as HTMLElement).className === 'string' ? (cur as HTMLElement).className : ''
+                const hay = `${cls} ${cur.id || ''} ${cur.tagName}`.toLowerCase()
+                if (/review|testimonial|ugc|trustpilot|judge\.me|loox|yotpo|stamped|okendo|junip/i.test(hay))
+                  return true
+                cur = cur.parentElement
+              }
+              return false
+            }
+
+            /** Gift rows, variant pickers — not main gallery media. */
+            function isExcludedThumbnailMerch(el: Element): boolean {
+              const selectors = [
+                '[class*="free-gift" i]',
+                '[class*="free_gift" i]',
+                '[class*="gift-with" i]',
+                '[class*="complementary" i]',
+                '[class*="upsell" i]',
+                '[class*="cross-sell" i]',
+                '[class*="recommendations" i]',
+                '[class*="product-form" i]',
+                '[class*="product_form" i]',
+                '[class*="variant-picker" i]',
+                '[class*="variant_picker" i]',
+                '[class*="sticky-atc" i]',
+                '[id*="gift" i]',
+              ]
+              for (const s of selectors) {
+                try {
+                  if (el.closest(s)) return true
+                } catch {
+                  /* ignore */
+                }
+              }
+              const cls = ((el as HTMLElement).className || '').toString().toLowerCase()
+              if (
+                cls.includes('gift') &&
+                (cls.includes('icon') || cls.includes('row') || cls.includes('with-order'))
+              )
+                return true
+              return false
+            }
+
+            function normalizeUrl(raw: string): string | null {
+              const u = raw.trim().split('#')[0]
+              if (!u || u.startsWith('data:')) return null
+              try {
+                const url = new URL(u, window.location.href)
+                return `${url.origin}${url.pathname}`.toLowerCase()
+              } catch {
+                const q = u.split('?')[0]
+                return q.length >= 20 ? q.toLowerCase() : null
+              }
+            }
+
+            const rootSel = [
+              'main [class*="product__media" i]',
+              'main [class*="product-media" i]',
+              'main [class*="media-gallery" i]',
+              '[class*="product-gallery" i]',
+              '[class*="media-gallery" i]',
+              '[id*="MediaGallery" i]',
+              '[data-media-gallery]',
+            ].join(', ')
+
+            let roots: Element[]
+            try {
+              roots = Array.from(document.querySelectorAll(rootSel))
+            } catch {
+              roots = []
+            }
+            if (roots.length === 0) {
+              try {
+                roots = Array.from(
+                  document.querySelectorAll(
+                    '[class*="product__media" i], [class*="product-media" i], [class*="product-gallery" i]',
+                  ),
+                )
+              } catch {
+                roots = []
+              }
+            }
+
+            const idSet = new Set<string>()
+            const imgUrls = new Set<string>()
+
+            for (const root of roots) {
+              if (isExcludedThumbnailMerch(root) || isInsideReviewSection(root)) continue
+
+              root.querySelectorAll('[data-media-id]').forEach((el) => {
+                if (isExcludedThumbnailMerch(el) || isInsideReviewSection(el)) return
+                const id = el.getAttribute('data-media-id')?.trim()
+                if (id) idSet.add(id)
+              })
+
+              root
+                .querySelectorAll(
+                  '[data-media-id] img[src], [data-media-id] img[data-src], [class*="product__media-item" i] img[src], [class*="media-item" i] img[src], [class*="gallery__slide" i] img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[src]',
+                )
+                .forEach((imgEl) => {
+                  const img = imgEl as HTMLImageElement
+                  if (isExcludedThumbnailMerch(img) || isInsideReviewSection(img)) return
+                  const u = normalizeUrl(img.currentSrc || img.src || img.getAttribute('data-src') || '')
+                  if (u && !/\/\.svg$/i.test(u)) imgUrls.add(u)
+                })
+            }
+
+            const byId = idSet.size
+            const byImg = imgUrls.size
+            let distinct = byId > 0 ? byId : byImg
+            let evidence =
+              byId >= 1
+                ? `unique data-media-id in main gallery roots: ${byId}` +
+                  (byImg > 0 ? `; unique slide image URLs (cross-check): ${byImg}` : '')
+                : byImg >= 1
+                  ? `no data-media-id — unique gallery slide image URLs: ${byImg}`
+                  : 'no gallery roots or countable media'
+
+            if (byId >= 1 && byImg > byId) {
+              distinct = Math.max(byId, byImg)
+              evidence += `; used max(id, images)=${distinct}`
+            }
+
+            const passes = distinct >= MIN_DISTINCT
+            return {
+              distinct,
+              passes,
+              rootsFound: roots.length,
+              evidence,
+            }
+          })
+
+          const multiBlock = buildMultiAngleGalleryDomBlock({
+            distinctCount: multiAngleEval.distinct,
+            passes: multiAngleEval.passes,
+            evidence: `${multiAngleEval.evidence} (gallery roots matched: ${multiAngleEval.rootsFound})`,
+          })
+          keyElements = `${keyElements || ''}\n\n${multiBlock}`
+          websiteContent += `\n\n${multiBlock}`
+          console.log(
+            `[MULTI-ANGLE GALLERY] distinct=${multiAngleEval.distinct} pass=${multiAngleEval.passes} roots=${multiAngleEval.rootsFound}`,
+          )
+        } catch (e) {
+          console.warn('Multi-angle product gallery DOM detection failed:', e)
+        }
+      }
+
       // ── Second-pass trust badges scan ─────────────────────────────────────
       // Re-check near-CTA only after scroll + settle (lazy payment widgets).
       const needsTrustReScan = rules.some(
@@ -5897,6 +6172,19 @@ export async function POST(request: NextRequest) {
           `Search accessible control: ${fallbackSearch.present ? 'YES' : 'NO'}\n` +
           `Search control detail: ${fallbackSearch.detail}\n` +
           `--- LAZY LOADING ---\n${lazyKeyLine}`
+
+        const needsMultiAngleGalleryFallback = rules.some(isMultiAngleProductGalleryRule)
+        if (needsMultiAngleGalleryFallback) {
+          const n = countDistinctGalleryDataMediaIdsFromHtml(rawHtml)
+          const passes = n >= 3
+          const fbBlock = buildMultiAngleGalleryDomBlock({
+            distinctCount: n,
+            passes,
+            evidence: `HTML fallback — unique data-media-id near gallery markup (${n} distinct)`,
+          })
+          keyElements = `${keyElements}\n\n${fbBlock}`
+          websiteContent += `\n\n${fbBlock}`
+        }
 
         // Fallback rating-near-title check.
         // In fetch fallback we cannot rely on rendered DOM positions, so use strict text-neighborhood matching.

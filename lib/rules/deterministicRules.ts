@@ -19,6 +19,14 @@ import {
   isProductTabsAccordionRule,
 } from '@/lib/rules/productTabsAccordionRule'
 import { evaluateWishlistNearCtaRule, isWishlistNearCtaRule } from '@/lib/rules/wishlistNearCtaRule'
+import {
+  evaluateProductGalleryVideoDemoRule,
+  isProductGalleryVideoDemoRule,
+} from '@/lib/rules/productGalleryVideoDemoRule'
+import {
+  evaluateMultiAngleProductGalleryRule,
+  isMultiAngleProductGalleryRule,
+} from '@/lib/rules/multiAngleProductImagesRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
@@ -805,6 +813,14 @@ export function tryEvaluateDeterministic(
   if (isThumbnailGalleryRule(rule)) {
     const thumbResult = evaluateThumbnailGalleryRule(rule, context.thumbnailGallery)
     if (thumbResult !== null) return thumbResult
+  }
+  if (isProductGalleryVideoDemoRule(rule)) {
+    const galleryVideoResult = evaluateProductGalleryVideoDemoRule(rule, context.keyElementsString)
+    if (galleryVideoResult !== null) return galleryVideoResult
+  }
+  if (isMultiAngleProductGalleryRule(rule)) {
+    const multiAngleResult = evaluateMultiAngleProductGalleryRule(rule, context.keyElementsString)
+    if (multiAngleResult !== null) return multiAngleResult
   }
   if (isBeforeAfterRule(rule)) {
     if (!context.beforeAfterTransformationExpected) {
