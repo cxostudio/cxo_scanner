@@ -4,6 +4,8 @@ import { z } from 'zod'
 import path from 'path'
 import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
+import { waitForMainColumnImages } from '@/lib/scanner/waitForMainColumnImages'
+import { snapshotIncludedPackDom } from '@/lib/scanner/includedPackNearCtaDomSnapshot'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import {
@@ -3207,23 +3209,9 @@ export async function POST(request: NextRequest) {
         wishlistNearCtaContext = null
       }
 
-      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
-      try {
-        await page.evaluate(() => {
-          const el =
-            document.querySelector<HTMLElement>(
-              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
-            ) || null
-          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
-        })
-        await new Promise((r) => setTimeout(r, 700))
-      } catch {
-        /* ignore */
-      }
-
-      // Gift / pack rows hydrate below the ATC on many Shopify subscriptions — scroll once so imgs copy exist in layout.
-      try {
-        await page.evaluate(() => {
+      /** Scroll lazy “free gifts / first order” rows into view (re-used on Vercel retry). */
+      const giftScrollIntoView = () =>
+        page.evaluate(() => {
           const labels = Array.from(
             document.querySelectorAll(
               'h2, h3, h4, h5, strong, button, div, span, p, [class*="gift" i], [class*="bonus" i]',
@@ -3237,398 +3225,62 @@ export async function POST(request: NextRequest) {
                 /\b(with\s+your\s+)?first\s+order\b.*\bgift\b/.test(t) ||
                 /\bgifts?\s+worth\b/.test(t)
               )
-            }) || document.querySelector<HTMLElement>(
+            }) ||
+            document.querySelector<HTMLElement>(
               '[class*="free-gift" i], [class*="gift-with" i], [class*="gift_row" i], [class*="gift-row" i]',
             )
           hit?.scrollIntoView?.({ behavior: 'instant', block: 'center' })
         })
-        await new Promise((r) => setTimeout(r, 550))
+
+      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
+      try {
+        await page.evaluate(() => {
+          const el =
+            document.querySelector<HTMLElement>(
+              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
+            ) || null
+          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+        })
+        await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2000 : 700))
+      } catch {
+        /* ignore */
+      }
+
+      // Gift / pack rows hydrate below the ATC — allow extra decode time on Vercel CPUs.
+      try {
+        await giftScrollIntoView()
+        await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2600 : 550))
       } catch {
         /* ignore */
       }
 
       // Bundle / kit: included or bonus items (e.g. free gifts list) near primary buy CTA
       try {
-        includedPackNearCtaContext = await page.evaluate(() => {
-          function findPrimaryPurchaseCta(): HTMLElement | null {
-            const ctaPatterns = [
-              'add to bag',
-              'add to basket',
-              'add to cart',
-              'add to order',
-              'buy now',
-              'buy it now',
-              'purchase',
-              'checkout',
-              'pay now',
-              'order now',
-              'complete order',
-              'place order',
-              'add pack',
-              'get it now',
-            ]
-            const selectors =
-              'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
-            const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
-            let best: HTMLElement | null = null
-            let bestScore = 0
-            for (const el of candidates) {
-              const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
-              const aria = (el.getAttribute('aria-label') || '').toLowerCase()
-              const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
-              const combined = `${text} ${aria} ${val}`
-              if (!ctaPatterns.some((p) => combined.includes(p))) continue
-              const st = window.getComputedStyle(el)
-              if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
-              const r = el.getBoundingClientRect()
-              if (r.width < 4 || r.height < 4) continue
-              const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
-              const inHeaderOnly =
-                !!el.closest('header, [class*="header" i], nav') &&
-                !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
-              const inProduct = !!(
-                el.closest('form[action*="cart" i]') ||
-                el.closest('[class*="product-form" i]') ||
-                el.closest('[class*="product__" i]') ||
-                el.closest('[class*="product-info" i]') ||
-                el.closest('[class*="product-details" i]') ||
-                el.closest('[data-product-form]') ||
-                el.closest('[id*="product-form" i]') ||
-                el.closest('[class*="purchase" i]') ||
-                el.closest('[name="add"]') ||
-                el.closest('[class*="shopify" i]')
-              )
-              let score = r.width * r.height + (inProduct ? 800000 : 0)
-              if (inFooter) score *= 0.02
-              if (inHeaderOnly && !inProduct) score *= 0.05
-              if (score > bestScore) {
-                bestScore = score
-                best = el
-              }
+        if (process.env.VERCEL) {
+          await waitForMainColumnImages(page, { perImageBudgetMs: 3200 })
+        }
+
+        includedPackNearCtaContext = await page.evaluate(snapshotIncludedPackDom)
+
+        if (
+          process.env.VERCEL &&
+          includedPackNearCtaContext?.ctaFound &&
+          includedPackNearCtaContext.bundleLikely &&
+          !includedPackNearCtaContext.includedNearCta
+        ) {
+          try {
+            await waitForMainColumnImages(page, { perImageBudgetMs: 4200, maxImages: 200 })
+            await giftScrollIntoView()
+            await new Promise((r) => setTimeout(r, 2100))
+            const secondPass = await page.evaluate(snapshotIncludedPackDom)
+            if (secondPass.includedNearCta) {
+              includedPackNearCtaContext = secondPass
+              console.log('[scan] included pack near CTA: Vercel second pass flipped to PASS')
             }
-            return best
+          } catch (vercelRetryErr) {
+            console.warn('[scan] included pack Vercel second pass failed:', vercelRetryErr)
           }
-
-          function getProductMerchRoot(cta: HTMLElement): Element | null {
-            return (
-              cta.closest('main, [role="main"]') ||
-              cta.closest('[class*="pip-product" i]') ||
-              cta.closest('[class*="product-information" i]') ||
-              cta.closest('[class*="product-details" i]') ||
-              cta.closest('[id*="product" i]') ||
-              cta.closest('article') ||
-              null
-            )
-          }
-
-          /** Spacegoods/Skio-style “free gifts” rows: headings + ≥3 distinct product thumbnails near buy column. */
-          function isVisibleForPack(h: HTMLElement): boolean {
-            const st = window.getComputedStyle(h)
-            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
-            const r = h.getBoundingClientRect()
-            return r.width > 2 && r.height > 2
-          }
-
-          function countGiftRowImagesNearCta(
-            rootEl: Element | null,
-            ctaEl: HTMLElement | null,
-          ): { count: number; note: string } {
-            if (!rootEl || !ctaEl) return { count: 0, note: '' }
-            const ctaRect = ctaEl.getBoundingClientRect()
-            let best = 0
-            let bestNote = ''
-
-            const giftHeadingText = (raw: string) => {
-              const s = raw.toLowerCase().replace(/\s+/g, ' ')
-              return (
-                (/\bfree\s+gifts?\b/.test(s) &&
-                  /\b(with|your|worth|first|order|bonus|included|supply|kit|pack|!|,)\b/i.test(s)) ||
-                /\bgifts?\s+with\s+your\s+first\s+order\b/i.test(s) ||
-                /\bfree\s+gifts?\s+with\b/i.test(s)
-              )
-            }
-
-            const hubs = Array.from(
-              rootEl.querySelectorAll(
-                'h2, h3, h4, h5, h6, strong, [class*="banner" i], [class*="heading" i], [class*="label" i], p',
-              ),
-            ) as HTMLElement[]
-            for (const hub of hubs) {
-              const raw = (hub.textContent || '').replace(/\s+/g, ' ').trim()
-              if (raw.length > 280 || raw.length < 8) continue
-              if (!giftHeadingText(raw)) continue
-
-              const scope =
-                (hub.closest(
-                  'section, article, [class*="plan" i], [class*="subscription" i], [class*="offer" i], [class*="bundle" i]',
-                ) as HTMLElement | null) ||
-                (hub.closest('[class*="product__" i]') as HTMLElement | null) ||
-                (hub.closest('[class*="product" i]') as HTMLElement | null) ||
-                hub.parentElement
-              if (!scope) continue
-
-              const seenUrls = new Set<string>()
-              let imgs = 0
-              scope.querySelectorAll('img').forEach((imgEl) => {
-                const img = imgEl as HTMLImageElement
-                if (img.closest('header, footer, [class*="header" i], [class*="footer" i]')) return
-                if (!isVisibleForPack(img)) return
-                const ir = img.getBoundingClientRect()
-                if (ir.width < 24 || ir.height < 24) return
-                if (ir.width * ir.height < 650) return
-                const u = (img.currentSrc || img.src || '').split('?')[0]
-                if (u) {
-                  if (seenUrls.has(u)) return
-                  seenUrls.add(u)
-                }
-                imgs++
-              })
-
-              if (imgs > best) {
-                best = imgs
-                bestNote = `"${raw.slice(0, 76)}" (${imgs} product images)`
-              }
-            }
-
-            const classSelectors = [
-              '[class*="free-gift" i]',
-              '[class*="free_gift" i]',
-              '[class*="gift-with" i]',
-              '[class*="gift_row" i]',
-              '[class*="gift-row" i]',
-              '[class*="gift-grid" i]',
-              '[class*="gift_grid" i]',
-              '[class*="first-order" i]',
-            ]
-            for (const sel of classSelectors) {
-              let boxes: HTMLElement[] = []
-              try {
-                boxes = Array.from(rootEl.querySelectorAll(sel)) as HTMLElement[]
-              } catch {
-                continue
-              }
-              for (const box of boxes) {
-                if (!isVisibleForPack(box)) continue
-                const br = box.getBoundingClientRect()
-                const xOverlap = Math.min(br.right, ctaRect.right) - Math.max(br.left, ctaRect.left)
-                if (xOverlap < 20 && Math.abs(br.left - ctaRect.left) > 280) continue
-                const seenUrls = new Set<string>()
-                let imgs = 0
-                box.querySelectorAll('img').forEach((imgEl) => {
-                  const img = imgEl as HTMLImageElement
-                  if (img.closest('header, footer, nav')) return
-                  if (!isVisibleForPack(img)) return
-                  const ir = img.getBoundingClientRect()
-                  if (ir.width < 24 || ir.height < 24 || ir.width * ir.height < 650) return
-                  const u = (img.currentSrc || img.src || '').split('?')[0]
-                  if (u) {
-                    if (seenUrls.has(u)) return
-                    seenUrls.add(u)
-                  }
-                  imgs++
-                })
-                if (imgs > best) {
-                  best = imgs
-                  bestNote = `${imgs} images in gift/pack row (${sel.trim()})`
-                }
-              }
-            }
-
-            return { count: best, note: bestNote }
-          }
-
-          const cta = findPrimaryPurchaseCta()
-          const path = window.location.pathname.toLowerCase()
-          const h1 = (document.querySelector('h1')?.textContent || '').toLowerCase()
-          const docTitle = (document.title || '').toLowerCase()
-          const pathTitle = `${path} ${h1} ${docTitle}`
-
-          const bundleLikely =
-            /starter-kit|starter kit|gift-set|sample-pack|value-pack|\/bundles\/|-bundle-|combo-pack|2-pack|3-pack|bogo|subscription-box/i.test(
-              pathTitle,
-            ) ||
-            /\b(starter kit|gift set|value pack|bundle deal|kit includes|pack includes)\b/i.test(pathTitle) ||
-            /\b(what'?s included|items included|everything you get|everything you need|need to get started)\b/i.test(
-              h1 + docTitle,
-            ) ||
-            /\/[\w-]*-kit\b|\/[\w-]*-bundle\b|\/[\w-]*starter[\w-]*\b/i.test(path)
-
-          const root = cta ? getProductMerchRoot(cta) : document.querySelector('main, [role="main"]')
-          const zoneFull = root
-            ? ((root as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
-            : (document.body.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
-
-          const low = zoneFull
-          const ctaParentText = cta?.parentElement
-            ? (cta.parentElement.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
-            : ''
-          const ctaFormText = cta?.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]')
-            ? (
-              (cta.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]') as HTMLElement)
-                .innerText || ''
-            )
-                .replace(/\s+/g, ' ')
-                .trim()
-                .toLowerCase()
-            : ''
-          // Anchor the text window on the **primary buy** phrases (rightmost match in reading order).
-          // Using earliest match among terms like "flavour" often sits above the buy column and
-          // excludes "Everything you need…" + free-gift copy below the title (Spacegoods, many Shopify themes).
-          const buyAnchorTerms = [
-            'add to bag',
-            'add to basket',
-            'add to cart',
-            'buy it now',
-            'buy now',
-            'sold out',
-            'out of stock',
-            'add pack',
-            'get it now',
-          ]
-          let buyIdx = -1
-          for (const term of buyAnchorTerms) {
-            const at = low.lastIndexOf(term)
-            if (at > buyIdx) buyIdx = at
-          }
-          let fallbackIdx = -1
-          const fallbackTerms = ['quantity', 'flavour', 'flavor']
-          for (const term of fallbackTerms) {
-            const at = low.indexOf(term)
-            if (at >= 0 && (fallbackIdx < 0 || at < fallbackIdx)) fallbackIdx = at
-          }
-          const span = 5200
-          const anchorIdx = buyIdx >= 0 ? buyIdx : fallbackIdx
-          const bodyNearWindow =
-            anchorIdx >= 0
-              ? low.slice(Math.max(0, anchorIdx - span), Math.min(low.length, anchorIdx + span))
-              : low.slice(0, 6200)
-          const nearWindow = `${ctaFormText} ${ctaParentText} ${bodyNearWindow}`.trim()
-          const zoneSlice = zoneFull.slice(0, 28000)
-          const merchWideForBundle =
-            /\b(free\s+gifts?|with\s+your\s+first\s+order|gifts?\s+worth|flexible\s+plan|month\s+supply|starter\s+kit|subscription|bonus\s+(items?|gifts?)|get started)\b/i.test(
-              zoneSlice,
-            )
-
-          const textReinforcesBundle =
-            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting|everything you need|get started|your first order)\b/i.test(
-              nearWindow,
-            ) || merchWideForBundle
-          const bundleLikelyFromGiftsPlan =
-            /\bfree\s+gifts?\b/i.test(zoneSlice) &&
-            /\b(subscription|month\s+supply|flexible\s+plan|starter\s*kit|\d+\s*servings\b|trial|first\s+order)/i.test(
-              `${path}\n${h1}\n${zoneSlice.slice(0, 5000)}`,
-            )
-          const bundleLikelyFinal =
-            bundleLikely ||
-            (/\b(kit|bundle)\b/i.test(h1) && textReinforcesBundle) ||
-            bundleLikelyFromGiftsPlan
-
-          const evidence: string[] = []
-          let score = 0
-
-          const { count: visualGiftImgCount, note: visualGiftNote } = countGiftRowImagesNearCta(root, cta)
-          if (visualGiftImgCount >= 3 && visualGiftNote) {
-            score += 6
-            evidence.push(`visual lineup: ${visualGiftNote}`)
-          }
-
-          if (
-            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|everything you need|need to get started|get started|you'?re getting|in the box|what you get|contains|included with|in this kit|in this pack/i.test(
-              nearWindow,
-            )
-          ) {
-            score += 4
-            evidence.push('explicit included / kit copy')
-          }
-          if (
-            /free\s+gifts?\s*(with|worth|!|,|\b)|with\s+your\s+first\s+order|\bflexible\s+plan\b|\bmonth\s+supply\b|bonus|complimentary|free\s+sample|free accessories/i.test(
-              nearWindow,
-            ) ||
-            merchWideForBundle
-          ) {
-            score += 2
-            evidence.push('free gifts or bonus language')
-          }
-          let quantityPackSignals = (
-            nearWindow.match(
-              /\b\d+x\s*(?:bag|bags|item|items|pack|packs|sample|samples|servings?|accessories|gifts?)\b/gi,
-            ) || []
-          ).length
-          if (/\b\d+x\b/i.test(nearWindow) && /\bsamples?\b/i.test(nearWindow)) {
-            quantityPackSignals = Math.max(quantityPackSignals, 1)
-          }
-          if (quantityPackSignals >= 2) {
-            score += 3
-            evidence.push(`${quantityPackSignals} quantity pack line(s)`)
-          } else if (quantityPackSignals === 1) {
-            score += 1
-            evidence.push('quantity pack line')
-          }
-          const money = (
-            nearWindow.match(/(?:[$£€₹]|(?:\brs\.?\s*))\s*[\d.,]+/gi) || []
-          ).length
-          if (money >= 4) {
-            score += 3
-            evidence.push(`${money} price lines in buy zone`)
-          } else if (money >= 2) {
-            score += 2
-            evidence.push(`${money} price lines in buy zone`)
-          }
-          if ((nearWindow.match(/✅|•|✓/g) || []).length >= 2) {
-            score += 1
-            evidence.push('bullet or check list near buy')
-          }
-          if (
-            /\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth\s*(?:[£$€₹]|rs\.?)\b/i.test(
-              nearWindow,
-            )
-          ) {
-            score += 1
-            evidence.push('stacked value / gifts worth copy')
-          }
-          if (/starter kit bundle|starter kit\s*:/i.test(nearWindow)) {
-            score += 2
-            evidence.push('starter-kit bundle copy')
-          }
-
-          const explicitIncludedHeading =
-            /what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains|everything you need|need to get started|everything you get|you'?re getting/i.test(
-              nearWindow,
-            ) ||
-            /\bfree\s+gifts?\s*(with|$|worth|!)/i.test(nearWindow) ||
-            /\bwith\s+your\s+first\s+order\b/i.test(nearWindow) ||
-            /\bgifts?\s+worth\b/i.test(nearWindow) ||
-            /\bfree\s+gifts?\s+with\b/i.test(zoneSlice)
-
-          const giftCopyInZone = /\bfree\s+gifts?\b/i.test(zoneSlice) || merchWideForBundle
-          const visualGiftLineup =
-            !!cta &&
-            visualGiftImgCount >= 3 &&
-            (giftCopyInZone || bundleLikelyFinal || merchWideForBundle)
-
-          const includedNearCta =
-            score >= 5 ||
-            (score >= 4 && money >= 2) ||
-            (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
-            (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
-            (bundleLikelyFinal &&
-              buyIdx >= 0 &&
-              explicitIncludedHeading &&
-              (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(
-                nearWindow,
-              ) ||
-                quantityPackSignals >= 1 ||
-                money >= 2)) ||
-            visualGiftLineup ||
-            (visualGiftImgCount >= 4 && !!cta && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice))
-
-          return {
-            ctaFound: !!cta,
-            bundleLikely: bundleLikelyFinal,
-            includedNearCta,
-            evidence,
-          }
-        })
+        }
       } catch (includedPackErr) {
         console.warn('[scan] included pack near CTA DOM snapshot failed:', includedPackErr)
         includedPackNearCtaContext = null
