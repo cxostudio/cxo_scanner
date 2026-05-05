@@ -98,8 +98,8 @@ export function snapshotIncludedPackDom(): {
     rootEl: Element | null,
     ctaEl: HTMLElement | null,
   ): { count: number; note: string } {
-    if (!rootEl || !ctaEl) return { count: 0, note: '' }
-    const ctaRect = ctaEl.getBoundingClientRect()
+    if (!rootEl) return { count: 0, note: '' }
+    const ctaRect = ctaEl?.getBoundingClientRect() || null
     let best = 0
     let bestNote = ''
 
@@ -173,9 +173,11 @@ export function snapshotIncludedPackDom(): {
       }
       for (const box of boxes) {
         if (!isVisibleForPack(box)) continue
-        const br = box.getBoundingClientRect()
-        const xOverlap = Math.min(br.right, ctaRect.right) - Math.max(br.left, ctaRect.left)
-        if (xOverlap < 12 && Math.abs(br.left - ctaRect.left) > 320) continue
+        if (ctaRect) {
+          const br = box.getBoundingClientRect()
+          const xOverlap = Math.min(br.right, ctaRect.right) - Math.max(br.left, ctaRect.left)
+          if (xOverlap < 12 && Math.abs(br.left - ctaRect.left) > 320) continue
+        }
         const seenUrls = new Set<string>()
         let imgs = 0
         box.querySelectorAll('img').forEach((imgEl) => {
@@ -365,14 +367,12 @@ export function snapshotIncludedPackDom(): {
   const giftCopyInZone = /\bfree\s+gifts?\b/i.test(zoneSlice) || merchWideForBundle
 
   const visualGiftLineup =
-    !!cta &&
-    ((visualGiftImgCount >= 3 && (giftCopyInZone || bundleLikelyFinal || merchWideForBundle)) ||
-      (visualGiftImgCount >= 2 && giftCopyInZone && bundleLikelyFinal))
+    (visualGiftImgCount >= 3 && (giftCopyInZone || bundleLikelyFinal || merchWideForBundle)) ||
+    (!!cta && visualGiftImgCount >= 2 && giftCopyInZone && bundleLikelyFinal)
 
   const labelledFreeBundlePass =
-    !!cta &&
     bundleLikelyFinal &&
-    buyIdx >= 0 &&
+    (buyIdx >= 0 || /\b(add to (bag|cart)|buy now|quantity|flavou?r)\b/i.test(zoneSlice)) &&
     freeItemCallouts >= 3 &&
     /\bfree\s+gifts?\b/i.test(zoneSlice)
 
@@ -388,7 +388,7 @@ export function snapshotIncludedPackDom(): {
         quantityPackSignals >= 1 ||
         money >= 2)) ||
     visualGiftLineup ||
-    (visualGiftImgCount >= 4 && !!cta && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice)) ||
+    (visualGiftImgCount >= 4 && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice)) ||
     labelledFreeBundlePass
 
   return {
