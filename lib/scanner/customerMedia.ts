@@ -347,20 +347,82 @@ export async function detectCustomerMedia(
       }
     }
 
-    // 14. Gallery images showing model/lifestyle/results (alt text based)
-    // Catches cases where product gallery has people/results images
-    const galleryImgs = Array.from(document.querySelectorAll(
-      '[class*="product-gallery"] img, [class*="product_gallery"] img, ' +
-      '[class*="product-media"] img, [class*="product_media"] img, ' +
-      '[class*="gallery"] img, [data-media-type] img'
-    ))
-    const lifestyleGalleryImgs = galleryImgs.filter(img => {
-      const alt = ((img as HTMLImageElement).alt || '').toLowerCase()
-      const src = ((img as HTMLImageElement).src || '').toLowerCase()
-      return /model|lifestyle|result|texture|before|after|skin|face|person|woman|man|apply|use|wearing|showing/i.test(alt + src)
+    // 14. Gallery images: lifestyle / in-use / contextual shots (alt, URL, parent class; Shopify 2.0 friendly)
+    function collectProductGalleryImages(): HTMLImageElement[] {
+      const seen = new Set<string>()
+      const out: HTMLImageElement[] = []
+      const add = (img: HTMLImageElement) => {
+        if (isInsideReviewSection(img)) return
+        const raw = (img.currentSrc || img.getAttribute('src') || '').trim()
+        if (!raw || raw.startsWith('data:')) return
+        try {
+          const key = new URL(raw, window.location.href).pathname.split('?')[0] || raw
+          if (seen.has(key)) return
+          seen.add(key)
+          out.push(img)
+        } catch {
+          if (!seen.has(raw)) {
+            seen.add(raw)
+            out.push(img)
+          }
+        }
+      }
+      const rootSelectors = [
+        '[class*="product__media" i]',
+        '[class*="product-media" i]',
+        '[class*="product_gallery" i]',
+        '[class*="product-gallery" i]',
+        '[data-media-gallery]',
+        '[id*="MediaGallery" i]',
+        '[class*="media-gallery" i]',
+        '[class*="product__column" i]',
+        'main [class*="slideshow" i]',
+        'main [class*="swiper" i]',
+      ].join(', ')
+      try {
+        document.querySelectorAll(rootSelectors).forEach((root) => {
+          if (!(root instanceof HTMLElement)) return
+          if (isInsideReviewSection(root)) return
+          root.querySelectorAll('img').forEach((n) => {
+            if (n instanceof HTMLImageElement) add(n)
+          })
+        })
+      } catch {
+        /* invalid selector in edge engines */
+      }
+      if (out.length < 2) {
+        document.querySelectorAll('[data-media-id] img, [class*="carousel" i] img').forEach((n) => {
+          if (n instanceof HTMLImageElement) add(n)
+        })
+      }
+      return out
+    }
+
+    const galleryImgs = collectProductGalleryImages()
+    const lifestyleCombinedRe =
+      /\b(model|lifestyle|in-use|in_use|usage|ugc|result|texture|before|after|skin|face|person|people|woman|man|hands?|holding|pour|pouring|blend|mixing|mix|drink|drinking|sip|mug|cup|glass|kitchen|table|desk|morning|evening|routine|daily|moment|prepare|preparing|enjoy|enjoying|scene|context|real\s*life|day\s*in|how-to|how_to|serving|wearing|apply|applying|using|showing|demonstrat)\b/i
+
+    const lifestyleGalleryImgs = galleryImgs.filter((img) => {
+      const alt = (img.alt || '').toLowerCase()
+      const src = (img.src || img.currentSrc || '').toLowerCase()
+      let parentCls = ''
+      let p: Element | null = img.parentElement
+      for (let depth = 0; p && depth < 4; depth += 1) {
+        const c = (p as HTMLElement).className
+        parentCls += ` ${typeof c === 'string' ? c : ''}`
+        p = p.parentElement
+      }
+      parentCls = parentCls.toLowerCase()
+      if (lifestyleCombinedRe.test(`${alt} ${src} ${parentCls}`)) return true
+      if (/\b(lifestyle|in_use|in-use|ugc|usage|scene|pour|pouring|holding|hands|model|context|routine|morning|kitchen)\b/i.test(src))
+        return true
+      return false
     })
     if (lifestyleGalleryImgs.length > 0) {
-      const alts = lifestyleGalleryImgs.slice(0, 3).map(i => (i as HTMLImageElement).alt || 'image').join('", "')
+      const alts = lifestyleGalleryImgs
+        .slice(0, 3)
+        .map((i) => (i.alt || '').trim() || '(no alt)')
+        .join('", "')
       photoEvidence.push(`Lifestyle/model/results images in product gallery: ${lifestyleGalleryImgs.length} (e.g. "${alts}")`)
     }
 

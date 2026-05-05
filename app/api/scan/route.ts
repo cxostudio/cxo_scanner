@@ -81,7 +81,9 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'help center',
   'highlight',
   'homepage',
+  'in use',
   'lazy loading',
+  'lifestyle',
   'link label',
   'live chat',
   'location',
@@ -6263,6 +6265,20 @@ export async function POST(request: NextRequest) {
             )
           })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+          /** Product gallery shows lifestyle / in-context usage (distinct from "customer photos in reviews"). */
+          const isLifestyleProductImageRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            const hay = `${t} ${d}`
+            if (t.includes('customer photo') || hay.includes('customer photo')) return false
+            return (
+              (t.includes('lifestyle') && (t.includes('product') || t.includes('image') || t.includes('gallery'))) ||
+              (hay.includes('lifestyle') && hay.includes('product') && hay.includes('image')) ||
+              (t.includes('in use') && (t.includes('product') || t.includes('image'))) ||
+              (d.includes('real-world') && (d.includes('image') || d.includes('gallery'))) ||
+              (d.includes('in use') && d.includes('product') && d.includes('image'))
+            )
+          })()
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           const isDescriptionBenefitsRule =
@@ -6689,6 +6705,33 @@ PASS only if you see a rating VERY CLOSE to the product title or in the same tit
 ✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
 ❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
 `
+          } else if (isLifestyleProductImageRule) {
+            const galleryDomLine = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            const galleryDomBlock = galleryDomLine
+              ? `DOM: Lifestyle / in-use gallery signals were detected (see Evidence line "Lifestyle/model/results images in product gallery"). You MUST set passed: true and quote that evidence.`
+              : `DOM: No strong filename/alt lifestyle signal — rely on the SCREENSHOT. Look for hands, a person, or a real-world scene in the main product gallery / carousel.`
+            specialInstructions = `
+PRODUCT IMAGES / LIFESTYLE "IN USE" RULE — SCREENSHOT + DOM
+
+${galleryDomBlock}
+
+WHAT THIS RULE CHECKS (gallery only):
+• The **main product image area** (hero + carousel slides) should show the product **in real use** or **in context**: e.g. hands pouring/mixing a drink, person drinking, kitchen/table scene, wearing/applying the product — not only flat packshots on white.
+
+PASS if you see ANY of:
+• Hands or body interacting with the product in the gallery
+• A clear lifestyle/context scene where the product is central
+• At least one carousel slide that is clearly "usage" rather than only product-on-white (even if other slides are packshots)
+
+FAIL only if every visible gallery slide is **only** sterile packshots with **no** person, hands, or contextual environment.
+
+Do **not** pass this rule based solely on Trustpilot/review text blocks — those are not product gallery images.
+
+Evidence lines (KEY ELEMENTS → CUSTOMER PHOTOS section):
+${customerPhotoEvidence.length > 0 ? customerPhotoEvidence.join(' | ') : 'None'}
+`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
 CUSTOMER PHOTOS RULE - DOM DETECTION + VISUAL ANALYSIS:
@@ -6981,6 +7024,10 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
+          const lifestyleGalleryPrefix = isLifestyleProductImageRule
+            ? `\n\n⚠️⚠️⚠️ LIFESTYLE / IN-USE PRODUCT IMAGES RULE ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. Look at the **main product gallery / hero carousel** first.\n\nPASS if ANY slide shows **hands, a person, or a real-world context** (pouring, mixing, drinking, wearing, applying the product).\nFAIL only if **every** visible gallery image is a flat packshot with **no** usage context.\n\nIf KEY ELEMENTS evidence includes "Lifestyle/model/results images in product gallery" → output passed: true.\n\nNow analyze the screenshot:\n\n`
+            : ''
+
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
@@ -7005,7 +7052,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
           const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${lifestyleGalleryPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -7804,6 +7851,70 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
             }
+          } else if (isLifestyleProductImageRule) {
+            const hasGalleryLifestyleDomEvidence = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            const lifestyleNeg =
+              reasonLower.includes('no lifestyle') ||
+              reasonLower.includes('no person') ||
+              reasonLower.includes('no hands') ||
+              reasonLower.includes('no human') ||
+              reasonLower.includes('only packshot') ||
+              reasonLower.includes('only white background') ||
+              reasonLower.includes('only product-on-white') ||
+              (reasonLower.includes('no ') &&
+                reasonLower.includes('gallery') &&
+                (reasonLower.includes('lifestyle') || reasonLower.includes('usage') || reasonLower.includes('person')))
+
+            if (!analysis.passed && hasGalleryLifestyleDomEvidence) {
+              const ev =
+                customerPhotoEvidence.filter((e) => /lifestyle\/model|product gallery:/i.test(e)).join('; ') ||
+                'lifestyle / in-use gallery imagery'
+              console.log(`Lifestyle product images rule: DOM gallery evidence. Forcing PASS. ${ev}`)
+              analysis.passed = true
+              analysis.reason = `Product gallery includes lifestyle or in-use imagery (${ev}). The page shows the product in real-world context, which satisfies this rule.`
+            }
+
+            const hasPositiveLifestyleAi =
+              !lifestyleNeg &&
+              (reasonLower.includes('lifestyle') ||
+                reasonLower.includes('in use') ||
+                reasonLower.includes('in-use') ||
+                reasonLower.includes('pouring') ||
+                reasonLower.includes('pour ') ||
+                reasonLower.includes('hands') ||
+                reasonLower.includes('hand ') ||
+                reasonLower.includes('person') ||
+                reasonLower.includes('model') ||
+                reasonLower.includes('real-world') ||
+                reasonLower.includes('real world') ||
+                reasonLower.includes('context') ||
+                reasonLower.includes('drinking') ||
+                reasonLower.includes('mixing') ||
+                (reasonLower.includes('gallery') && (reasonLower.includes('usage') || reasonLower.includes('using'))))
+
+            if (!analysis.passed && hasPositiveLifestyleAi) {
+              console.log('Lifestyle product images rule: AI reason describes usage/lifestyle imagery. Forcing PASS.')
+              analysis.passed = true
+              if (!analysis.reason?.trim()) {
+                analysis.reason =
+                  'The product gallery shows lifestyle or in-context usage imagery (e.g. hands or environment with the product), so this rule passes.'
+              }
+            }
+
+            if (
+              !reasonLower.includes('gallery') &&
+              !reasonLower.includes('image') &&
+              !reasonLower.includes('lifestyle') &&
+              !reasonLower.includes('carousel') &&
+              !reasonLower.includes('hero')
+            ) {
+              console.warn(
+                `Warning: Lifestyle product-image rule but reason may lack gallery context: ${(analysis.reason || '').substring(0, 50)}`,
+              )
+              isRelevant = false
+            }
           } else if (isProductTitleRule && !analysis.passed) {
             // Direct override: AI often wrongly says "missing the brand" when title clearly contains brand (e.g. Caudalie)
             if (reasonLower.includes('missing the brand') && /Caudalie|Vinoperfect|Serum|Brightening|30ml|product title\s+['\"]/i.test(analysis.reason || '')) {
@@ -8045,21 +8156,40 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             reasonLower.includes(keyword)
           )
 
-          // Special check for customer photos rule - must NOT mention rating rule
-          if (isCustomerPhotoRule && (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))) {
-            console.error(`CRITICAL ERROR: Customer photos rule response mentions rating rule. This is wrong!`)
-            // Only force PASS if there's clear positive evidence of customer photos (not just keywords in any context)
+          // Special check for customer photos / lifestyle gallery rules - must NOT mention rating rule
+          if (
+            (isCustomerPhotoRule || isLifestyleProductImageRule) &&
+            (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))
+          ) {
+            console.error(`CRITICAL ERROR: Customer/lifestyle photo rule response mentions rating rule. This is wrong!`)
+            const hasGalleryLifestyleLine = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            // Only force PASS if there's clear positive evidence (not just keywords in any context)
             const hasStrongPhotoEvidence =
               (reasonLower.includes('customer photo') && !reasonLower.includes('no customer photo')) ||
               (reasonLower.includes('customer-uploaded') && !reasonLower.includes('no customer-uploaded')) ||
-              (reasonLower.includes('customer review image') && !reasonLower.includes('no '))
+              (reasonLower.includes('customer review image') && !reasonLower.includes('no ')) ||
+              (isLifestyleProductImageRule &&
+                hasGalleryLifestyleLine &&
+                !reasonLower.includes('no lifestyle')) ||
+              (isLifestyleProductImageRule &&
+                (reasonLower.includes('lifestyle') ||
+                  reasonLower.includes('hands') ||
+                  reasonLower.includes('pouring') ||
+                  reasonLower.includes('in use') ||
+                  reasonLower.includes('person')) &&
+                !reasonLower.includes('no person') &&
+                !reasonLower.includes('no lifestyle'))
             if (hasStrongPhotoEvidence) {
               analysis.passed = true
-              analysis.reason = `Customer photos are displayed in the reviews section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
-              console.log(`Fixed: Removed rating rule mention and forced PASS for customer photos`)
+              analysis.reason = isLifestyleProductImageRule
+                ? `Product gallery shows lifestyle or in-use imagery (hands/person/context). This fulfills the requirement for product images that show the product in use.`
+                : `Customer photos are displayed in the reviews section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
+              console.log(`Fixed: Removed rating rule mention and forced PASS for customer/lifestyle photo rule`)
             } else {
               // Remove rating mention but keep the fail result
-              analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Customer photos rule: ')
+              analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Photos / gallery rule: ')
               analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
             }
           }
