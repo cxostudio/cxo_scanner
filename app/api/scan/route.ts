@@ -5343,7 +5343,7 @@ export async function POST(request: NextRequest) {
               return false
             }
 
-            /** Gift rows, variant pickers — not main gallery media. */
+            /** Gift rows / upsell blocks are not main gallery media. */
             function isExcludedThumbnailMerch(el: Element): boolean {
               const selectors = [
                 '[class*="free-gift" i]',
@@ -5353,8 +5353,6 @@ export async function POST(request: NextRequest) {
                 '[class*="upsell" i]',
                 '[class*="cross-sell" i]',
                 '[class*="recommendations" i]',
-                '[class*="product-form" i]',
-                '[class*="product_form" i]',
                 '[class*="variant-picker" i]',
                 '[class*="variant_picker" i]',
                 '[class*="sticky-atc" i]',
@@ -5392,6 +5390,10 @@ export async function POST(request: NextRequest) {
               'main [class*="product__media" i]',
               'main [class*="product-media" i]',
               'main [class*="media-gallery" i]',
+              'main media-gallery',
+              '[data-product-media]',
+              '[data-product-media-wrapper]',
+              '[class*="product__media-list" i]',
               '[class*="product-gallery" i]',
               '[class*="media-gallery" i]',
               '[id*="MediaGallery" i]',
@@ -5408,7 +5410,7 @@ export async function POST(request: NextRequest) {
               try {
                 roots = Array.from(
                   document.querySelectorAll(
-                    '[class*="product__media" i], [class*="product-media" i], [class*="product-gallery" i]',
+                    '[class*="product__media" i], [class*="product-media" i], [class*="product-gallery" i], media-gallery, [data-product-media], [data-product-media-wrapper]',
                   ),
                 )
               } catch {
@@ -5430,12 +5432,33 @@ export async function POST(request: NextRequest) {
 
               root
                 .querySelectorAll(
-                  '[data-media-id] img[src], [data-media-id] img[data-src], [class*="product__media-item" i] img[src], [class*="media-item" i] img[src], [class*="gallery__slide" i] img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[src]',
+                  '[data-media-id] img[src], [data-media-id] img[data-src], [data-media-id] img[data-original], [class*="product__media-item" i] img[src], [class*="product__media-item" i] img[data-src], [class*="media-item" i] img[src], [class*="gallery__slide" i] img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[data-src], picture source[srcset], img[srcset]',
                 )
                 .forEach((imgEl) => {
-                  const img = imgEl as HTMLImageElement
-                  if (isExcludedThumbnailMerch(img) || isInsideReviewSection(img)) return
-                  const u = normalizeUrl(img.currentSrc || img.src || img.getAttribute('data-src') || '')
+                  const el = imgEl as HTMLElement
+                  if (isExcludedThumbnailMerch(el) || isInsideReviewSection(el)) return
+                  const asImg = imgEl as HTMLImageElement
+                  const sourceSet =
+                    imgEl.getAttribute('srcset') ||
+                    imgEl.getAttribute('data-srcset') ||
+                    asImg.srcset ||
+                    ''
+                  const fromSrcset = sourceSet
+                    .split(',')
+                    .map((p) => p.trim().split(/\s+/)[0])
+                    .filter(Boolean)
+                    .map((s) => normalizeUrl(s))
+                    .filter((s): s is string => !!s)
+                  fromSrcset.forEach((u) => {
+                    if (!/\/\.svg$/i.test(u)) imgUrls.add(u)
+                  })
+                  const u = normalizeUrl(
+                    asImg.currentSrc ||
+                      asImg.src ||
+                      imgEl.getAttribute('data-src') ||
+                      imgEl.getAttribute('data-original') ||
+                      '',
+                  )
                   if (u && !/\/\.svg$/i.test(u)) imgUrls.add(u)
                 })
             }
@@ -5477,6 +5500,31 @@ export async function POST(request: NextRequest) {
           )
         } catch (e) {
           console.warn('Multi-angle product gallery DOM detection failed:', e)
+          try {
+            const html = await page.content()
+            const fallbackDistinct = countDistinctGalleryDataMediaIdsFromHtml(html)
+            const fallbackPasses = fallbackDistinct >= 3
+            const fallbackBlock = buildMultiAngleGalleryDomBlock({
+              distinctCount: fallbackDistinct,
+              passes: fallbackPasses,
+              evidence: `DOM scan failed; HTML fallback counted unique gallery media markers=${fallbackDistinct}`,
+            })
+            keyElements = `${keyElements || ''}\n\n${fallbackBlock}`
+            websiteContent += `\n\n${fallbackBlock}`
+            console.log(
+              `[MULTI-ANGLE GALLERY] fallback distinct=${fallbackDistinct} pass=${fallbackPasses} (DOM scan failed path)`,
+            )
+          } catch (fallbackErr) {
+            console.warn('Multi-angle product gallery HTML fallback after DOM failure also failed:', fallbackErr)
+            const failSafeBlock = buildMultiAngleGalleryDomBlock({
+              distinctCount: 0,
+              passes: false,
+              evidence:
+                'DOM scan failed and HTML fallback unavailable; unable to count distinct product gallery media.',
+            })
+            keyElements = `${keyElements || ''}\n\n${failSafeBlock}`
+            websiteContent += `\n\n${failSafeBlock}`
+          }
         }
       }
 
