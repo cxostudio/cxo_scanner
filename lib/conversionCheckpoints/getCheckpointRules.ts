@@ -110,58 +110,182 @@ export const TARGET_CHECKPOINT_RECORD_IDS = [
   'rec33A6aJXon8YXfR',
   'recLehZKzun1Rxv0Z',
   'recYUxusypKnfViyM',
+  'recSKgDYp5GAl0g7B',
+  'recnbgJzDarhgi4RH',
+  'recNxnjMNyufvGsDX',
+  'rec9Bd8mIKecasTPF',
+  'rechQdZcW7EkLpi5J',
+  'recH6IBXpHPI1KIxY',
+  'receK3gEjM9yV2vi2',
+  'recGbDdjsN1u8pusF',
+  'recxEGfZMHhvNPCUa',
+  'recKQWJU3qEuKGFA3',
+  'recTMXWLDavg6RIi1',
+  'recxoLHExiwXLdy75',
+  'rec7WWY98CVhOtAXo',
+
 ] as const
 
-function buildRetrieveRecordUrl(listRecordsUrl: string, recordId: string): string {
-  const u = new URL(listRecordsUrl)
-  const path = u.pathname.replace(/\/$/, '')
-  return `${u.origin}${path}/${encodeURIComponent(recordId)}`
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
-async function fetchRecordById(apiUrl: string, apiKey: string, recordId: string) {
-  const recordUrl = buildRetrieveRecordUrl(apiUrl, recordId)
-  const res = await fetch(recordUrl, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-  })
-  const data = (await res.json()) as AirtableSingleRecord & { error?: unknown }
-  if (!res.ok) {
-    return { ok: false as const, status: res.status, body: data }
+/** Base list URL for the table (no `/rec…` retrieve suffix, no query string). */
+function getListRecordsBaseUrl(apiUrl: string): string {
+  const u = new URL(apiUrl)
+  let segments = u.pathname.split('/').filter(Boolean)
+  if (segments.length >= 4 && /^rec[a-zA-Z0-9]+$/.test(segments[segments.length - 1]!)) {
+    segments = segments.slice(0, -1)
   }
-  return { ok: true as const, record: data }
+  const path = `/${segments.join('/')}`
+  return `${u.origin}${path}`
 }
 
+function chunkIds<T>(arr: readonly T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size) as T[])
+  return out
+}
+
+/** Airtable formula: match any of the given record IDs (sanitized). */
+function buildOrRecordIdFormula(ids: readonly string[]): string {
+  const safe = ids.map((id) => id.trim()).filter((id) => /^rec[a-zA-Z0-9]+$/.test(id))
+  if (safe.length === 0) return ''
+  return `OR(${safe.map((id) => `RECORD_ID()='${id}'`).join(',')})`
+}
+
+function bodyLooksRateLimited(data: unknown): boolean {
+  if (data == null) return false
+  const s = JSON.stringify(data)
+  return s.includes('RATE_LIMIT') || s.includes('rate limit')
+}
+
+type ListResponse = {
+  records?: AirtableSingleRecord[]
+  offset?: string
+  error?: unknown
+  errors?: unknown
+}
+
+/**
+ * Fetches all records matching `filterByFormula`, following `offset` pagination.
+ * Retries on 429 / Airtable rate-limit payloads with exponential backoff.
+ */
+async function fetchAllRecordsForFormula(
+  listBaseUrl: string,
+  apiKey: string,
+  filterByFormula: string,
+): Promise<{ ok: true; records: AirtableSingleRecord[] } | { ok: false; status: number; body: unknown }> {
+  const all: AirtableSingleRecord[] = []
+  let offset: string | undefined
+
+  for (;;) {
+    const params = new URLSearchParams()
+    params.set('filterByFormula', filterByFormula)
+    params.set('pageSize', '100')
+    if (offset) params.set('offset', offset)
+
+    const url = `${listBaseUrl}?${params.toString()}`
+    let lastStatus = 500
+    let lastBody: unknown = null
+    let page: ListResponse | null = null
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+      })
+      lastStatus = res.status
+      lastBody = await res.json().catch(() => ({}))
+      page = lastBody as ListResponse
+
+      if (res.ok) break
+
+      const retry =
+        res.status === 429 ||
+        res.status === 503 ||
+        bodyLooksRateLimited(lastBody)
+
+      if (retry && attempt < 5) {
+        const waitMs = Math.min(10_000, 400 * 2 ** attempt)
+        console.warn(
+          `[getConversionCheckpointRules] Airtable rate limit / transient ${res.status}, retry in ${waitMs}ms (attempt ${attempt + 1}/5)`,
+        )
+        await sleep(waitMs)
+        continue
+      }
+
+      return { ok: false, status: res.status, body: lastBody }
+    }
+
+    const batch = page?.records ?? []
+    all.push(...batch)
+    offset = page?.offset
+    if (!offset) break
+  }
+
+  return { ok: true, records: all }
+}
+
+/**
+ * Loads many checkpoint rows with **few list API calls** (batched `filterByFormula`).
+ * Avoids one HTTP request per ID — that pattern trips Airtable `RATE_LIMIT_REACHED` quickly.
+ */
 async function fetchRecordsByIds(
   apiUrl: string,
   apiKey: string,
   recordIds: readonly string[],
-) {
-  const results = await Promise.all(recordIds.map((id) => fetchRecordById(apiUrl, apiKey, id)))
-  const records: AirtableSingleRecord[] = []
-  const notFoundIds: string[] = []
-
-  for (let i = 0; i < results.length; i += 1) {
-    const result = results[i]
-    const recordId = recordIds[i]
-    if (result.ok) {
-      records.push(result.record)
-      continue
+): Promise<
+  | {
+      ok: true
+      records: AirtableSingleRecord[]
+      requestedIds: readonly string[]
+      foundCount: number
+      notFoundIds: string[]
     }
-    if (result.status === 404) {
-      notFoundIds.push(recordId)
-      continue
-    }
-    return { ok: false as const, status: result.status, body: result.body }
+  | { ok: false; status: number; body: unknown }
+> {
+  const unique = [...new Set(recordIds.map((id) => id.trim()).filter(Boolean))]
+  if (unique.length === 0) {
+    return { ok: true, records: [], requestedIds: recordIds, foundCount: 0, notFoundIds: [] }
   }
 
+  const listBaseUrl = getListRecordsBaseUrl(apiUrl)
+  const idChunks = chunkIds(unique, 20)
+  const mergedById = new Map<string, AirtableSingleRecord>()
+
+  for (let i = 0; i < idChunks.length; i += 1) {
+    const formula = buildOrRecordIdFormula(idChunks[i]!)
+    if (!formula) continue
+
+    const chunkRes = await fetchAllRecordsForFormula(listBaseUrl, apiKey, formula)
+    if (!chunkRes.ok) return chunkRes
+
+    for (const rec of chunkRes.records) {
+      mergedById.set(rec.id, rec)
+    }
+
+    if (i < idChunks.length - 1) {
+      await sleep(250)
+    }
+  }
+
+  const ordered: AirtableSingleRecord[] = []
+  for (const id of unique) {
+    const rec = mergedById.get(id)
+    if (rec) ordered.push(rec)
+  }
+
+  const notFoundIds = unique.filter((id) => !mergedById.has(id))
+
   return {
-    ok: true as const,
-    records,
-    requestedIds: recordIds,
-    foundCount: records.length,
+    ok: true,
+    records: ordered,
+    requestedIds: unique,
+    foundCount: ordered.length,
     notFoundIds,
   }
 }

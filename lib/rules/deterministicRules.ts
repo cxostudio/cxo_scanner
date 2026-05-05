@@ -10,6 +10,15 @@ import type { FooterNewsletterSnapshot } from '@/lib/rules/footerNewsletterRule'
 import { evaluateFooterNewsletterRule } from '@/lib/rules/footerNewsletterRule'
 import type { FooterCustomerSupportSnapshot } from '@/lib/rules/footerCustomerSupportRule'
 import { evaluateFooterCustomerSupportRule } from '@/lib/rules/footerCustomerSupportRule'
+import {
+  evaluateIncludedPackNearCtaRule,
+  isIncludedPackNearCtaRule,
+} from '@/lib/rules/includedPackNearCtaRule'
+import {
+  evaluateProductTabsAccordionRule,
+  isProductTabsAccordionRule,
+} from '@/lib/rules/productTabsAccordionRule'
+import { evaluateWishlistNearCtaRule, isWishlistNearCtaRule } from '@/lib/rules/wishlistNearCtaRule'
 
 export function isLazyLoadingRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
@@ -153,9 +162,11 @@ export function isProductTitleRule(rule: ScanRule): boolean {
 
 export function isThumbnailGalleryRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
   return (
     rule.id === 'image-thumbnails' ||
-    (t.includes('thumbnail') && t.includes('gallery'))
+    (t.includes('thumbnail') && t.includes('gallery')) ||
+    (d.includes('thumbnails') && d.includes('gallery'))
   )
 }
 
@@ -766,6 +777,18 @@ export function tryEvaluateDeterministic(
   if (isTrustBadgesNearCtaRule(rule)) {
     const trustResult = evaluateTrustBadgesNearCtaRule(rule, context.keyElementsString)
     if (trustResult !== null) return trustResult
+  }
+  if (isWishlistNearCtaRule(rule)) {
+    const wishlistResult = evaluateWishlistNearCtaRule(rule, context.keyElementsString)
+    if (wishlistResult !== null) return wishlistResult
+  }
+  if (isIncludedPackNearCtaRule(rule)) {
+    const packResult = evaluateIncludedPackNearCtaRule(rule, context.keyElementsString)
+    if (packResult !== null) return packResult
+  }
+  if (isProductTabsAccordionRule(rule)) {
+    const tabsResult = evaluateProductTabsAccordionRule(rule, context.keyElementsString)
+    if (tabsResult !== null) return tabsResult
   }
   if (isVerbUrgencyCtaLabelRule(rule)) {
     const ctaVerbResult = evaluateVerbUrgencyCtaLabelRule(rule, context.keyElementsString)

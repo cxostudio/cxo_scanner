@@ -60,6 +60,7 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'annotation',
   'arrow',
   'back to top',
+  'badge',
   'before',
   'benefit',
   'breadcrumb',
@@ -80,7 +81,9 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'help center',
   'highlight',
   'homepage',
+  'in use',
   'lazy loading',
+  'lifestyle',
   'link label',
   'live chat',
   'location',
@@ -102,9 +105,11 @@ const ACTIVE_CONVERSION_RULE_MATCHERS = [
   'secure checkout',
   'sitewide',
   'size',
+  'selling',
   'subscription',
   'swipe',
   'terms',
+  'thumbnail',
   'title',
   'trust',
   'urgency',
@@ -117,6 +122,26 @@ function isActiveConversionRule(rule: Rule): boolean {
   return ACTIVE_CONVERSION_RULE_MATCHERS.some((keyword) => haystack.includes(keyword))
 }
 
+/**
+ * Rules about benefit copy, badges, or annotations on product imagery.
+ * Keeps DOM scan + AI "image annotations" overrides in sync (e.g. "key selling points on images").
+ */
+function isImageSellingPointsOrAnnotationRule(rule: Pick<Rule, 'id' | 'title' | 'description'>): boolean {
+  const t = (rule.title || '').toLowerCase()
+  const d = (rule.description || '').toLowerCase()
+  if (rule.id === 'image-annotations') return true
+  if (t.includes('annotation') && t.includes('image')) return true
+  if (d.includes('annotations') && d.includes('product images')) return true
+  if (t.includes('selling point') && t.includes('image')) return true
+  if (
+    (t.includes('badges') || t.includes('badge')) &&
+    t.includes('image') &&
+    (t.includes('selling') || t.includes('product') || t.includes('vegan') || t.includes('cruelty'))
+  ) {
+    return true
+  }
+  return false
+}
 
 
 // Zod schemas for validation
@@ -1163,6 +1188,15 @@ export async function POST(request: NextRequest) {
       trustBadgesInfo: string
       containerDescription: string
     } | null = null
+    /** Save-for-later / wishlist / shopping list control beside primary buy CTA (deterministic rule). */
+    let wishlistNearCtaContext: { ctaFound: boolean; nearCta: boolean; evidence: string[] } | null = null
+    /** Bundle/kit: included or bonus items listed near primary buy CTA (deterministic rule). */
+    let includedPackNearCtaContext: {
+      ctaFound: boolean
+      bundleLikely: boolean
+      includedNearCta: boolean
+      evidence: string[]
+    } | null = null
     let lazyLoadingResult: { detected: boolean; lazyLoadedCount: number; totalMediaCount: number; examples: string[]; summary: string } | null = null
     let squareImageContext: {
       squareContainersFound: number
@@ -1739,6 +1773,63 @@ export async function POST(request: NextRequest) {
               count: potentialAccordionHeaders.length,
               selector: 'headings'
             })
+          }
+
+          // Shopify / headless: section titles as buttons or <details> summaries (not always h2–h4)
+          try {
+            const navHits = new Set<string>()
+            const matchesDetailLabel = (raw: string): boolean => {
+              const t = raw.replace(/\s+/g, ' ').trim().toLowerCase()
+              if (!t || t.length > 72) return false
+              const patterns = [
+                /^product details?$/i,
+                /^description$/i,
+                /^ingredients?$/i,
+                /^nutritional information$/i,
+                /^nutrition info$/i,
+                /^shipping(\s+&?\s*returns?)?$/i,
+                /^delivery$/i,
+                /^returns?$/i,
+                /^reviews?$/i,
+                /^specifications?$/i,
+                /^how to use/i,
+                /^faq$/i,
+                /^benefits$/i,
+                /^features$/i,
+                /^what'?s inside$/i,
+              ]
+              if (patterns.some((p) => p.test(t))) return true
+              if (t.includes('nutritional') && t.includes('information')) return true
+              if (t.includes('product') && t.includes('detail')) return true
+              return false
+            }
+            const roots = Array.from(
+              document.querySelectorAll('main, [role="main"], [id*="product" i], [class*="product" i]'),
+            ) as HTMLElement[]
+            const seen = new Set<Element>()
+            for (const root of roots) {
+              root
+                .querySelectorAll(
+                  'button, [role="tab"], [role="button"], details > summary, a[class*="tab" i]',
+                )
+                .forEach((el) => {
+                  if (seen.has(el)) return
+                  if (el.closest('footer, [role="contentinfo"], header, [role="banner"]')) return
+                  const lab = (el.textContent || '').replace(/\s+/g, ' ').trim()
+                  if (!matchesDetailLabel(lab)) return
+                  seen.add(el)
+                  navHits.add(lab.slice(0, 48).toLowerCase())
+                })
+            }
+            if (navHits.size >= 2) {
+              foundTabs.push({
+                type: 'product-detail-nav',
+                count: navHits.size,
+                selector: 'main-section-buttons-or-summaries',
+              })
+            }
+          } catch {
+            /* ignore */
           }
 
           // Check for collapsible content sections
@@ -2723,6 +2814,519 @@ export async function POST(request: NextRequest) {
         }
       })
 
+      // Wishlist / save-for-later / shopping list near primary CTA (same scroll position as trust badges)
+      try {
+        wishlistNearCtaContext = await page.evaluate(() => {
+        function findPrimaryPurchaseCta(): HTMLElement | null {
+          const ctaPatterns = [
+            'add to bag',
+            'add to basket',
+            'add to cart',
+            'add to order',
+            'buy now',
+            'buy it now',
+            'purchase',
+            'checkout',
+            'pay now',
+            'order now',
+            'complete order',
+            'place order',
+            'add pack',
+            'get it now',
+          ]
+          const selectors =
+            'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+          let best: HTMLElement | null = null
+          let bestScore = 0
+          for (const el of candidates) {
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+            const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+            const combined = `${text} ${aria} ${val}`
+            if (!ctaPatterns.some((p) => combined.includes(p))) continue
+            const st = window.getComputedStyle(el)
+            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
+            const r = el.getBoundingClientRect()
+            if (r.width < 4 || r.height < 4) continue
+            const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+            const inHeaderOnly =
+              !!el.closest('header, [class*="header" i], nav') &&
+              !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+            const inProduct = !!(
+              el.closest('form[action*="cart" i]') ||
+              el.closest('[class*="product-form" i]') ||
+              el.closest('[class*="product__" i]') ||
+              el.closest('[class*="product-info" i]') ||
+              el.closest('[class*="product-details" i]') ||
+              el.closest('[data-product-form]') ||
+              el.closest('[id*="product-form" i]') ||
+              el.closest('[class*="purchase" i]') ||
+              el.closest('[name="add"]') ||
+              el.closest('[class*="shopify" i]')
+            )
+            let score = r.width * r.height + (inProduct ? 800000 : 0)
+            if (inFooter) score *= 0.02
+            if (inHeaderOnly && !inProduct) score *= 0.05
+            if (score > bestScore) {
+              bestScore = score
+              best = el
+            }
+          }
+          return best
+        }
+
+        function isExcludedFarFromBuy(el: Element): boolean {
+          return !!el.closest(
+            'footer, [role="contentinfo"], [id*="shopify-section-footer" i], ' +
+              '[class*="site-footer" i], [data-section-type="footer" i]',
+          )
+        }
+
+        function pixelNearBuyButton(cta: HTMLElement, el: Element): boolean {
+          const c = cta.getBoundingClientRect()
+          const t = (el as HTMLElement).getBoundingClientRect()
+          if (c.height < 4 || t.height < 1) return false
+          const hz = t.left < c.right + 180 && t.right > c.left - 180
+          const gapBelow = t.top - c.bottom
+          const gapAbove = c.top - t.bottom
+          const nearBelow = gapBelow >= -40 && gapBelow <= 220
+          const nearAbove = gapAbove >= -32 && gapAbove <= 420
+          return hz && (nearBelow || nearAbove)
+        }
+
+        function isElementActuallyVisible(el: Element): boolean {
+          const h = el as HTMLElement
+          if (h.hidden || h.getAttribute('aria-hidden') === 'true') return false
+          const st = window.getComputedStyle(h)
+          if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
+          const r = h.getBoundingClientRect()
+          return r.width >= 4 && r.height >= 4
+        }
+
+        function getPurchaseBlock(el: Element | null): Element | null {
+          if (!el) return null
+          return (
+            el.closest('form[action*="cart" i]') ||
+            el.closest('[class*="product-form" i]') ||
+            el.closest('[class*="product__info" i]') ||
+            el.closest('[class*="product-info" i]') ||
+            el.closest('[class*="purchase" i]') ||
+            el.closest('[data-product-form]') ||
+            el.closest('[id*="product-form" i]')
+          )
+        }
+
+        function isInSamePurchaseBlock(cta: HTMLElement, el: Element): boolean {
+          const ctaBlock = getPurchaseBlock(cta)
+          const elBlock = getPurchaseBlock(el)
+          return !!ctaBlock && !!elBlock && ctaBlock === elBlock
+        }
+
+        function getProductMerchRoot(cta: HTMLElement): Element | null {
+          return (
+            cta.closest('main, [role="main"]') ||
+            cta.closest('[class*="pip-product" i]') ||
+            cta.closest('[class*="product-information" i]') ||
+            cta.closest('[class*="product-details" i]') ||
+            cta.closest('[id*="product" i]') ||
+            cta.closest('article') ||
+            null
+          )
+        }
+
+        function inHeaderOnlyChrome(el: Element): boolean {
+          return !!(el.closest('header, [role="banner"]') && !el.closest('main, [role="main"]'))
+        }
+
+        /** Title / price / icon row through buy area — not global header-only links. */
+        function isEasilyVisibleNearBuyFlow(cta: HTMLElement, el: Element): boolean {
+          if (inHeaderOnlyChrome(el)) return false
+          const root = getProductMerchRoot(cta)
+          if (!root || !root.contains(el)) return false
+          const cr = cta.getBoundingClientRect()
+          const er = (el as HTMLElement).getBoundingClientRect()
+          const rr = (root as HTMLElement).getBoundingClientRect()
+          const hz = er.right >= cr.left - 220 && er.left <= cr.right + 220
+          const bandTop = Math.min(cr.top, rr.top) - 40
+          const bandBottom = cr.bottom + 480
+          const vertOverlap = er.bottom >= bandTop && er.top <= bandBottom
+          return hz && vertOverlap
+        }
+
+        function nearPrimaryCta(cta: HTMLElement | null, el: Element): boolean {
+          if (!cta) return false
+          if (isExcludedFarFromBuy(el)) return false
+          if (!isElementActuallyVisible(el)) return false
+          if (cta === el || cta.contains(el)) return true
+          if (isInSamePurchaseBlock(cta, el)) return true
+          if (pixelNearBuyButton(cta, el)) return true
+          return isEasilyVisibleNearBuyFlow(cta, el)
+        }
+
+        function controlBlob(el: HTMLElement): string {
+          const attrs = Array.from(el.attributes || [])
+            .map((a) => `${a.name}=${a.value}`)
+            .join(' ')
+          return [
+            el.getAttribute('aria-label'),
+            el.getAttribute('title'),
+            el.getAttribute('href'),
+            (el.textContent || '').replace(/\s+/g, ' ').trim(),
+            (el.className || '').toString(),
+            el.id,
+            attrs,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+        }
+
+        function matchesSaveLater(h: string, el: HTMLElement): boolean {
+          const inner = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+          const lab = (el.getAttribute('aria-label') || '').toLowerCase()
+          const combined = `${inner} ${lab}`
+          if (
+            /\b(add to (cart|bag|basket)|buy it now|buy now|checkout|place order)\b/.test(combined) &&
+            !/\b(wishlist|list|save|favourite|favorite|later)\b/i.test(combined)
+          ) {
+            return false
+          }
+          const phrase =
+            /\b(wishlist|wish-list|wish_list|save for later|save-for-later|favourites?\b|favorites?\b|shopping list|shopping-list|shopping_list|shoppinglist|add to list|save to list|my lists?\b|love list|save item|saved items?)\b/i
+          const href = (el.getAttribute('href') || '').toLowerCase()
+          const hrefOk = /wishlist|favorites|favourites|saved[-_]items|shopping[-_]list|wish-list/i.test(href)
+          const dataOrClass =
+            /(wishlist|wish-list|wish_list|saved-for-later|save-for-later|shopping-list|shopping_list|shoppinglist|towishlist|add-to-wish|addtowish|smartwishlist|swym|icon-wish|wish-icon|wishlist-icon|favorite-btn|favourite-btn|favorites-btn|favourites-btn|save[-_]for[-_]later|heart-icon|icon-heart)/i.test(
+              h,
+            )
+          return phrase.test(h) || hrefOk || dataOrClass
+        }
+
+        function svgHintBlob(el: HTMLElement): string {
+          let s = ''
+          el.querySelectorAll('svg title, svg [aria-label], use').forEach((n) => {
+            s +=
+              (n.textContent || '') +
+              ' ' +
+              (n.getAttribute?.('aria-label') || '') +
+              ' ' +
+              (n.getAttribute?.('href') || n.getAttribute?.('xlink:href') || '') +
+              ' '
+          })
+          return s.toLowerCase()
+        }
+
+        /**
+         * Text/href/class match OR strong wishlist tokens on the control only (no loose innerHTML —
+         * avoids false PASS from substrings like "Swiss" → "wish", or generic heart icons).
+         */
+        function matchesWishlistControl(cta: HTMLElement, h: string, el: HTMLElement): boolean {
+          if (matchesSaveLater(h, el)) return true
+          if (!isEasilyVisibleNearBuyFlow(cta, el)) return false
+          if (
+            /\b(share|close|search|zoom|menu|play|video|more items|quantity|swiper|carousel|prev|next|thumbnail|minus|plus|trash|delete|remove|edit|sort|filter|accordion|payment|klarna|paypal|locale|language|country|size chart|compare|notify|tiktok|pinterest|whatsapp|copy|enlarge|360)\b/i.test(
+              h,
+            )
+          ) {
+            return false
+          }
+          const svgPart = svgHintBlob(el)
+          const attrs = `${h} ${svgPart}`.toLowerCase()
+          const strictToken =
+            /wishlist|wish-list|wish_list|save for later|save-for-later|shopping[\s_-]*list|shoppinglist|add[\s_-]*to[\s_-]*list|save[\s_-]*to[\s_-]*list|my lists?\b|favorites?[-_\s]?(btn|button|icon)|favourites?[-_\s]?(btn|button|icon)|saved items?|bookmark|registry|towishlist|add-to-wish|smartwishlist|swym|icon-wish|wish-icon|icon-heart|heart-icon|wishlist-|back-in-stock|\bwish\b(?!bone)/i.test(
+              attrs,
+            )
+          if (strictToken) return true
+
+          const aria = (el.getAttribute('aria-label') || '').trim()
+          if (
+            aria.length >= 4 &&
+            aria.length <= 120 &&
+            /\b(wishlist|wish list|save for later|favorites?|favourites?|shopping list|add to list|save to list|remind me|save item)\b/i.test(
+              aria,
+            ) &&
+            !/\b(swiss|wish you well|wishbone)\b/i.test(aria.toLowerCase())
+          ) {
+            return true
+          }
+
+          return false
+        }
+
+        const cta = findPrimaryPurchaseCta()
+        if (!cta) {
+          return { ctaFound: false, nearCta: false, evidence: [] as string[] }
+        }
+        try {
+          cta.scrollIntoView({ block: 'center', inline: 'nearest' })
+        } catch {
+          /* ignore */
+        }
+
+        const evidence: string[] = []
+        const controls = document.querySelectorAll('button, a[href], [role="button"], input[type="button"]')
+        for (const el of Array.from(controls) as HTMLElement[]) {
+          if (el === cta || cta.contains(el)) continue
+          if (!nearPrimaryCta(cta, el)) continue
+          const h = controlBlob(el)
+          if (!matchesWishlistControl(cta, h, el)) continue
+          const label = (
+            el.getAttribute('aria-label') ||
+            el.getAttribute('title') ||
+            (el.textContent || '').replace(/\s+/g, ' ').trim() ||
+            'Wishlist / save-for-later control'
+          ).slice(0, 120)
+          if (label) evidence.push(label)
+          if (evidence.length >= 5) break
+        }
+
+        return { ctaFound: true, nearCta: evidence.length > 0, evidence }
+        })
+      } catch (wishlistScanErr) {
+        console.warn('[scan] wishlist near CTA DOM snapshot failed:', wishlistScanErr)
+        wishlistNearCtaContext = null
+      }
+
+      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
+      try {
+        await page.evaluate(() => {
+          const el =
+            document.querySelector<HTMLElement>(
+              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
+            ) || null
+          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+        })
+        await new Promise((r) => setTimeout(r, 700))
+      } catch {
+        /* ignore */
+      }
+
+      // Bundle / kit: included or bonus items (e.g. free gifts list) near primary buy CTA
+      try {
+        includedPackNearCtaContext = await page.evaluate(() => {
+          function findPrimaryPurchaseCta(): HTMLElement | null {
+            const ctaPatterns = [
+              'add to bag',
+              'add to basket',
+              'add to cart',
+              'add to order',
+              'buy now',
+              'buy it now',
+              'purchase',
+              'checkout',
+              'pay now',
+              'order now',
+              'complete order',
+              'place order',
+              'add pack',
+              'get it now',
+            ]
+            const selectors =
+              'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
+            const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
+            let best: HTMLElement | null = null
+            let bestScore = 0
+            for (const el of candidates) {
+              const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+              const aria = (el.getAttribute('aria-label') || '').toLowerCase()
+              const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
+              const combined = `${text} ${aria} ${val}`
+              if (!ctaPatterns.some((p) => combined.includes(p))) continue
+              const st = window.getComputedStyle(el)
+              if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
+              const r = el.getBoundingClientRect()
+              if (r.width < 4 || r.height < 4) continue
+              const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
+              const inHeaderOnly =
+                !!el.closest('header, [class*="header" i], nav') &&
+                !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
+              const inProduct = !!(
+                el.closest('form[action*="cart" i]') ||
+                el.closest('[class*="product-form" i]') ||
+                el.closest('[class*="product__" i]') ||
+                el.closest('[class*="product-info" i]') ||
+                el.closest('[class*="product-details" i]') ||
+                el.closest('[data-product-form]') ||
+                el.closest('[id*="product-form" i]') ||
+                el.closest('[class*="purchase" i]') ||
+                el.closest('[name="add"]') ||
+                el.closest('[class*="shopify" i]')
+              )
+              let score = r.width * r.height + (inProduct ? 800000 : 0)
+              if (inFooter) score *= 0.02
+              if (inHeaderOnly && !inProduct) score *= 0.05
+              if (score > bestScore) {
+                bestScore = score
+                best = el
+              }
+            }
+            return best
+          }
+
+          function getProductMerchRoot(cta: HTMLElement): Element | null {
+            return (
+              cta.closest('main, [role="main"]') ||
+              cta.closest('[class*="pip-product" i]') ||
+              cta.closest('[class*="product-information" i]') ||
+              cta.closest('[class*="product-details" i]') ||
+              cta.closest('[id*="product" i]') ||
+              cta.closest('article') ||
+              null
+            )
+          }
+
+          const cta = findPrimaryPurchaseCta()
+          const path = window.location.pathname.toLowerCase()
+          const h1 = (document.querySelector('h1')?.textContent || '').toLowerCase()
+          const docTitle = (document.title || '').toLowerCase()
+          const pathTitle = `${path} ${h1} ${docTitle}`
+
+          const bundleLikely =
+            /starter-kit|starter kit|gift-set|sample-pack|value-pack|\/bundles\/|-bundle-|combo-pack|2-pack|3-pack|bogo|subscription-box/i.test(
+              pathTitle,
+            ) ||
+            /\b(starter kit|gift set|value pack|bundle deal|kit includes|pack includes)\b/i.test(pathTitle) ||
+            /\b(what'?s included|items included|everything you get|everything you need|need to get started)\b/i.test(
+              h1 + docTitle,
+            ) ||
+            /\/[\w-]*-kit\b|\/[\w-]*-bundle\b|\/[\w-]*starter[\w-]*\b/i.test(path)
+
+          const root = cta ? getProductMerchRoot(cta) : document.querySelector('main, [role="main"]')
+          const zoneFull = root
+            ? ((root as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            : (document.body.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+          const low = zoneFull
+          const ctaParentText = cta?.parentElement
+            ? (cta.parentElement.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            : ''
+          const ctaFormText = cta?.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]')
+            ? (
+              (cta.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]') as HTMLElement)
+                .innerText || ''
+            )
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase()
+            : ''
+          // Anchor the text window on the **primary buy** phrases (rightmost match in reading order).
+          // Using earliest match among terms like "flavour" often sits above the buy column and
+          // excludes "Everything you need…" + free-gift copy below the title (Spacegoods, many Shopify themes).
+          const buyAnchorTerms = [
+            'add to bag',
+            'add to basket',
+            'add to cart',
+            'buy it now',
+            'buy now',
+            'sold out',
+            'out of stock',
+            'add pack',
+            'get it now',
+          ]
+          let buyIdx = -1
+          for (const term of buyAnchorTerms) {
+            const at = low.lastIndexOf(term)
+            if (at > buyIdx) buyIdx = at
+          }
+          let fallbackIdx = -1
+          const fallbackTerms = ['quantity', 'flavour', 'flavor']
+          for (const term of fallbackTerms) {
+            const at = low.indexOf(term)
+            if (at >= 0 && (fallbackIdx < 0 || at < fallbackIdx)) fallbackIdx = at
+          }
+          const span = 3400
+          const anchorIdx = buyIdx >= 0 ? buyIdx : fallbackIdx
+          const bodyNearWindow =
+            anchorIdx >= 0
+              ? low.slice(Math.max(0, anchorIdx - span), Math.min(low.length, anchorIdx + span))
+              : low.slice(0, 6200)
+          const nearWindow = `${ctaFormText} ${ctaParentText} ${bodyNearWindow}`.trim()
+
+          const textReinforcesBundle =
+            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting|everything you need|get started|your first order)\b/i.test(
+              nearWindow,
+            )
+          const bundleLikelyFinal = bundleLikely || (/\b(kit|bundle)\b/i.test(h1) && textReinforcesBundle)
+
+          const evidence: string[] = []
+          let score = 0
+          if (
+            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|everything you need|need to get started|get started|you'?re getting|in the box|what you get|contains|included with|in this kit|in this pack/i.test(
+              nearWindow,
+            )
+          ) {
+            score += 4
+            evidence.push('explicit included / kit copy')
+          }
+          if (/free\s+gifts?\s*(with|worth)?|bonus|complimentary|free\s+sample|free accessories/i.test(nearWindow)) {
+            score += 2
+            evidence.push('free gifts or bonus language')
+          }
+          const quantityPackSignals = (nearWindow.match(/\b\d+x\s*(?:bag|bags|item|items|pack|packs|sample|samples|servings?|accessories|gifts?)\b/gi) || []).length
+          if (quantityPackSignals >= 2) {
+            score += 3
+            evidence.push(`${quantityPackSignals} quantity pack line(s)`)
+          } else if (quantityPackSignals === 1) {
+            score += 1
+            evidence.push('quantity pack line')
+          }
+          const money = (nearWindow.match(/(?:[$£€₹]|(?:\brs\.?\s*))[\d.,]+/gi) || []).length
+          if (money >= 4) {
+            score += 3
+            evidence.push(`${money} price lines in buy zone`)
+          } else if (money >= 2) {
+            score += 2
+            evidence.push(`${money} price lines in buy zone`)
+          }
+          if ((nearWindow.match(/✅|•|✓/g) || []).length >= 2) {
+            score += 1
+            evidence.push('bullet or check list near buy')
+          }
+          if (
+            /\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth\s*(?:[£$€₹]|rs\.?)\b/i.test(
+              nearWindow,
+            )
+          ) {
+            score += 1
+            evidence.push('stacked value / gifts worth copy')
+          }
+          if (/starter kit bundle|starter kit\s*:/i.test(nearWindow)) {
+            score += 2
+            evidence.push('starter-kit bundle copy')
+          }
+
+          const explicitIncludedHeading =
+            /what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains|everything you need|need to get started|everything you get|you'?re getting/i.test(
+              nearWindow,
+            )
+
+          const includedNearCta =
+            score >= 5 ||
+            (score >= 4 && money >= 2) ||
+            (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
+            (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
+            (bundleLikelyFinal &&
+              buyIdx >= 0 &&
+              explicitIncludedHeading &&
+              (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(
+                nearWindow,
+              ) ||
+                quantityPackSignals >= 1 ||
+                money >= 2))
+
+          return {
+            ctaFound: !!cta,
+            bundleLikely: bundleLikelyFinal,
+            includedNearCta,
+            evidence,
+          }
+        })
+      } catch (includedPackErr) {
+        console.warn('[scan] included pack near CTA DOM snapshot failed:', includedPackErr)
+        includedPackNearCtaContext = null
+      }
+
       // Scroll variant/product form into view so client-side selection state is applied, then wait for JS
       await page.evaluate(() => {
         const form = document.querySelector('form[action*="/cart/add"], [id*="product-form"], [class*="product-form"], [class*="variant"]')
@@ -3399,6 +4003,35 @@ export async function POST(request: NextRequest) {
         mainNavContext = null
       }
 
+      if (wishlistNearCtaContext) {
+        const wishlistBlock = [
+          '',
+          '--- WISHLIST / SAVE FOR LATER NEAR CTA (DOM) ---',
+          `Primary CTA found: ${wishlistNearCtaContext.ctaFound ? 'YES' : 'NO'}`,
+          `Save-for-later control near primary CTA: ${wishlistNearCtaContext.nearCta ? 'YES' : 'NO'}`,
+          `Evidence: ${wishlistNearCtaContext.evidence.length ? wishlistNearCtaContext.evidence.join(' | ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${wishlistBlock}`
+        console.log(
+          `[scan] wishlist near CTA: cta=${wishlistNearCtaContext.ctaFound} near=${wishlistNearCtaContext.nearCta}`,
+        )
+      }
+
+      if (includedPackNearCtaContext) {
+        const packBlock = [
+          '',
+          '--- INCLUDED / BUNDLE ITEMS NEAR CTA (DOM) ---',
+          `Primary CTA found: ${includedPackNearCtaContext.ctaFound ? 'YES' : 'NO'}`,
+          `Bundle or kit style offer (DOM): ${includedPackNearCtaContext.bundleLikely ? 'YES' : 'NO'}`,
+          `Included items / bonus lineup near buy area (DOM): ${includedPackNearCtaContext.includedNearCta ? 'YES' : 'NO'}`,
+          `Evidence: ${includedPackNearCtaContext.evidence.length ? includedPackNearCtaContext.evidence.join(' | ') : 'None'}`,
+        ].join('\n')
+        keyElements = `${keyElements || ''}${packBlock}`
+        console.log(
+          `[scan] included pack near CTA: bundle=${includedPackNearCtaContext.bundleLikely} included=${includedPackNearCtaContext.includedNearCta} cta=${includedPackNearCtaContext.ctaFound}`,
+        )
+      }
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
@@ -3738,16 +4371,15 @@ export async function POST(request: NextRequest) {
 
       // ── Image Annotations DOM Detection ──────────────────────────────────────
       // Detect overlay text, badges, labels on/near product images.
-      const needsAnnotationCheck = rules.some(r =>
-        r.id === 'image-annotations' ||
-        (r.title.toLowerCase().includes('annotation') && r.title.toLowerCase().includes('image')) ||
-        (r.description?.toLowerCase().includes('annotations') && r.description?.toLowerCase().includes('product images'))
-      )
+      const needsAnnotationCheck = rules.some(isImageSellingPointsOrAnnotationRule)
       if (needsAnnotationCheck && page) {
         try {
           const annoResult = await page.evaluate(() => {
             const evidence: string[] = []
             let found = false
+
+            const CALLOUT_RE =
+              /free\s+gifts?|worth\s*[£$€]|flavour\s+samples?|flavor\s+samples?|\d+x\s+flavou?r\s+samples?|free\s+whisk|free\s+mug|free\s+spoon|%\s*off\s+today|calmer\s+evenings?|better\s+sleep/i
 
             // ── 1. Elements absolutely positioned inside image containers ──────
             // Overlays are typically position:absolute children of a relative container
@@ -3773,6 +4405,25 @@ export async function POST(request: NextRequest) {
                 }
               }
               if (found) break
+            }
+
+            // ── 1b. Hero/gallery marketing callouts (not only position:absolute overlays)
+            if (!found) {
+              for (const container of IMAGE_CONTAINERS) {
+                const largeImgs = Array.from(container.querySelectorAll('img')).filter((img) => {
+                  const r = img.getBoundingClientRect()
+                  return r.width * r.height >= 35000
+                })
+                if (largeImgs.length === 0) continue
+                const inner = ((container as HTMLElement).innerText || '').trim()
+                if (inner.length > 4000) continue
+                if (CALLOUT_RE.test(inner)) {
+                  const m = inner.match(CALLOUT_RE)
+                  evidence.push(`Gallery/hero callout copy: "${(m && m[0]) || 'promotional text'}"`)
+                  found = true
+                  break
+                }
+              }
             }
 
             // ── 2. Badge / label / tag class names anywhere near images ─────────
@@ -3810,6 +4461,7 @@ export async function POST(request: NextRequest) {
                 /-\d+\s*%/,                                    // "-63%", "-25%"
                 /\+\d+\s*%/,                                   // "+30%"
                 /\d+\s*%\s+(?:improvement|reduction|increase|less|more)/i,
+                /\b\d+\s*%\s+off\b/i,
                 /dermatologically\s+tested/i,
                 /clinically\s+proven/i,
                 /ophthalmologist\s+tested/i,
@@ -3821,6 +4473,12 @@ export async function POST(request: NextRequest) {
                 /new\s+arrival/i,
                 /\bsale\b/i,
                 /\bnew\b/i,
+                /\bvegan\b/i,
+                /\bcruelty[-\s]?free\b/i,
+                /free\s+gifts?/i,
+                /\bfree\s+(?:mug|whisk|spoon|sample|samples)\b/i,
+                /worth\s*[£$€]/i,
+                CALLOUT_RE,
               ]
               // Check image alt attributes
               const imgs = Array.from(document.querySelectorAll('img'))
@@ -4486,7 +5144,9 @@ export async function POST(request: NextRequest) {
       const needsThumbnailGalleryCheck = rules.some(
         (r) =>
           r.id === 'image-thumbnails' ||
-          (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery'))
+          (r.title.toLowerCase().includes('thumbnail') && r.title.toLowerCase().includes('gallery')) ||
+          (r.description?.toLowerCase().includes('thumbnails') &&
+            r.description?.toLowerCase().includes('gallery'))
       )
       if (needsThumbnailGalleryCheck && page) {
         try {
@@ -4507,10 +5167,40 @@ export async function POST(request: NextRequest) {
                 return true
               }
 
+              /** Gift rows, upsells, and variant pickers often reuse small images / data-media-id — not gallery thumbs. */
+              function isExcludedThumbnailMerch(el: Element): boolean {
+                const selectors = [
+                  '[class*="free-gift" i]',
+                  '[class*="free_gift" i]',
+                  '[class*="gift-with" i]',
+                  '[class*="complementary" i]',
+                  '[class*="upsell" i]',
+                  '[class*="cross-sell" i]',
+                  '[class*="recommendations" i]',
+                  '[class*="product-form" i]',
+                  '[class*="product_form" i]',
+                  '[class*="variant-picker" i]',
+                  '[class*="variant_picker" i]',
+                  '[class*="sticky-atc" i]',
+                  '[id*="gift" i]',
+                ]
+                for (const s of selectors) {
+                  try {
+                    if (el.closest(s)) return true
+                  } catch {
+                    /* invalid selector in older engines */
+                  }
+                }
+                const cls = ((el as HTMLElement).className || '').toString().toLowerCase()
+                if (cls.includes('gift') && (cls.includes('icon') || cls.includes('row') || cls.includes('with-order')))
+                  return true
+                return false
+              }
+
               // Multiple selectable gallery media (Shopify) — require small previews so mobile
               // does not false-pass when only the main hero is visible or two large slides stack.
               const mediaEls = Array.from(document.querySelectorAll('[data-media-id]')) as HTMLElement[]
-              const visibleMedia = mediaEls.filter(isVisible)
+              const visibleMedia = mediaEls.filter((el) => isVisible(el) && !isExcludedThumbnailMerch(el))
               const maxSide = (el: HTMLElement) => {
                 const r = el.getBoundingClientRect()
                 return Math.max(r.width, r.height)
@@ -4551,8 +5241,10 @@ export async function POST(request: NextRequest) {
                 try {
                   const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
                   for (const el of els) {
-                    if (!isVisible(el)) continue
-                    const imgs = Array.from(el.querySelectorAll('img')).filter(isVisible)
+                    if (!isVisible(el) || isExcludedThumbnailMerch(el)) continue
+                    const imgs = Array.from(el.querySelectorAll('img')).filter(
+                      (img) => isVisible(img) && !isExcludedThumbnailMerch(img)
+                    )
                     if (imgs.length >= 2) {
                       return {
                         found: true,
@@ -4571,7 +5263,10 @@ export async function POST(request: NextRequest) {
                 )
               )
               for (const root of roots) {
-                const imgs = Array.from(root.querySelectorAll('img')).filter(isVisible)
+                if (isExcludedThumbnailMerch(root)) continue
+                const imgs = Array.from(root.querySelectorAll('img')).filter(
+                  (img) => isVisible(img) && !isExcludedThumbnailMerch(img)
+                )
                 if (imgs.length < 2) continue
                 const areas = imgs.map((img) => {
                   const r = img.getBoundingClientRect()
@@ -4582,7 +5277,7 @@ export async function POST(request: NextRequest) {
                 if (mainArea < 400) continue
                 let small = 0
                 for (let i = 1; i < areas.length; i++) {
-                  if (areas[i].area > 0 && areas[i].area <= mainArea * 0.4) small++
+                  if (areas[i].area > 0 && areas[i].area <= mainArea * 0.28) small++
                 }
                 if (small >= 2) {
                   return {
@@ -5570,6 +6265,20 @@ export async function POST(request: NextRequest) {
             )
           })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+          /** Product gallery shows lifestyle / in-context usage (distinct from "customer photos in reviews"). */
+          const isLifestyleProductImageRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            const hay = `${t} ${d}`
+            if (t.includes('customer photo') || hay.includes('customer photo')) return false
+            return (
+              (t.includes('lifestyle') && (t.includes('product') || t.includes('image') || t.includes('gallery'))) ||
+              (hay.includes('lifestyle') && hay.includes('product') && hay.includes('image')) ||
+              (t.includes('in use') && (t.includes('product') || t.includes('image'))) ||
+              (d.includes('real-world') && (d.includes('image') || d.includes('gallery'))) ||
+              (d.includes('in use') && d.includes('product') && d.includes('image'))
+            )
+          })()
           const isProductTitleRule = rule.id === 'product-title-clarity' || rule.title.toLowerCase().includes('product title') || rule.description.toLowerCase().includes('product title')
           const isBenefitsNearTitleRule = rule.id === 'benefits-near-title' || rule.title.toLowerCase().includes('benefits') && rule.title.toLowerCase().includes('title')
           const isDescriptionBenefitsRule =
@@ -5610,10 +6319,7 @@ export async function POST(request: NextRequest) {
             rule.id === 'product-comparison' ||
             rule.title.toLowerCase().includes('product comparison') ||
             rule.description.toLowerCase().includes('product comparison');
-          const isImageAnnotationsRule =
-            rule.id === 'image-annotations' ||
-            (rule.title.toLowerCase().includes('annotation') && rule.title.toLowerCase().includes('image')) ||
-            (rule.description.toLowerCase().includes('annotations') && rule.description.toLowerCase().includes('product images'))
+          const isImageAnnotationsRule = isImageSellingPointsOrAnnotationRule(rule)
           const isThumbnailsRule =
             rule.id === 'image-thumbnails' ||
             (rule.title.toLowerCase().includes('thumbnail') && rule.title.toLowerCase().includes('gallery')) ||
@@ -5999,6 +6705,33 @@ PASS only if you see a rating VERY CLOSE to the product title or in the same tit
 ✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
 ❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
 `
+          } else if (isLifestyleProductImageRule) {
+            const galleryDomLine = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            const galleryDomBlock = galleryDomLine
+              ? `DOM: Lifestyle / in-use gallery signals were detected (see Evidence line "Lifestyle/model/results images in product gallery"). You MUST set passed: true and quote that evidence.`
+              : `DOM: No strong filename/alt lifestyle signal — rely on the SCREENSHOT. Look for hands, a person, or a real-world scene in the main product gallery / carousel.`
+            specialInstructions = `
+PRODUCT IMAGES / LIFESTYLE "IN USE" RULE — SCREENSHOT + DOM
+
+${galleryDomBlock}
+
+WHAT THIS RULE CHECKS (gallery only):
+• The **main product image area** (hero + carousel slides) should show the product **in real use** or **in context**: e.g. hands pouring/mixing a drink, person drinking, kitchen/table scene, wearing/applying the product — not only flat packshots on white.
+
+PASS if you see ANY of:
+• Hands or body interacting with the product in the gallery
+• A clear lifestyle/context scene where the product is central
+• At least one carousel slide that is clearly "usage" rather than only product-on-white (even if other slides are packshots)
+
+FAIL only if every visible gallery slide is **only** sterile packshots with **no** person, hands, or contextual environment.
+
+Do **not** pass this rule based solely on Trustpilot/review text blocks — those are not product gallery images.
+
+Evidence lines (KEY ELEMENTS → CUSTOMER PHOTOS section):
+${customerPhotoEvidence.length > 0 ? customerPhotoEvidence.join(' | ') : 'None'}
+`
           } else if (isCustomerPhotoRule) {
             specialInstructions = `
 CUSTOMER PHOTOS RULE - DOM DETECTION + VISUAL ANALYSIS:
@@ -6291,6 +7024,10 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           }
 
           // Add special prefix for customer photos rule to ensure screenshot is analyzed
+          const lifestyleGalleryPrefix = isLifestyleProductImageRule
+            ? `\n\n⚠️⚠️⚠️ LIFESTYLE / IN-USE PRODUCT IMAGES RULE ⚠️⚠️⚠️\n\nYou receive a SCREENSHOT. Look at the **main product gallery / hero carousel** first.\n\nPASS if ANY slide shows **hands, a person, or a real-world context** (pouring, mixing, drinking, wearing, applying the product).\nFAIL only if **every** visible gallery image is a flat packshot with **no** usage context.\n\nIf KEY ELEMENTS evidence includes "Lifestyle/model/results images in product gallery" → output passed: true.\n\nNow analyze the screenshot:\n\n`
+            : ''
+
           const customerPhotoPrefix = isCustomerPhotoRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR CUSTOMER PHOTOS RULE ⚠️⚠️⚠️\n\nTHIS IS THE CUSTOMER PHOTOS RULE — be BROAD and LENIENT.\n\nYou are receiving a SCREENSHOT. Check BOTH the product gallery thumbnails AND the reviews section.\n\nPASS immediately if you see ANY of:\n1. Gallery thumbnail strip with at least one lifestyle/model/usage shot (person using or wearing the product)\n2. Verified customer review section (Trustpilot, Trusted Shops, Loox, Yotpo) with real customer names, star ratings, and verified badges\n3. Customer photo thumbnails visible inside review cards or in a UGC/community gallery\n4. Any section showing the product being used by a real person\n\nFAIL only if ALL of these are true: zero lifestyle/model shots in gallery AND zero customer review section AND zero UGC photos.\n\nDO NOT mention "rating rule" — this is the CUSTOMER PHOTOS rule.\n\nNow analyze the screenshot image provided below:\n\n` : ''
 
           const videoTestimonialPrefix = isVideoTestimonialRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR VIDEO TESTIMONIALS RULE ⚠️⚠️⚠️\n\nTHIS IS THE VIDEO TESTIMONIALS RULE! You are receiving a SCREENSHOT IMAGE. You MUST look at this image FIRST.\n\nLook specifically for: \n - Sections titled "Video Testimonials", "Customer Videos", or "Video Reviews"\n - Video players with play buttons(▶️) in review sections\n - Any videos or video thumbnails displayed in review sections\n\nCRITICAL: If you SEE videos with play buttons(▶️) or video thumbnails in review sections in the screenshot → you MUST output passed: true. Do NOT fail based on KEY ELEMENTS alone. When in doubt, trust the SCREENSHOT. Site may have video testimonials as images or custom UI that KEY ELEMENTS miss.\n\nReview section videos with play buttons(▶️) = VIDEO TESTIMONIALS(always pass).\nNo videos or play buttons(▶️) visible anywhere = FAIL.\n\nNow analyze the screenshot image provided below: \n\n` : ''
@@ -6315,7 +7052,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           const variantPreselectPrefix = isVariantRule ? `\n\n⚠️⚠️ VARIANT PRESELECTION RULE — CHECK SCREENSHOT WHEN DOM SAYS NONE ⚠️⚠️\n\nIf KEY ELEMENTS shows "Selected Variant: None", you MUST look at the SCREENSHOT.\nIf the screenshot shows variant options (e.g. flavours, sizes) and ONE option has a clearly different visual state (gradient border, colored border, highlighted background) while others look plain → that IS preselection. Output passed: true and name the option (e.g. "Coffee", "Medium").\nOnly fail if both DOM says None AND the screenshot shows no such visual preselection.\n\nNow analyze the screenshot:\n\n` : ''
           const mainNavImportantPagesPrefix = isMainNavImportantPagesRule ? `\n\n⚠️ MAIN NAVIGATION (IMPORTANT PAGES) RULE ⚠️\n\nRead the special instructions FIRST for MAIN_NAV_DOM_ESSENTIAL_LIKELY.\nIf that flag is true → output passed: true.\nOtherwise look at the SCREENSHOT for header / mega-menu / menu icon + shop paths.\nHamburger + drawer nav with Shop / Bundles / Reviews counts as main navigation.\n\nNow analyze the screenshot:\n\n` : ''
           const topDealsPromoPrefix = isTopOfPageDealsUrgencyPromoRule ? `\n\n⚠️ TOP DEALS / PROMO BAR RULE ⚠️\n\nRead special instructions for TOP_PROMO_DOM_LIKELY.\nIf TOP_PROMO_DOM_LIKELY=true → output passed: true.\nOtherwise inspect the VERY TOP of the screenshot for offer bars (e.g. % off, free gifts, spring sale).\nProduct pages with a top announcement bar satisfy the same intent as the homepage.\n\nNow analyze the screenshot:\n\n` : ''
-          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
+          const ruleSpecificPrefix = `${topDealsPromoPrefix}${mainNavImportantPagesPrefix}${lifestyleGalleryPrefix}${customerPhotoPrefix}${videoTestimonialPrefix}${imageAnnotationPrefix}${logoHomepagePrefix}${headerCartQuickAccessPrefix}${cartIconItemCountPrefix}${generalCustomerReviewsPrefix}${ratingPrefix}${productComparisonPrefix}${trustBadgesPrefix}${benefitsNearTitlePrefix}${thumbnailsPrefix}${beforeAfterPrefix}${freeShippingThresholdPrefix}${galleryNavPrefix}${descriptionBenefitsPrefix}${variantPreselectPrefix}`
           const prompt = buildRulePrompt({
             url: validUrl,
             contentForAI,
@@ -6597,6 +7334,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               const ANNOTATION_TEXT_PATTERNS = [
                 /-\d+\s*%/,
                 /\+\d+\s*%/,
+                /\b\d+\s*%\s+off\b/i,
                 /dermatologically\s+tested/i,
                 /clinically\s+proven/i,
                 /ophthalmologist\s+tested/i,
@@ -6614,6 +7352,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 /\bfree\s+(?:mug|whisk|spoon|gift|sample|samples)\b/i,
                 /\b\d+x\s+flavour\s+samples?\b/i,
                 /\bflavour\s+samples?\b/i,
+                /calmer\s+evenings?/i,
+                /better\s+sleep/i,
               ]
               const matchedAnno = ANNOTATION_TEXT_PATTERNS.find(p => p.test(pageText))
               if (matchedAnno) {
@@ -7111,6 +7851,70 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
             }
+          } else if (isLifestyleProductImageRule) {
+            const hasGalleryLifestyleDomEvidence = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            const lifestyleNeg =
+              reasonLower.includes('no lifestyle') ||
+              reasonLower.includes('no person') ||
+              reasonLower.includes('no hands') ||
+              reasonLower.includes('no human') ||
+              reasonLower.includes('only packshot') ||
+              reasonLower.includes('only white background') ||
+              reasonLower.includes('only product-on-white') ||
+              (reasonLower.includes('no ') &&
+                reasonLower.includes('gallery') &&
+                (reasonLower.includes('lifestyle') || reasonLower.includes('usage') || reasonLower.includes('person')))
+
+            if (!analysis.passed && hasGalleryLifestyleDomEvidence) {
+              const ev =
+                customerPhotoEvidence.filter((e) => /lifestyle\/model|product gallery:/i.test(e)).join('; ') ||
+                'lifestyle / in-use gallery imagery'
+              console.log(`Lifestyle product images rule: DOM gallery evidence. Forcing PASS. ${ev}`)
+              analysis.passed = true
+              analysis.reason = `Product gallery includes lifestyle or in-use imagery (${ev}). The page shows the product in real-world context, which satisfies this rule.`
+            }
+
+            const hasPositiveLifestyleAi =
+              !lifestyleNeg &&
+              (reasonLower.includes('lifestyle') ||
+                reasonLower.includes('in use') ||
+                reasonLower.includes('in-use') ||
+                reasonLower.includes('pouring') ||
+                reasonLower.includes('pour ') ||
+                reasonLower.includes('hands') ||
+                reasonLower.includes('hand ') ||
+                reasonLower.includes('person') ||
+                reasonLower.includes('model') ||
+                reasonLower.includes('real-world') ||
+                reasonLower.includes('real world') ||
+                reasonLower.includes('context') ||
+                reasonLower.includes('drinking') ||
+                reasonLower.includes('mixing') ||
+                (reasonLower.includes('gallery') && (reasonLower.includes('usage') || reasonLower.includes('using'))))
+
+            if (!analysis.passed && hasPositiveLifestyleAi) {
+              console.log('Lifestyle product images rule: AI reason describes usage/lifestyle imagery. Forcing PASS.')
+              analysis.passed = true
+              if (!analysis.reason?.trim()) {
+                analysis.reason =
+                  'The product gallery shows lifestyle or in-context usage imagery (e.g. hands or environment with the product), so this rule passes.'
+              }
+            }
+
+            if (
+              !reasonLower.includes('gallery') &&
+              !reasonLower.includes('image') &&
+              !reasonLower.includes('lifestyle') &&
+              !reasonLower.includes('carousel') &&
+              !reasonLower.includes('hero')
+            ) {
+              console.warn(
+                `Warning: Lifestyle product-image rule but reason may lack gallery context: ${(analysis.reason || '').substring(0, 50)}`,
+              )
+              isRelevant = false
+            }
           } else if (isProductTitleRule && !analysis.passed) {
             // Direct override: AI often wrongly says "missing the brand" when title clearly contains brand (e.g. Caudalie)
             if (reasonLower.includes('missing the brand') && /Caudalie|Vinoperfect|Serum|Brightening|30ml|product title\s+['\"]/i.test(analysis.reason || '')) {
@@ -7352,21 +8156,40 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             reasonLower.includes(keyword)
           )
 
-          // Special check for customer photos rule - must NOT mention rating rule
-          if (isCustomerPhotoRule && (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))) {
-            console.error(`CRITICAL ERROR: Customer photos rule response mentions rating rule. This is wrong!`)
-            // Only force PASS if there's clear positive evidence of customer photos (not just keywords in any context)
+          // Special check for customer photos / lifestyle gallery rules - must NOT mention rating rule
+          if (
+            (isCustomerPhotoRule || isLifestyleProductImageRule) &&
+            (reasonLower.includes('rating rule') || (reasonLower.includes('rating') && reasonLower.includes('failed')))
+          ) {
+            console.error(`CRITICAL ERROR: Customer/lifestyle photo rule response mentions rating rule. This is wrong!`)
+            const hasGalleryLifestyleLine = customerPhotoEvidence.some((e) =>
+              /lifestyle\/model|product gallery:/i.test(e),
+            )
+            // Only force PASS if there's clear positive evidence (not just keywords in any context)
             const hasStrongPhotoEvidence =
               (reasonLower.includes('customer photo') && !reasonLower.includes('no customer photo')) ||
               (reasonLower.includes('customer-uploaded') && !reasonLower.includes('no customer-uploaded')) ||
-              (reasonLower.includes('customer review image') && !reasonLower.includes('no '))
+              (reasonLower.includes('customer review image') && !reasonLower.includes('no ')) ||
+              (isLifestyleProductImageRule &&
+                hasGalleryLifestyleLine &&
+                !reasonLower.includes('no lifestyle')) ||
+              (isLifestyleProductImageRule &&
+                (reasonLower.includes('lifestyle') ||
+                  reasonLower.includes('hands') ||
+                  reasonLower.includes('pouring') ||
+                  reasonLower.includes('in use') ||
+                  reasonLower.includes('person')) &&
+                !reasonLower.includes('no person') &&
+                !reasonLower.includes('no lifestyle'))
             if (hasStrongPhotoEvidence) {
               analysis.passed = true
-              analysis.reason = `Customer photos are displayed in the reviews section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
-              console.log(`Fixed: Removed rating rule mention and forced PASS for customer photos`)
+              analysis.reason = isLifestyleProductImageRule
+                ? `Product gallery shows lifestyle or in-use imagery (hands/person/context). This fulfills the requirement for product images that show the product in use.`
+                : `Customer photos are displayed in the reviews section. These are customer-uploaded photos showing the product, which fulfills the requirement for showing customer photos using the product.`
+              console.log(`Fixed: Removed rating rule mention and forced PASS for customer/lifestyle photo rule`)
             } else {
               // Remove rating mention but keep the fail result
-              analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Customer photos rule: ')
+              analysis.reason = analysis.reason.replace(/rating rule failed[^.]*/gi, 'Photos / gallery rule: ')
               analysis.reason = analysis.reason.replace(/rating[^.]*failed/gi, '')
             }
           }
