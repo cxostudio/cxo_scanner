@@ -3086,6 +3086,20 @@ export async function POST(request: NextRequest) {
         wishlistNearCtaContext = null
       }
 
+      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
+      try {
+        await page.evaluate(() => {
+          const el =
+            document.querySelector<HTMLElement>(
+              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
+            ) || null
+          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+        })
+        await new Promise((r) => setTimeout(r, 700))
+      } catch {
+        /* ignore */
+      }
+
       // Bundle / kit: included or bonus items (e.g. free gifts list) near primary buy CTA
       try {
         includedPackNearCtaContext = await page.evaluate(() => {
@@ -3171,7 +3185,10 @@ export async function POST(request: NextRequest) {
               pathTitle,
             ) ||
             /\b(starter kit|gift set|value pack|bundle deal|kit includes|pack includes)\b/i.test(pathTitle) ||
-            /\b(what'?s included|items included|everything you get)\b/i.test(h1 + docTitle)
+            /\b(what'?s included|items included|everything you get|everything you need|need to get started)\b/i.test(
+              h1 + docTitle,
+            ) ||
+            /\/[\w-]*-kit\b|\/[\w-]*-bundle\b|\/[\w-]*starter[\w-]*\b/i.test(path)
 
           const root = cta ? getProductMerchRoot(cta) : document.querySelector('main, [role="main"]')
           const zoneFull = root
@@ -3191,29 +3208,41 @@ export async function POST(request: NextRequest) {
                 .trim()
                 .toLowerCase()
             : ''
-          const anchorTerms = [
+          // Anchor the text window on the **primary buy** phrases (rightmost match in reading order).
+          // Using earliest match among terms like "flavour" often sits above the buy column and
+          // excludes "Everything you need…" + free-gift copy below the title (Spacegoods, many Shopify themes).
+          const buyAnchorTerms = [
             'add to bag',
+            'add to basket',
             'add to cart',
             'buy it now',
             'buy now',
             'sold out',
             'out of stock',
-            'quantity',
-            'flavour',
-            'flavor',
+            'add pack',
+            'get it now',
           ]
-          let idx = -1
-          for (const term of anchorTerms) {
-            const at = low.indexOf(term)
-            if (at >= 0 && (idx < 0 || at < idx)) idx = at
+          let buyIdx = -1
+          for (const term of buyAnchorTerms) {
+            const at = low.lastIndexOf(term)
+            if (at > buyIdx) buyIdx = at
           }
-          const span = 2400
+          let fallbackIdx = -1
+          const fallbackTerms = ['quantity', 'flavour', 'flavor']
+          for (const term of fallbackTerms) {
+            const at = low.indexOf(term)
+            if (at >= 0 && (fallbackIdx < 0 || at < fallbackIdx)) fallbackIdx = at
+          }
+          const span = 3400
+          const anchorIdx = buyIdx >= 0 ? buyIdx : fallbackIdx
           const bodyNearWindow =
-            idx >= 0 ? low.slice(Math.max(0, idx - span), Math.min(low.length, idx + span)) : low.slice(0, 5200)
+            anchorIdx >= 0
+              ? low.slice(Math.max(0, anchorIdx - span), Math.min(low.length, anchorIdx + span))
+              : low.slice(0, 6200)
           const nearWindow = `${ctaFormText} ${ctaParentText} ${bodyNearWindow}`.trim()
 
           const textReinforcesBundle =
-            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting)\b/i.test(
+            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting|everything you need|get started|your first order)\b/i.test(
               nearWindow,
             )
           const bundleLikelyFinal = bundleLikely || (/\b(kit|bundle)\b/i.test(h1) && textReinforcesBundle)
@@ -3221,7 +3250,7 @@ export async function POST(request: NextRequest) {
           const evidence: string[] = []
           let score = 0
           if (
-            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|you'?re getting|in the box|what you get|contains/i.test(
+            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|everything you need|need to get started|get started|you'?re getting|in the box|what you get|contains|included with|in this kit|in this pack/i.test(
               nearWindow,
             )
           ) {
@@ -3240,7 +3269,7 @@ export async function POST(request: NextRequest) {
             score += 1
             evidence.push('quantity pack line')
           }
-          const money = (nearWindow.match(/[$£€][\d.,]+/g) || []).length
+          const money = (nearWindow.match(/(?:[$£€₹]|(?:\brs\.?\s*))[\d.,]+/gi) || []).length
           if (money >= 4) {
             score += 3
             evidence.push(`${money} price lines in buy zone`)
@@ -3252,7 +3281,11 @@ export async function POST(request: NextRequest) {
             score += 1
             evidence.push('bullet or check list near buy')
           }
-          if (/\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth £|worth \$|worth €/i.test(nearWindow)) {
+          if (
+            /\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth\s*(?:[£$€₹]|rs\.?)\b/i.test(
+              nearWindow,
+            )
+          ) {
             score += 1
             evidence.push('stacked value / gifts worth copy')
           }
@@ -3261,13 +3294,24 @@ export async function POST(request: NextRequest) {
             evidence.push('starter-kit bundle copy')
           }
 
+          const explicitIncludedHeading =
+            /what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains|everything you need|need to get started|everything you get|you'?re getting/i.test(
+              nearWindow,
+            )
+
           const includedNearCta =
             score >= 5 ||
             (score >= 4 && money >= 2) ||
             (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
-            (/what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains/i.test(nearWindow) &&
-              (money >= 1 || quantityPackSignals >= 1) &&
-              score >= 3)
+            (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
+            (bundleLikelyFinal &&
+              buyIdx >= 0 &&
+              explicitIncludedHeading &&
+              (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(
+                nearWindow,
+              ) ||
+                quantityPackSignals >= 1 ||
+                money >= 2))
 
           return {
             ctaFound: !!cta,
