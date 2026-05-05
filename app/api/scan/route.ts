@@ -6,6 +6,11 @@ import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
 import { waitForMainColumnImages } from '@/lib/scanner/waitForMainColumnImages'
 import { snapshotIncludedPackDom } from '@/lib/scanner/includedPackNearCtaDomSnapshot'
+import {
+  detectTabsAccordionFromHtml,
+  formatProductTabsAccordionDomBlock,
+  snapshotProductTabsAccordionDom,
+} from '@/lib/scanner/productTabsAccordionDom'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import {
@@ -31,6 +36,7 @@ import {
   collectFooterCustomerSupportSnapshot,
   emptyFooterCustomerSupportSnapshot,
 } from '@/lib/rules/footerCustomerSupportRule'
+import { isProductTabsAccordionRule } from '@/lib/rules/productTabsAccordionRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -1814,6 +1820,7 @@ export async function POST(request: NextRequest) {
               if (patterns.some((p) => p.test(t))) return true
               if (t.includes('nutritional') && t.includes('information')) return true
               if (t.includes('product') && t.includes('detail')) return true
+              if (t.includes('ingredient') && (t.includes('nutrition') || t.includes('nutritional'))) return true
               return false
             }
             const roots = Array.from(
@@ -1834,7 +1841,8 @@ export async function POST(request: NextRequest) {
                   navHits.add(lab.slice(0, 48).toLowerCase())
                 })
             }
-            if (navHits.size >= 2) {
+            const hasMainDetails = !!document.querySelector('main details, [role="main"] details')
+            if (navHits.size >= 2 || (navHits.size >= 1 && hasMainDetails)) {
               foundTabs.push({
                 type: 'product-detail-nav',
                 count: navHits.size,
@@ -3991,6 +3999,30 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      try {
+        const needsProductTabsAccordionScan = rules.some(isProductTabsAccordionRule)
+        if (needsProductTabsAccordionScan) {
+          await page.evaluate(() => {
+            document
+              .querySelectorAll<HTMLElement>(
+                'main details, [role="main"] details, main [class*="accordion" i], [class*="disclosure" i]',
+              )
+              .forEach((el, i) => {
+                if (i < 4) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+              })
+            window.scrollBy(0, Math.min(380, Math.max(0, document.documentElement.scrollHeight * 0.12)))
+          })
+          await new Promise((r) => setTimeout(r, process.env.VERCEL ? 650 : 320))
+          const tabsAccordionDom = await page.evaluate(snapshotProductTabsAccordionDom)
+          keyElements = `${keyElements || ''}\n\n${formatProductTabsAccordionDomBlock(tabsAccordionDom)}`
+          console.log(
+            `[scan] product tabs/accordion DOM re-scan: pass=${tabsAccordionDom.pass} signals=${tabsAccordionDom.totalSignals}`,
+          )
+        }
+      } catch (tabsAccordionErr) {
+        console.warn('[scan] product tabs/accordion DOM re-scan failed:', tabsAccordionErr)
+      }
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
@@ -6028,6 +6060,14 @@ export async function POST(request: NextRequest) {
           })
           keyElements = `${keyElements}\n\n${fbBlock}`
           websiteContent += `\n\n${fbBlock}`
+        }
+
+        const needsTabsAccordionFallback = rules.some(isProductTabsAccordionRule)
+        if (needsTabsAccordionFallback && rawHtml) {
+          const tabsAccordionHtml = detectTabsAccordionFromHtml(rawHtml)
+          const tabsAccordionBlock = formatProductTabsAccordionDomBlock(tabsAccordionHtml, 'html-fallback')
+          keyElements = `${keyElements}\n\n${tabsAccordionBlock}`
+          websiteContent += `\n\n${tabsAccordionBlock}`
         }
 
         // Fallback rating-near-title check.
