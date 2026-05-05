@@ -555,7 +555,7 @@ export default function ScannerPage() {
                             Today: Product page audit
                         </h3>
                         <p className="text-[#757575] text-[14.5px] font-normal leading-[25.6px] tracking-[0.48px]">
-                            You've completed a focused CRO audit covering <span className="font-bold">27 product page
+                            You've completed a focused CRO audit covering <span className="font-bold">40 product page
                                 checkpoints</span>.
                         </p>
                     </div>
