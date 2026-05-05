@@ -3179,15 +3179,38 @@ export async function POST(request: NextRequest) {
             : (document.body.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
 
           const low = zoneFull
-          const idx = Math.max(
-            low.indexOf('add to bag'),
-            low.indexOf('add to cart'),
-            low.indexOf('buy it now'),
-            low.indexOf('buy now'),
-          )
-          const span = 1800
-          const nearWindow =
-            idx >= 0 ? low.slice(Math.max(0, idx - span), Math.min(low.length, idx + span)) : low.slice(0, 3200)
+          const ctaParentText = cta?.parentElement
+            ? (cta.parentElement.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+            : ''
+          const ctaFormText = cta?.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]')
+            ? (
+              (cta.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]') as HTMLElement)
+                .innerText || ''
+            )
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase()
+            : ''
+          const anchorTerms = [
+            'add to bag',
+            'add to cart',
+            'buy it now',
+            'buy now',
+            'sold out',
+            'out of stock',
+            'quantity',
+            'flavour',
+            'flavor',
+          ]
+          let idx = -1
+          for (const term of anchorTerms) {
+            const at = low.indexOf(term)
+            if (at >= 0 && (idx < 0 || at < idx)) idx = at
+          }
+          const span = 2400
+          const bodyNearWindow =
+            idx >= 0 ? low.slice(Math.max(0, idx - span), Math.min(low.length, idx + span)) : low.slice(0, 5200)
+          const nearWindow = `${ctaFormText} ${ctaParentText} ${bodyNearWindow}`.trim()
 
           const textReinforcesBundle =
             /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting)\b/i.test(
@@ -3197,13 +3220,25 @@ export async function POST(request: NextRequest) {
 
           const evidence: string[] = []
           let score = 0
-          if (/what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|you'?re getting/i.test(nearWindow)) {
+          if (
+            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|you'?re getting|in the box|what you get|contains/i.test(
+              nearWindow,
+            )
+          ) {
             score += 4
             evidence.push('explicit included / kit copy')
           }
-          if (/free\s+gifts?\s*(with|worth)?|bonus|complimentary|free\s+sample/i.test(nearWindow)) {
+          if (/free\s+gifts?\s*(with|worth)?|bonus|complimentary|free\s+sample|free accessories/i.test(nearWindow)) {
             score += 2
             evidence.push('free gifts or bonus language')
+          }
+          const quantityPackSignals = (nearWindow.match(/\b\d+x\s*(?:bag|bags|item|items|pack|packs|sample|samples|servings?|accessories|gifts?)\b/gi) || []).length
+          if (quantityPackSignals >= 2) {
+            score += 3
+            evidence.push(`${quantityPackSignals} quantity pack line(s)`)
+          } else if (quantityPackSignals === 1) {
+            score += 1
+            evidence.push('quantity pack line')
           }
           const money = (nearWindow.match(/[$£€][\d.,]+/g) || []).length
           if (money >= 4) {
@@ -3217,21 +3252,27 @@ export async function POST(request: NextRequest) {
             score += 1
             evidence.push('bullet or check list near buy')
           }
-          if (/\b(and|\+)\s+free\b|\+\s*free gifts|gifts worth|worth £|worth \$|worth €/i.test(nearWindow)) {
+          if (/\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth £|worth \$|worth €/i.test(nearWindow)) {
             score += 1
             evidence.push('stacked value / gifts worth copy')
+          }
+          if (/starter kit bundle|starter kit\s*:/i.test(nearWindow)) {
+            score += 2
+            evidence.push('starter-kit bundle copy')
           }
 
           const includedNearCta =
             score >= 5 ||
             (score >= 4 && money >= 2) ||
             (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
-            (/what'?s included|kit includes|pack includes|bundle includes/i.test(nearWindow) && money >= 1 && score >= 3)
+            (/what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains/i.test(nearWindow) &&
+              (money >= 1 || quantityPackSignals >= 1) &&
+              score >= 3)
 
           return {
             ctaFound: !!cta,
             bundleLikely: bundleLikelyFinal,
-            includedNearCta: !!cta && includedNearCta,
+            includedNearCta,
             evidence,
           }
         })
