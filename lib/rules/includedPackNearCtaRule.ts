@@ -15,6 +15,7 @@ export function isIncludedPackNearCtaRule(rule: ScanRule): boolean {
     ) ||
     (hay.includes('included') && (hay.includes('pack') || hay.includes('bundle') || hay.includes('kit'))) ||
     (hay.includes('visually') && hay.includes('display')) ||
+    (hay.includes('included') && hay.includes('products') && hay.includes('visually')) ||
     (hay.includes('additional') && hay.includes('items') && hay.includes('pack')) ||
     (d.includes('included') && d.includes('cta'))
   const mentionsCtaOrNear =
@@ -43,14 +44,20 @@ export function evaluateIncludedPackNearCtaRule(rule: ScanRule, keyElementsStrin
   }
 
   if (includedNear) {
+    const visual = /visual lineup:/i.test(evidence)
+    const tail =
+      evidence && evidence.toLowerCase() !== 'none' ? evidence.slice(0, 160) + (evidence.length > 160 ? '…' : '') : ''
+
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: true,
       reason:
-        evidence && evidence.toLowerCase() !== 'none'
-          ? `Included or bonus items are clearly shown in the purchase area near the main action (${evidence.slice(0, 140)}).`
-          : 'Included or bonus items are clearly shown in the purchase area near the main buy action.',
+        visual && tail
+          ? `Bonus or pack items are shown with images near the purchase area (${tail}).`
+          : tail
+            ? `Included or bonus items are clearly shown in the purchase area near the main action (${tail}).`
+            : 'Included or bonus items are clearly shown in the purchase area near the main buy action.',
     }
   }
 
