@@ -168,6 +168,19 @@ export function isProductTitleRule(rule: ScanRule): boolean {
   )
 }
 
+/** "Short list of key benefits near product title" rule. */
+export function isBenefitsNearTitleRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  const hay = `${t} ${d}`
+  return (
+    rule.id === 'benefits-near-title' ||
+    ((hay.includes('benefit') || hay.includes('benefits')) &&
+      (hay.includes('title') || hay.includes('product title') || hay.includes('near the product title'))) ||
+    (hay.includes('key benefit') && hay.includes('near'))
+  )
+}
+
 /** "How to use in simple steps" rule. */
 export function isHowToUseSimpleStepsRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
@@ -646,6 +659,76 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
   }
 }
 
+export function evaluateBenefitsNearTitleRule(
+  rule: ScanRule,
+  keyElementsString: string,
+  fullVisibleText: string
+): ScanResult | null {
+  const raw = fullVisibleText || ''
+  if (!raw.trim()) return null
+
+  const lower = raw
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!lower) return null
+
+  const title = (extractPrimaryProductTitle(keyElementsString) || '').toLowerCase().trim()
+  const titleIdx = title ? lower.indexOf(title) : -1
+  const titleWindow =
+    titleIdx >= 0
+      ? lower.slice(Math.max(0, titleIdx - 900), Math.min(lower.length, titleIdx + Math.max(title.length, 40) + 1600))
+      : ''
+  const topChunk = lower.slice(0, 7000)
+
+  const benefitSignals: Array<{ label: string; pattern: RegExp }> = [
+    { label: 'focus/mental performance', pattern: /\b(focus|focused|mental performance|sharper focus|clarity|productivity)\b/i },
+    { label: 'energy', pattern: /\b(energy|sustained energy|boost energy|alertness)\b/i },
+    { label: 'calm/stress support', pattern: /\b(calm|calming|reduce anxiety|stress support|no anxiety)\b/i },
+    { label: 'taste', pattern: /\b(great taste|delicious taste|tastes great|easy to drink)\b/i },
+    { label: 'no jitters/crash', pattern: /\b(zero jitters|without (the )?jitters|no jitters|without (the )?crash|zero crash|no crash)\b/i },
+    { label: 'easy usage', pattern: /\b(hot or cold|water or milk|mix into|easy to use|no routine change)\b/i },
+    { label: 'shipping/returns', pattern: /\b(free shipping|free express delivery|money-back|money back guarantee|easy returns)\b/i },
+  ]
+
+  const collectSignals = (text: string): string[] =>
+    benefitSignals.filter((s) => s.pattern.test(text)).map((s) => s.label)
+
+  const nearTitleSignals = collectSignals(titleWindow)
+  const topSignals = collectSignals(topChunk)
+
+  const hasTitleAreaContext =
+    /\b(starter kit|add to bag|nutritional information|flavour|flavor|quantity|reviews?)\b/i.test(topChunk)
+  const hasShortListShape =
+    (raw.match(/[•✓✅]\s*[^\n]{3,120}/g) || []).length >= 2 ||
+    /(?:\n|^)\s*(?:1\.|2\.|3\.|-\s+).{3,120}(?:\n|$)/i.test(raw)
+
+  const passNearTitle = nearTitleSignals.length >= 2
+  const passTopFallback =
+    nearTitleSignals.length === 0 &&
+    topSignals.length >= 3 &&
+    (hasTitleAreaContext || hasShortListShape)
+
+  if (passNearTitle || passTopFallback) {
+    const used = passNearTitle ? nearTitleSignals : topSignals
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A short key-benefits list is present near the product title (signals: ${used.slice(0, 4).join(', ')}).`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'No clear short list of 2-3 key benefits was detected near the product title. Add concise benefit points directly in the product title block.',
+  }
+}
+
 export function evaluateHowToUseSimpleStepsRule(
   rule: ScanRule,
   fullVisibleText: string
@@ -921,6 +1004,14 @@ export function tryEvaluateDeterministic(
   if (isProductTitleRule(rule)) {
     const productTitleResult = evaluateProductTitleRule(rule, context.keyElementsString)
     if (productTitleResult !== null) return productTitleResult
+  }
+  if (isBenefitsNearTitleRule(rule)) {
+    const benefitsNearTitleResult = evaluateBenefitsNearTitleRule(
+      rule,
+      context.keyElementsString,
+      context.fullVisibleText
+    )
+    if (benefitsNearTitleResult !== null) return benefitsNearTitleResult
   }
   if (isHowToUseSimpleStepsRule(rule)) {
     const howToUseResult = evaluateHowToUseSimpleStepsRule(rule, context.fullVisibleText)
