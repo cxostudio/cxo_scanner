@@ -2979,8 +2979,20 @@ export async function POST(request: NextRequest) {
                 .join(' ')
             )
           : ''
+        // Production-safe fallback: include the entire purchase block text for the selected CTA.
+        // Some storefronts hydrate/reflow CTA siblings differently on serverless runs, which can
+        // cause narrow sibling-band scans to miss nearby trust copy (returns/authenticity/guarantee).
+        const ctaPurchaseBlockText = cta
+          ? (
+              (getPurchaseBlock(cta) as HTMLElement | null)?.innerText || ''
+            )
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 5000)
+          : ''
         const pageText = (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 140000)
-        const trustTextSignals = collectTrustTextSignals(ctaBandText, pageText)
+        const trustNearText = `${ctaBandText} ${ctaPurchaseBlockText}`.trim()
+        const trustTextSignals = collectTrustTextSignals(trustNearText, pageText)
         const countNear = brandsNear.length
         const countElse = brandsElse.length
         const domStructureFound = countNear > 0
