@@ -6664,6 +6664,10 @@ export async function POST(request: NextRequest) {
             rule.id === 'image-thumbnails' ||
             (rule.title.toLowerCase().includes('thumbnail') && rule.title.toLowerCase().includes('gallery')) ||
             (rule.description.toLowerCase().includes('thumbnails') && rule.description.toLowerCase().includes('gallery'))
+          const isImageBackgroundConsistencyRule =
+            rule.id === 'image-background-consistency' ||
+            (rule.title.toLowerCase().includes('background') && rule.title.toLowerCase().includes('consisten')) ||
+            (rule.description.toLowerCase().includes('main product image') && rule.description.toLowerCase().includes('clean background'))
           const isBeforeAfterRule =
             rule.id === 'image-before-after' ||
             (rule.title.toLowerCase().includes('before') && rule.title.toLowerCase().includes('after')) ||
@@ -6780,6 +6784,26 @@ Shopping-related labels detected in header/menu chrome: ${navLabels}
 
 ✅ PASS: "Header / menu includes Shop all, Bundles, and Reviews—key shopping destinations are in primary navigation."
 ❌ FAIL: "No shop or category links appear in the header or primary menu—users cannot reach the catalog from main navigation."
+`
+          } else if (isImageBackgroundConsistencyRule) {
+            specialInstructions = `
+IMAGE BACKGROUND CONSISTENCY RULE (STRICT INTERPRETATION)
+
+Evaluate ONLY the PRIMARY / HERO product image area.
+Do NOT fail this rule because of additional gallery images, lifestyle shots, model photos, before/after images, or mixed thumbnails.
+
+PASS criteria:
+- The main hero product image uses a clean, professional background (typically white / light gray / neutral, not cluttered).
+
+FAIL criteria:
+- The main hero product image itself has a distracting, cluttered, busy, or random-colored background that hurts product clarity.
+
+Decision priority:
+1) First inspect the hero/main image in the screenshot.
+2) Ignore non-hero gallery variation when deciding pass/fail.
+3) If hero is clean even when other thumbnails are lifestyle/mixed, output PASS.
+
+Your reason must explicitly mention the main/hero image background.
 `
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
@@ -7907,6 +7931,29 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.log(`Main navigation rule: DOM shows essential shopping nav (${labels}). Forcing PASS.`)
               analysis.passed = true
               analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
+            }
+          } else if (isImageBackgroundConsistencyRule) {
+            const reasonHasHeroCleanSignal =
+              (reasonLower.includes('hero') || reasonLower.includes('main image') || reasonLower.includes('primary image')) &&
+              (reasonLower.includes('clean background') ||
+                reasonLower.includes('neutral background') ||
+                reasonLower.includes('white background') ||
+                reasonLower.includes('light gray background') ||
+                reasonLower.includes('professional background'))
+
+            const reasonOnlyComplainsAboutOtherImages =
+              reasonLower.includes('other images') ||
+              reasonLower.includes('gallery images') ||
+              reasonLower.includes('thumbnails') ||
+              reasonLower.includes('lifestyle images') ||
+              reasonLower.includes('mixed backgrounds')
+
+            // Hero image cleanliness decides this rule. Mixed gallery backgrounds are allowed.
+            if (!analysis.passed && reasonHasHeroCleanSignal && reasonOnlyComplainsAboutOtherImages) {
+              console.log('Image background consistency: hero image is clean; non-hero gallery variation should not fail this rule. Forcing PASS.')
+              analysis.passed = true
+              analysis.reason =
+                'The primary/hero product image has a clean, professional background. Additional gallery/lifestyle images may vary, which is acceptable for this rule.'
             }
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()
