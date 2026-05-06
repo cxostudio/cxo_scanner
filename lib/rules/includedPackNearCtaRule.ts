@@ -9,11 +9,15 @@ export function isIncludedPackNearCtaRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
   const hay = `${t} ${d}`
-  const mentionsPackBundle =
+  const mentionsPackBundleOrAddon =
     /\b(pack|bundle|kit|starter kit|additional items?|included products?|what'?s included|items included|all included)\b/i.test(
       hay,
     ) ||
     (hay.includes('included') && (hay.includes('pack') || hay.includes('bundle') || hay.includes('kit'))) ||
+    (hay.includes('complementary') && (hay.includes('add-on') || hay.includes('addon') || hay.includes('upsell'))) ||
+    (hay.includes('quick') && hay.includes('upsell')) ||
+    ((hay.includes('add-on') || hay.includes('addon')) && hay.includes('cta')) ||
+    (hay.includes('upsell') && hay.includes('cta')) ||
     (hay.includes('visually') && hay.includes('display')) ||
     (hay.includes('included') && hay.includes('products') && hay.includes('visually')) ||
     (hay.includes('additional') && hay.includes('items') && hay.includes('pack')) ||
@@ -21,19 +25,16 @@ export function isIncludedPackNearCtaRule(rule: ScanRule): boolean {
   const mentionsCtaOrNear =
     /\b(cta|add\s+to\s+(cart|bag)|buy\s+now|purchase|near\s+(the\s+)?cta|call to action)\b/i.test(hay) ||
     (hay.includes('near') && (hay.includes('cart') || hay.includes('button'))) ||
+    (hay.includes('main cta') || hay.includes('main call-to-action') || hay.includes('main call to action')) ||
     (hay.includes('visually') && hay.includes('display')) ||
     (hay.includes('product') && hay.includes('includes'))
-  return mentionsPackBundle && mentionsCtaOrNear
+  return mentionsPackBundleOrAddon && mentionsCtaOrNear
 }
 
 export function evaluateIncludedPackNearCtaRule(rule: ScanRule, keyElementsString: string): ScanResult | null {
   if (!keyElementsString.includes('--- INCLUDED / BUNDLE ITEMS NEAR CTA (DOM) ---')) return null
 
   const bundleLikely = /Bundle or kit style offer \(DOM\):\s*YES/i.test(keyElementsString)
-  if (!bundleLikely) {
-    return null
-  }
-
   const ctaFound = /Primary CTA found:\s*YES/i.test(keyElementsString)
   const includedNear = /Included items \/ bonus lineup near buy area \(DOM\):\s*YES/i.test(keyElementsString)
   const afterBlock = keyElementsString.split('--- INCLUDED / BUNDLE ITEMS NEAR CTA (DOM) ---')[1]
@@ -61,6 +62,15 @@ export function evaluateIncludedPackNearCtaRule(rule: ScanRule, keyElementsStrin
     }
   }
 
+  // For quick complementary add-on / upsell-near-CTA rules, we should still return
+  // a deterministic FAIL when CTA exists but no near-CTA add-on evidence is found.
+  // This avoids falling back to noisy AI-only interpretation.
+  const ruleText = `${rule.title} ${rule.description}`.toLowerCase()
+  const isAddonUpsellFlavor =
+    (ruleText.includes('complementary') && (ruleText.includes('add-on') || ruleText.includes('addon') || ruleText.includes('upsell'))) ||
+    (ruleText.includes('quick') && ruleText.includes('upsell')) ||
+    (ruleText.includes('upsell') && ruleText.includes('cta'))
+
   if (!ctaFound) {
     return {
       ruleId: rule.id,
@@ -71,11 +81,17 @@ export function evaluateIncludedPackNearCtaRule(rule: ScanRule, keyElementsStrin
     }
   }
 
+  if (!bundleLikely && !isAddonUpsellFlavor) {
+    return null
+  }
+
   return {
     ruleId: rule.id,
     ruleTitle: rule.title,
     passed: false,
     reason:
-      'This product is presented as a bundle or kit, but no clear list of included or bonus items was detected next to the main Add to cart / Buy area.',
+      isAddonUpsellFlavor
+        ? 'No quick complementary add-on or upsell block was detected near the main purchase CTA.'
+        : 'This product is presented as a bundle or kit, but no clear list of included or bonus items was detected next to the main Add to cart / Buy area.',
   }
 }
