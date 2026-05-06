@@ -68,6 +68,73 @@ export function countDistinctGalleryDataMediaIdsFromHtml(html: string): number {
   }
   if (ids.size >= 3) return ids.size
 
+  // Shopify themes often expose gallery media without stable data-media-id in fallback HTML.
+  // Count unique product-like image URLs from gallery chunk attributes/JSON.
+  const normalizeImageUrl = (raw: string): string | null => {
+    const cleaned = String(raw || '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '')
+      .replace(/\\\//g, '/')
+    if (!cleaned || cleaned.startsWith('data:')) return null
+    try {
+      const u = new URL(cleaned, 'https://example.com')
+      const normalized = `${u.origin}${u.pathname}`.toLowerCase()
+      return normalized
+    } catch {
+      const noQuery = cleaned.split('?')[0].toLowerCase()
+      return noQuery.length > 20 ? noQuery : null
+    }
+  }
+  const looksLikeProductImage = (u: string): boolean => {
+    if (!u) return false
+    const lower = u.toLowerCase()
+    if (!/\.(jpg|jpeg|png|webp|avif)(?:$|\?)/i.test(lower)) return false
+    if (
+      /logo|icon|sprite|flag|avatar|review|testimonial|trustpilot|payment|badge|placeholder|favicon/i.test(
+        lower,
+      )
+    ) {
+      return false
+    }
+    return (
+      /\/products?\//i.test(lower) ||
+      /cdn\.shopify\.com/i.test(lower) ||
+      /\/files\//i.test(lower)
+    )
+  }
+
+  const productLikeImages = new Set<string>()
+  const attrRe =
+    /\b(?:src|data-src|data-original|data-zoom-image|data-image|data-large-image)\s*=\s*["']([^"']+)["']/gi
+  let a: RegExpExecArray | null
+  while ((a = attrRe.exec(chunk)) !== null) {
+    const u = normalizeImageUrl(a[1])
+    if (u && looksLikeProductImage(u)) productLikeImages.add(u)
+  }
+
+  const srcsetRe = /\bsrcset\s*=\s*["']([^"']+)["']/gi
+  let s: RegExpExecArray | null
+  while ((s = srcsetRe.exec(chunk)) !== null) {
+    const parts = s[1]
+      .split(',')
+      .map((p) => p.trim().split(/\s+/)[0])
+      .filter(Boolean)
+    for (const p of parts) {
+      const u = normalizeImageUrl(p)
+      if (u && looksLikeProductImage(u)) productLikeImages.add(u)
+    }
+  }
+
+  // JSON blobs (Shopify/ProductJson/etc.) frequently contain escaped image URLs.
+  const jsonUrlRe = /https?:\\\/\\\/[^"']+\.(?:jpg|jpeg|png|webp|avif)(?:\\\/\?[^"']*)?/gi
+  let j: RegExpExecArray | null
+  while ((j = jsonUrlRe.exec(chunk)) !== null) {
+    const u = normalizeImageUrl(j[0])
+    if (u && looksLikeProductImage(u)) productLikeImages.add(u)
+  }
+
+  if (productLikeImages.size >= 3) return productLikeImages.size
+
   const productImages = new Set<string>()
   const ldJsonRe = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
   let scriptMatch: RegExpExecArray | null
