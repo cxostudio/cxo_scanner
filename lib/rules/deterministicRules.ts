@@ -179,14 +179,22 @@ export function isHowToUseSimpleStepsRule(rule: ScanRule): boolean {
     hay.includes('how to') ||
     hay.includes('usage') ||
     hay.includes('instructions') ||
-    hay.includes('directions')
+    hay.includes('directions') ||
+    hay.includes('how it works')
 
   const hasStepIntent =
     hay.includes('simple step') ||
     hay.includes('step-by-step') ||
     hay.includes('step by step') ||
     hay.includes('3-5') ||
-    (hay.includes('step') && hay.includes('simple'))
+    hay.includes('steps') ||
+    hay.includes('guide') ||
+    hay.includes('tutorial') ||
+    hay.includes('instructional') ||
+    hay.includes('how-to') ||
+    hay.includes('process') ||
+    hay.includes('walkthrough') ||
+    (hay.includes('step') && (hay.includes('simple') || hay.includes('usage') || hay.includes('use')))
 
   return hasHowToIntent && hasStepIntent
 }
@@ -650,32 +658,50 @@ export function evaluateHowToUseSimpleStepsRule(
   if (!normalized) return null
 
   const hasHowToHeading =
-    /\b(how to use|how to enjoy|how to prepare|how to make|directions|instructions?)\b/i.test(
+    /\b(how to use|how to enjoy|how to prepare|how to make|directions|instructions?|how it works|best ways to enjoy|perfect mix)\b/i.test(
       normalized
     )
   const stepLabelCount =
-    normalized.match(/\bstep\s*(?:\d+|one|two|three|four|five|six)\b/gi)?.length || 0
+    normalized.match(
+      /\bstep\s*(?:\d+|one|two|three|four|five|six|seven|eight)\b|\b(?:first|second|third|fourth|fifth)\s+step\b/gi
+    )?.length || 0
   const numberedActionCount =
     normalized.match(
       /\b\d{1,2}[\)\.\-:]\s*(?:scoop|add|mix|stir|blend|shake|drink|apply|use|take|enjoy)\b/gi
+    )?.length || 0
+  const actionVerbCount =
+    normalized.match(
+      /\b(?:scoop|add|mix|stir|blend|froth|shake|drink|apply|use|take|enjoy|pour|whisk)\b/gi
     )?.length || 0
   const hasActionSequence =
     /\b(?:scoop|add)\b.{0,30}\bmix\b.{0,30}\b(?:drink|shake|stir|blend|enjoy)\b/i.test(
       normalized
     )
+  const hasHowToListPattern =
+    /\b(?:how to use|how to make|how it works|best ways to enjoy|perfect mix)\b.{0,500}\b(?:step\s*(?:\d+|one|two|three)|\d{1,2}[\)\.\-:]\s*(?:add|mix|blend|shake|apply|drink|use))\b/i.test(
+      normalized
+    )
 
   const hasClearStepSection =
-    (hasHowToHeading && (stepLabelCount >= 2 || numberedActionCount >= 2 || hasActionSequence)) ||
+    (hasHowToHeading &&
+      (stepLabelCount >= 1 ||
+        numberedActionCount >= 2 ||
+        hasActionSequence ||
+        actionVerbCount >= 4 ||
+        hasHowToListPattern)) ||
     stepLabelCount >= 3 ||
-    numberedActionCount >= 3
+    numberedActionCount >= 3 ||
+    hasHowToListPattern
 
   if (hasClearStepSection) {
     const detail =
       stepLabelCount >= 3
         ? `${stepLabelCount} step labels`
-        : numberedActionCount >= 2
+      : numberedActionCount >= 2
           ? `${numberedActionCount} numbered action steps`
-          : 'how-to heading with action sequence'
+        : hasHowToListPattern
+          ? 'how-to heading with step/list pattern'
+        : 'how-to heading with action sequence'
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
