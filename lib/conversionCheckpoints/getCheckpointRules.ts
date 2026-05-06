@@ -110,19 +110,21 @@ export const TARGET_CHECKPOINT_RECORD_IDS = [
   'rec33A6aJXon8YXfR',
   'recLehZKzun1Rxv0Z',
   'recYUxusypKnfViyM',
-  'recSKgDYp5GAl0g7B',
   'recnbgJzDarhgi4RH',
   'recNxnjMNyufvGsDX',
   'rec9Bd8mIKecasTPF',
   'rechQdZcW7EkLpi5J',
   'recH6IBXpHPI1KIxY',
   'receK3gEjM9yV2vi2',
-  'recGbDdjsN1u8pusF',
   'recxEGfZMHhvNPCUa',
   'recKQWJU3qEuKGFA3',
-  'recTMXWLDavg6RIi1',
   'recxoLHExiwXLdy75',
   'rec7WWY98CVhOtAXo',
+  'rec7hmBdP9rqP4gVw',
+  'recP2gybr9r0x8LYz',
+  'recf9TVdWozjE1laI',
+  'recYvb2wC1safMjpN',
+  'rechWSGCANIZS39ja'
 
 ] as const
 
