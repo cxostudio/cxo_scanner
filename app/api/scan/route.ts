@@ -6605,6 +6605,20 @@ export async function POST(request: NextRequest) {
             )
           })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+          const isComplementaryItemsInImageRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            const hay = `${t} ${d}`
+            if (hay.includes('customer photo') || hay.includes('ugc') || hay.includes('review photo')) return false
+            // Keep this matcher narrow so generic cross-sell/up-sell recommendation rules
+            // are NOT captured by this stricter "same image frame" rule.
+            return (
+              (hay.includes('alongside') && hay.includes('complementary') && hay.includes('image')) ||
+              (hay.includes('complementary items') && hay.includes('image')) ||
+              (hay.includes('paired with') && hay.includes('image')) ||
+              (hay.includes('in the frame') && hay.includes('complementary'))
+            )
+          })()
           /** Product gallery shows lifestyle / in-context usage (distinct from "customer photos in reviews"). */
           const isLifestyleProductImageRule = (() => {
             const t = rule.title.toLowerCase()
@@ -7068,6 +7082,25 @@ PASS only if you see a rating VERY CLOSE to the product title or in the same tit
 ✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
 ✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
 ❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
+`
+          } else if (isComplementaryItemsInImageRule) {
+            specialInstructions = `
+COMPLEMENTARY ITEMS IN PRODUCT IMAGES RULE — STRICT VISUAL CHECK
+
+This rule is NOT about review widgets, Trustpilot text, customer photos, or generic cross-sell sections.
+It only checks whether product gallery/hero images show the main product together with complementary items in the SAME IMAGE FRAME.
+
+PASS only if screenshot clearly shows:
+- Main product + at least one related/complementary item in the same hero/gallery image
+- Example: serum shown with another routine product/accessory beside it in one image
+
+FAIL when:
+- Gallery shows only single-product packshots/isolated product views
+- Cross-sell cards exist elsewhere on page but not in the same product image
+- Only review/social-proof blocks are present (no complementary-item imagery in gallery)
+
+Do NOT pass based on Trustpilot/verified reviews/review photos alone.
+Your reason must explicitly mention whether complementary items are visible in the same product image frame.
 `
           } else if (isLifestyleProductImageRule) {
             const galleryDomLine = customerPhotoEvidence.some((e) =>
@@ -8237,6 +8270,39 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             if (!reasonLower.includes('photo') && !reasonLower.includes('image') && !reasonLower.includes('customer')) {
               console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
+            }
+          } else if (isComplementaryItemsInImageRule) {
+            const hasExplicitSameFramePositive =
+              (reasonLower.includes('same image') ||
+                reasonLower.includes('same frame') ||
+                reasonLower.includes('alongside') ||
+                reasonLower.includes('paired with')) &&
+              (reasonLower.includes('complementary') ||
+                reasonLower.includes('related item') ||
+                reasonLower.includes('accessory') ||
+                reasonLower.includes('another product'))
+
+            const hasLooseNonVisualSignals =
+              reasonLower.includes('trustpilot') ||
+              reasonLower.includes('verified review') ||
+              reasonLower.includes('customer review') ||
+              reasonLower.includes('ugc') ||
+              reasonLower.includes('recommended for you') ||
+              reasonLower.includes('complete your') ||
+              reasonLower.includes('recently viewed')
+
+            // Strict guardrail: this rule only passes on same-image complementary-item evidence.
+            if (analysis.passed && !hasExplicitSameFramePositive) {
+              console.log('Complementary-items image rule: PASS without same-frame evidence. Forcing FAIL.')
+              analysis.passed = false
+              analysis.reason =
+                'No clear product-gallery image shows the main product alongside complementary items in the same frame. Recommendation/review sections alone do not satisfy this rule.'
+            }
+
+            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive) {
+              analysis.passed = false
+              analysis.reason =
+                'Cross-sell/review signals are present, but this rule requires complementary items to be visible in the same product image frame. That evidence was not found.'
             }
           } else if (isLifestyleProductImageRule) {
             const hasGalleryLifestyleDomEvidence = customerPhotoEvidence.some((e) =>
