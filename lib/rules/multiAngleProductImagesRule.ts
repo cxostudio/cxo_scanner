@@ -48,11 +48,13 @@ export function buildMultiAngleGalleryDomBlock(args: {
 
 /** HTML-only fallback: count unique data-media-id near gallery-like markup (fetch/Puppeteer failure path). */
 export function countDistinctGalleryDataMediaIdsFromHtml(html: string): number {
-  const anchor = html.search(/product__media|product-gallery|media-gallery|data-media-id/i)
+  const anchor = html.search(
+    /product__media|product-gallery|media-gallery|data-media-id|media-gallery|data-product-media|product-single__media/i,
+  )
   const chunk =
     anchor >= 0
-      ? html.slice(Math.max(0, anchor - 400), Math.min(html.length, anchor + 140000))
-      : html.slice(0, 160000)
+      ? html.slice(Math.max(0, anchor - 600), Math.min(html.length, anchor + 220000))
+      : html.slice(0, 240000)
   const re = /\bdata-media-id\s*=\s*["']([^"']+)["']/gi
   const ids = new Set<string>()
   let m: RegExpExecArray | null
@@ -64,7 +66,35 @@ export function countDistinctGalleryDataMediaIdsFromHtml(html: string): number {
     if (/review|testimonial|ugc|yotpo|judge|loox|stamped|okendo|junip/.test(ctx)) continue
     ids.add(id)
   }
-  return ids.size
+  if (ids.size >= 3) return ids.size
+
+  const productImages = new Set<string>()
+  const ldJsonRe = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  let scriptMatch: RegExpExecArray | null
+  while ((scriptMatch = ldJsonRe.exec(chunk)) !== null) {
+    const raw = scriptMatch[1]?.trim()
+    if (!raw) continue
+    try {
+      const parsed = JSON.parse(raw)
+      const nodes = Array.isArray(parsed) ? parsed : [parsed]
+      for (const node of nodes) {
+        const t = String(node?.['@type'] || '').toLowerCase()
+        if (t !== 'product') continue
+        const img = node?.image
+        const addImage = (v: unknown) => {
+          const s = String(v || '').trim()
+          if (!s || s.startsWith('data:')) return
+          productImages.add(s.split('?')[0].toLowerCase())
+        }
+        if (Array.isArray(img)) img.forEach(addImage)
+        else addImage(img)
+      }
+    } catch {
+      /* ignore malformed ld+json */
+    }
+  }
+
+  return Math.max(ids.size, productImages.size)
 }
 
 export function evaluateMultiAngleProductGalleryRule(rule: ScanRule, keyElementsString: string): ScanResult | null {

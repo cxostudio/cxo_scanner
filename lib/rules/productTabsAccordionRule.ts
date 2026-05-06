@@ -24,7 +24,8 @@ export function evaluateProductTabsAccordionRule(rule: ScanRule, keyElementsStri
 
   if (/Tab\/Accordion Status:\s*PASS/i.test(keyElementsString)) {
     const types =
-      keyElementsString.match(/Tabs\/Accordions Found:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'tabs/accordions'
+      keyElementsString.match(/Tabs\/Accordions Found(?:\s*\(scoped\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() ||
+      'tabs/accordions'
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,

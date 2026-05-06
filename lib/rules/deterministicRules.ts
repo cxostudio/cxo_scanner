@@ -168,6 +168,50 @@ export function isProductTitleRule(rule: ScanRule): boolean {
   )
 }
 
+/** "Short list of key benefits near product title" rule. */
+export function isBenefitsNearTitleRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  const hay = `${t} ${d}`
+  return (
+    rule.id === 'benefits-near-title' ||
+    ((hay.includes('benefit') || hay.includes('benefits')) &&
+      (hay.includes('title') || hay.includes('product title') || hay.includes('near the product title'))) ||
+    (hay.includes('key benefit') && hay.includes('near'))
+  )
+}
+
+/** "How to use in simple steps" rule. */
+export function isHowToUseSimpleStepsRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  const hay = `${t} ${d}`
+
+  const hasHowToIntent =
+    hay.includes('how to use') ||
+    hay.includes('how to') ||
+    hay.includes('usage') ||
+    hay.includes('instructions') ||
+    hay.includes('directions') ||
+    hay.includes('how it works')
+
+  const hasStepIntent =
+    hay.includes('simple step') ||
+    hay.includes('step-by-step') ||
+    hay.includes('step by step') ||
+    hay.includes('3-5') ||
+    hay.includes('steps') ||
+    hay.includes('guide') ||
+    hay.includes('tutorial') ||
+    hay.includes('instructional') ||
+    hay.includes('how-to') ||
+    hay.includes('process') ||
+    hay.includes('walkthrough') ||
+    (hay.includes('step') && (hay.includes('simple') || hay.includes('usage') || hay.includes('use')))
+
+  return hasHowToIntent && hasStepIntent
+}
+
 export function isThumbnailGalleryRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -442,14 +486,23 @@ export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString
   const nearCtaYes = /Visual trust icons near CTA \(DOM\):\s*YES/i.test(keyElementsString)
   const ctaFound = /CTA Found:\s*YES/i.test(keyElementsString)
   const nearMarks = keyElementsString.match(/Visual trust marks near CTA(?: \(payment logos, seals, guarantee icons\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+  const textNearMarks =
+    keyElementsString.match(/Text trust signals near CTA(?: \(secure\/guarantee\/returns\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() ||
+    'None'
   const elsewhereMarks = keyElementsString.match(/Visual trust marks elsewhere only(?: \(footer, etc\. — does NOT pass\))?:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
+  const textElsewhereMarks =
+    keyElementsString.match(/Text trust signals elsewhere only:\s*(.+?)(?:\n|$)/i)?.[1]?.trim() || 'None'
 
-  if (nearCtaYes) {
+  if (nearCtaYes || (textNearMarks && textNearMarks.toLowerCase() !== 'none')) {
+    const mergedNear =
+      nearMarks && nearMarks.toLowerCase() !== 'none'
+        ? nearMarks
+        : textNearMarks
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: true,
-      reason: `Trust/payment icons are detected near the primary CTA (${nearMarks}).`,
+      reason: `Trust signals are detected near the primary CTA (${mergedNear}).`,
     }
   }
 
@@ -462,12 +515,15 @@ export function evaluateTrustBadgesNearCtaRule(rule: ScanRule, keyElementsString
     }
   }
 
-  if (elsewhereMarks && elsewhereMarks.toLowerCase() !== 'none') {
+  const elsewhereCombined = [elsewhereMarks, textElsewhereMarks]
+    .filter((v) => v && v.toLowerCase() !== 'none')
+    .join('; ')
+  if (elsewhereCombined) {
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: false,
-      reason: `Trust/payment icons appear only away from the primary CTA (${elsewhereMarks}).`,
+      reason: `Trust signals appear only away from the primary CTA (${elsewhereCombined}).`,
     }
   }
 
@@ -600,6 +656,149 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
     ruleTitle: rule.title,
     passed: false,
     reason: `The product title "${title}" in the product page header is too generic. It needs more specific attributes such as brand, size, variant, or key benefit so the title is clear on its own.`,
+  }
+}
+
+export function evaluateBenefitsNearTitleRule(
+  rule: ScanRule,
+  keyElementsString: string,
+  fullVisibleText: string
+): ScanResult | null {
+  const raw = fullVisibleText || ''
+  if (!raw.trim()) return null
+
+  const lower = raw
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!lower) return null
+
+  const title = (extractPrimaryProductTitle(keyElementsString) || '').toLowerCase().trim()
+  const titleIdx = title ? lower.indexOf(title) : -1
+  const titleWindow =
+    titleIdx >= 0
+      ? lower.slice(Math.max(0, titleIdx - 900), Math.min(lower.length, titleIdx + Math.max(title.length, 40) + 1600))
+      : ''
+  const topChunk = lower.slice(0, 7000)
+
+  const benefitSignals: Array<{ label: string; pattern: RegExp }> = [
+    { label: 'focus/mental performance', pattern: /\b(focus|focused|mental performance|sharper focus|clarity|productivity)\b/i },
+    { label: 'energy', pattern: /\b(energy|sustained energy|boost energy|alertness)\b/i },
+    { label: 'calm/stress support', pattern: /\b(calm|calming|reduce anxiety|stress support|no anxiety)\b/i },
+    { label: 'taste', pattern: /\b(great taste|delicious taste|tastes great|easy to drink)\b/i },
+    { label: 'no jitters/crash', pattern: /\b(zero jitters|without (the )?jitters|no jitters|without (the )?crash|zero crash|no crash)\b/i },
+    { label: 'easy usage', pattern: /\b(hot or cold|water or milk|mix into|easy to use|no routine change)\b/i },
+    { label: 'shipping/returns', pattern: /\b(free shipping|free express delivery|money-back|money back guarantee|easy returns)\b/i },
+  ]
+
+  const collectSignals = (text: string): string[] =>
+    benefitSignals.filter((s) => s.pattern.test(text)).map((s) => s.label)
+
+  const nearTitleSignals = collectSignals(titleWindow)
+  const topSignals = collectSignals(topChunk)
+
+  const hasTitleAreaContext =
+    /\b(starter kit|add to bag|nutritional information|flavour|flavor|quantity|reviews?)\b/i.test(topChunk)
+  const hasShortListShape =
+    (raw.match(/[•✓✅]\s*[^\n]{3,120}/g) || []).length >= 2 ||
+    /(?:\n|^)\s*(?:1\.|2\.|3\.|-\s+).{3,120}(?:\n|$)/i.test(raw)
+
+  const passNearTitle = nearTitleSignals.length >= 2
+  const passTopFallback =
+    nearTitleSignals.length === 0 &&
+    topSignals.length >= 3 &&
+    (hasTitleAreaContext || hasShortListShape)
+
+  if (passNearTitle || passTopFallback) {
+    const used = passNearTitle ? nearTitleSignals : topSignals
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A short key-benefits list is present near the product title (signals: ${used.slice(0, 4).join(', ')}).`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'No clear short list of 2-3 key benefits was detected near the product title. Add concise benefit points directly in the product title block.',
+  }
+}
+
+export function evaluateHowToUseSimpleStepsRule(
+  rule: ScanRule,
+  fullVisibleText: string
+): ScanResult | null {
+  const normalized = (fullVisibleText || '')
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return null
+
+  const hasHowToHeading =
+    /\b(how to use|how to enjoy|how to prepare|how to make|directions|instructions?|how it works|best ways to enjoy|perfect mix)\b/i.test(
+      normalized
+    )
+  const stepLabelCount =
+    normalized.match(
+      /\bstep\s*(?:\d+|one|two|three|four|five|six|seven|eight)\b|\b(?:first|second|third|fourth|fifth)\s+step\b/gi
+    )?.length || 0
+  const numberedActionCount =
+    normalized.match(
+      /\b\d{1,2}[\)\.\-:]\s*(?:scoop|add|mix|stir|blend|shake|drink|apply|use|take|enjoy)\b/gi
+    )?.length || 0
+  const actionVerbCount =
+    normalized.match(
+      /\b(?:scoop|add|mix|stir|blend|froth|shake|drink|apply|use|take|enjoy|pour|whisk)\b/gi
+    )?.length || 0
+  const hasActionSequence =
+    /\b(?:scoop|add)\b.{0,30}\bmix\b.{0,30}\b(?:drink|shake|stir|blend|enjoy)\b/i.test(
+      normalized
+    )
+  const hasHowToListPattern =
+    /\b(?:how to use|how to make|how it works|best ways to enjoy|perfect mix)\b.{0,500}\b(?:step\s*(?:\d+|one|two|three)|\d{1,2}[\)\.\-:]\s*(?:add|mix|blend|shake|apply|drink|use))\b/i.test(
+      normalized
+    )
+
+  const hasClearStepSection =
+    (hasHowToHeading &&
+      (stepLabelCount >= 1 ||
+        numberedActionCount >= 2 ||
+        hasActionSequence ||
+        actionVerbCount >= 4 ||
+        hasHowToListPattern)) ||
+    stepLabelCount >= 3 ||
+    numberedActionCount >= 3 ||
+    hasHowToListPattern
+
+  if (hasClearStepSection) {
+    const detail =
+      stepLabelCount >= 3
+        ? `${stepLabelCount} step labels`
+      : numberedActionCount >= 2
+          ? `${numberedActionCount} numbered action steps`
+        : hasHowToListPattern
+          ? 'how-to heading with step/list pattern'
+        : 'how-to heading with action sequence'
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A clear how-to usage section is present with simple step guidance (${detail}).`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'No clear how-to section with simple step-by-step usage guidance was detected. Add a short 3-5 step usage section (e.g. Step 1, Step 2, Step 3).',
   }
 }
 
@@ -805,6 +1004,18 @@ export function tryEvaluateDeterministic(
   if (isProductTitleRule(rule)) {
     const productTitleResult = evaluateProductTitleRule(rule, context.keyElementsString)
     if (productTitleResult !== null) return productTitleResult
+  }
+  if (isBenefitsNearTitleRule(rule)) {
+    const benefitsNearTitleResult = evaluateBenefitsNearTitleRule(
+      rule,
+      context.keyElementsString,
+      context.fullVisibleText
+    )
+    if (benefitsNearTitleResult !== null) return benefitsNearTitleResult
+  }
+  if (isHowToUseSimpleStepsRule(rule)) {
+    const howToUseResult = evaluateHowToUseSimpleStepsRule(rule, context.fullVisibleText)
+    if (howToUseResult !== null) return howToUseResult
   }
   if (isVariantRule(rule)) {
     const variantResult = evaluateVariantRule(rule, context.keyElementsString, context.fullVisibleText)

@@ -4,6 +4,13 @@ import { z } from 'zod'
 import path from 'path'
 import fs from 'fs'
 import { scrollPageToBottom, getSettleDelayMs } from '@/lib/scanner/scrollLoader'
+import { waitForMainColumnImages } from '@/lib/scanner/waitForMainColumnImages'
+import { snapshotIncludedPackDom } from '@/lib/scanner/includedPackNearCtaDomSnapshot'
+import {
+  detectTabsAccordionFromHtml,
+  formatProductTabsAccordionDomBlock,
+  snapshotProductTabsAccordionDom,
+} from '@/lib/scanner/productTabsAccordionDom'
 import { detectLazyLoading, buildLazyLoadingSummary } from '@/lib/scanner/lazyLoading'
 import { detectCustomerMedia } from '@/lib/scanner/customerMedia'
 import {
@@ -29,6 +36,7 @@ import {
   collectFooterCustomerSupportSnapshot,
   emptyFooterCustomerSupportSnapshot,
 } from '@/lib/rules/footerCustomerSupportRule'
+import { isProductTabsAccordionRule } from '@/lib/rules/productTabsAccordionRule'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -395,6 +403,8 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   domStructureFound: boolean
   paymentBrandsFound: string[]
   paymentBrandsElsewhere: string[]
+  textSignalsNearCta: string[]
+  textSignalsElsewhere: string[]
   trustBadgesInfo: string
   containerDescription: string
 } {
@@ -404,6 +414,8 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
       domStructureFound: false,
       paymentBrandsFound: [],
       paymentBrandsElsewhere: [],
+      textSignalsNearCta: [],
+      textSignalsElsewhere: [],
       trustBadgesInfo: 'No HTML available for trust-near-CTA fallback.',
       containerDescription: 'html-fallback',
     }
@@ -432,6 +444,13 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     { label: 'guarantee-badge', re: /\bmoney\s*-?\s*back\b|\bguarantee\b|\bsecure\s+checkout\s+badge\b/ },
   ]
   const VISUAL_RE = /<(img|svg|iframe)\b|(?:id|class)=["'][^"']*(icon|badge|payment|secure|trust|checkout)[^"']*["']/i
+  const TEXT_SIGNAL_LABELS: Array<{ label: string; re: RegExp }> = [
+    { label: 'secure-checkout', re: /\bsecure\s+checkout\b|\bsafe\s+checkout\b|\bprotected\s+checkout\b/ },
+    { label: 'encrypted-payment', re: /\bssl\b|\bencrypted\b|\bsecure\s+payment\b/ },
+    { label: 'money-back-guarantee', re: /\bmoney\s*-?\s*back\b|\b\d{1,3}\s*-?\s*day\s+money\s*-?\s*back\b/ },
+    { label: 'trusted-authenticity', re: /\b100%\s+authentic\b|\bauthentic\s+(?:products?|skincare)\b/ },
+    { label: 'returns-policy-near-cta', re: /\breturn(?:s)?\b.{0,40}\b(?:day|days|refund)\b/ },
+  ]
 
   const candidateBlocks: string[] = []
   let blockMatch: RegExpExecArray | null
@@ -444,9 +463,16 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   const ctaFound = CTA_RE.test(html)
   const nearFound = new Set<string>()
   const elsewhereFound = new Set<string>()
+  const textNearFound = new Set<string>()
+  const textElsewhereFound = new Set<string>()
 
   const addMatchesFromArea = (source: string, bucket: Set<string>) => {
     for (const item of TRUST_LABELS) {
+      if (item.re.test(source)) bucket.add(item.label)
+    }
+  }
+  const addTextSignalMatchesFromArea = (source: string, bucket: Set<string>) => {
+    for (const item of TEXT_SIGNAL_LABELS) {
       if (item.re.test(source)) bucket.add(item.label)
     }
   }
@@ -454,11 +480,13 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
   const nearMatchedBlocks: string[] = []
   for (const block of candidateBlocks) {
     if (!CTA_RE.test(block)) continue
-    if (!VISUAL_RE.test(block)) continue
     const localFound = new Set<string>()
-    addMatchesFromArea(block, localFound)
-    if (localFound.size === 0) continue
+    const localTextFound = new Set<string>()
+    if (VISUAL_RE.test(block)) addMatchesFromArea(block, localFound)
+    addTextSignalMatchesFromArea(block, localTextFound)
+    if (localFound.size === 0 && localTextFound.size === 0) continue
     for (const name of localFound) nearFound.add(name)
+    for (const name of localTextFound) textNearFound.add(name)
     nearMatchedBlocks.push(block)
   }
 
@@ -466,15 +494,19 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     .map((m) => m[0])
     .join('\n')
   addMatchesFromArea(footerOnly, elsewhereFound)
+  addTextSignalMatchesFromArea(footerOnly, textElsewhereFound)
 
   if (nearMatchedBlocks.length > 0) {
     const combinedNear = nearMatchedBlocks.join('\n')
     const outsideNear = html.replace(combinedNear, ' ')
     addMatchesFromArea(outsideNear, elsewhereFound)
+    addTextSignalMatchesFromArea(outsideNear, textElsewhereFound)
   }
 
   const paymentBrandsFound = Array.from(nearFound)
   const paymentBrandsElsewhere = Array.from(elsewhereFound).filter((x) => !nearFound.has(x))
+  const textSignalsNearCta = Array.from(textNearFound)
+  const textSignalsElsewhere = Array.from(textElsewhereFound).filter((x) => !textNearFound.has(x))
   const domStructureFound = paymentBrandsFound.length > 0
 
   return {
@@ -482,10 +514,12 @@ function detectTrustNearCtaFromHtml(rawHtml: string): {
     domStructureFound,
     paymentBrandsFound,
     paymentBrandsElsewhere,
-    trustBadgesInfo: domStructureFound
-      ? `HTML fallback found trust/payment markers near CTA: ${paymentBrandsFound.join(', ')}`
-      : paymentBrandsElsewhere.length > 0
-        ? `HTML fallback found trust markers only outside CTA context: ${paymentBrandsElsewhere.join(', ')}`
+    textSignalsNearCta,
+    textSignalsElsewhere,
+    trustBadgesInfo: domStructureFound || textSignalsNearCta.length > 0
+      ? `HTML fallback found trust markers near CTA: ${(paymentBrandsFound.concat(textSignalsNearCta)).join(', ')}`
+      : paymentBrandsElsewhere.length > 0 || textSignalsElsewhere.length > 0
+        ? `HTML fallback found trust markers only outside CTA context: ${(paymentBrandsElsewhere.concat(textSignalsElsewhere)).join(', ')}`
         : 'HTML fallback found no trust/payment markers near CTA.',
     containerDescription: 'html-fallback: CTA/trust markers in same product/purchase block',
   }
@@ -1192,8 +1226,11 @@ export async function POST(request: NextRequest) {
       /** True only when img/svg/iframe (or svg use) trust marks are near the primary CTA — not plain text. */
       domStructureFound: boolean
       paymentBrandsFound: string[]
+      /** Strong trust wording near CTA when visual logos are missing/lazy (secure checkout, guarantee, returns). */
+      textSignalsNearCta: string[]
       /** Visual trust marks elsewhere (e.g. footer) — does NOT satisfy "near CTA". */
       paymentBrandsElsewhere: string[]
+      textSignalsElsewhere: string[]
       trustBadgesCount: number
       trustBadgesElsewhereCount: number
       trustBadgesInfo: string
@@ -1812,6 +1849,7 @@ export async function POST(request: NextRequest) {
               if (patterns.some((p) => p.test(t))) return true
               if (t.includes('nutritional') && t.includes('information')) return true
               if (t.includes('product') && t.includes('detail')) return true
+              if (t.includes('ingredient') && (t.includes('nutrition') || t.includes('nutritional'))) return true
               return false
             }
             const roots = Array.from(
@@ -1832,7 +1870,8 @@ export async function POST(request: NextRequest) {
                   navHits.add(lab.slice(0, 48).toLowerCase())
                 })
             }
-            if (navHits.size >= 2) {
+            const hasMainDetails = !!document.querySelector('main details, [role="main"] details')
+            if (navHits.size >= 2 || (navHits.size >= 1 && hasMainDetails)) {
               foundTabs.push({
                 type: 'product-detail-nav',
                 count: navHits.size,
@@ -2877,6 +2916,18 @@ export async function POST(request: NextRequest) {
           if (isInSamePurchaseBlock(cta, el)) return true
           return pixelNearBuyButton(cta, el)
         }
+        function collectTrustTextSignals(nearCtaText: string, pageText: string): { near: string[]; elsewhere: string[] } {
+          const defs: Array<{ id: string; re: RegExp }> = [
+            { id: 'secure-checkout', re: /\bsecure\s+checkout\b|\bsafe\s+checkout\b|\bprotected\s+checkout\b/i },
+            { id: 'encrypted-payment', re: /\bssl\b|\bencrypted\b|\bsecure\s+payment\b/i },
+            { id: 'money-back-guarantee', re: /\bmoney\s*-?\s*back\b|\b\d{1,3}\s*-?\s*day\s+money\s*-?\s*back\b/i },
+            { id: 'trusted-authenticity', re: /\b100%\s+authentic\b|\bauthentic\s+(?:products?|skincare)\b/i },
+            { id: 'returns-policy-near-cta', re: /\breturn(?:s)?\b.{0,48}\b(?:day|days|refund|unused|unopened)\b/i },
+          ]
+          const near = defs.filter((d) => d.re.test(nearCtaText)).map((d) => d.id)
+          const elsewhere = defs.filter((d) => !near.includes(d.id) && d.re.test(pageText)).map((d) => d.id)
+          return { near, elsewhere }
+        }
 
         const cta = findPrimaryPurchaseCta()
         if (cta) {
@@ -2910,6 +2961,26 @@ export async function POST(request: NextRequest) {
 
         const brandsNear = Array.from(foundNear.keys())
         const brandsElse = Array.from(foundElsewhere.keys())
+        const ctaBandText = cta
+          ? (
+              Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  'main p, main span, main div, main li, [role="main"] p, [role="main"] span, [role="main"] div, [role="main"] li',
+                ),
+              )
+                .filter((el) => {
+                  if (isExcludedFarFromBuy(el)) return false
+                  if (el === cta || cta.contains(el) || nearPrimaryCta(cta, el)) return true
+                  return false
+                })
+                .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
+                .filter((t) => t.length >= 4 && t.length <= 220)
+                .slice(0, 60)
+                .join(' ')
+            )
+          : ''
+        const pageText = (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 140000)
+        const trustTextSignals = collectTrustTextSignals(ctaBandText, pageText)
         const countNear = brandsNear.length
         const countElse = brandsElse.length
         const domStructureFound = countNear > 0
@@ -2919,14 +2990,16 @@ export async function POST(request: NextRequest) {
           ctaText,
           domStructureFound,
           paymentBrandsFound: brandsNear,
+          textSignalsNearCta: trustTextSignals.near,
           paymentBrandsElsewhere: brandsElse,
+          textSignalsElsewhere: trustTextSignals.elsewhere,
           trustBadgesCount: countNear,
           trustBadgesElsewhereCount: countElse,
-          trustBadgesInfo: domStructureFound
+          trustBadgesInfo: domStructureFound || trustTextSignals.near.length > 0
             ? `Visual icons/logos near primary CTA: ${brandsNear.join(', ')}`
-            : countElse > 0
-              ? `No visual trust icons near CTA; elsewhere only: ${brandsElse.join(', ')}`
-              : 'No payment/security/guarantee icons detected near the primary CTA',
+            : countElse > 0 || trustTextSignals.elsewhere.length > 0
+              ? `No visual trust icons near CTA; elsewhere only: ${(brandsElse.concat(trustTextSignals.elsewhere)).join(', ')}`
+              : 'No trust icons or strong trust text detected near the primary CTA',
           containerDescription: cta
             ? '±4 sibling nodes around buy button or tight pixel band; footer excluded'
             : 'CTA not found — cannot verify proximity',
@@ -3207,23 +3280,9 @@ export async function POST(request: NextRequest) {
         wishlistNearCtaContext = null
       }
 
-      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
-      try {
-        await page.evaluate(() => {
-          const el =
-            document.querySelector<HTMLElement>(
-              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
-            ) || null
-          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
-        })
-        await new Promise((r) => setTimeout(r, 700))
-      } catch {
-        /* ignore */
-      }
-
-      // Gift / pack rows hydrate below the ATC on many Shopify subscriptions — scroll once so imgs copy exist in layout.
-      try {
-        await page.evaluate(() => {
+      /** Scroll lazy “free gifts / first order” rows into view (re-used on Vercel retry). */
+      const giftScrollIntoView = () =>
+        page.evaluate(() => {
           const labels = Array.from(
             document.querySelectorAll(
               'h2, h3, h4, h5, strong, button, div, span, p, [class*="gift" i], [class*="bonus" i]',
@@ -3237,398 +3296,62 @@ export async function POST(request: NextRequest) {
                 /\b(with\s+your\s+)?first\s+order\b.*\bgift\b/.test(t) ||
                 /\bgifts?\s+worth\b/.test(t)
               )
-            }) || document.querySelector<HTMLElement>(
+            }) ||
+            document.querySelector<HTMLElement>(
               '[class*="free-gift" i], [class*="gift-with" i], [class*="gift_row" i], [class*="gift-row" i]',
             )
           hit?.scrollIntoView?.({ behavior: 'instant', block: 'center' })
         })
-        await new Promise((r) => setTimeout(r, 550))
+
+      // Product column + kit copy often hydrate after first paint; serverless (Vercel) is slower than local.
+      try {
+        await page.evaluate(() => {
+          const el =
+            document.querySelector<HTMLElement>(
+              'form[action*="cart/add" i], [id*="product-form" i], [class*="product-form" i], [class*="product__info" i], main h1',
+            ) || null
+          if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+        })
+        await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2000 : 700))
+      } catch {
+        /* ignore */
+      }
+
+      // Gift / pack rows hydrate below the ATC — allow extra decode time on Vercel CPUs.
+      try {
+        await giftScrollIntoView()
+        await new Promise((r) => setTimeout(r, process.env.VERCEL ? 2600 : 550))
       } catch {
         /* ignore */
       }
 
       // Bundle / kit: included or bonus items (e.g. free gifts list) near primary buy CTA
       try {
-        includedPackNearCtaContext = await page.evaluate(() => {
-          function findPrimaryPurchaseCta(): HTMLElement | null {
-            const ctaPatterns = [
-              'add to bag',
-              'add to basket',
-              'add to cart',
-              'add to order',
-              'buy now',
-              'buy it now',
-              'purchase',
-              'checkout',
-              'pay now',
-              'order now',
-              'complete order',
-              'place order',
-              'add pack',
-              'get it now',
-            ]
-            const selectors =
-              'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
-            const candidates = Array.from(document.querySelectorAll<HTMLElement>(selectors))
-            let best: HTMLElement | null = null
-            let bestScore = 0
-            for (const el of candidates) {
-              const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
-              const aria = (el.getAttribute('aria-label') || '').toLowerCase()
-              const val = el instanceof HTMLInputElement ? (el.value || '').toLowerCase() : ''
-              const combined = `${text} ${aria} ${val}`
-              if (!ctaPatterns.some((p) => combined.includes(p))) continue
-              const st = window.getComputedStyle(el)
-              if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
-              const r = el.getBoundingClientRect()
-              if (r.width < 4 || r.height < 4) continue
-              const inFooter = !!el.closest('footer, [class*="footer" i], [id*="footer" i]')
-              const inHeaderOnly =
-                !!el.closest('header, [class*="header" i], nav') &&
-                !el.closest('main, [role="main"], [class*="product" i], [id*="Product" i]')
-              const inProduct = !!(
-                el.closest('form[action*="cart" i]') ||
-                el.closest('[class*="product-form" i]') ||
-                el.closest('[class*="product__" i]') ||
-                el.closest('[class*="product-info" i]') ||
-                el.closest('[class*="product-details" i]') ||
-                el.closest('[data-product-form]') ||
-                el.closest('[id*="product-form" i]') ||
-                el.closest('[class*="purchase" i]') ||
-                el.closest('[name="add"]') ||
-                el.closest('[class*="shopify" i]')
-              )
-              let score = r.width * r.height + (inProduct ? 800000 : 0)
-              if (inFooter) score *= 0.02
-              if (inHeaderOnly && !inProduct) score *= 0.05
-              if (score > bestScore) {
-                bestScore = score
-                best = el
-              }
+        if (process.env.VERCEL) {
+          await waitForMainColumnImages(page, { perImageBudgetMs: 3200 })
+        }
+
+        includedPackNearCtaContext = await page.evaluate(snapshotIncludedPackDom)
+
+        if (
+          process.env.VERCEL &&
+          includedPackNearCtaContext?.ctaFound &&
+          includedPackNearCtaContext.bundleLikely &&
+          !includedPackNearCtaContext.includedNearCta
+        ) {
+          try {
+            await waitForMainColumnImages(page, { perImageBudgetMs: 4200, maxImages: 200 })
+            await giftScrollIntoView()
+            await new Promise((r) => setTimeout(r, 2100))
+            const secondPass = await page.evaluate(snapshotIncludedPackDom)
+            if (secondPass.includedNearCta) {
+              includedPackNearCtaContext = secondPass
+              console.log('[scan] included pack near CTA: Vercel second pass flipped to PASS')
             }
-            return best
+          } catch (vercelRetryErr) {
+            console.warn('[scan] included pack Vercel second pass failed:', vercelRetryErr)
           }
-
-          function getProductMerchRoot(cta: HTMLElement): Element | null {
-            return (
-              cta.closest('main, [role="main"]') ||
-              cta.closest('[class*="pip-product" i]') ||
-              cta.closest('[class*="product-information" i]') ||
-              cta.closest('[class*="product-details" i]') ||
-              cta.closest('[id*="product" i]') ||
-              cta.closest('article') ||
-              null
-            )
-          }
-
-          /** Spacegoods/Skio-style “free gifts” rows: headings + ≥3 distinct product thumbnails near buy column. */
-          function isVisibleForPack(h: HTMLElement): boolean {
-            const st = window.getComputedStyle(h)
-            if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) return false
-            const r = h.getBoundingClientRect()
-            return r.width > 2 && r.height > 2
-          }
-
-          function countGiftRowImagesNearCta(
-            rootEl: Element | null,
-            ctaEl: HTMLElement | null,
-          ): { count: number; note: string } {
-            if (!rootEl || !ctaEl) return { count: 0, note: '' }
-            const ctaRect = ctaEl.getBoundingClientRect()
-            let best = 0
-            let bestNote = ''
-
-            const giftHeadingText = (raw: string) => {
-              const s = raw.toLowerCase().replace(/\s+/g, ' ')
-              return (
-                (/\bfree\s+gifts?\b/.test(s) &&
-                  /\b(with|your|worth|first|order|bonus|included|supply|kit|pack|!|,)\b/i.test(s)) ||
-                /\bgifts?\s+with\s+your\s+first\s+order\b/i.test(s) ||
-                /\bfree\s+gifts?\s+with\b/i.test(s)
-              )
-            }
-
-            const hubs = Array.from(
-              rootEl.querySelectorAll(
-                'h2, h3, h4, h5, h6, strong, [class*="banner" i], [class*="heading" i], [class*="label" i], p',
-              ),
-            ) as HTMLElement[]
-            for (const hub of hubs) {
-              const raw = (hub.textContent || '').replace(/\s+/g, ' ').trim()
-              if (raw.length > 280 || raw.length < 8) continue
-              if (!giftHeadingText(raw)) continue
-
-              const scope =
-                (hub.closest(
-                  'section, article, [class*="plan" i], [class*="subscription" i], [class*="offer" i], [class*="bundle" i]',
-                ) as HTMLElement | null) ||
-                (hub.closest('[class*="product__" i]') as HTMLElement | null) ||
-                (hub.closest('[class*="product" i]') as HTMLElement | null) ||
-                hub.parentElement
-              if (!scope) continue
-
-              const seenUrls = new Set<string>()
-              let imgs = 0
-              scope.querySelectorAll('img').forEach((imgEl) => {
-                const img = imgEl as HTMLImageElement
-                if (img.closest('header, footer, [class*="header" i], [class*="footer" i]')) return
-                if (!isVisibleForPack(img)) return
-                const ir = img.getBoundingClientRect()
-                if (ir.width < 24 || ir.height < 24) return
-                if (ir.width * ir.height < 650) return
-                const u = (img.currentSrc || img.src || '').split('?')[0]
-                if (u) {
-                  if (seenUrls.has(u)) return
-                  seenUrls.add(u)
-                }
-                imgs++
-              })
-
-              if (imgs > best) {
-                best = imgs
-                bestNote = `"${raw.slice(0, 76)}" (${imgs} product images)`
-              }
-            }
-
-            const classSelectors = [
-              '[class*="free-gift" i]',
-              '[class*="free_gift" i]',
-              '[class*="gift-with" i]',
-              '[class*="gift_row" i]',
-              '[class*="gift-row" i]',
-              '[class*="gift-grid" i]',
-              '[class*="gift_grid" i]',
-              '[class*="first-order" i]',
-            ]
-            for (const sel of classSelectors) {
-              let boxes: HTMLElement[] = []
-              try {
-                boxes = Array.from(rootEl.querySelectorAll(sel)) as HTMLElement[]
-              } catch {
-                continue
-              }
-              for (const box of boxes) {
-                if (!isVisibleForPack(box)) continue
-                const br = box.getBoundingClientRect()
-                const xOverlap = Math.min(br.right, ctaRect.right) - Math.max(br.left, ctaRect.left)
-                if (xOverlap < 20 && Math.abs(br.left - ctaRect.left) > 280) continue
-                const seenUrls = new Set<string>()
-                let imgs = 0
-                box.querySelectorAll('img').forEach((imgEl) => {
-                  const img = imgEl as HTMLImageElement
-                  if (img.closest('header, footer, nav')) return
-                  if (!isVisibleForPack(img)) return
-                  const ir = img.getBoundingClientRect()
-                  if (ir.width < 24 || ir.height < 24 || ir.width * ir.height < 650) return
-                  const u = (img.currentSrc || img.src || '').split('?')[0]
-                  if (u) {
-                    if (seenUrls.has(u)) return
-                    seenUrls.add(u)
-                  }
-                  imgs++
-                })
-                if (imgs > best) {
-                  best = imgs
-                  bestNote = `${imgs} images in gift/pack row (${sel.trim()})`
-                }
-              }
-            }
-
-            return { count: best, note: bestNote }
-          }
-
-          const cta = findPrimaryPurchaseCta()
-          const path = window.location.pathname.toLowerCase()
-          const h1 = (document.querySelector('h1')?.textContent || '').toLowerCase()
-          const docTitle = (document.title || '').toLowerCase()
-          const pathTitle = `${path} ${h1} ${docTitle}`
-
-          const bundleLikely =
-            /starter-kit|starter kit|gift-set|sample-pack|value-pack|\/bundles\/|-bundle-|combo-pack|2-pack|3-pack|bogo|subscription-box/i.test(
-              pathTitle,
-            ) ||
-            /\b(starter kit|gift set|value pack|bundle deal|kit includes|pack includes)\b/i.test(pathTitle) ||
-            /\b(what'?s included|items included|everything you get|everything you need|need to get started)\b/i.test(
-              h1 + docTitle,
-            ) ||
-            /\/[\w-]*-kit\b|\/[\w-]*-bundle\b|\/[\w-]*starter[\w-]*\b/i.test(path)
-
-          const root = cta ? getProductMerchRoot(cta) : document.querySelector('main, [role="main"]')
-          const zoneFull = root
-            ? ((root as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
-            : (document.body.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase()
-
-          const low = zoneFull
-          const ctaParentText = cta?.parentElement
-            ? (cta.parentElement.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
-            : ''
-          const ctaFormText = cta?.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]')
-            ? (
-              (cta.closest('form, [class*="product-form" i], [class*="product-info" i], [class*="product-details" i]') as HTMLElement)
-                .innerText || ''
-            )
-                .replace(/\s+/g, ' ')
-                .trim()
-                .toLowerCase()
-            : ''
-          // Anchor the text window on the **primary buy** phrases (rightmost match in reading order).
-          // Using earliest match among terms like "flavour" often sits above the buy column and
-          // excludes "Everything you need…" + free-gift copy below the title (Spacegoods, many Shopify themes).
-          const buyAnchorTerms = [
-            'add to bag',
-            'add to basket',
-            'add to cart',
-            'buy it now',
-            'buy now',
-            'sold out',
-            'out of stock',
-            'add pack',
-            'get it now',
-          ]
-          let buyIdx = -1
-          for (const term of buyAnchorTerms) {
-            const at = low.lastIndexOf(term)
-            if (at > buyIdx) buyIdx = at
-          }
-          let fallbackIdx = -1
-          const fallbackTerms = ['quantity', 'flavour', 'flavor']
-          for (const term of fallbackTerms) {
-            const at = low.indexOf(term)
-            if (at >= 0 && (fallbackIdx < 0 || at < fallbackIdx)) fallbackIdx = at
-          }
-          const span = 5200
-          const anchorIdx = buyIdx >= 0 ? buyIdx : fallbackIdx
-          const bodyNearWindow =
-            anchorIdx >= 0
-              ? low.slice(Math.max(0, anchorIdx - span), Math.min(low.length, anchorIdx + span))
-              : low.slice(0, 6200)
-          const nearWindow = `${ctaFormText} ${ctaParentText} ${bodyNearWindow}`.trim()
-          const zoneSlice = zoneFull.slice(0, 28000)
-          const merchWideForBundle =
-            /\b(free\s+gifts?|with\s+your\s+first\s+order|gifts?\s+worth|flexible\s+plan|month\s+supply|starter\s+kit|subscription|bonus\s+(items?|gifts?)|get started)\b/i.test(
-              zoneSlice,
-            )
-
-          const textReinforcesBundle =
-            /\b(free gifts?|what'?s included|starter kit|subscription|bonus|kit includes|pack includes|you'?re getting|everything you need|get started|your first order)\b/i.test(
-              nearWindow,
-            ) || merchWideForBundle
-          const bundleLikelyFromGiftsPlan =
-            /\bfree\s+gifts?\b/i.test(zoneSlice) &&
-            /\b(subscription|month\s+supply|flexible\s+plan|starter\s*kit|\d+\s*servings\b|trial|first\s+order)/i.test(
-              `${path}\n${h1}\n${zoneSlice.slice(0, 5000)}`,
-            )
-          const bundleLikelyFinal =
-            bundleLikely ||
-            (/\b(kit|bundle)\b/i.test(h1) && textReinforcesBundle) ||
-            bundleLikelyFromGiftsPlan
-
-          const evidence: string[] = []
-          let score = 0
-
-          const { count: visualGiftImgCount, note: visualGiftNote } = countGiftRowImagesNearCta(root, cta)
-          if (visualGiftImgCount >= 3 && visualGiftNote) {
-            score += 6
-            evidence.push(`visual lineup: ${visualGiftNote}`)
-          }
-
-          if (
-            /what'?s included|included items?|kit includes|pack includes|bundle includes|everything you get|everything you need|need to get started|get started|you'?re getting|in the box|what you get|contains|included with|in this kit|in this pack/i.test(
-              nearWindow,
-            )
-          ) {
-            score += 4
-            evidence.push('explicit included / kit copy')
-          }
-          if (
-            /free\s+gifts?\s*(with|worth|!|,|\b)|with\s+your\s+first\s+order|\bflexible\s+plan\b|\bmonth\s+supply\b|bonus|complimentary|free\s+sample|free accessories/i.test(
-              nearWindow,
-            ) ||
-            merchWideForBundle
-          ) {
-            score += 2
-            evidence.push('free gifts or bonus language')
-          }
-          let quantityPackSignals = (
-            nearWindow.match(
-              /\b\d+x\s*(?:bag|bags|item|items|pack|packs|sample|samples|servings?|accessories|gifts?)\b/gi,
-            ) || []
-          ).length
-          if (/\b\d+x\b/i.test(nearWindow) && /\bsamples?\b/i.test(nearWindow)) {
-            quantityPackSignals = Math.max(quantityPackSignals, 1)
-          }
-          if (quantityPackSignals >= 2) {
-            score += 3
-            evidence.push(`${quantityPackSignals} quantity pack line(s)`)
-          } else if (quantityPackSignals === 1) {
-            score += 1
-            evidence.push('quantity pack line')
-          }
-          const money = (
-            nearWindow.match(/(?:[$£€₹]|(?:\brs\.?\s*))\s*[\d.,]+/gi) || []
-          ).length
-          if (money >= 4) {
-            score += 3
-            evidence.push(`${money} price lines in buy zone`)
-          } else if (money >= 2) {
-            score += 2
-            evidence.push(`${money} price lines in buy zone`)
-          }
-          if ((nearWindow.match(/✅|•|✓/g) || []).length >= 2) {
-            score += 1
-            evidence.push('bullet or check list near buy')
-          }
-          if (
-            /\b(and|\+)\s+free\b|\+\s*free gifts|\+\s*free accessories|gifts worth|worth\s*(?:[£$€₹]|rs\.?)\b/i.test(
-              nearWindow,
-            )
-          ) {
-            score += 1
-            evidence.push('stacked value / gifts worth copy')
-          }
-          if (/starter kit bundle|starter kit\s*:/i.test(nearWindow)) {
-            score += 2
-            evidence.push('starter-kit bundle copy')
-          }
-
-          const explicitIncludedHeading =
-            /what'?s included|kit includes|pack includes|bundle includes|in the box|what you get|contains|everything you need|need to get started|everything you get|you'?re getting/i.test(
-              nearWindow,
-            ) ||
-            /\bfree\s+gifts?\s*(with|$|worth|!)/i.test(nearWindow) ||
-            /\bwith\s+your\s+first\s+order\b/i.test(nearWindow) ||
-            /\bgifts?\s+worth\b/i.test(nearWindow) ||
-            /\bfree\s+gifts?\s+with\b/i.test(zoneSlice)
-
-          const giftCopyInZone = /\bfree\s+gifts?\b/i.test(zoneSlice) || merchWideForBundle
-          const visualGiftLineup =
-            !!cta &&
-            visualGiftImgCount >= 3 &&
-            (giftCopyInZone || bundleLikelyFinal || merchWideForBundle)
-
-          const includedNearCta =
-            score >= 5 ||
-            (score >= 4 && money >= 2) ||
-            (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
-            (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
-            (bundleLikelyFinal &&
-              buyIdx >= 0 &&
-              explicitIncludedHeading &&
-              (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(
-                nearWindow,
-              ) ||
-                quantityPackSignals >= 1 ||
-                money >= 2)) ||
-            visualGiftLineup ||
-            (visualGiftImgCount >= 4 && !!cta && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice))
-
-          return {
-            ctaFound: !!cta,
-            bundleLikely: bundleLikelyFinal,
-            includedNearCta,
-            evidence,
-          }
-        })
+        }
       } catch (includedPackErr) {
         console.warn('[scan] included pack near CTA DOM snapshot failed:', includedPackErr)
         includedPackNearCtaContext = null
@@ -4339,13 +4062,37 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      try {
+        const needsProductTabsAccordionScan = rules.some(isProductTabsAccordionRule)
+        if (needsProductTabsAccordionScan) {
+          await page.evaluate(() => {
+            document
+              .querySelectorAll<HTMLElement>(
+                'main details, [role="main"] details, main [class*="accordion" i], [class*="disclosure" i]',
+              )
+              .forEach((el, i) => {
+                if (i < 4) el.scrollIntoView({ behavior: 'instant', block: 'center' })
+              })
+            window.scrollBy(0, Math.min(380, Math.max(0, document.documentElement.scrollHeight * 0.12)))
+          })
+          await new Promise((r) => setTimeout(r, process.env.VERCEL ? 650 : 320))
+          const tabsAccordionDom = await page.evaluate(snapshotProductTabsAccordionDom)
+          keyElements = `${keyElements || ''}\n\n${formatProductTabsAccordionDomBlock(tabsAccordionDom)}`
+          console.log(
+            `[scan] product tabs/accordion DOM re-scan: pass=${tabsAccordionDom.pass} signals=${tabsAccordionDom.totalSignals}`,
+          )
+        }
+      } catch (tabsAccordionErr) {
+        console.warn('[scan] product tabs/accordion DOM re-scan failed:', tabsAccordionErr)
+      }
+
       websiteContent = (visibleText.length > 4000 ? visibleText.substring(0, 4000) + '...' : visibleText) +
         '\n\n--- KEY ELEMENTS ---\n' + keyElements +
         `\n\n--- QUANTITY / DISCOUNT CHECK ---\nTiered quantity pricing (1x item, 2x items): ${quantityDiscountContext.tieredPricing ? "YES" : "NO"}\nPercentage discount (Save 16%, 20% off): ${quantityDiscountContext.percentDiscount ? "YES" : "NO"}\nPrice drop (e.g. €46.10 → €39.18): ${quantityDiscountContext.priceDrop ? "YES" : "NO"}\nPatterns found: ${quantityDiscountContext.foundPatterns.join(", ") || "None"}\nRule passes (any of above): ${quantityDiscountContext.hasAnyDiscount ? "YES" : "NO"}\n(Ignore coupon codes and free shipping)\n` +
         `\n\n--- CTA CONTEXT ---\n${ctaContext}` +
         (shippingTimeContext ? `\n\n--- DELIVERY TIME CHECK ---\nCTA Found: ${shippingTimeContext.ctaFound ? "YES" : "NO"}\nCTA Text: ${shippingTimeContext.ctaFound ? shippingTimeContext.ctaText : "N/A"}\nCTA Visible Without Scrolling: ${shippingTimeContext.ctaVisibleWithoutScrolling ? "YES" : "NO"}\nDelivery info near CTA: ${shippingTimeContext.shippingInfoNearCTA}\nHas Countdown/Cutoff Time (optional): ${shippingTimeContext.hasCountdown ? "YES" : "NO"}\nHas Delivery Date or Range (required): ${shippingTimeContext.hasDeliveryDate ? "YES" : "NO"}\nDelivery text found: ${shippingTimeContext.shippingText}\nAll Requirements Met (CTA + delivery near CTA + date/range; countdown not required): ${shippingTimeContext.allRequirementsMet ? "YES" : "NO"}` : '') +
         (trustBadgesContext
-          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+          ? `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText || 'N/A'}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA (payment logos, seals, guarantee icons): ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
           : '') +
         (squareImageContext ? `\n\n--- SQUARE IMAGE CHECK ---\n${squareImageContext.summary}` : '')
 
@@ -5659,7 +5406,7 @@ export async function POST(request: NextRequest) {
               return false
             }
 
-            /** Gift rows, variant pickers — not main gallery media. */
+            /** Gift rows / upsell blocks are not main gallery media. */
             function isExcludedThumbnailMerch(el: Element): boolean {
               const selectors = [
                 '[class*="free-gift" i]',
@@ -5669,8 +5416,6 @@ export async function POST(request: NextRequest) {
                 '[class*="upsell" i]',
                 '[class*="cross-sell" i]',
                 '[class*="recommendations" i]',
-                '[class*="product-form" i]',
-                '[class*="product_form" i]',
                 '[class*="variant-picker" i]',
                 '[class*="variant_picker" i]',
                 '[class*="sticky-atc" i]',
@@ -5708,6 +5453,10 @@ export async function POST(request: NextRequest) {
               'main [class*="product__media" i]',
               'main [class*="product-media" i]',
               'main [class*="media-gallery" i]',
+              'main media-gallery',
+              '[data-product-media]',
+              '[data-product-media-wrapper]',
+              '[class*="product__media-list" i]',
               '[class*="product-gallery" i]',
               '[class*="media-gallery" i]',
               '[id*="MediaGallery" i]',
@@ -5724,7 +5473,7 @@ export async function POST(request: NextRequest) {
               try {
                 roots = Array.from(
                   document.querySelectorAll(
-                    '[class*="product__media" i], [class*="product-media" i], [class*="product-gallery" i]',
+                    '[class*="product__media" i], [class*="product-media" i], [class*="product-gallery" i], media-gallery, [data-product-media], [data-product-media-wrapper]',
                   ),
                 )
               } catch {
@@ -5746,12 +5495,33 @@ export async function POST(request: NextRequest) {
 
               root
                 .querySelectorAll(
-                  '[data-media-id] img[src], [data-media-id] img[data-src], [class*="product__media-item" i] img[src], [class*="media-item" i] img[src], [class*="gallery__slide" i] img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[src]',
+                  '[data-media-id] img[src], [data-media-id] img[data-src], [data-media-id] img[data-original], [class*="product__media-item" i] img[src], [class*="product__media-item" i] img[data-src], [class*="media-item" i] img[src], [class*="gallery__slide" i] img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[src], [class*="swiper-slide"]:not([class*="duplicate" i]) img[data-src], picture source[srcset], img[srcset]',
                 )
                 .forEach((imgEl) => {
-                  const img = imgEl as HTMLImageElement
-                  if (isExcludedThumbnailMerch(img) || isInsideReviewSection(img)) return
-                  const u = normalizeUrl(img.currentSrc || img.src || img.getAttribute('data-src') || '')
+                  const el = imgEl as HTMLElement
+                  if (isExcludedThumbnailMerch(el) || isInsideReviewSection(el)) return
+                  const asImg = imgEl as HTMLImageElement
+                  const sourceSet =
+                    imgEl.getAttribute('srcset') ||
+                    imgEl.getAttribute('data-srcset') ||
+                    asImg.srcset ||
+                    ''
+                  const fromSrcset = sourceSet
+                    .split(',')
+                    .map((p) => p.trim().split(/\s+/)[0])
+                    .filter(Boolean)
+                    .map((s) => normalizeUrl(s))
+                    .filter((s): s is string => !!s)
+                  fromSrcset.forEach((u) => {
+                    if (!/\/\.svg$/i.test(u)) imgUrls.add(u)
+                  })
+                  const u = normalizeUrl(
+                    asImg.currentSrc ||
+                      asImg.src ||
+                      imgEl.getAttribute('data-src') ||
+                      imgEl.getAttribute('data-original') ||
+                      '',
+                  )
                   if (u && !/\/\.svg$/i.test(u)) imgUrls.add(u)
                 })
             }
@@ -5793,6 +5563,31 @@ export async function POST(request: NextRequest) {
           )
         } catch (e) {
           console.warn('Multi-angle product gallery DOM detection failed:', e)
+          try {
+            const html = await page.content()
+            const fallbackDistinct = countDistinctGalleryDataMediaIdsFromHtml(html)
+            const fallbackPasses = fallbackDistinct >= 3
+            const fallbackBlock = buildMultiAngleGalleryDomBlock({
+              distinctCount: fallbackDistinct,
+              passes: fallbackPasses,
+              evidence: `DOM scan failed; HTML fallback counted unique gallery media markers=${fallbackDistinct}`,
+            })
+            keyElements = `${keyElements || ''}\n\n${fallbackBlock}`
+            websiteContent += `\n\n${fallbackBlock}`
+            console.log(
+              `[MULTI-ANGLE GALLERY] fallback distinct=${fallbackDistinct} pass=${fallbackPasses} (DOM scan failed path)`,
+            )
+          } catch (fallbackErr) {
+            console.warn('Multi-angle product gallery HTML fallback after DOM failure also failed:', fallbackErr)
+            const failSafeBlock = buildMultiAngleGalleryDomBlock({
+              distinctCount: 0,
+              passes: false,
+              evidence:
+                'DOM scan failed and HTML fallback unavailable; unable to count distinct product gallery media.',
+            })
+            keyElements = `${keyElements || ''}\n\n${failSafeBlock}`
+            websiteContent += `\n\n${failSafeBlock}`
+          }
         }
       }
 
@@ -5987,27 +5782,56 @@ export async function POST(request: NextRequest) {
             }
 
             return {
+              ctaFound: !!cta,
+              ctaText: cta
+                ? (cta.textContent || cta.getAttribute('aria-label') || 'CTA').replace(/\s+/g, ' ').trim()
+                : 'not found',
               brandsNear: Array.from(foundNear.keys()),
               brandsElse: Array.from(foundElse.keys()),
             }
           })
 
-          if (reScanResult.brandsNear.length > 0 && trustBadgesContext) {
+          if (reScanResult.brandsNear.length > 0) {
             console.log(`Trust badges second-pass (near CTA): ${reScanResult.brandsNear.join(', ')}`)
-            const mergedNear = [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brandsNear])]
-            const mergedElse = [...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...reScanResult.brandsElse])]
-            trustBadgesContext = {
-              ...trustBadgesContext,
-              domStructureFound: true,
-              paymentBrandsFound: mergedNear,
-              paymentBrandsElsewhere: mergedElse,
-              trustBadgesCount: mergedNear.length,
-              trustBadgesElsewhereCount: mergedElse.length,
-              trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
-              containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
-            }
-            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
-            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
+            const mergedNear = trustBadgesContext
+              ? [...new Set([...trustBadgesContext.paymentBrandsFound, ...reScanResult.brandsNear])]
+              : [...new Set(reScanResult.brandsNear)]
+            const mergedElse = trustBadgesContext
+              ? [...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...reScanResult.brandsElse])]
+              : [...new Set(reScanResult.brandsElse)]
+            trustBadgesContext = trustBadgesContext
+              ? {
+                  ...trustBadgesContext,
+                  ctaFound: trustBadgesContext.ctaFound || !!reScanResult.ctaFound,
+                  ctaText:
+                    trustBadgesContext.ctaText && trustBadgesContext.ctaText !== 'not found'
+                      ? trustBadgesContext.ctaText
+                      : reScanResult.ctaText || trustBadgesContext.ctaText,
+                  domStructureFound: mergedNear.length > 0,
+                  paymentBrandsFound: mergedNear,
+                  paymentBrandsElsewhere: mergedElse,
+                  trustBadgesCount: mergedNear.length,
+                  trustBadgesElsewhereCount: mergedElse.length,
+                  trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
+                  containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
+                }
+              : {
+                  ctaFound: !!reScanResult.ctaFound,
+                  ctaText: reScanResult.ctaText || 'not found',
+                  domStructureFound: mergedNear.length > 0,
+                  paymentBrandsFound: mergedNear,
+                  textSignalsNearCta: [],
+                  paymentBrandsElsewhere: mergedElse,
+                  textSignalsElsewhere: [],
+                  trustBadgesCount: mergedNear.length,
+                  trustBadgesElsewhereCount: mergedElse.length,
+                  trustBadgesInfo: `Second-pass (near CTA): ${mergedNear.join(', ')}`,
+                  containerDescription: 'second-pass: ±4 sibling band or tight pixel; footer excluded',
+                }
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = /--- TRUST BADGES CHECK/.test(websiteContent)
+              ? websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
+              : `${websiteContent}${trustBlock}`
           }
         } catch (e) {
           console.warn('Trust badges second-pass scan failed:', e)
@@ -6021,12 +5845,33 @@ export async function POST(request: NextRequest) {
         try {
           const runtimeHtml = await page.content()
           const trustHtmlFallback = detectTrustNearCtaFromHtml(runtimeHtml)
-          if (trustBadgesContext && trustHtmlFallback.domStructureFound) {
+          if (trustHtmlFallback.domStructureFound || trustHtmlFallback.textSignalsNearCta.length > 0) {
+            if (!trustBadgesContext) {
+              trustBadgesContext = {
+                ctaFound: trustHtmlFallback.ctaFound,
+                ctaText: trustHtmlFallback.ctaFound ? 'detected in HTML fallback' : 'not found',
+                domStructureFound: trustHtmlFallback.domStructureFound,
+                paymentBrandsFound: [...trustHtmlFallback.paymentBrandsFound],
+                paymentBrandsElsewhere: [...trustHtmlFallback.paymentBrandsElsewhere],
+                textSignalsNearCta: [...trustHtmlFallback.textSignalsNearCta],
+                textSignalsElsewhere: [...trustHtmlFallback.textSignalsElsewhere],
+                trustBadgesCount: trustHtmlFallback.paymentBrandsFound.length,
+                trustBadgesElsewhereCount: trustHtmlFallback.paymentBrandsElsewhere.length,
+                trustBadgesInfo: trustHtmlFallback.trustBadgesInfo,
+                containerDescription: trustHtmlFallback.containerDescription,
+              }
+            } else {
             const mergedNear = [
               ...new Set([...trustBadgesContext.paymentBrandsFound, ...trustHtmlFallback.paymentBrandsFound]),
             ]
             const mergedElse = [
               ...new Set([...trustBadgesContext.paymentBrandsElsewhere, ...trustHtmlFallback.paymentBrandsElsewhere]),
+            ]
+            const mergedTextNear = [
+              ...new Set([...trustBadgesContext.textSignalsNearCta, ...trustHtmlFallback.textSignalsNearCta]),
+            ]
+            const mergedTextElse = [
+              ...new Set([...trustBadgesContext.textSignalsElsewhere, ...trustHtmlFallback.textSignalsElsewhere]),
             ]
             trustBadgesContext = {
               ...trustBadgesContext,
@@ -6040,14 +5885,19 @@ export async function POST(request: NextRequest) {
               domStructureFound: true,
               paymentBrandsFound: mergedNear,
               paymentBrandsElsewhere: mergedElse,
+              textSignalsNearCta: mergedTextNear,
+              textSignalsElsewhere: mergedTextElse,
               trustBadgesCount: mergedNear.length,
               trustBadgesElsewhereCount: mergedElse.length,
               trustBadgesInfo: trustHtmlFallback.trustBadgesInfo,
               containerDescription: trustHtmlFallback.containerDescription,
             }
-            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): YES\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.join(', ')}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
-            websiteContent = websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
-            console.log(`[scan] trust badges HTML fallback detected near CTA: ${mergedNear.join(', ')}`)
+              console.log(`[scan] trust badges HTML fallback detected near CTA: ${mergedNear.join(', ')}`)
+            }
+            const trustBlock = `\n\n--- TRUST BADGES CHECK (icons/logos/badges only — near Add to cart / Add to bag / Buy CTA) ---\nCTA Found: ${trustBadgesContext.ctaFound ? 'YES' : 'NO'}\nCTA Text: ${trustBadgesContext.ctaText}\nVisual trust icons near CTA (DOM): ${trustBadgesContext.domStructureFound ? 'YES' : 'NO'}\nVisual trust marks near CTA: ${trustBadgesContext.paymentBrandsFound.length > 0 ? trustBadgesContext.paymentBrandsFound.join(', ') : 'None'}\nText trust signals near CTA (secure/guarantee/returns): ${trustBadgesContext.textSignalsNearCta.length > 0 ? trustBadgesContext.textSignalsNearCta.join(', ') : 'None'}\nVisual trust marks elsewhere only (footer, etc. — does NOT pass): ${trustBadgesContext.paymentBrandsElsewhere.length > 0 ? trustBadgesContext.paymentBrandsElsewhere.join(', ') : 'None'}\nText trust signals elsewhere only: ${trustBadgesContext.textSignalsElsewhere.length > 0 ? trustBadgesContext.textSignalsElsewhere.join(', ') : 'None'}\nCount near CTA: ${trustBadgesContext.trustBadgesCount}\nElsewhere count: ${trustBadgesContext.trustBadgesElsewhereCount}\nPurchase scan: ${trustBadgesContext.containerDescription}\nTrust Badges Info: ${trustBadgesContext.trustBadgesInfo}`
+            websiteContent = /--- TRUST BADGES CHECK/.test(websiteContent)
+              ? websiteContent.replace(/--- TRUST BADGES CHECK[\s\S]*?(?=\n\n---|$)/, trustBlock)
+              : `${websiteContent}${trustBlock}`
           } else if (trustBadgesContext && !trustBadgesContext.ctaFound && trustHtmlFallback.ctaFound) {
             trustBadgesContext = {
               ...trustBadgesContext,
@@ -6118,13 +5968,15 @@ export async function POST(request: NextRequest) {
           console.log('[FALLBACK] Footer newsletter form pair detected from HTML.')
         }
         const htmlFallbackTrustNearCta = detectTrustNearCtaFromHtml(rawHtml)
-        if (htmlFallbackTrustNearCta.domStructureFound) {
+        if (htmlFallbackTrustNearCta.domStructureFound || htmlFallbackTrustNearCta.textSignalsNearCta.length > 0) {
           trustBadgesContext = {
             ctaFound: htmlFallbackTrustNearCta.ctaFound,
             ctaText: htmlFallbackTrustNearCta.ctaFound ? 'detected in HTML fallback' : 'not found',
-            domStructureFound: true,
+            domStructureFound: htmlFallbackTrustNearCta.domStructureFound,
             paymentBrandsFound: htmlFallbackTrustNearCta.paymentBrandsFound,
+            textSignalsNearCta: htmlFallbackTrustNearCta.textSignalsNearCta,
             paymentBrandsElsewhere: htmlFallbackTrustNearCta.paymentBrandsElsewhere,
+            textSignalsElsewhere: htmlFallbackTrustNearCta.textSignalsElsewhere,
             trustBadgesCount: htmlFallbackTrustNearCta.paymentBrandsFound.length,
             trustBadgesElsewhereCount: htmlFallbackTrustNearCta.paymentBrandsElsewhere.length,
             trustBadgesInfo: htmlFallbackTrustNearCta.trustBadgesInfo,
@@ -6376,6 +6228,14 @@ export async function POST(request: NextRequest) {
           })
           keyElements = `${keyElements}\n\n${fbBlock}`
           websiteContent += `\n\n${fbBlock}`
+        }
+
+        const needsTabsAccordionFallback = rules.some(isProductTabsAccordionRule)
+        if (needsTabsAccordionFallback && rawHtml) {
+          const tabsAccordionHtml = detectTabsAccordionFromHtml(rawHtml)
+          const tabsAccordionBlock = formatProductTabsAccordionDomBlock(tabsAccordionHtml, 'html-fallback')
+          keyElements = `${keyElements}\n\n${tabsAccordionBlock}`
+          websiteContent += `\n\n${tabsAccordionBlock}`
         }
 
         // Fallback rating-near-title check.
@@ -6745,6 +6605,20 @@ export async function POST(request: NextRequest) {
             )
           })()
           const isCustomerPhotoRule = rule.title.toLowerCase().includes('customer photo') || rule.title.toLowerCase().includes('customer using') || rule.description.toLowerCase().includes('customer photo') || rule.description.toLowerCase().includes('photos of customers') || rule.title.toLowerCase().includes('show customer photos')
+          const isComplementaryItemsInImageRule = (() => {
+            const t = rule.title.toLowerCase()
+            const d = rule.description.toLowerCase()
+            const hay = `${t} ${d}`
+            if (hay.includes('customer photo') || hay.includes('ugc') || hay.includes('review photo')) return false
+            // Keep this matcher narrow so generic cross-sell/up-sell recommendation rules
+            // are NOT captured by this stricter "same image frame" rule.
+            return (
+              (hay.includes('alongside') && hay.includes('complementary') && hay.includes('image')) ||
+              (hay.includes('complementary items') && hay.includes('image')) ||
+              (hay.includes('paired with') && hay.includes('image')) ||
+              (hay.includes('in the frame') && hay.includes('complementary'))
+            )
+          })()
           /** Product gallery shows lifestyle / in-context usage (distinct from "customer photos in reviews"). */
           const isLifestyleProductImageRule = (() => {
             const t = rule.title.toLowerCase()
@@ -6804,6 +6678,10 @@ export async function POST(request: NextRequest) {
             rule.id === 'image-thumbnails' ||
             (rule.title.toLowerCase().includes('thumbnail') && rule.title.toLowerCase().includes('gallery')) ||
             (rule.description.toLowerCase().includes('thumbnails') && rule.description.toLowerCase().includes('gallery'))
+          const isImageBackgroundConsistencyRule =
+            rule.id === 'image-background-consistency' ||
+            (rule.title.toLowerCase().includes('background') && rule.title.toLowerCase().includes('consisten')) ||
+            (rule.description.toLowerCase().includes('main product image') && rule.description.toLowerCase().includes('clean background'))
           const isBeforeAfterRule =
             rule.id === 'image-before-after' ||
             (rule.title.toLowerCase().includes('before') && rule.title.toLowerCase().includes('after')) ||
@@ -6920,6 +6798,26 @@ Shopping-related labels detected in header/menu chrome: ${navLabels}
 
 ✅ PASS: "Header / menu includes Shop all, Bundles, and Reviews—key shopping destinations are in primary navigation."
 ❌ FAIL: "No shop or category links appear in the header or primary menu—users cannot reach the catalog from main navigation."
+`
+          } else if (isImageBackgroundConsistencyRule) {
+            specialInstructions = `
+IMAGE BACKGROUND CONSISTENCY RULE (STRICT INTERPRETATION)
+
+Evaluate ONLY the PRIMARY / HERO product image area.
+Do NOT fail this rule because of additional gallery images, lifestyle shots, model photos, before/after images, or mixed thumbnails.
+
+PASS criteria:
+- The main hero product image uses a clean, professional background (typically white / light gray / neutral, not cluttered).
+
+FAIL criteria:
+- The main hero product image itself has a distracting, cluttered, busy, or random-colored background that hurts product clarity.
+
+Decision priority:
+1) First inspect the hero/main image in the screenshot.
+2) Ignore non-hero gallery variation when deciding pass/fail.
+3) If hero is clean even when other thumbnails are lifestyle/mixed, output PASS.
+
+Your reason must explicitly mention the main/hero image background.
 `
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
@@ -7184,6 +7082,25 @@ PASS only if you see a rating VERY CLOSE to the product title or in the same tit
 ✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
 ✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
 ❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
+`
+          } else if (isComplementaryItemsInImageRule) {
+            specialInstructions = `
+COMPLEMENTARY ITEMS IN PRODUCT IMAGES RULE — STRICT VISUAL CHECK
+
+This rule is NOT about review widgets, Trustpilot text, customer photos, or generic cross-sell sections.
+It only checks whether product gallery/hero images show the main product together with complementary items in the SAME IMAGE FRAME.
+
+PASS only if screenshot clearly shows:
+- Main product + at least one related/complementary item in the same hero/gallery image
+- Example: serum shown with another routine product/accessory beside it in one image
+
+FAIL when:
+- Gallery shows only single-product packshots/isolated product views
+- Cross-sell cards exist elsewhere on page but not in the same product image
+- Only review/social-proof blocks are present (no complementary-item imagery in gallery)
+
+Do NOT pass based on Trustpilot/verified reviews/review photos alone.
+Your reason must explicitly mention whether complementary items are visible in the same product image frame.
 `
           } else if (isLifestyleProductImageRule) {
             const galleryDomLine = customerPhotoEvidence.some((e) =>
@@ -8048,6 +7965,29 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.passed = true
               analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
             }
+          } else if (isImageBackgroundConsistencyRule) {
+            const reasonHasHeroCleanSignal =
+              (reasonLower.includes('hero') || reasonLower.includes('main image') || reasonLower.includes('primary image')) &&
+              (reasonLower.includes('clean background') ||
+                reasonLower.includes('neutral background') ||
+                reasonLower.includes('white background') ||
+                reasonLower.includes('light gray background') ||
+                reasonLower.includes('professional background'))
+
+            const reasonOnlyComplainsAboutOtherImages =
+              reasonLower.includes('other images') ||
+              reasonLower.includes('gallery images') ||
+              reasonLower.includes('thumbnails') ||
+              reasonLower.includes('lifestyle images') ||
+              reasonLower.includes('mixed backgrounds')
+
+            // Hero image cleanliness decides this rule. Mixed gallery backgrounds are allowed.
+            if (!analysis.passed && reasonHasHeroCleanSignal && reasonOnlyComplainsAboutOtherImages) {
+              console.log('Image background consistency: hero image is clean; non-hero gallery variation should not fail this rule. Forcing PASS.')
+              analysis.passed = true
+              analysis.reason =
+                'The primary/hero product image has a clean, professional background. Additional gallery/lifestyle images may vary, which is acceptable for this rule.'
+            }
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()
             const textFallback =
@@ -8331,6 +8271,39 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               console.warn(`Warning: Customer photo rule but reason doesn't mention photos/customers: ${analysis.reason.substring(0, 50)}`)
               isRelevant = false
             }
+          } else if (isComplementaryItemsInImageRule) {
+            const hasExplicitSameFramePositive =
+              (reasonLower.includes('same image') ||
+                reasonLower.includes('same frame') ||
+                reasonLower.includes('alongside') ||
+                reasonLower.includes('paired with')) &&
+              (reasonLower.includes('complementary') ||
+                reasonLower.includes('related item') ||
+                reasonLower.includes('accessory') ||
+                reasonLower.includes('another product'))
+
+            const hasLooseNonVisualSignals =
+              reasonLower.includes('trustpilot') ||
+              reasonLower.includes('verified review') ||
+              reasonLower.includes('customer review') ||
+              reasonLower.includes('ugc') ||
+              reasonLower.includes('recommended for you') ||
+              reasonLower.includes('complete your') ||
+              reasonLower.includes('recently viewed')
+
+            // Strict guardrail: this rule only passes on same-image complementary-item evidence.
+            if (analysis.passed && !hasExplicitSameFramePositive) {
+              console.log('Complementary-items image rule: PASS without same-frame evidence. Forcing FAIL.')
+              analysis.passed = false
+              analysis.reason =
+                'No clear product-gallery image shows the main product alongside complementary items in the same frame. Recommendation/review sections alone do not satisfy this rule.'
+            }
+
+            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive) {
+              analysis.passed = false
+              analysis.reason =
+                'Cross-sell/review signals are present, but this rule requires complementary items to be visible in the same product image frame. That evidence was not found.'
+            }
           } else if (isLifestyleProductImageRule) {
             const hasGalleryLifestyleDomEvidence = customerPhotoEvidence.some((e) =>
               /lifestyle\/model|product gallery:/i.test(e),
@@ -8545,10 +8518,13 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             // Strict near-CTA guardrail: if DOM says "not near CTA", do not allow random PASS.
             // This prevents false passes caused by footer/global trust icons.
             if (analysis.passed && trustBadgesContext && !trustBadgesContext.domStructureFound) {
+              const hasNearCtaTextTrustSignals =
+                Array.isArray(trustBadgesContext.textSignalsNearCta) &&
+                trustBadgesContext.textSignalsNearCta.length > 0
               const aiNearCtaVisualEvidence =
                 /(near|beside|next to|below).{0,40}(add to (cart|bag)|buy|purchase|checkout)/i.test(analysis.reason || '') &&
                 /(icon|icons|badge|badges|logo|logos|seal|seals|guarantee|secure|payment)/i.test(analysis.reason || '')
-              if (aiNearCtaVisualEvidence) {
+              if (aiNearCtaVisualEvidence || hasNearCtaTextTrustSignals) {
                 console.log('Trust badges rule: AI reason shows clear near-CTA visual trust evidence; keeping PASS.')
               } else {
               const elsewhere = trustBadgesContext.paymentBrandsElsewhere
@@ -8559,7 +8535,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               } else {
                 console.log(`Trust badges rule: no near-CTA trust icons detected. Forcing FAIL.`)
                 analysis.passed = false
-                analysis.reason = 'No trust/payment icons were detected near the primary CTA. Add recognizable trust badges directly beside or below the purchase button.'
+                analysis.reason = 'No trust/payment signals were detected near the primary CTA. Add recognizable trust badges or secure-checkout trust messaging directly beside or below the purchase button.'
               }
               }
             }
