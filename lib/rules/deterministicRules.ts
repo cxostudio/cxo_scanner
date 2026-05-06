@@ -168,6 +168,29 @@ export function isProductTitleRule(rule: ScanRule): boolean {
   )
 }
 
+/** "How to use in simple steps" rule. */
+export function isHowToUseSimpleStepsRule(rule: ScanRule): boolean {
+  const t = rule.title.toLowerCase()
+  const d = rule.description.toLowerCase()
+  const hay = `${t} ${d}`
+
+  const hasHowToIntent =
+    hay.includes('how to use') ||
+    hay.includes('how to') ||
+    hay.includes('usage') ||
+    hay.includes('instructions') ||
+    hay.includes('directions')
+
+  const hasStepIntent =
+    hay.includes('simple step') ||
+    hay.includes('step-by-step') ||
+    hay.includes('step by step') ||
+    hay.includes('3-5') ||
+    (hay.includes('step') && hay.includes('simple'))
+
+  return hasHowToIntent && hasStepIntent
+}
+
 export function isThumbnailGalleryRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
@@ -615,6 +638,61 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
   }
 }
 
+export function evaluateHowToUseSimpleStepsRule(
+  rule: ScanRule,
+  fullVisibleText: string
+): ScanResult | null {
+  const normalized = (fullVisibleText || '')
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return null
+
+  const hasHowToHeading =
+    /\b(how to use|how to enjoy|how to prepare|how to make|directions|instructions?)\b/i.test(
+      normalized
+    )
+  const stepLabelCount =
+    normalized.match(/\bstep\s*(?:\d+|one|two|three|four|five|six)\b/gi)?.length || 0
+  const numberedActionCount =
+    normalized.match(
+      /\b\d{1,2}[\)\.\-:]\s*(?:scoop|add|mix|stir|blend|shake|drink|apply|use|take|enjoy)\b/gi
+    )?.length || 0
+  const hasActionSequence =
+    /\b(?:scoop|add)\b.{0,30}\bmix\b.{0,30}\b(?:drink|shake|stir|blend|enjoy)\b/i.test(
+      normalized
+    )
+
+  const hasClearStepSection =
+    (hasHowToHeading && (stepLabelCount >= 2 || numberedActionCount >= 2 || hasActionSequence)) ||
+    stepLabelCount >= 3 ||
+    numberedActionCount >= 3
+
+  if (hasClearStepSection) {
+    const detail =
+      stepLabelCount >= 3
+        ? `${stepLabelCount} step labels`
+        : numberedActionCount >= 2
+          ? `${numberedActionCount} numbered action steps`
+          : 'how-to heading with action sequence'
+    return {
+      ruleId: rule.id,
+      ruleTitle: rule.title,
+      passed: true,
+      reason: `A clear how-to usage section is present with simple step guidance (${detail}).`,
+    }
+  }
+
+  return {
+    ruleId: rule.id,
+    ruleTitle: rule.title,
+    passed: false,
+    reason:
+      'No clear how-to section with simple step-by-step usage guidance was detected. Add a short 3-5 step usage section (e.g. Step 1, Step 2, Step 3).',
+  }
+}
+
 
 function uniqueEvidenceParts(...parts: (string | undefined)[]): string {
   const seen = new Set<string>()
@@ -817,6 +895,10 @@ export function tryEvaluateDeterministic(
   if (isProductTitleRule(rule)) {
     const productTitleResult = evaluateProductTitleRule(rule, context.keyElementsString)
     if (productTitleResult !== null) return productTitleResult
+  }
+  if (isHowToUseSimpleStepsRule(rule)) {
+    const howToUseResult = evaluateHowToUseSimpleStepsRule(rule, context.fullVisibleText)
+    if (howToUseResult !== null) return howToUseResult
   }
   if (isVariantRule(rule)) {
     const variantResult = evaluateVariantRule(rule, context.keyElementsString, context.fullVisibleText)
