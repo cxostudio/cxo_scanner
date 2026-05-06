@@ -2777,9 +2777,13 @@ export async function POST(request: NextRequest) {
               el.closest('[name="add"]') ||
               el.closest('[class*="shopify" i]')
             )
+            const inRecommendationLikeArea = !!el.closest(
+              '[class*="recommend" i], [class*="related" i], [class*="upsell" i], [class*="cross-sell" i], [class*="recently-viewed" i], [data-product-recommendations], [class*="complete your" i]',
+            )
             let score = r.width * r.height + (inProduct ? 800000 : 0)
             if (inFooter) score *= 0.02
             if (inHeaderOnly && !inProduct) score *= 0.05
+            if (inRecommendationLikeArea) score *= 0.12
             if (score > bestScore) {
               bestScore = score
               best = el
@@ -2872,10 +2876,11 @@ export async function POST(request: NextRequest) {
           const c = cta.getBoundingClientRect()
           const t = (el as HTMLElement).getBoundingClientRect()
           if (c.height < 4 || t.height < 1) return false
-          const hz = t.left < c.right + 80 && t.right > c.left - 80
+          const hz = t.left < c.right + 140 && t.right > c.left - 140
           const gapBelow = t.top - c.bottom
           const gapAbove = c.top - t.bottom
-          const nearBelow = gapBelow >= -24 && gapBelow <= 120
+          // Some PDPs place shipping/returns rows between CTA and payment logos.
+          const nearBelow = gapBelow >= -24 && gapBelow <= 240
           const nearAbove = gapAbove >= -20 && gapAbove <= 48
           return hz && (nearBelow || nearAbove)
         }
@@ -5715,9 +5720,13 @@ export async function POST(request: NextRequest) {
                   el.closest('[name="add"]') ||
                   el.closest('[class*="shopify" i]')
                 )
+                const inRecommendationLikeArea = !!el.closest(
+                  '[class*="recommend" i], [class*="related" i], [class*="upsell" i], [class*="cross-sell" i], [class*="recently-viewed" i], [data-product-recommendations], [class*="complete your" i]',
+                )
                 let score = r.width * r.height + (inProduct ? 800000 : 0)
                 if (inFooter) score *= 0.02
                 if (inHeaderOnly && !inProduct) score *= 0.05
+                if (inRecommendationLikeArea) score *= 0.12
                 if (score > bestScore) {
                   bestScore = score
                   best = el
