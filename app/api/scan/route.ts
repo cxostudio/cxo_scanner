@@ -7764,25 +7764,11 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                 'The page does not show both rating score and review count near the product title. Ratings shown only in lower sections do not satisfy this rule.'
             }
 
-            // Fallback: if page text contains a rating signal close to the product title text, force PASS.
-            // Require BOTH score + count in the near-title text window.
-            if (!analysis.passed) {
-              const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
-              const titleLine =
-                keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
-              if (titleLine && fullText.includes(titleLine)) {
-                const idx = fullText.indexOf(titleLine)
-                const nearWindow = fullText.slice(Math.max(0, idx - 260), idx + Math.max(540, titleLine.length))
-                const hasScoreNearTitle = hasRatingScoreSignal(nearWindow)
-                const hasCountNearTitle = hasReviewCountSignal(nearWindow)
-                if (hasScoreNearTitle && hasCountNearTitle) {
-                  console.log(`Rating rule: text fallback found score + count near title window. Forcing PASS.`)
-                  analysis.passed = true
-                  analysis.reason =
-                    'A rating score and review count are both visible near the product title, so the requirement is satisfied.'
-                }
-              }
-            }
+            // No text fallback: the raw page text concatenates content from
+            // different visual regions, so a near-title text window can find
+            // score+count signals even when the rating widget is visually far
+            // from the title (e.g. lower review section). The DOM near-title
+            // check (which uses bounding boxes) is authoritative for this rule.
 
             // Sanity warning (never force fail based on missing count or link)
             if (!ratingForcedPass && !analysis.passed) {

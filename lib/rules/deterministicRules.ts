@@ -161,11 +161,19 @@ export function isShippingRule(rule: ScanRule): boolean {
 export function isProductTitleRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
-  return (
-    rule.id === 'product-title-clarity' ||
-    t.includes('product title') ||
-    d.includes('product title')
-  )
+  if (rule.id === 'product-title-clarity') return true
+  // Exclude rules where "product title" is only used as a location reference
+  // (e.g. "Show ratings near the product title", "Key benefits near the product title").
+  // These rules are not about the title itself and have their own evaluation paths.
+  const isLocationReference = (text: string) =>
+    /\bnear\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bnext\s+to\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bbeside\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\b(?:displayed|highlighted|shown|visible|positioned|placed)\s+near\b/.test(text) ||
+    /\babove\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bbelow\s+(?:the\s+)?(?:product\s+)?title\b/.test(text)
+  if (isLocationReference(t) || isLocationReference(d)) return false
+  return t.includes('product title') || d.includes('product title')
 }
 
 /** "Short list of key benefits near product title" rule. */
