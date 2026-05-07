@@ -364,6 +364,14 @@ export function snapshotIncludedPackDom(): {
     /\bgifts?\s+worth\b/i.test(nearWindow) ||
     /\bfree\s+gifts?\s+with\b/i.test(zoneSlice)
 
+  // Guardrail: quantity tiers and price lines alone are NOT complementary add-on evidence.
+  // Require explicit add-on language or clear visual included-items proof near the buy area.
+  const explicitAddonCopyNearCta =
+    /\b(complementary|add-?on|upsell|cross-?sell|frequently bought together|add this|also add|pair with|bundle and save)\b/i.test(
+      nearWindow,
+    ) ||
+    /\b(free\s+sample|free\s+gift|bonus\s+item|included\s+item)\b/i.test(nearWindow)
+
   const giftCopyInZone = /\bfree\s+gifts?\b/i.test(zoneSlice) || merchWideForBundle
 
   const visualGiftLineup =
@@ -376,20 +384,28 @@ export function snapshotIncludedPackDom(): {
     freeItemCallouts >= 3 &&
     /\bfree\s+gifts?\b/i.test(zoneSlice)
 
-  const includedNearCta =
-    score >= 5 ||
-    (score >= 4 && money >= 2) ||
-    (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
-    (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
-    (bundleLikelyFinal &&
-      buyIdx >= 0 &&
-      explicitIncludedHeading &&
-      (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(nearWindow) ||
-        quantityPackSignals >= 1 ||
-        money >= 2)) ||
+  const addonAnchorFound =
+    explicitIncludedHeading ||
+    explicitAddonCopyNearCta ||
     visualGiftLineup ||
-    (visualGiftImgCount >= 4 && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice)) ||
-    labelledFreeBundlePass
+    labelledFreeBundlePass ||
+    freeItemCallouts >= 1
+
+  const includedNearCta =
+    addonAnchorFound &&
+    (score >= 5 ||
+      (score >= 4 && money >= 2) ||
+      (score >= 3 && /free\s+gifts?\s+with/i.test(nearWindow) && money >= 2) ||
+      (explicitIncludedHeading && (money >= 1 || quantityPackSignals >= 1) && score >= 3) ||
+      (bundleLikelyFinal &&
+        buyIdx >= 0 &&
+        explicitIncludedHeading &&
+        (/free\s+gifts?|worth\s*(?:[£$€₹]|rs\.?)|sample|whisk|mug|spoon|accessories included|no extra cost/i.test(nearWindow) ||
+          quantityPackSignals >= 1 ||
+          money >= 2)) ||
+      visualGiftLineup ||
+      (visualGiftImgCount >= 4 && /\b(free|bonus|gift|included|kit|pack|starter)\b/i.test(zoneSlice)) ||
+      labelledFreeBundlePass)
 
   return {
     ctaFound: !!cta,

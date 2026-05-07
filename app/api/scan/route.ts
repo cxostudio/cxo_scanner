@@ -4698,20 +4698,39 @@ export async function POST(request: NextRequest) {
             const primaryTitle = titleCandidates[0] || null
             const primaryTitleBlock = primaryTitle
               ? (
-                  primaryTitle.closest('[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], section, article, form, main, div')
-                    || primaryTitle.parentElement
+                  primaryTitle.closest(
+                    '[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], [class*="product-summary"], [id*="product" i]'
+                  ) || primaryTitle.parentElement
                 ) as HTMLElement | null
               : null
-            const scopedText = primaryTitleBlock
+            const titleParent = (primaryTitle?.parentElement || null) as HTMLElement | null
+            // Prevent false positives from whole-page containers (main/section/article/body).
+            const blockTag = (primaryTitleBlock?.tagName || '').toLowerCase()
+            const isTooBroadBlock =
+              blockTag === 'main' ||
+              blockTag === 'section' ||
+              blockTag === 'article' ||
+              blockTag === 'body' ||
+              (primaryTitleBlock?.childElementCount || 0) > 80
+            const scopedText = !isTooBroadBlock && primaryTitleBlock
               ? (primaryTitleBlock.innerText || primaryTitleBlock.textContent || '')
-              : ((document.body.innerText || document.body.textContent || '').slice(0, 4000))
+              : (
+                  [
+                    titleParent?.previousElementSibling ? ((titleParent.previousElementSibling as HTMLElement).innerText || '') : '',
+                    primaryTitle ? (primaryTitle.innerText || primaryTitle.textContent || '') : '',
+                    titleParent?.nextElementSibling ? ((titleParent.nextElementSibling as HTMLElement).innerText || '') : '',
+                  ]
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                ).slice(0, 1200)
 
             const isNearTitle = (el: Element | null): boolean => {
               if (!el || !isVisible(el) || titleCandidates.length === 0) return false
               const rect = (el as HTMLElement).getBoundingClientRect()
               return titleCandidates.some((titleEl) => {
                 const titleRect = titleEl.getBoundingClientRect()
-                const sameBlock = !!primaryTitleBlock && (primaryTitleBlock === el || primaryTitleBlock.contains(el as Node))
+                const sameBlock = !!primaryTitleBlock && !isTooBroadBlock && (primaryTitleBlock === el || primaryTitleBlock.contains(el as Node))
                 const verticalGap = Math.min(
                   Math.abs(rect.top - titleRect.bottom),
                   Math.abs(titleRect.top - rect.bottom),
@@ -6893,21 +6912,23 @@ Shopping-related labels detected in header/menu chrome: ${navLabels}
             specialInstructions = `
 IMAGE BACKGROUND CONSISTENCY RULE (STRICT INTERPRETATION)
 
-Evaluate ONLY the PRIMARY / HERO product image area.
-Do NOT fail this rule because of additional gallery images, lifestyle shots, model photos, before/after images, or mixed thumbnails.
+Evaluate the ENTIRE product image gallery (hero + thumbnails/slides).
+This rule is about consistency across product images, not only hero cleanliness.
 
 PASS criteria:
-- The main hero product image uses a clean, professional background (typically white / light gray / neutral, not cluttered).
+- Most gallery images share one consistent background style (typically clean white/light gray/neutral studio look).
+- Minor lighting/crop differences are acceptable when the background style remains consistent.
 
 FAIL criteria:
-- The main hero product image itself has a distracting, cluttered, busy, or random-colored background that hurts product clarity.
+- Gallery includes mixed background styles (e.g., some plain studio shots plus lifestyle/model/scene backgrounds).
+- Background treatment changes noticeably across slides, creating an inconsistent visual presentation.
 
 Decision priority:
-1) First inspect the hero/main image in the screenshot.
-2) Ignore non-hero gallery variation when deciding pass/fail.
-3) If hero is clean even when other thumbnails are lifestyle/mixed, output PASS.
+1) Inspect gallery thumbnails and visible slides, not just the hero image.
+2) If backgrounds are mixed across gallery images, output FAIL.
+3) Pass only when background style is broadly consistent across product imagery.
 
-Your reason must explicitly mention the main/hero image background.
+Your reason must explicitly mention background consistency across the gallery.
 `
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
@@ -7532,7 +7553,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             ? `\n\n⚠️ CART ICON ITEM COUNT / BADGE RULE ⚠️\n\nRead "--- CART ICON ITEM COUNT (DOM) ---":\n- If "Storefront cart item count" is 0, PASS (empty cart — no badge is required).\n- If count > 0, PASS only if "Count badge visible" is YES; otherwise FAIL.\nIf "Cart icon item count rule verdict: PASS", output passed: true.\n\nNow analyze:\n\n`
             : ''
           const generalCustomerReviewsPrefix = isGeneralCustomerReviewsRule ? `\n\n⚠️⚠️⚠️ GENERAL CUSTOMER REVIEWS RULE — IMAGE FIRST ⚠️⚠️⚠️\n\nTreat this as ANY-PAGE validation (not homepage-only).\n\nLook at the screenshot first. PASS if you can see a reviews block, rating summary with review context, Trustpilot/review widget, or customer review cards.\nIf screenshot is unclear, use page text/DOM evidence. Review indicators like "Excellent", "4.x out of 5", "reviews", "what customers are saying", and review widget labels count.\n\nFAIL only when no review content is visible/detectable anywhere on the scanned page.\n\nNow analyze the screenshot:\n\n` : ''
-          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
+          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS NEAR TITLE RULE — STRICT LOCATION CHECK ⚠️⚠️⚠️\n\nThis is a location-sensitive visual rule.\n\nPASS only if rating evidence is in the SAME title block or very close to the product title (directly above/below/beside title).\n\nValid near-title evidence:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars) near title\n✅ Numeric rating near title (e.g. "4.5 out of 5", "4.7/5")\n✅ Review count near title (e.g. "203 reviews")\n✅ Trustpilot / rating widget near title\n\nDo NOT pass when rating appears only in lower sections like:\n❌ Review carousel/testimonial section\n❌ "Rated X/X based on Y reviews" far below product header\n❌ Footer, recommendation blocks, or unrelated widgets\n\nDecision priority:\n1) If KEY ELEMENTS says "Rating found near title: YES" → PASS.\n2) If KEY ELEMENTS says "Rating found near title: NO" → FAIL unless screenshot clearly shows a near-title rating marker.\n3) Ignore ratings that are far below the title block.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
@@ -7737,6 +7758,8 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           if (isRatingRule) {
             let ratingForcedPass = false
+            const ratingNearTitleFlag =
+              keyElements?.match(/Rating found near title:\s*(YES|NO)/i)?.[1]?.toUpperCase() || null
 
             // Override 1: DOM found rating near title → force PASS
             if (ratingContext?.found && ratingContext?.nearTitle && !analysis.passed) {
@@ -7755,8 +7778,20 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `No star ratings, review counts, or rating widgets were detected near the product title. Add star ratings near the title block.`
             }
 
+            // Hard stop: if key elements explicitly says near-title rating is NO, keep this rule as FAIL.
+            if (analysis.passed && ratingNearTitleFlag === 'NO') {
+              console.log(`Rating rule: key-elements flag says near-title rating = NO. Forcing FAIL.`)
+              analysis.passed = false
+              analysis.reason =
+                'No star ratings, review counts, or rating widgets were detected near the product title. Ratings found only in lower sections do not satisfy this rule.'
+            }
+
             // Fallback: if page text contains a rating signal close to the product title text, force PASS.
+            // Do not use this fallback when explicit near-title flag is NO.
             if (!analysis.passed) {
+              if (ratingNearTitleFlag === 'NO') {
+                // Keep FAIL strict when deterministic near-title check says NO.
+              } else {
               const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
               const titleLine =
                 keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
@@ -7772,6 +7807,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
                   analysis.passed = true
                   analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
                 }
+              }
               }
             }
 
@@ -8056,27 +8092,20 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
             }
           } else if (isImageBackgroundConsistencyRule) {
-            const reasonHasHeroCleanSignal =
-              (reasonLower.includes('hero') || reasonLower.includes('main image') || reasonLower.includes('primary image')) &&
-              (reasonLower.includes('clean background') ||
-                reasonLower.includes('neutral background') ||
-                reasonLower.includes('white background') ||
-                reasonLower.includes('light gray background') ||
-                reasonLower.includes('professional background'))
-
-            const reasonOnlyComplainsAboutOtherImages =
-              reasonLower.includes('other images') ||
+            const reasonMentionsMixedGallery =
+              reasonLower.includes('mixed background') ||
+              reasonLower.includes('inconsistent background') ||
               reasonLower.includes('gallery images') ||
               reasonLower.includes('thumbnails') ||
               reasonLower.includes('lifestyle images') ||
-              reasonLower.includes('mixed backgrounds')
+              reasonLower.includes('model images')
 
-            // Hero image cleanliness decides this rule. Mixed gallery backgrounds are allowed.
-            if (!analysis.passed && reasonHasHeroCleanSignal && reasonOnlyComplainsAboutOtherImages) {
-              console.log('Image background consistency: hero image is clean; non-hero gallery variation should not fail this rule. Forcing PASS.')
-              analysis.passed = true
+            // Mixed gallery backgrounds should fail this rule, even when hero image is clean.
+            if (analysis.passed && reasonMentionsMixedGallery) {
+              console.log('Image background consistency: mixed gallery backgrounds detected. Forcing FAIL.')
+              analysis.passed = false
               analysis.reason =
-                'The primary/hero product image has a clean, professional background. Additional gallery/lifestyle images may vary, which is acceptable for this rule.'
+                'Product gallery backgrounds are inconsistent across images (studio/plain and lifestyle/scene images are mixed), so this rule fails.'
             }
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()

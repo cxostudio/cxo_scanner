@@ -67,7 +67,7 @@
   {
     "id": "image-background-consistency",
     "title": "Maintain consistent image backgrounds",
-    "description": "The primary/hero product image should use a clean, professional background (e.g. white or light gray). Lifestyle shots, model images, or before/after result images in additional gallery thumbnails are acceptable and do NOT count as inconsistency. PASS if the main product image has a clean background. FAIL only if the main product image itself has a distracting, cluttered, or random-colored background."
+    "description": "All product gallery images should maintain a consistent, clean background style (e.g. white or light gray). PASS only when most gallery images (including thumbnails/slides) follow one consistent background look. FAIL if the gallery mixes plain studio backgrounds with lifestyle/model/scene backgrounds in a way that creates inconsistency."
   },
   {
     "id": "image-before-after",
