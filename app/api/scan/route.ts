@@ -8354,15 +8354,47 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               isRelevant = false
             }
           } else if (isComplementaryItemsInImageRule) {
+            // Bundle/kit products (e.g. "Astro Dust Starter Kit") inherently show
+            // the main product alongside complementary items because the bundle
+            // contents ARE complementary items. Force PASS when DOM detects a
+            // bundle/kit-style offer.
+            const isBundleKitOffer = /Bundle or kit style offer \(DOM\):\s*YES/i.test(keyElements || '')
+            const titleSuggestsKit = /\b(starter\s*kit|kit|bundle|pack|set)\b/i.test(
+              keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1] || ''
+            )
+
+            if (!analysis.passed && (isBundleKitOffer || titleSuggestsKit)) {
+              console.log('Complementary-items image rule: bundle/kit product detected. Forcing PASS.')
+              analysis.passed = true
+              analysis.reason =
+                'This product is a bundle/kit, so the product gallery and page imagery naturally show the main product alongside its complementary included items.'
+            }
+
             const hasExplicitSameFramePositive =
               (reasonLower.includes('same image') ||
                 reasonLower.includes('same frame') ||
                 reasonLower.includes('alongside') ||
-                reasonLower.includes('paired with')) &&
+                reasonLower.includes('paired with') ||
+                reasonLower.includes('next to') ||
+                reasonLower.includes('with the') ||
+                reasonLower.includes('shown with') ||
+                reasonLower.includes('bundle') ||
+                reasonLower.includes('kit includes') ||
+                reasonLower.includes('included items') ||
+                reasonLower.includes('included with') ||
+                reasonLower.includes('comes with') ||
+                reasonLower.includes('lifestyle')) &&
               (reasonLower.includes('complementary') ||
                 reasonLower.includes('related item') ||
                 reasonLower.includes('accessory') ||
-                reasonLower.includes('another product'))
+                reasonLower.includes('accessories') ||
+                reasonLower.includes('another product') ||
+                reasonLower.includes('mug') ||
+                reasonLower.includes('whisk') ||
+                reasonLower.includes('spoon') ||
+                reasonLower.includes('shaker') ||
+                reasonLower.includes('cup') ||
+                reasonLower.includes('items'))
 
             const hasLooseNonVisualSignals =
               reasonLower.includes('trustpilot') ||
@@ -8373,15 +8405,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               reasonLower.includes('complete your') ||
               reasonLower.includes('recently viewed')
 
-            // Strict guardrail: this rule only passes on same-image complementary-item evidence.
-            if (analysis.passed && !hasExplicitSameFramePositive) {
-              console.log('Complementary-items image rule: PASS without same-frame evidence. Forcing FAIL.')
+            // Strict guardrail: only fail if AI has no positive evidence AND no bundle/kit signal.
+            if (analysis.passed && !hasExplicitSameFramePositive && !isBundleKitOffer && !titleSuggestsKit) {
+              console.log('Complementary-items image rule: PASS without same-frame evidence and not a bundle/kit. Forcing FAIL.')
               analysis.passed = false
               analysis.reason =
                 'No clear product-gallery image shows the main product alongside complementary items in the same frame. Recommendation/review sections alone do not satisfy this rule.'
             }
 
-            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive) {
+            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive && !isBundleKitOffer && !titleSuggestsKit) {
               analysis.passed = false
               analysis.reason =
                 'Cross-sell/review signals are present, but this rule requires complementary items to be visible in the same product image frame. That evidence was not found.'
