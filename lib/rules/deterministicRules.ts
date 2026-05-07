@@ -752,29 +752,15 @@ export function evaluateHowToUseSimpleStepsRule(
     normalized.match(
       /\b\d{1,2}[\)\.\-:]\s*(?:scoop|add|mix|stir|blend|shake|drink|apply|use|take|enjoy)\b/gi
     )?.length || 0
-  const actionVerbCount =
-    normalized.match(
-      /\b(?:scoop|add|mix|stir|blend|froth|shake|drink|apply|use|take|enjoy|pour|whisk)\b/gi
-    )?.length || 0
-  const hasActionSequence =
-    /\b(?:scoop|add)\b.{0,30}\bmix\b.{0,30}\b(?:drink|shake|stir|blend|enjoy)\b/i.test(
-      normalized
-    )
   const hasHowToListPattern =
     /\b(?:how to use|how to make|how it works|best ways to enjoy|perfect mix)\b.{0,500}\b(?:step\s*(?:\d+|one|two|three)|\d{1,2}[\)\.\-:]\s*(?:add|mix|blend|shake|apply|drink|use))\b/i.test(
       normalized
     )
 
   const hasClearStepSection =
-    (hasHowToHeading &&
-      (stepLabelCount >= 1 ||
-        numberedActionCount >= 2 ||
-        hasActionSequence ||
-        actionVerbCount >= 4 ||
-        hasHowToListPattern)) ||
     stepLabelCount >= 3 ||
     numberedActionCount >= 3 ||
-    hasHowToListPattern
+    (hasHowToHeading && (stepLabelCount >= 2 || numberedActionCount >= 2 || hasHowToListPattern))
 
   if (hasClearStepSection) {
     const detail =
@@ -784,7 +770,7 @@ export function evaluateHowToUseSimpleStepsRule(
           ? `${numberedActionCount} numbered action steps`
         : hasHowToListPattern
           ? 'how-to heading with step/list pattern'
-        : 'how-to heading with action sequence'
+        : 'how-to heading with step/list pattern'
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
