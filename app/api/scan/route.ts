@@ -2140,7 +2140,56 @@ export async function POST(request: NextRequest) {
           cartInfo.push('Cart quick access detail: Unknown')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- SEARCH ACCESS CHECK ---\n${searchInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
+        // Canonical line for deterministic product-title rules (must match extractPrimaryProductTitle).
+        const headingText = (el: Element | null): string => {
+          if (!el) return ''
+          return (el.textContent || '').replace(/\s+/g, ' ').trim()
+        }
+        const primaryTitleSelectors = [
+          'main h1',
+          '[role="main"] h1',
+          '#MainContent h1',
+          '#main h1',
+          '.product-single h1',
+          '.product h1',
+          '[class*="product"] h1',
+          '[data-product-detail] h1',
+          '[itemtype*="Product"] h1',
+        ]
+        let primaryProductTitle = ''
+        for (const sel of primaryTitleSelectors) {
+          const t = headingText(document.querySelector(sel))
+          if (t.length >= 3 && t.length <= 220 && !/^(home|shop|cart)$/i.test(t)) {
+            primaryProductTitle = t
+            break
+          }
+        }
+        if (!primaryProductTitle) {
+          const h1s = Array.from(document.querySelectorAll('h1'))
+          for (const h of h1s) {
+            const t = headingText(h)
+            if (
+              t.length >= 8 &&
+              t.length <= 220 &&
+              !/^(cookie|cookies|privacy|menu|navigation|search|welcome)\b/i.test(t)
+            ) {
+              primaryProductTitle = t
+              break
+            }
+          }
+        }
+        if (!primaryProductTitle) {
+          const og = (
+            document.querySelector('meta[property="og:title"]')?.getAttribute('content') || ''
+          ).trim()
+          const simplified = og ? og.split(/\s*[|\u2013\u2014-]\s*/)[0].trim() : ''
+          if (simplified.length >= 3 && simplified.length <= 220) primaryProductTitle = simplified
+        }
+        if (!primaryProductTitle || primaryProductTitle.length < 3) {
+          primaryProductTitle = 'Not found'
+        }
+
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nPrimary Product Title: ${primaryProductTitle}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- SEARCH ACCESS CHECK ---\n${searchInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
       })
 
       // Cart icon item count / badge: empty cart = PASS; non-empty = PASS only with visible count badge
@@ -6224,9 +6273,29 @@ export async function POST(request: NextRequest) {
         const fallbackSearch = detectSearchAccessibilityFromHtml(rawHtml)
         const fallbackButtonsLine = fallbackButtons.length > 0 ? fallbackButtons.join(' | ') : '[fetch fallback]'
         const fallbackHeadingsLine = fallbackHeadings.length > 0 ? fallbackHeadings.join(' | ') : '[fetch fallback]'
+        let fallbackPrimaryTitle = 'Not found'
+        try {
+          const ogTitleRaw =
+            rawHtml.match(/property=["']og:title["'][^>]*content=["']([^"']{3,260})["']/i)?.[1]?.trim() || ''
+          if (ogTitleRaw) {
+            const simplified = ogTitleRaw.split(/\s*[|\u2013\u2014-]\s*/)[0].trim()
+            if (simplified.length >= 3 && simplified.length <= 220) fallbackPrimaryTitle = simplified
+          }
+          if (
+            fallbackPrimaryTitle === 'Not found' &&
+            fallbackHeadings.length > 0 &&
+            typeof fallbackHeadings[0] === 'string'
+          ) {
+            const h0 = fallbackHeadings[0].trim()
+            if (h0.length >= 3 && h0.length <= 220) fallbackPrimaryTitle = h0
+          }
+        } catch {
+          /* keep Not found */
+        }
         keyElements =
           `Buttons/Links: ${fallbackButtonsLine}\n` +
           `Headings: ${fallbackHeadingsLine}\n` +
+          `Primary Product Title: ${fallbackPrimaryTitle}\n` +
           `Breadcrumbs: Not found\n` +
           `Selected Variant: ${selectedVariant || 'None'}\n` +
           `--- LOGO LINK CHECK ---\n` +
