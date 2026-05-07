@@ -22,7 +22,7 @@
   {
     "id": "social-proof-product-ratings",
     "title": "Show product ratings near title",
-    "description": "Product ratings should be visible near the product title. PASS only if a rating indicator appears in the same title block or very close to the title (for example directly above, below, or beside it). Valid indicators include star icons (★★★★★), numeric rating (4.5/5), review count (203 reviews), Trustpilot widget (Excellent), or any rating badge/widget. Do NOT pass if ratings appear only farther down the page, in review sections, or elsewhere away from the title. Screenshot detection is the primary source."
+    "description": "Product ratings should be visible near the product title. PASS only if BOTH are visible in the same title block (or directly above/below/beside it): (1) a rating score indicator (for example stars or 4.5/5), and (2) a review count indicator (for example 203 reviews). FAIL if either signal is missing near the title, or if ratings appear only farther down the page (review/testimonial sections, footer, or other distant blocks). Screenshot detection is primary, with DOM near-title checks as validation."
   },
   {
     "id": "product-title-clarity",
