@@ -639,23 +639,37 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
 
   const wordCount = title.split(/\s+/).filter(Boolean).length
   const detailSignals = getProductTitleDetailSignals(title)
-  const shortTitle = title.length < 18 || wordCount < 3
-  const hasSize = detailSignals.includes('size/quantity')
-  const hasProductType = detailSignals.includes('product type')
-  const hasVariantOrBenefit = detailSignals.includes('variant/benefit')
-  const descriptiveEnough =
-    wordCount >= 5 ||
-    (hasSize && hasProductType) ||
-    (hasProductType && hasVariantOrBenefit) ||
-    detailSignals.length >= 3
 
-  if (!shortTitle && descriptiveEnough) {
-    const details = detailSignals.filter((signal) => signal !== 'multi-word descriptive title').join(', ') || 'specific product details'
+  // A title is considered descriptive enough when ANY of these hold:
+  //   - 2+ words and ≥10 characters (covers brand-style names like "Astro Dust")
+  //   - any product-type / size / variant / benefit signal
+  //   - ≥2 detail signals
+  //   - 3+ words
+  // This matches how the rule is judged in practice: titles like
+  // "astro dust - starter kit" or "Caudalie Vinoperfect Brightening Dark Spot
+  // Serum 30ml" should both PASS. Only clearly bad titles (single short word,
+  // pure SKU, or empty) should FAIL.
+  const isObviouslyBad =
+    title.length < 4 ||
+    wordCount < 2 ||
+    /^\s*sku[-_:]?\s*\w+\s*$/i.test(title) ||
+    /^\s*[a-z0-9_-]{1,3}\s*$/i.test(title)
+  const descriptiveEnough =
+    !isObviouslyBad &&
+    (
+      wordCount >= 3 ||
+      (wordCount >= 2 && title.length >= 10) ||
+      detailSignals.length >= 1
+    )
+
+  if (descriptiveEnough) {
+    const details = detailSignals.filter((signal) => signal !== 'multi-word descriptive title').join(', ') ||
+      `${wordCount} descriptive words`
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: true,
-      reason: `The product title "${title}" is descriptive and clear. It includes specific details such as ${details}, so users can quickly understand what the product is.`,
+      reason: `The product title "${title}" is concise and descriptive. It includes ${details}, so users can quickly understand what the product is.`,
     }
   }
 
@@ -663,7 +677,7 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
     ruleId: rule.id,
     ruleTitle: rule.title,
     passed: false,
-    reason: `The product title "${title}" in the product page header is too generic. It needs more specific attributes such as brand, size, variant, or key benefit so the title is clear on its own.`,
+    reason: `The product title "${title}" is too generic or too short. Use a clearer title that includes the product name plus key attributes such as brand, type, variant, or size.`,
   }
 }
 

@@ -6602,18 +6602,22 @@ export async function POST(request: NextRequest) {
               websiteTextLower,
             )
           const hasStrongNonDomEvidence = hasStrictSectionText && hasStrictPlayableSignal
-          const hasHtmlMarkerEvidence = !!videoHtmlFallbackContext?.strong
 
-          if (customerReviewVideoFound || hasStrongNonDomEvidence || hasHtmlMarkerEvidence) {
+          // NOTE: HTML markers fallback (videoHtmlFallbackContext) is intentionally
+          // NOT used as a PASS condition. It does raw substring matches on the HTML
+          // (e.g. "video-review" / "customer-video" class names) which fire false
+          // positives on themes that ship those class names without any actual
+          // customer testimonial content (e.g. Spacegoods uses such classes for
+          // ingredient/demo carousels). Trust the DOM detector or strict text
+          // signals only.
+          if (customerReviewVideoFound || hasStrongNonDomEvidence) {
             const reason = customerReviewVideoFound
               ? customerReviewVideoEvidence.length > 0
                 ? `Customer video testimonials were detected on the page: ${customerReviewVideoEvidence
                     .slice(0, 2)
                     .join('; ')}.`
                 : 'Customer video testimonials were detected on the product page.'
-              : hasStrongNonDomEvidence
-                ? 'Video testimonial section text and playable video signals were detected on the product page.'
-                : `UGC video/testimonial HTML markers were detected (${(videoHtmlFallbackContext?.hits || []).slice(0, 4).join(', ')}).`
+              : 'Video testimonial section text and playable video signals were detected on the product page.'
             results.push(
               withCheckpoint({
                 ruleId: rule.id,
