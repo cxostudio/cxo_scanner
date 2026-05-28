@@ -241,7 +241,12 @@ export default function Home() {
   /** Keep tiny pause so scanner route appears almost immediately. */
   const POST_SCAN_UI_BEFORE_REDIRECT_MS = 120
   /** Cap UI-completion wait aggressively; this is UX-only and does not affect rule evaluation. */
-  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 2_500
+  const ANALYSIS_UI_COMPLETION_MAX_WAIT_MS = 1_800
+  /**
+   * Start /api/scan after the first preview frame or this cap — keeps UI in sync without
+   * blocking rules on slow quadrant/mobile capture (local + Vercel).
+   */
+  const PREVIEW_GATE_MAX_WAIT_MS = 12_000
   /** Keep a tiny stagger so users can see finish/remove sequence. */
   const ANALYSIS_STEP_REMOVE_STAGGER_MS = 170
 
@@ -894,10 +899,11 @@ export default function Home() {
         validUrl = `https://${validUrl}`
       }
 
-      // ✅ Rules filtered on the server by `url` (detected page type + Airtable Page Type IDs)
-      const cpRes = await fetch(
-        `/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`,
-      )
+      // Rules + IP in parallel (does not affect rule evaluation)
+      const [cpRes, ipRes] = await Promise.all([
+        fetch(`/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`),
+        fetch('https://api.ipify.org?format=json').catch(() => null),
+      ])
       const cpRaw = await cpRes.text()
       if (!cpRes.ok) {
         let detail = ''
@@ -956,18 +962,16 @@ export default function Home() {
         `timezone=${timeZone}`,
       ].join(' | ')
   
-      // ✅ Get IP (safe)
       let ipAddress = 'Unknown'
-      try {
-        const res = await fetch('https://api.ipify.org?format=json')
-        if (res.ok) {
-          const data = await res.json()
+      if (ipRes?.ok) {
+        try {
+          const data = (await ipRes.json()) as { ip?: string }
           ipAddress = data?.ip || 'Unknown'
+        } catch {
+          console.warn('IP parse failed')
         }
-      } catch {
-        console.warn('IP fetch failed')
       }
-  
+
       // ✅ UI setup
       setShowAnalyze(true)
       setProgress(null)
@@ -995,31 +999,23 @@ export default function Home() {
       // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
-      const streamPromise = startWebsitePreviewStream(validUrl)
-      void streamPromise.catch((e) => console.error('Preview stream:', e))
-
-      // ✅ Screenshot (non-blocking, clean)
-      ;(async () => {
-        try {
-          const res = await fetch('/api/screenshot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: validUrl }),
-          })
-  
-          if (!res.ok) return
-  
-          const data = await res.json()
-          if (data?.screenshot) {
-            setWebsiteScreenshot(data.screenshot)
-            sessionStorage.setItem('lastScreenshot', data.screenshot)
-          }
-        } catch (err) {
-          console.warn('Screenshot  failed:', err)
+      // Preview stream runs in background; rule scan starts after first frame or gate timeout.
+      // /api/scan captures screenshot on batch 1 — no separate /api/screenshot (saves a Puppeteer run).
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const releaseGate = () => {
+          if (settled) return
+          settled = true
+          window.clearTimeout(gateTimeoutId)
+          resolve()
         }
-      })()
-  
-      // Main scan: POST /api/scan per batch, then /api/scan/combine (after preview is visible or gate timeout)
+        const gateTimeoutId = window.setTimeout(releaseGate, PREVIEW_GATE_MAX_WAIT_MS)
+        void startWebsitePreviewStream(validUrl, { onReadyForRuleScan: releaseGate }).catch((e) => {
+          console.error('Preview stream:', e)
+          releaseGate()
+        })
+      })
+
       const batches = prepareBatches(validUrl, rulesToUse)
       await processBatches(batches)
       await waitForAnalyzeUiCompletion()
