@@ -789,11 +789,16 @@ export default function Home() {
           if (typeof msg.previewDesktop === 'string') {
             setPreviewDesktop(msg.previewDesktop)
             persistScanPreview('scanPreviewDesktop', msg.previewDesktop)
+            // Show both panes immediately; replace with true mobile frame when it arrives.
+            setPreviewMobile((prev) => prev || msg.previewDesktop as string)
+            persistScanPreview('scanPreviewMobile', msg.previewDesktop)
             if (previewLooksReady(msg.previewDesktop)) releaseRuleScanGate()
           }
           if (typeof msg.preview === 'string' && !msg.previewDesktop) {
             setPreviewDesktop(msg.preview)
             persistScanPreview('scanPreviewDesktop', msg.preview)
+            setPreviewMobile((prev) => prev || msg.preview as string)
+            persistScanPreview('scanPreviewMobile', msg.preview)
             if (previewLooksReady(msg.preview)) releaseRuleScanGate()
           }
           if (typeof msg.previewMobile === 'string') {
@@ -990,26 +995,8 @@ export default function Home() {
       // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
-      let resolvePreviewGate!: () => void
-      const previewReadyPromise = new Promise<void>((r) => {
-        resolvePreviewGate = r
-      })
-      let previewGateSettled = false
-      let previewGateTimeoutId = 0
-      const settlePreviewGate = () => {
-        if (previewGateSettled) return
-        previewGateSettled = true
-        if (previewGateTimeoutId !== 0) window.clearTimeout(previewGateTimeoutId)
-        resolvePreviewGate()
-      }
-      previewGateTimeoutId = window.setTimeout(settlePreviewGate, 35_000)
-
-      const streamPromise = startWebsitePreviewStream(validUrl, {
-        onReadyForRuleScan: settlePreviewGate,
-      })
+      const streamPromise = startWebsitePreviewStream(validUrl)
       void streamPromise.catch((e) => console.error('Preview stream:', e))
-
-      await previewReadyPromise
 
       // ✅ Screenshot (non-blocking, clean)
       ;(async () => {

@@ -12,8 +12,53 @@ const QUADRANT_LABELS = ['Top', 'Upper middle', 'Lower middle', 'Bottom'] as con
 const PREVIEW_GOTO_TIMEOUT_MS = 60_000
 const PREVIEW_GOTO_RETRY_MS = 45_000
 /** Shorter than before so first desktop preview reaches the client sooner (tradeoff: rare mid-paint captures). */
-const READY_COMPLETE_WAIT_MS = 8_000
-const POST_NAV_SETTLE_MS = 1_100
+const READY_COMPLETE_WAIT_MS = 3_500
+const POST_NAV_SETTLE_MS = 450
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function isExecutionContextResetError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? '')
+  const lower = msg.toLowerCase()
+  return (
+    lower.includes('execution context was destroyed') ||
+    lower.includes('cannot find context with specified id') ||
+    lower.includes('execution context is not available')
+  )
+}
+
+async function stabilizeAfterPossibleNavigation(page: Page): Promise<void> {
+  try {
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 7_000 })
+  } catch {
+    // It's fine if there is no active navigation.
+  }
+  try {
+    await page.waitForFunction(() => document.readyState === 'complete', { timeout: 4_000 })
+  } catch {
+    // Many storefronts keep loading trackers forever.
+  }
+  await sleep(240)
+}
+
+async function retryOnContextReset<T>(
+  page: Page,
+  label: string,
+  run: () => Promise<T>,
+  retries = 2,
+): Promise<T> {
+  let attempt = 0
+  while (true) {
+    try {
+      return await run()
+    } catch (error) {
+      if (!isExecutionContextResetError(error) || attempt >= retries) throw error
+      attempt += 1
+      console.warn(`[analyzeWebsiteStream] ${label} failed due to navigation/context reset; retry ${attempt}/${retries}`)
+      await stabilizeAfterPossibleNavigation(page)
+    }
+  }
+}
 
 /**
  * Navigate for screenshot capture: prefer domcontentloaded (fast), wait for load where possible,
@@ -81,6 +126,9 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
+      let fallbackDesktopDataUrl: string | null = null
+      let fallbackMobileDataUrl: string | null = null
+      let fallbackFinalUrl = url
       try {
         // First NDJSON chunk ASAP so the client can show URL / favicon strategy before Puppeteer cold start.
         send(controller, { type: 'meta', url })
@@ -107,24 +155,31 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
 
         // Ensure desktop preview is above-the-fold (same as fresh mobile tab). Some sites
         // restore scroll or paint mid-page before first capture without this.
-        await page.evaluate(() => {
-          window.scrollTo(0, 0)
-          document.documentElement.scrollTop = 0
-          document.body.scrollTop = 0
+        await retryOnContextReset(page, 'desktop scroll reset', async () => {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0)
+            document.documentElement.scrollTop = 0
+            document.body.scrollTop = 0
+          })
         })
         await new Promise((r) => setTimeout(r, 100))
 
-        const desktopB64 = (await page.screenshot({
-          type: 'jpeg',
-          quality: 82,
-          encoding: 'base64',
-          fullPage: false,
+        const desktopB64 = (await retryOnContextReset(page, 'desktop screenshot', async () => {
+          return (await page.screenshot({
+            type: 'jpeg',
+            quality: 82,
+            encoding: 'base64',
+            fullPage: false,
+          })) as string
         })) as string
 
         let desktopDataUrl = `data:image/jpeg;base64,${desktopB64}`
+        fallbackDesktopDataUrl = desktopDataUrl
         send(controller, {
           type: 'preview',
           previewDesktop: desktopDataUrl,
+          // Immediate mobile placeholder: replaced by real mobile frame below.
+          previewMobile: desktopDataUrl,
         })
 
         let mobileDataUrl = desktopDataUrl
@@ -150,17 +205,21 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           await mobilePage.setDefaultNavigationTimeout(90_000)
           await mobilePage.setDefaultTimeout(90_000)
           await gotoForPreview(mobilePage, url)
-          await mobilePage.evaluate(() => {
-            window.scrollTo(0, 0)
-            document.documentElement.scrollTop = 0
-            document.body.scrollTop = 0
+          await retryOnContextReset(mobilePage, 'mobile scroll reset', async () => {
+            await mobilePage!.evaluate(() => {
+              window.scrollTo(0, 0)
+              document.documentElement.scrollTop = 0
+              document.body.scrollTop = 0
+            })
           })
-          await new Promise((r) => setTimeout(r, 380))
-          const mobB64 = (await mobilePage.screenshot({
-            type: 'jpeg',
-            quality: 82,
-            encoding: 'base64',
-            fullPage: false,
+          await new Promise((r) => setTimeout(r, 140))
+          const mobB64 = (await retryOnContextReset(mobilePage, 'mobile screenshot', async () => {
+            return (await mobilePage!.screenshot({
+              type: 'jpeg',
+              quality: 82,
+              encoding: 'base64',
+              fullPage: false,
+            })) as string
           })) as string
           mobileDataUrl = `data:image/jpeg;base64,${mobB64}`
         } catch (mobileErr) {
@@ -175,12 +234,16 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           type: 'preview',
           previewMobile: mobileDataUrl,
         })
+        fallbackMobileDataUrl = mobileDataUrl
 
-        await page.evaluate(() => {
-          window.scrollTo(0, 0)
+        await retryOnContextReset(page, 'desktop pre-quadrant scroll reset', async () => {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0)
+          })
         })
 
         const finalUrl = page.url()
+        fallbackFinalUrl = finalUrl
 
         let wasRedirected = false
         try {
@@ -191,10 +254,15 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           // ignore
         }
 
-        const { height, innerHeight } = await page.evaluate(() => ({
-          height: document.documentElement.scrollHeight,
-          innerHeight: window.innerHeight,
-        }))
+        const { height, innerHeight } = await retryOnContextReset(
+          page,
+          'measure viewport/document height',
+          async () =>
+            await page.evaluate(() => ({
+              height: document.documentElement.scrollHeight,
+              innerHeight: window.innerHeight,
+            })),
+        )
 
         const safeH = Math.max(4, height)
         const vh = Math.max(1, innerHeight)
@@ -209,26 +277,40 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
         })
 
         const quadrants: string[] = []
+        let lastGoodQuadrant: string | null = null
         for (let i = 0; i < 4; i++) {
-          const targetY = scrollTargets[i] ?? 0
-          await page.evaluate((y) => {
-            window.scrollTo(0, y)
-            document.documentElement.scrollTop = y
-            document.body.scrollTop = y
-          }, targetY)
-          await new Promise((r) => setTimeout(r, 280))
-          const b64 = (await page.screenshot({
-            type: 'png',
-            encoding: 'base64',
-            fullPage: false,
-          })) as string
-          quadrants.push(`data:image/png;base64,${b64}`)
+          try {
+            const targetY = scrollTargets[i] ?? 0
+            await retryOnContextReset(page, `quadrant ${i + 1} scroll`, async () => {
+              await page.evaluate((y) => {
+                window.scrollTo(0, y)
+                document.documentElement.scrollTop = y
+                document.body.scrollTop = y
+              }, targetY)
+            })
+            await sleep(280)
+            const b64 = (await retryOnContextReset(page, `quadrant ${i + 1} screenshot`, async () => {
+              return (await page.screenshot({
+                type: 'png',
+                encoding: 'base64',
+                fullPage: false,
+              })) as string
+            })) as string
+            const dataUrl = `data:image/png;base64,${b64}`
+            quadrants.push(dataUrl)
+            lastGoodQuadrant = dataUrl
+          } catch (quadrantErr) {
+            console.warn(`[analyzeWebsiteStream] quadrant ${i + 1} capture failed:`, quadrantErr)
+            quadrants.push(lastGoodQuadrant || desktopDataUrl)
+          }
         }
 
-        await page.evaluate(() => {
-          window.scrollTo(0, 0)
-          document.documentElement.scrollTop = 0
-          document.body.scrollTop = 0
+        await retryOnContextReset(page, 'desktop post-quadrant scroll reset', async () => {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0)
+            document.documentElement.scrollTop = 0
+            document.body.scrollTop = 0
+          })
         })
 
         await browser.close()
@@ -250,6 +332,29 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
       } catch (error: unknown) {
         console.error('Error in analyzeWebsiteStream:', error)
         const msg = error instanceof Error ? error.message : 'An unknown error occurred'
+        const canFallbackWithFrames = !!fallbackDesktopDataUrl
+        if (canFallbackWithFrames) {
+          const fallbackDesktop = fallbackDesktopDataUrl!
+          const fallbackMobile = fallbackMobileDataUrl || fallbackDesktop
+          const fallbackQuadrants = [fallbackDesktop, fallbackDesktop, fallbackDesktop, fallbackDesktop]
+          try {
+            send(controller, { type: 'preview', previewDesktop: fallbackDesktop })
+            send(controller, { type: 'preview', previewMobile: fallbackMobile })
+            send(controller, {
+              type: 'complete',
+              message: 'Capture completed with fallback frames',
+              quadrants: fallbackQuadrants,
+              quadrantLabels: [...QUADRANT_LABELS],
+              url: fallbackFinalUrl,
+              previewMobile: fallbackMobile,
+              redirectWarning: `Preview capture partially failed (${msg}). Showing fallback frames.`,
+            })
+            controller.close()
+            return
+          } catch (fallbackErr) {
+            console.warn('[analyzeWebsiteStream] fallback frame response failed:', fallbackErr)
+          }
+        }
         try {
           send(controller, {
             type: 'error',
