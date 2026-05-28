@@ -161,11 +161,19 @@ export function isShippingRule(rule: ScanRule): boolean {
 export function isProductTitleRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
   const d = rule.description.toLowerCase()
-  return (
-    rule.id === 'product-title-clarity' ||
-    t.includes('product title') ||
-    d.includes('product title')
-  )
+  if (rule.id === 'product-title-clarity') return true
+  // Exclude rules where "product title" is only used as a location reference
+  // (e.g. "Show ratings near the product title", "Key benefits near the product title").
+  // These rules are not about the title itself and have their own evaluation paths.
+  const isLocationReference = (text: string) =>
+    /\bnear\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bnext\s+to\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bbeside\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\b(?:displayed|highlighted|shown|visible|positioned|placed)\s+near\b/.test(text) ||
+    /\babove\s+(?:the\s+)?(?:product\s+)?title\b/.test(text) ||
+    /\bbelow\s+(?:the\s+)?(?:product\s+)?title\b/.test(text)
+  if (isLocationReference(t) || isLocationReference(d)) return false
+  return t.includes('product title') || d.includes('product title')
 }
 
 /** "Short list of key benefits near product title" rule. */
@@ -631,23 +639,37 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
 
   const wordCount = title.split(/\s+/).filter(Boolean).length
   const detailSignals = getProductTitleDetailSignals(title)
-  const shortTitle = title.length < 18 || wordCount < 3
-  const hasSize = detailSignals.includes('size/quantity')
-  const hasProductType = detailSignals.includes('product type')
-  const hasVariantOrBenefit = detailSignals.includes('variant/benefit')
-  const descriptiveEnough =
-    wordCount >= 5 ||
-    (hasSize && hasProductType) ||
-    (hasProductType && hasVariantOrBenefit) ||
-    detailSignals.length >= 3
 
-  if (!shortTitle && descriptiveEnough) {
-    const details = detailSignals.filter((signal) => signal !== 'multi-word descriptive title').join(', ') || 'specific product details'
+  // A title is considered descriptive enough when ANY of these hold:
+  //   - 2+ words and ≥10 characters (covers brand-style names like "Astro Dust")
+  //   - any product-type / size / variant / benefit signal
+  //   - ≥2 detail signals
+  //   - 3+ words
+  // This matches how the rule is judged in practice: titles like
+  // "astro dust - starter kit" or "Caudalie Vinoperfect Brightening Dark Spot
+  // Serum 30ml" should both PASS. Only clearly bad titles (single short word,
+  // pure SKU, or empty) should FAIL.
+  const isObviouslyBad =
+    title.length < 4 ||
+    wordCount < 2 ||
+    /^\s*sku[-_:]?\s*\w+\s*$/i.test(title) ||
+    /^\s*[a-z0-9_-]{1,3}\s*$/i.test(title)
+  const descriptiveEnough =
+    !isObviouslyBad &&
+    (
+      wordCount >= 3 ||
+      (wordCount >= 2 && title.length >= 10) ||
+      detailSignals.length >= 1
+    )
+
+  if (descriptiveEnough) {
+    const details = detailSignals.filter((signal) => signal !== 'multi-word descriptive title').join(', ') ||
+      `${wordCount} descriptive words`
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,
       passed: true,
-      reason: `The product title "${title}" is descriptive and clear. It includes specific details such as ${details}, so users can quickly understand what the product is.`,
+      reason: `The product title "${title}" is concise and descriptive. It includes ${details}, so users can quickly understand what the product is.`,
     }
   }
 
@@ -655,7 +677,7 @@ export function evaluateProductTitleRule(rule: ScanRule, keyElementsString: stri
     ruleId: rule.id,
     ruleTitle: rule.title,
     passed: false,
-    reason: `The product title "${title}" in the product page header is too generic. It needs more specific attributes such as brand, size, variant, or key benefit so the title is clear on its own.`,
+    reason: `The product title "${title}" is too generic or too short. Use a clearer title that includes the product name plus key attributes such as brand, type, variant, or size.`,
   }
 }
 
@@ -752,29 +774,15 @@ export function evaluateHowToUseSimpleStepsRule(
     normalized.match(
       /\b\d{1,2}[\)\.\-:]\s*(?:scoop|add|mix|stir|blend|shake|drink|apply|use|take|enjoy)\b/gi
     )?.length || 0
-  const actionVerbCount =
-    normalized.match(
-      /\b(?:scoop|add|mix|stir|blend|froth|shake|drink|apply|use|take|enjoy|pour|whisk)\b/gi
-    )?.length || 0
-  const hasActionSequence =
-    /\b(?:scoop|add)\b.{0,30}\bmix\b.{0,30}\b(?:drink|shake|stir|blend|enjoy)\b/i.test(
-      normalized
-    )
   const hasHowToListPattern =
     /\b(?:how to use|how to make|how it works|best ways to enjoy|perfect mix)\b.{0,500}\b(?:step\s*(?:\d+|one|two|three)|\d{1,2}[\)\.\-:]\s*(?:add|mix|blend|shake|apply|drink|use))\b/i.test(
       normalized
     )
 
   const hasClearStepSection =
-    (hasHowToHeading &&
-      (stepLabelCount >= 1 ||
-        numberedActionCount >= 2 ||
-        hasActionSequence ||
-        actionVerbCount >= 4 ||
-        hasHowToListPattern)) ||
     stepLabelCount >= 3 ||
     numberedActionCount >= 3 ||
-    hasHowToListPattern
+    (hasHowToHeading && (stepLabelCount >= 2 || numberedActionCount >= 2 || hasHowToListPattern))
 
   if (hasClearStepSection) {
     const detail =
@@ -784,7 +792,7 @@ export function evaluateHowToUseSimpleStepsRule(
           ? `${numberedActionCount} numbered action steps`
         : hasHowToListPattern
           ? 'how-to heading with step/list pattern'
-        : 'how-to heading with action sequence'
+        : 'how-to heading with step/list pattern'
     return {
       ruleId: rule.id,
       ruleTitle: rule.title,

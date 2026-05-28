@@ -37,6 +37,12 @@ import {
   emptyFooterCustomerSupportSnapshot,
 } from '@/lib/rules/footerCustomerSupportRule'
 import { isProductTabsAccordionRule } from '@/lib/rules/productTabsAccordionRule'
+import {
+  extractNearTitleRatingSignalsFromKeyElements,
+  hasRatingScoreSignal,
+  hasReviewCountSignal,
+  isStrictNearTitleRatingPass,
+} from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -1270,6 +1276,8 @@ export async function POST(request: NextRequest) {
       evidence: string[]
       ratingText: string
       nearTitle: boolean
+      scoreNearTitle: boolean
+      reviewCountNearTitle: boolean
     } | null = null
     let comparisonContext: {
       found: boolean
@@ -2140,7 +2148,56 @@ export async function POST(request: NextRequest) {
           cartInfo.push('Cart quick access detail: Unknown')
         }
 
-        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- SEARCH ACCESS CHECK ---\n${searchInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
+        // Canonical line for deterministic product-title rules (must match extractPrimaryProductTitle).
+        const headingText = (el: Element | null): string => {
+          if (!el) return ''
+          return (el.textContent || '').replace(/\s+/g, ' ').trim()
+        }
+        const primaryTitleSelectors = [
+          'main h1',
+          '[role="main"] h1',
+          '#MainContent h1',
+          '#main h1',
+          '.product-single h1',
+          '.product h1',
+          '[class*="product"] h1',
+          '[data-product-detail] h1',
+          '[itemtype*="Product"] h1',
+        ]
+        let primaryProductTitle = ''
+        for (const sel of primaryTitleSelectors) {
+          const t = headingText(document.querySelector(sel))
+          if (t.length >= 3 && t.length <= 220 && !/^(home|shop|cart)$/i.test(t)) {
+            primaryProductTitle = t
+            break
+          }
+        }
+        if (!primaryProductTitle) {
+          const h1s = Array.from(document.querySelectorAll('h1'))
+          for (const h of h1s) {
+            const t = headingText(h)
+            if (
+              t.length >= 8 &&
+              t.length <= 220 &&
+              !/^(cookie|cookies|privacy|menu|navigation|search|welcome)\b/i.test(t)
+            ) {
+              primaryProductTitle = t
+              break
+            }
+          }
+        }
+        if (!primaryProductTitle) {
+          const og = (
+            document.querySelector('meta[property="og:title"]')?.getAttribute('content') || ''
+          ).trim()
+          const simplified = og ? og.split(/\s*[|\u2013\u2014-]\s*/)[0].trim() : ''
+          if (simplified.length >= 3 && simplified.length <= 220) primaryProductTitle = simplified
+        }
+        if (!primaryProductTitle || primaryProductTitle.length < 3) {
+          primaryProductTitle = 'Not found'
+        }
+
+        return `Buttons/Links: ${buttons}\nHeadings: ${headings}\nPrimary Product Title: ${primaryProductTitle}\nBreadcrumbs: ${breadcrumbs || 'Not found'}\n${colorInfo.join('\n')}\n${tabsInfo.join('\n')}\n--- LOGO LINK CHECK ---\n${logoInfo.join('\n')}\n--- SEARCH ACCESS CHECK ---\n${searchInfo.join('\n')}\n--- HEADER CART QUICK ACCESS (DOM) ---\n${cartInfo.join('\n')}`
       })
 
       // Cart icon item count / badge: empty cart = PASS; non-empty = PASS only with visible count badge
@@ -4608,6 +4665,8 @@ export async function POST(request: NextRequest) {
             let found = false
             let ratingText = ''
             let nearTitle = false
+            let scoreNearTitle = false
+            let reviewCountNearTitle = false
 
             // Helper: visible text of element
             const visText = (el: Element) => (el as HTMLElement).innerText?.trim() || el.textContent?.trim() || ''
@@ -4649,20 +4708,39 @@ export async function POST(request: NextRequest) {
             const primaryTitle = titleCandidates[0] || null
             const primaryTitleBlock = primaryTitle
               ? (
-                  primaryTitle.closest('[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], section, article, form, main, div')
-                    || primaryTitle.parentElement
+                  primaryTitle.closest(
+                    '[class*="product-info"], [class*="product__info"], [class*="product-meta"], [class*="product-form"], [class*="product-details"], [class*="product-summary"], [id*="product" i]'
+                  ) || primaryTitle.parentElement
                 ) as HTMLElement | null
               : null
-            const scopedText = primaryTitleBlock
+            const titleParent = (primaryTitle?.parentElement || null) as HTMLElement | null
+            // Prevent false positives from whole-page containers (main/section/article/body).
+            const blockTag = (primaryTitleBlock?.tagName || '').toLowerCase()
+            const isTooBroadBlock =
+              blockTag === 'main' ||
+              blockTag === 'section' ||
+              blockTag === 'article' ||
+              blockTag === 'body' ||
+              (primaryTitleBlock?.childElementCount || 0) > 80
+            const scopedText = !isTooBroadBlock && primaryTitleBlock
               ? (primaryTitleBlock.innerText || primaryTitleBlock.textContent || '')
-              : ((document.body.innerText || document.body.textContent || '').slice(0, 4000))
+              : (
+                  [
+                    titleParent?.previousElementSibling ? ((titleParent.previousElementSibling as HTMLElement).innerText || '') : '',
+                    primaryTitle ? (primaryTitle.innerText || primaryTitle.textContent || '') : '',
+                    titleParent?.nextElementSibling ? ((titleParent.nextElementSibling as HTMLElement).innerText || '') : '',
+                  ]
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                ).slice(0, 1200)
 
             const isNearTitle = (el: Element | null): boolean => {
               if (!el || !isVisible(el) || titleCandidates.length === 0) return false
               const rect = (el as HTMLElement).getBoundingClientRect()
               return titleCandidates.some((titleEl) => {
                 const titleRect = titleEl.getBoundingClientRect()
-                const sameBlock = !!primaryTitleBlock && (primaryTitleBlock === el || primaryTitleBlock.contains(el as Node))
+                const sameBlock = !!primaryTitleBlock && !isTooBroadBlock && (primaryTitleBlock === el || primaryTitleBlock.contains(el as Node))
                 const verticalGap = Math.min(
                   Math.abs(rect.top - titleRect.bottom),
                   Math.abs(titleRect.top - rect.bottom),
@@ -4694,75 +4772,53 @@ export async function POST(request: NextRequest) {
                 if (el) {
                   const txt = visText(el).substring(0, 100)
                   evidence.push(`Rating widget near title (${sel}): "${txt || '(element present)'}"`)
-                  found = true
-                  nearTitle = true
-                  ratingText = txt
-                  break
+                  if (/\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(txt) || /[★☆⭐✩✭]/.test(txt)) {
+                    scoreNearTitle = true
+                  }
+                  if (/\b\d[\d,.]*\s*(?:k)?\s+(?:reviews?|ratings?)\b/i.test(txt)) {
+                    reviewCountNearTitle = true
+                  }
+                  if (!ratingText) ratingText = txt
                 }
               } catch { /* ignore invalid selector */ }
             }
 
-            // 2. Star unicode characters near the title block
-            if (!found) {
-              const starPattern = /[★☆⭐✩✭]/
-              if (starPattern.test(scopedText)) {
-                const match = scopedText.match(/[★☆⭐✩✭].{0,60}/) || []
-                evidence.push(`Star characters found near title: "${match[0]?.trim().substring(0, 80) || ''}"`)
-                found = true
-                nearTitle = true
-                ratingText = match[0]?.trim() || 'star icons'
-              }
-            }
-
-            // 3. Numeric rating patterns near the title block
-            if (!found) {
-              const ratingNumPattern = /\b[1-5](\.\d)?\s*(out of\s*5|\/\s*5|stars?|\s+star)/i
-              const m = scopedText.match(ratingNumPattern)
+            // 2. Score indicators near title block
+            if (!scoreNearTitle) {
+              const scorePattern = /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b|[★☆⭐✩✭]/i
+              const m = scopedText.match(scorePattern)
               if (m) {
-                evidence.push(`Numeric rating near title: "${m[0].trim()}"`)
-                found = true
-                nearTitle = true
-                ratingText = m[0].trim()
+                scoreNearTitle = true
+                evidence.push(`Rating score near title: "${m[0].trim().substring(0, 80)}"`)
+                if (!ratingText) ratingText = m[0].trim()
               }
             }
 
-            // 4. Review count text near the title block
-            if (!found) {
-              const reviewCountPattern = /\b(\d[\d,.]*k?)\s+(reviews?|ratings?|customers?|opinions?)/i
+            // 3. Review count indicators near title block
+            if (!reviewCountNearTitle) {
+              const reviewCountPattern = /\b\d[\d,.]*\s*(?:k)?\s+(?:reviews?|ratings?)\b/i
               const m = scopedText.match(reviewCountPattern)
               if (m) {
+                reviewCountNearTitle = true
                 evidence.push(`Review count near title: "${m[0].trim()}"`)
-                found = true
-                nearTitle = true
-                ratingText = m[0].trim()
+                if (!ratingText) ratingText = m[0].trim()
               }
             }
 
-            // 5. Trustpilot-specific keywords near the title block
-            if (!found) {
-              const tpPattern = /\b(trustpilot|trustscore|excellent|great|average|bad)\b/i
-              const m = scopedText.match(tpPattern)
-              if (m) {
-                evidence.push(`Trustpilot/review keyword near title: "${m[0].trim()}"`)
-                found = true
-                nearTitle = true
-                ratingText = m[0].trim()
-              }
-            }
-
-            // 6. SVG-based star icons near the title block
-            if (!found) {
+            // 4. SVG-based star icons near title can satisfy score only
+            if (!scoreNearTitle) {
               const svgStars = Array.from(document.querySelectorAll('svg[class*="star"], svg[class*="rating"], [class*="star"] svg, [class*="rating"] svg'))
                 .filter((node) => isNearTitle(node))
               if (svgStars.length > 0) {
                 evidence.push(`SVG star icons found near title (${svgStars.length})`)
-                found = true
-                nearTitle = true
-                ratingText = `${svgStars.length} SVG star icon(s)`
+                scoreNearTitle = true
+                if (!ratingText) ratingText = `${svgStars.length} SVG star icon(s)`
               }
             }
 
-            return { found, evidence, ratingText, nearTitle }
+            nearTitle = scoreNearTitle && reviewCountNearTitle
+            found = nearTitle
+            return { found, evidence, ratingText, nearTitle, scoreNearTitle, reviewCountNearTitle }
           })
 
           ratingContext = {
@@ -4770,12 +4826,16 @@ export async function POST(request: NextRequest) {
             evidence: ratingResult.evidence,
             ratingText: ratingResult.ratingText,
             nearTitle: ratingResult.nearTitle,
+            scoreNearTitle: ratingResult.scoreNearTitle,
+            reviewCountNearTitle: ratingResult.reviewCountNearTitle,
           }
           websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
             `\nRating found near title: ${ratingResult.found && ratingResult.nearTitle ? 'YES' : 'NO'}` +
+            `\nRating score near title: ${ratingResult.scoreNearTitle ? 'YES' : 'NO'}` +
+            `\nReview count near title: ${ratingResult.reviewCountNearTitle ? 'YES' : 'NO'}` +
             (ratingResult.ratingText ? `\nRating text: "${ratingResult.ratingText}"` : '') +
             (ratingResult.evidence.length > 0 ? `\nEvidence: ${ratingResult.evidence.slice(0, 3).join('; ')}` : '')
-          console.log(`Product rating DOM check: found=${ratingResult.found}, nearTitle=${ratingResult.nearTitle}, text="${ratingResult.ratingText}"`)
+          console.log(`Product rating DOM check: found=${ratingResult.found}, nearTitle=${ratingResult.nearTitle}, score=${ratingResult.scoreNearTitle}, count=${ratingResult.reviewCountNearTitle}, text="${ratingResult.ratingText}"`)
         } catch (e) {
           console.warn('Product rating DOM detection failed:', e)
         }
@@ -6224,9 +6284,29 @@ export async function POST(request: NextRequest) {
         const fallbackSearch = detectSearchAccessibilityFromHtml(rawHtml)
         const fallbackButtonsLine = fallbackButtons.length > 0 ? fallbackButtons.join(' | ') : '[fetch fallback]'
         const fallbackHeadingsLine = fallbackHeadings.length > 0 ? fallbackHeadings.join(' | ') : '[fetch fallback]'
+        let fallbackPrimaryTitle = 'Not found'
+        try {
+          const ogTitleRaw =
+            rawHtml.match(/property=["']og:title["'][^>]*content=["']([^"']{3,260})["']/i)?.[1]?.trim() || ''
+          if (ogTitleRaw) {
+            const simplified = ogTitleRaw.split(/\s*[|\u2013\u2014-]\s*/)[0].trim()
+            if (simplified.length >= 3 && simplified.length <= 220) fallbackPrimaryTitle = simplified
+          }
+          if (
+            fallbackPrimaryTitle === 'Not found' &&
+            fallbackHeadings.length > 0 &&
+            typeof fallbackHeadings[0] === 'string'
+          ) {
+            const h0 = fallbackHeadings[0].trim()
+            if (h0.length >= 3 && h0.length <= 220) fallbackPrimaryTitle = h0
+          }
+        } catch {
+          /* keep Not found */
+        }
         keyElements =
           `Buttons/Links: ${fallbackButtonsLine}\n` +
           `Headings: ${fallbackHeadingsLine}\n` +
+          `Primary Product Title: ${fallbackPrimaryTitle}\n` +
           `Breadcrumbs: Not found\n` +
           `Selected Variant: ${selectedVariant || 'None'}\n` +
           `--- LOGO LINK CHECK ---\n` +
@@ -6274,49 +6354,47 @@ export async function POST(request: NextRequest) {
             let found = false
             let ratingText = ''
             let nearTitle = false
+            let scoreNearTitle = false
+            let reviewCountNearTitle = false
 
             const titleFromH1 = rawHtml.match(/<h1[^>]*>\s*([^<]{3,140})\s*<\/h1>/i)?.[1]?.trim() || ''
             const titleFromOg = rawHtml.match(/property=["']og:title["'][^>]*content=["']([^"']{3,160})["']/i)?.[1]?.trim() || ''
             const titleCandidate = (titleFromH1 || titleFromOg || '').toLowerCase()
 
-            const ratingPattern = /\b(?:excellent|trustpilot|trustscore|[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)|\d[\d,.]*\s*(?:reviews?|ratings?))\b/i
-
             if (titleCandidate) {
               const idx = pageTextLower.indexOf(titleCandidate)
               if (idx >= 0) {
-                const start = Math.max(0, idx - 320)
+                const start = Math.max(0, idx - 260)
                 const end = Math.min(pageText.length, idx + titleCandidate.length + 320)
                 const aroundTitle = pageText.slice(start, end)
-                const aroundMatch = aroundTitle.match(ratingPattern)
-                if (aroundMatch) {
-                  found = true
-                  nearTitle = true
-                  ratingText = aroundMatch[0].trim()
-                  evidence.push(`Fallback rating near title text: "${ratingText}"`)
+                if (hasRatingScoreSignal(aroundTitle)) {
+                  scoreNearTitle = true
+                }
+                if (hasReviewCountSignal(aroundTitle)) {
+                  reviewCountNearTitle = true
+                }
+                if (scoreNearTitle || reviewCountNearTitle) {
+                  const m = aroundTitle.match(/\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b|\b\d[\d,.]*\s*(?:k)?\s+(?:reviews?|ratings?)\b|[★☆⭐✩✭]/i)
+                  if (m) ratingText = m[0].trim()
+                  evidence.push('Fallback near-title neighborhood parsed for score/count signals')
                 }
               }
             }
-
-            // Secondary fallback: common Trustpilot line appears right above product title on some themes.
-            if (!found) {
-              const tpIdx = pageTextLower.indexOf('excellent')
-              const titleLikeIdx = pageTextLower.indexOf('starter kit')
-              if (tpIdx >= 0 && titleLikeIdx >= 0 && Math.abs(tpIdx - titleLikeIdx) <= 420) {
-                found = true
-                nearTitle = true
-                ratingText = 'Excellent'
-                evidence.push('Fallback Trustpilot keyword close to title phrase')
-              }
-            }
+            nearTitle = scoreNearTitle && reviewCountNearTitle
+            found = nearTitle
 
             ratingContext = {
               found,
               evidence,
               ratingText,
               nearTitle,
+              scoreNearTitle,
+              reviewCountNearTitle,
             }
             websiteContent += `\n\n--- PRODUCT RATING DOM CHECK ---` +
               `\nRating found near title: ${found && nearTitle ? 'YES' : 'NO'}` +
+              `\nRating score near title: ${scoreNearTitle ? 'YES' : 'NO'}` +
+              `\nReview count near title: ${reviewCountNearTitle ? 'YES' : 'NO'}` +
               (ratingText ? `\nRating text: "${ratingText}"` : '') +
               (evidence.length > 0 ? `\nEvidence: ${evidence.join('; ')}` : '')
           } catch {
@@ -6524,18 +6602,22 @@ export async function POST(request: NextRequest) {
               websiteTextLower,
             )
           const hasStrongNonDomEvidence = hasStrictSectionText && hasStrictPlayableSignal
-          const hasHtmlMarkerEvidence = !!videoHtmlFallbackContext?.strong
 
-          if (customerReviewVideoFound || hasStrongNonDomEvidence || hasHtmlMarkerEvidence) {
+          // NOTE: HTML markers fallback (videoHtmlFallbackContext) is intentionally
+          // NOT used as a PASS condition. It does raw substring matches on the HTML
+          // (e.g. "video-review" / "customer-video" class names) which fire false
+          // positives on themes that ship those class names without any actual
+          // customer testimonial content (e.g. Spacegoods uses such classes for
+          // ingredient/demo carousels). Trust the DOM detector or strict text
+          // signals only.
+          if (customerReviewVideoFound || hasStrongNonDomEvidence) {
             const reason = customerReviewVideoFound
               ? customerReviewVideoEvidence.length > 0
                 ? `Customer video testimonials were detected on the page: ${customerReviewVideoEvidence
                     .slice(0, 2)
                     .join('; ')}.`
                 : 'Customer video testimonials were detected on the product page.'
-              : hasStrongNonDomEvidence
-                ? 'Video testimonial section text and playable video signals were detected on the product page.'
-                : `UGC video/testimonial HTML markers were detected (${(videoHtmlFallbackContext?.hits || []).slice(0, 4).join(', ')}).`
+              : 'Video testimonial section text and playable video signals were detected on the product page.'
             results.push(
               withCheckpoint({
                 ruleId: rule.id,
@@ -6824,21 +6906,23 @@ Shopping-related labels detected in header/menu chrome: ${navLabels}
             specialInstructions = `
 IMAGE BACKGROUND CONSISTENCY RULE (STRICT INTERPRETATION)
 
-Evaluate ONLY the PRIMARY / HERO product image area.
-Do NOT fail this rule because of additional gallery images, lifestyle shots, model photos, before/after images, or mixed thumbnails.
+Evaluate the ENTIRE product image gallery (hero + thumbnails/slides).
+This rule is about consistency across product images, not only hero cleanliness.
 
 PASS criteria:
-- The main hero product image uses a clean, professional background (typically white / light gray / neutral, not cluttered).
+- Most gallery images share one consistent background style (typically clean white/light gray/neutral studio look).
+- Minor lighting/crop differences are acceptable when the background style remains consistent.
 
 FAIL criteria:
-- The main hero product image itself has a distracting, cluttered, busy, or random-colored background that hurts product clarity.
+- Gallery includes mixed background styles (e.g., some plain studio shots plus lifestyle/model/scene backgrounds).
+- Background treatment changes noticeably across slides, creating an inconsistent visual presentation.
 
 Decision priority:
-1) First inspect the hero/main image in the screenshot.
-2) Ignore non-hero gallery variation when deciding pass/fail.
-3) If hero is clean even when other thumbnails are lifestyle/mixed, output PASS.
+1) Inspect gallery thumbnails and visible slides, not just the hero image.
+2) If backgrounds are mixed across gallery images, output FAIL.
+3) Pass only when background style is broadly consistent across product imagery.
 
-Your reason must explicitly mention the main/hero image background.
+Your reason must explicitly mention background consistency across the gallery.
 `
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const promoLikely = topOfPageDealsPromoContext?.promoAtTopLikely === true
@@ -7075,34 +7159,28 @@ PRODUCT RATINGS RULE — SCREENSHOT IS THE PRIMARY SOURCE
 
 ━━━━ STEP 1: Analyze the SCREENSHOT ━━━━
 
-PASS only if you see a rating VERY CLOSE to the product title or in the same title/info block:
+PASS only if BOTH are visible VERY CLOSE to the product title or in the same title/info block:
 
-✅ Star icons of any kind: ★★★★★, ☆, ⭐, filled/empty SVG stars
-✅ Numeric rating: "4.5 out of 5", "4.5/5", "4.8 stars", "4.5"
-✅ Review count: "203 reviews", "1.2k ratings", "150 customers"
-✅ Trustpilot widget: "Excellent", "TrustScore 4.7", Trustpilot bar/badge
-✅ Any rating badge or widget (Yotpo, Loox, Stamped, Judge.me, etc.)
-✅ Text like "Rated 4.5", "4.8 ★", "Excellent ★★★★★"
+✅ Rating score indicator near title: "4.5 out of 5", "4.5/5", "4.8 stars", stars/icons
+✅ Review count indicator near title: "203 reviews", "1.2k ratings", etc.
 
 → "Near title" means directly above, below, or beside the product title in the same visible product header block.
 → If the rating appears only lower on the page, inside a distant reviews section, or away from the title block, you MUST FAIL.
-→ PASS if ANY one of these is visible near the title in the screenshot.
-→ Do NOT require all three (score + count + link). Any single rating indicator is enough.
+→ PASS only when score + review count are both near title.
 
 ━━━━ STEP 2: Check PRODUCT RATING DOM CHECK in KEY ELEMENTS ━━━━
 
-- "Rating found near title: YES" → PASS immediately
-- "Rating found near title: NO" → check screenshot more carefully before failing
+- "Rating score near title: YES" AND "Review count near title: YES" → PASS
+- Otherwise → FAIL
 
 ━━━━ FAIL CONDITION ━━━━
 
-❌ FAIL if: No stars, no rating numbers, no review count, and no rating widget are visible near the product title.
+❌ FAIL if score and review count are not both visible near the product title.
 
 ━━━━ EXAMPLES ━━━━
 
-✅ PASS reason: "Product ratings are visible near the product section showing a Trustpilot widget with 'Excellent ★★★★★' and a rating score of 4.7 out of 5."
-✅ PASS reason: "Star rating icons (★★★★☆) and a review count of 203 reviews are visible near the product title."
-❌ FAIL reason: "No product ratings, star icons, review counts, or rating widgets were detected near the product title. Add star ratings near the title block."
+✅ PASS reason: "A rating score (4.7/5) and review count (203 reviews) are both visible next to the product title."
+❌ FAIL reason: "The page does not show both rating score and review count near the product title. Ratings shown only in lower review sections do not satisfy this rule."
 `
           } else if (isComplementaryItemsInImageRule) {
             specialInstructions = `
@@ -7463,7 +7541,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             ? `\n\n⚠️ CART ICON ITEM COUNT / BADGE RULE ⚠️\n\nRead "--- CART ICON ITEM COUNT (DOM) ---":\n- If "Storefront cart item count" is 0, PASS (empty cart — no badge is required).\n- If count > 0, PASS only if "Count badge visible" is YES; otherwise FAIL.\nIf "Cart icon item count rule verdict: PASS", output passed: true.\n\nNow analyze:\n\n`
             : ''
           const generalCustomerReviewsPrefix = isGeneralCustomerReviewsRule ? `\n\n⚠️⚠️⚠️ GENERAL CUSTOMER REVIEWS RULE — IMAGE FIRST ⚠️⚠️⚠️\n\nTreat this as ANY-PAGE validation (not homepage-only).\n\nLook at the screenshot first. PASS if you can see a reviews block, rating summary with review context, Trustpilot/review widget, or customer review cards.\nIf screenshot is unclear, use page text/DOM evidence. Review indicators like "Excellent", "4.x out of 5", "reviews", "what customers are saying", and review widget labels count.\n\nFAIL only when no review content is visible/detectable anywhere on the scanned page.\n\nNow analyze the screenshot:\n\n` : ''
-          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Your first job is to scan the screenshot.\n\nPASS immediately if you see ANY of these in the screenshot:\n✅ Star icons (★★★★★, ⭐, filled/empty star shapes, SVG stars)\n✅ A numeric rating (e.g. "4.5 out of 5", "4.7/5", "4.8 stars")\n✅ A review count (e.g. "203 reviews", "1.2k ratings", "150 customers")\n✅ A Trustpilot widget showing "Excellent", "TrustScore", or a green star bar\n✅ Any rating badge (Yotpo, Loox, Stamped, Judge.me, Okendo, etc.)\n\n→ ONE rating indicator is enough. Do NOT require score + count + clickable link all at once.\n→ PASS if the screenshot shows any star, any rating number, or any review widget.\n→ FAIL only if the screenshot shows NO stars, NO rating numbers, and NO review widgets anywhere.\n\nNow analyze the screenshot:\n\n` : ''
+          const ratingPrefix = isRatingRule ? `\n\n⚠️⚠️⚠️ PRODUCT RATINGS NEAR TITLE RULE — STRICT LOCATION CHECK ⚠️⚠️⚠️\n\nThis is a location-sensitive visual rule.\n\nPASS only if BOTH of the following are in the SAME title block or very close to the product title (directly above/below/beside title):\n✅ Rating score indicator (e.g. 4.5/5, 4.5 out of 5, stars)\n✅ Review count indicator (e.g. 203 reviews, 1.2k ratings)\n\nDo NOT pass when rating appears only in lower sections like:\n❌ Review carousel/testimonial section\n❌ "Rated X/X based on Y reviews" far below product header\n❌ Footer, recommendation blocks, or unrelated widgets\n\nDecision priority:\n1) If KEY ELEMENTS says "Rating score near title: YES" and "Review count near title: YES" → PASS.\n2) Otherwise → FAIL unless screenshot clearly shows BOTH indicators next to title.\n3) Ignore ratings that are far below the title block.\n\nNow analyze the screenshot:\n\n` : ''
           const productComparisonPrefix = isProductComparisonRule ? `\n\n⚠️⚠️⚠️ PRODUCT COMPARISON RULE — LOOK AT THE SCREENSHOT FIRST ⚠️⚠️⚠️\n\nThis is a VISUAL rule. Scan the screenshot carefully.\n\nPASS immediately if you see ANY of the following:\n✅ Feature rows comparing two products with check and cross icons — ticks can look like ✓ ✔ or thin tick shapes; crosses can look like ✗ ✕ × or thin X shapes (like those on spacegoods.com)\n✅ A VS / versus layout (e.g. "Our product vs Competitor", "Rainbow Dust vs Coffee")\n✅ Side-by-side product comparison cards or columns\n✅ A section labelled "Top Comparisons", "Recent Comparisons", "How we compare", "Compare", or "Vs"\n✅ Any comparison grid or table showing product differences\n✅ A list of features with tick icons for this product and cross/X icons for the alternative\n\n→ Any ONE of these formats is enough to PASS.\n→ Thin ✓ and × icons (like SVG or CSS icon ticks and crosses) count exactly the same as ✓ and ✕ Unicode symbols.\n→ Do NOT require strict table format, 2-3 alternatives, or 4+ attributes.\n→ FAIL only if NO comparison section of any kind is visible.\n\nNow analyze the screenshot:\n\n` : ''
           const galleryNavPrefix = isMobileGalleryRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR GALLERY NAVIGATION RULE ⚠️⚠️⚠️\n\nTHIS IS THE "ENABLE SWIPE OR ARROWS ON MOBILE GALLERIES" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nScan the product image gallery area. PASS immediately if you see:\n- Arrow buttons (◀ ▶, ‹ ›, < >) on either side of the main gallery image\n- Circular navigation buttons on the sides of the gallery\n- Any slider or carousel prev/next navigation controls\n- Navigation dots or indicators below the gallery images\n\nSTEP 2 — DOM CHECK:\nCheck "GALLERY NAVIGATION DOM CHECK" in KEY ELEMENTS.\nIf "Navigation arrows/swipe found: YES" → PASS.\n\nPASS if screenshot shows arrows OR DOM found navigation elements.\nFAIL ONLY if screenshot shows no arrows AND DOM found nothing.\n\nNow analyze the screenshot:\n\n` : ''
           const descriptionBenefitsPrefix = isDescriptionBenefitsRule ? `\n\n⚠️⚠️⚠️ CRITICAL FOR DESCRIPTION BENEFITS RULE ⚠️⚠️⚠️\n\nTHIS IS THE "FOCUS ON BENEFITS IN PRODUCT DESCRIPTIONS" RULE.\n\nSTEP 1 — SCREENSHOT (look at image FIRST):\nLook at the product description area in the screenshot. PASS immediately if you see:\n✅ Benefit bullets like "Fades dark spots fast", "Evens skin tone", "Glows with natural radiance"\n✅ Any short statements describing RESULTS or IMPROVEMENTS for the user\n✅ Words like: fades, reduces, improves, boosts, brightens, hydrates, smooths, corrects, radiance, luminous\n\nSTEP 2 — DOM CHECK:\nCheck "DESCRIPTION BENEFITS CHECK" in KEY ELEMENTS.\nIf "Benefit keywords found: YES" → PASS.\nIf 2+ matched keywords → PASS.\n\nIMPORTANT: Do NOT fail because ingredients or formulas exist. Features + benefits = PASS. Only FAIL if there are ZERO benefit statements and ONLY ingredients/attributes.\n\nNow analyze the screenshot:\n\n` : ''
@@ -7668,43 +7746,33 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
 
           if (isRatingRule) {
             let ratingForcedPass = false
+            const ratingSignals = extractNearTitleRatingSignalsFromKeyElements(keyElements || '')
+            const strictNearTitlePass = isStrictNearTitleRatingPass(ratingSignals)
 
-            // Override 1: DOM found rating near title → force PASS
-            if (ratingContext?.found && ratingContext?.nearTitle && !analysis.passed) {
-              console.log(`Rating rule: DOM found rating near title ("${ratingContext.ratingText}"). Forcing PASS.`)
+            // Override 1: deterministic signals confirm score+count near title.
+            if ((ratingContext?.scoreNearTitle && ratingContext?.reviewCountNearTitle) || strictNearTitlePass) {
+              if (!analysis.passed) {
+              console.log(`Rating rule: strict near-title score+count detected. Forcing PASS.`)
               analysis.passed = true
               ratingForcedPass = true
-              const ev = ratingContext.evidence[0] || ratingContext.ratingText || 'rating element detected'
-              analysis.reason = `Product ratings detected by DOM scan near the title: ${ev}. Star ratings or review indicators are present in the product title block.`
-            }
-
-            // Hard guardrail: only force FAIL when we have explicit DOM evidence that rating is NOT near title.
-            // Do not fail on missing/unknown ratingContext (that caused false fails on some storefronts).
-            if (analysis.passed && ratingContext && !ratingContext.nearTitle) {
-              console.log(`Rating rule: AI passed but DOM found no near-title rating evidence. Forcing FAIL.`)
-              analysis.passed = false
-              analysis.reason = `No star ratings, review counts, or rating widgets were detected near the product title. Add star ratings near the title block.`
-            }
-
-            // Fallback: if page text contains a rating signal close to the product title text, force PASS.
-            if (!analysis.passed) {
-              const fullText = (fullVisibleText || websiteContent || '').toLowerCase()
-              const titleLine =
-                keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1]?.trim()?.toLowerCase() || ''
-              if (titleLine && fullText.includes(titleLine)) {
-                const idx = fullText.indexOf(titleLine)
-                const nearWindow = fullText.slice(Math.max(0, idx - 260), idx + Math.max(540, titleLine.length))
-                const hasRatingSignalNearTitle =
-                  /\b(excellent|trustpilot|trustscore)\b/i.test(nearWindow) ||
-                  /\b[1-5](?:\.\d)?\s*(?:out of\s*5|\/\s*5|stars?)\b/i.test(nearWindow) ||
-                  /[★☆⭐]/.test(nearWindow)
-                if (hasRatingSignalNearTitle) {
-                  console.log(`Rating rule: text fallback found rating near title window. Forcing PASS.`)
-                  analysis.passed = true
-                  analysis.reason = 'Product ratings are visible near the product title (e.g., star/score/review indicator appears in the title block).'
-                }
+              const ev = ratingContext?.evidence?.[0] || ratingContext?.ratingText || 'rating score + review count near title detected'
+              analysis.reason = `Product ratings detected near title with both required signals (score + review count). Evidence: ${ev}.`
               }
             }
+
+            // Hard guardrail: if strict score+count near-title requirement is not met, FAIL.
+            if (analysis.passed && !(ratingContext?.scoreNearTitle && ratingContext?.reviewCountNearTitle) && !strictNearTitlePass) {
+              console.log(`Rating rule: AI passed but strict near-title score+count requirement not met. Forcing FAIL.`)
+              analysis.passed = false
+              analysis.reason =
+                'The page does not show both rating score and review count near the product title. Ratings shown only in lower sections do not satisfy this rule.'
+            }
+
+            // No text fallback: the raw page text concatenates content from
+            // different visual regions, so a near-title text window can find
+            // score+count signals even when the rating widget is visually far
+            // from the title (e.g. lower review section). The DOM near-title
+            // check (which uses bounding boxes) is authoritative for this rule.
 
             // Sanity warning (never force fail based on missing count or link)
             if (!ratingForcedPass && !analysis.passed) {
@@ -7987,27 +8055,20 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               analysis.reason = `Main navigation includes multiple shopping-related destinations (${labels || 'shop paths in header or menu'}), so users can reach important pages from primary nav.`
             }
           } else if (isImageBackgroundConsistencyRule) {
-            const reasonHasHeroCleanSignal =
-              (reasonLower.includes('hero') || reasonLower.includes('main image') || reasonLower.includes('primary image')) &&
-              (reasonLower.includes('clean background') ||
-                reasonLower.includes('neutral background') ||
-                reasonLower.includes('white background') ||
-                reasonLower.includes('light gray background') ||
-                reasonLower.includes('professional background'))
-
-            const reasonOnlyComplainsAboutOtherImages =
-              reasonLower.includes('other images') ||
+            const reasonMentionsMixedGallery =
+              reasonLower.includes('mixed background') ||
+              reasonLower.includes('inconsistent background') ||
               reasonLower.includes('gallery images') ||
               reasonLower.includes('thumbnails') ||
               reasonLower.includes('lifestyle images') ||
-              reasonLower.includes('mixed backgrounds')
+              reasonLower.includes('model images')
 
-            // Hero image cleanliness decides this rule. Mixed gallery backgrounds are allowed.
-            if (!analysis.passed && reasonHasHeroCleanSignal && reasonOnlyComplainsAboutOtherImages) {
-              console.log('Image background consistency: hero image is clean; non-hero gallery variation should not fail this rule. Forcing PASS.')
-              analysis.passed = true
+            // Mixed gallery backgrounds should fail this rule, even when hero image is clean.
+            if (analysis.passed && reasonMentionsMixedGallery) {
+              console.log('Image background consistency: mixed gallery backgrounds detected. Forcing FAIL.')
+              analysis.passed = false
               analysis.reason =
-                'The primary/hero product image has a clean, professional background. Additional gallery/lifestyle images may vary, which is acceptable for this rule.'
+                'Product gallery backgrounds are inconsistent across images (studio/plain and lifestyle/scene images are mixed), so this rule fails.'
             }
           } else if (isTopOfPageDealsUrgencyPromoRule) {
             const topSlice = (fullVisibleText || websiteContent || '').slice(0, 3600).toLowerCase()
@@ -8293,15 +8354,47 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               isRelevant = false
             }
           } else if (isComplementaryItemsInImageRule) {
+            // Bundle/kit products (e.g. "Astro Dust Starter Kit") inherently show
+            // the main product alongside complementary items because the bundle
+            // contents ARE complementary items. Force PASS when DOM detects a
+            // bundle/kit-style offer.
+            const isBundleKitOffer = /Bundle or kit style offer \(DOM\):\s*YES/i.test(keyElements || '')
+            const titleSuggestsKit = /\b(starter\s*kit|kit|bundle|pack|set)\b/i.test(
+              keyElements?.match(/Primary Product Title:\s*(.+?)(?:\n|$)/i)?.[1] || ''
+            )
+
+            if (!analysis.passed && (isBundleKitOffer || titleSuggestsKit)) {
+              console.log('Complementary-items image rule: bundle/kit product detected. Forcing PASS.')
+              analysis.passed = true
+              analysis.reason =
+                'This product is a bundle/kit, so the product gallery and page imagery naturally show the main product alongside its complementary included items.'
+            }
+
             const hasExplicitSameFramePositive =
               (reasonLower.includes('same image') ||
                 reasonLower.includes('same frame') ||
                 reasonLower.includes('alongside') ||
-                reasonLower.includes('paired with')) &&
+                reasonLower.includes('paired with') ||
+                reasonLower.includes('next to') ||
+                reasonLower.includes('with the') ||
+                reasonLower.includes('shown with') ||
+                reasonLower.includes('bundle') ||
+                reasonLower.includes('kit includes') ||
+                reasonLower.includes('included items') ||
+                reasonLower.includes('included with') ||
+                reasonLower.includes('comes with') ||
+                reasonLower.includes('lifestyle')) &&
               (reasonLower.includes('complementary') ||
                 reasonLower.includes('related item') ||
                 reasonLower.includes('accessory') ||
-                reasonLower.includes('another product'))
+                reasonLower.includes('accessories') ||
+                reasonLower.includes('another product') ||
+                reasonLower.includes('mug') ||
+                reasonLower.includes('whisk') ||
+                reasonLower.includes('spoon') ||
+                reasonLower.includes('shaker') ||
+                reasonLower.includes('cup') ||
+                reasonLower.includes('items'))
 
             const hasLooseNonVisualSignals =
               reasonLower.includes('trustpilot') ||
@@ -8312,15 +8405,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               reasonLower.includes('complete your') ||
               reasonLower.includes('recently viewed')
 
-            // Strict guardrail: this rule only passes on same-image complementary-item evidence.
-            if (analysis.passed && !hasExplicitSameFramePositive) {
-              console.log('Complementary-items image rule: PASS without same-frame evidence. Forcing FAIL.')
+            // Strict guardrail: only fail if AI has no positive evidence AND no bundle/kit signal.
+            if (analysis.passed && !hasExplicitSameFramePositive && !isBundleKitOffer && !titleSuggestsKit) {
+              console.log('Complementary-items image rule: PASS without same-frame evidence and not a bundle/kit. Forcing FAIL.')
               analysis.passed = false
               analysis.reason =
                 'No clear product-gallery image shows the main product alongside complementary items in the same frame. Recommendation/review sections alone do not satisfy this rule.'
             }
 
-            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive) {
+            if (analysis.passed && hasLooseNonVisualSignals && !hasExplicitSameFramePositive && !isBundleKitOffer && !titleSuggestsKit) {
               analysis.passed = false
               analysis.reason =
                 'Cross-sell/review signals are present, but this rule requires complementary items to be visible in the same product image frame. That evidence was not found.'

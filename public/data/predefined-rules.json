@@ -22,7 +22,7 @@
   {
     "id": "social-proof-product-ratings",
     "title": "Show product ratings near title",
-    "description": "Product ratings should be visible near the product title. PASS only if a rating indicator appears in the same title block or very close to the title (for example directly above, below, or beside it). Valid indicators include star icons (★★★★★), numeric rating (4.5/5), review count (203 reviews), Trustpilot widget (Excellent), or any rating badge/widget. Do NOT pass if ratings appear only farther down the page, in review sections, or elsewhere away from the title. Screenshot detection is the primary source."
+    "description": "Product ratings should be visible near the product title. PASS only if BOTH are visible in the same title block (or directly above/below/beside it): (1) a rating score indicator (for example stars or 4.5/5), and (2) a review count indicator (for example 203 reviews). FAIL if either signal is missing near the title, or if ratings appear only farther down the page (review/testimonial sections, footer, or other distant blocks). Screenshot detection is primary, with DOM near-title checks as validation."
   },
   {
     "id": "product-title-clarity",
@@ -67,7 +67,7 @@
   {
     "id": "image-background-consistency",
     "title": "Maintain consistent image backgrounds",
-    "description": "The primary/hero product image should use a clean, professional background (e.g. white or light gray). Lifestyle shots, model images, or before/after result images in additional gallery thumbnails are acceptable and do NOT count as inconsistency. PASS if the main product image has a clean background. FAIL only if the main product image itself has a distracting, cluttered, or random-colored background."
+    "description": "All product gallery images should maintain a consistent, clean background style (e.g. white or light gray). PASS only when most gallery images (including thumbnails/slides) follow one consistent background look. FAIL if the gallery mixes plain studio backgrounds with lifestyle/model/scene backgrounds in a way that creates inconsistency."
   },
   {
     "id": "image-before-after",
