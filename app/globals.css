@@ -88,6 +88,134 @@
   animation: ux-ray-sweep 2.6s ease-in-out infinite alternate;
 }
 
+/* =============================================================================
+   Scan loading FX — gray/monochrome, GPU-cheap (opacity/transform only).
+   Consumed by DualViewportLoader + ScanFx + the analyze panel in page.tsx.
+   ========================================================================== */
+
+/* Gentle float for the whole mockup scene */
+@keyframes scene-breathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.scene-breathe { animation: scene-breathe 4s ease-in-out infinite; }
+
+/* Reveal sweep: a thin band travels top -> bottom, brightening as it passes */
+@keyframes scan-sweep-gray {
+  0% { top: -14%; }
+  100% { top: 100%; }
+}
+.scan-sweep-gray { animation: scan-sweep-gray 2.6s linear infinite; }
+
+/* Subtle life in the scan grid */
+@keyframes grid-flicker {
+  0%, 100% { opacity: 0.14; }
+  50% { opacity: 0.22; }
+}
+.grid-flicker { animation: grid-flicker 2.2s ease-in-out infinite; }
+
+/* Falling data characters (duration set inline per column) */
+@keyframes data-rain {
+  0% { transform: translateY(-110%); }
+  100% { transform: translateY(120%); }
+}
+.data-rain-col {
+  animation-name: data-rain;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* "Found something" ping — flashes once per sweep, delayed per position */
+@keyframes ping-flash {
+  0% { transform: scale(0.4); opacity: 0; }
+  8% { transform: scale(1); opacity: 0.9; }
+  30% { transform: scale(1.7); opacity: 0; }
+  100% { opacity: 0; }
+}
+.scan-ping { animation: ping-flash 2.6s ease-out infinite; }
+
+/* Camera-style viewfinder brackets */
+@keyframes viewfinder-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.05); }
+}
+.viewfinder-pulse { animation: viewfinder-pulse 1.8s ease-in-out infinite; }
+
+/* Roaming focus dot wandering the page */
+@keyframes focus-roam {
+  0% { top: 22%; left: 18%; }
+  25% { top: 30%; left: 72%; }
+  50% { top: 66%; left: 55%; }
+  75% { top: 54%; left: 28%; }
+  100% { top: 22%; left: 18%; }
+}
+.focus-roam { animation: focus-roam 6s ease-in-out infinite; }
+
+/* Mini radar rotating sweep */
+@keyframes radar-sweep { to { transform: rotate(360deg); } }
+.radar-sweep { animation: radar-sweep 2s linear infinite; }
+
+/* Progress bar shimmer stripe */
+@keyframes progress-shimmer {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(600%); }
+}
+.progress-shimmer { animation: progress-shimmer 1.6s ease-in-out infinite; }
+
+/* Glowing comet head at the leading edge of the progress fill (centered via margins) */
+@keyframes comet-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+.comet-pulse { animation: comet-pulse 1.1s ease-in-out infinite; }
+
+/* Queued-up pending checklist items pulse in a wave (delay set inline) */
+@keyframes queued-wave {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+.queued-wave { animation: queued-wave 1.6s ease-in-out infinite; }
+
+/* ---------------------------------------------------------------------------
+   "Loud" scan FX — bigger/brighter variants used on the /anim-preview sandbox.
+   ------------------------------------------------------------------------- */
+
+/* Inspect boxes: rectangles that snap onto detected regions, then fade */
+@keyframes inspect-pop {
+  0% { opacity: 0; transform: scale(1.12); }
+  8% { opacity: 1; transform: scale(1); }
+  40% { opacity: 1; }
+  55% { opacity: 0; }
+  100% { opacity: 0; }
+}
+.inspect-box { animation: inspect-pop 4s ease-in-out infinite; }
+
+/* Expanding ring around a ping so the "found it" flash is unmissable */
+@keyframes ping-ring {
+  0% { transform: scale(0.4); opacity: 0; }
+  10% { opacity: 0.75; }
+  60% { transform: scale(2.8); opacity: 0; }
+  100% { opacity: 0; }
+}
+.scan-ping-ring { animation: ping-ring 2.6s ease-out infinite; }
+
+/* Floating "✓ found" chips lifting off the mockup */
+@keyframes chip-float {
+  0% { opacity: 0; transform: translateY(8px) scale(0.9); }
+  12% { opacity: 1; transform: translateY(0) scale(1); }
+  42% { opacity: 1; transform: translateY(-5px); }
+  62% { opacity: 0; transform: translateY(-16px); }
+  100% { opacity: 0; }
+}
+.scan-chip { animation: chip-float 4s ease-in-out infinite; }
+
+/* Spotlight vignette: darkens everything except a roaming circle (path shared with focus-roam) */
+.spotlight-hole {
+  animation: focus-roam 6s ease-in-out infinite;
+  box-shadow: 0 0 34px 10px rgba(24, 24, 27, 0.22), 0 0 0 9999px rgba(24, 24, 27, 0.34);
+}
+
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }

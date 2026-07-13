@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
-import { MiniDualViewportCard } from './MiniDualViewportCard';
+import { MiniDualViewportCard } from '../components/MiniDualViewportCard';
 
 type Props = {
   quadrants: string[];
@@ -18,7 +18,7 @@ const SETTLE_MS = 700;
 const easeSmooth = [0.22, 1, 0.36, 1] as const;
 
 /** Left = completed thumbs; right = active scan; pending enters bottom → up; “In progress” above active card */
-export function QuadrantScanSequence({
+export function PreviewQuadrants({
   quadrants,
   quadrantLabels,
   previewDesktop,
@@ -40,45 +40,36 @@ export function QuadrantScanSequence({
     const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
     (async () => {
-      // Loop the scan continuously — the below-section loader keeps "coming" until the
-      // component unmounts (i.e. the scan finishes and the page redirects), matching the
-      // top mockup's persistent scan line.
-      while (!cancelled && runId === runIdRef.current) {
-        // Fresh pass: clear the settled thumbnails so they animate out, then rebuild.
-        setRowStack([]);
-
-        for (let i = 0; i < quadrants.length; i++) {
-          if (cancelled || runId !== runIdRef.current) return;
-
-          setActiveIndex(i);
-          setPhase('enter');
-          await wait(ENTER_MS);
-
-          if (cancelled || runId !== runIdRef.current) return;
-          setPhase('scan');
-          await wait(SCAN_MS);
-
-          if (cancelled || runId !== runIdRef.current) return;
-          setPhase('settle');
-          await wait(SETTLE_MS);
-
-          if (cancelled || runId !== runIdRef.current) return;
-
-          setRowStack((prev) => [
-            ...prev,
-            {
-              src: quadrants[i],
-              label: quadrantLabels[i] ?? `Part ${i + 1}`,
-              key: i,
-            },
-          ]);
-        }
-
-        // Finished a full pass — brief pause, then loop again.
-        setActiveIndex(null);
-        setPhase('idle');
+      for (let i = 0; i < quadrants.length; i++) {
         if (cancelled || runId !== runIdRef.current) return;
-        await wait(900);
+
+        setActiveIndex(i);
+        setPhase('enter');
+        await wait(ENTER_MS);
+
+        if (cancelled || runId !== runIdRef.current) return;
+        setPhase('scan');
+        await wait(SCAN_MS);
+
+        if (cancelled || runId !== runIdRef.current) return;
+        setPhase('settle');
+        await wait(SETTLE_MS);
+
+        if (cancelled || runId !== runIdRef.current) return;
+
+        setRowStack((prev) => [
+          ...prev,
+          {
+            src: quadrants[i],
+            label: quadrantLabels[i] ?? `Part ${i + 1}`,
+            key: i,
+          },
+        ]);
+
+        if (i === quadrants.length - 1) {
+          setActiveIndex(null);
+          setPhase('idle');
+        }
       }
     })();
 
@@ -138,14 +129,14 @@ export function QuadrantScanSequence({
           {/* Only mount while scanning — empty w-48/w-72 was stealing space and left-aligning the 4 thumbs */}
           {currentSrc !== null && activeIndex !== null && (
             <div className="flex w-20 shrink-0 flex-col items-stretch sm:w-32">
-              <p className="mb-2 w-full text-center text-[11px] font-semibold uppercase tracking-wide text-violet-600 sm:text-xs">
+              <p className="mb-2 w-full text-center text-[11px] font-semibold uppercase tracking-wide text-gray-600 sm:text-xs">
                 In progress
               </p>
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeIndex}
                   layout
-                  className="relative w-full overflow-hidden rounded-lg border border-violet-400/45 bg-white shadow-md ring-1 ring-violet-300/25"
+                  className="relative w-full overflow-hidden rounded-lg border border-gray-400/45 bg-white shadow-md ring-1 ring-gray-300/25"
                   initial={{ y: 110, opacity: 0, scale: 0.88 }}
                   animate={
                     phase === 'settle'
@@ -190,17 +181,17 @@ export function QuadrantScanSequence({
                     />
                     {phase === 'scan' && (
                       <div className="pointer-events-none absolute inset-0" aria-hidden>
-                        <div className="absolute inset-0 bg-violet-600/25" />
+                        <div className="absolute inset-0 bg-zinc-600/25" />
                         <div
                           className="absolute inset-0 opacity-35"
                           style={{
                             backgroundImage:
-                              'linear-gradient(rgba(139, 92, 246, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 92, 246, 0.4) 1px, transparent 1px)',
+                              'linear-gradient(rgba(82, 82, 91, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(82, 82, 91, 0.4) 1px, transparent 1px)',
                             backgroundSize: '18px 18px',
                           }}
                         />
                         <motion.div
-                          className="absolute left-0 right-0 z-10 h-[2px] rounded-full bg-violet-400 shadow-[0_0_20px_rgba(167,139,250,0.95)]"
+                          className="absolute left-0 right-0 z-10 h-[2px] rounded-full bg-zinc-200 shadow-[0_0_20px_rgba(228,228,231,0.95)]"
                           initial={{ top: 0 }}
                           animate={{ top: 'calc(100% - 2px)' }}
                           transition={{

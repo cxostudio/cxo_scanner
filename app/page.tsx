@@ -1447,7 +1447,7 @@ export default function Home() {
                                   align="start"
                                   previewDesktop={previewDesktop}
                                   previewMobile={previewMobile}
-                                  scanning={false}
+                                  scanning
                                 />
                               </div>
                             )}

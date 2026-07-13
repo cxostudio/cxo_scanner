@@ -1,9 +1,33 @@
 'use client';
 
+import { useRef } from 'react';
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'framer-motion';
+
 export type InstantPreviewHint = {
   host: string;
   faviconUrl: string;
 };
+
+/** Cartoon magnifying glass (blue glass, dark rim + handle, glare) that roams across the scan overlay. */
+function MagnifierGlass() {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      className="h-full w-full drop-shadow-[0_2px_5px_rgba(0,0,0,0.28)]"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {/* handle (drawn first so the rim overlaps it) */}
+      <line x1="40" y1="40" x2="57" y2="57" stroke="#0f172a" strokeWidth="9" strokeLinecap="round" />
+      {/* glass — semi-transparent so it tints/magnifies what's underneath */}
+      <circle cx="26" cy="26" r="20" fill="#dbeafe" fillOpacity="0.55" stroke="#0f172a" strokeWidth="5" />
+      <circle cx="26" cy="26" r="15" fill="#ffffff" fillOpacity="0.22" />
+      {/* glare */}
+      <path d="M15 23 A15 15 0 0 1 26 13" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.9" />
+      <circle cx="18.5" cy="20" r="2.4" fill="#ffffff" opacity="0.85" />
+    </svg>
+  );
+}
 
 type DualViewportLoaderProps = {
   /** null = empty pane while URL capture is in flight */
@@ -51,7 +75,27 @@ export function DualViewportLoader({
   const instant = instantPreview ?? null
   const showInstantDesktop = !desktopReady && instant != null
   const showInstantMobile = !mobileSrc && instant != null
+  const reduce = useReducedMotion() ?? false
   const isStart = align === 'start';
+
+  // 3D tilt — mouse-driven, desktop only; disabled under reduced motion / when not scanning.
+  const enableTilt = scanning && !reduce;
+  const sceneRef = useRef<HTMLDivElement | null>(null);
+  const px = useMotionValue(0);
+  const py = useMotionValue(0);
+  const rotateX = useSpring(useTransform(py, [-0.5, 0.5], [6, -6]), { stiffness: 150, damping: 18 });
+  const rotateY = useSpring(useTransform(px, [-0.5, 0.5], [-8, 8]), { stiffness: 150, damping: 18 });
+
+  const handleMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!enableTilt || !sceneRef.current) return;
+    const r = sceneRef.current.getBoundingClientRect();
+    px.set((e.clientX - r.left) / r.width - 0.5);
+    py.set((e.clientY - r.top) / r.height - 0.5);
+  };
+  const handleLeave = () => {
+    px.set(0);
+    py.set(0);
+  };
 
   return (
     <div
@@ -69,6 +113,19 @@ export function DualViewportLoader({
           aria-hidden
         />
 
+        {/* Tilt wrapper (outer) + breathing/floating (inner) so the two transforms compose instead of clobbering. */}
+        <div
+          ref={sceneRef}
+          className="w-full"
+          style={enableTilt ? { perspective: 1000 } : undefined}
+          onMouseMove={handleMove}
+          onMouseLeave={handleLeave}
+        >
+          <motion.div
+            style={enableTilt ? { rotateX, rotateY, transformStyle: 'preserve-3d' } : undefined}
+            className="w-full"
+          >
+            <div className={enableTilt ? 'scene-breathe w-full' : 'w-full'}>
         <div className="relative mx-auto w-full h-full md:h-auto min-h-[406px] mobile-set-height flex items-center md:items-start">
           <div className="relative z-0 w-full max-w-[min(100%,40rem)] shrink-0 lg:min-w-0 sm:pe-[60px] lg:pe-0 shadow-[0_32px_90px_-22px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.04] rounded-[1.8rem] overflow-hidden h-full">
             <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4">
@@ -113,6 +170,11 @@ export function DualViewportLoader({
                   />
                   <div className="absolute inset-0 bg-violet-600/14" />
                   <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(167,139,250,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
+                  {!reduce && (
+                    <span className="focus-roam absolute z-20 h-10 w-10">
+                      <MagnifierGlass />
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -161,6 +223,11 @@ export function DualViewportLoader({
                       />
                       <div className="absolute inset-0 bg-violet-600/14" />
                       <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(167,139,250,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
+                      {!reduce && (
+                        <span className="focus-roam absolute z-20 h-7 w-7">
+                          <MagnifierGlass />
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -172,6 +239,9 @@ export function DualViewportLoader({
               </div>
             </div>
           </div>
+        </div>
+            </div>
+          </motion.div>
         </div>
       </div>
 
