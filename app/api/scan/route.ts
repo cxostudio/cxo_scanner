@@ -199,6 +199,40 @@ const ScanRequestSchema = z.object({
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
+ * Runs `worker` over every item with at most `limit` in flight at once.
+ * Each item is processed independently (no shared mutable state), so results
+ * are identical to a sequential loop — only wall-clock time changes. Rejections
+ * are swallowed per-item (workers already push their own error results), matching
+ * the previous per-rule try/catch behaviour.
+ */
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  const max = Math.max(1, Math.min(limit, items.length))
+  let cursor = 0
+  const runners: Promise<void>[] = []
+  for (let i = 0; i < max; i += 1) {
+    runners.push(
+      (async () => {
+        for (;;) {
+          const index = cursor
+          cursor += 1
+          if (index >= items.length) return
+          try {
+            await worker(items[index]!)
+          } catch {
+            // Worker owns its own error handling / result push; ignore here.
+          }
+        }
+      })(),
+    )
+  }
+  await Promise.all(runners)
+}
+
+/**
  * Fetch fallback has no computed styles. Infer common Tailwind / Shopify patterns where
  * the thumbnail strip is only shown from sm/md/lg up (hidden on phone).
  */
@@ -6497,6 +6531,13 @@ export async function POST(request: NextRequest) {
     // Site already loaded above, now process all rules efficiently
     const results: ScanResult[] = []
     const BATCH_SIZE = 10 // Increased for faster processing
+    // Max rule evaluations in flight at once within a batch. Rules are
+    // independent, so this only affects speed, not results. Kept conservative
+    // to stay well within OpenRouter rate limits. Override via env if needed.
+    const RULE_CONCURRENCY = Math.max(
+      1,
+      Number.parseInt(process.env.SCAN_RULE_CONCURRENCY || '6', 10) || 6,
+    )
 
     // Split rules into batches
     const batches: Rule[][] = []
@@ -6531,18 +6572,11 @@ export async function POST(request: NextRequest) {
       const batch = batches[batchIndex]
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} rules`)
 
-      // Process rules in current batch with minimal delay
-      for (const rule of batch) {
-        // Minimal delay only for rate limiting
-        const now = Date.now()
-        if (lastRequestTime > 0) {
-          const timeSinceLastRequest = now - lastRequestTime
-          if (timeSinceLastRequest < MIN_DELAY_BETWEEN_REQUESTS) {
-            const waitTime = MIN_DELAY_BETWEEN_REQUESTS - timeSinceLastRequest
-            await sleep(waitTime)
-          }
-        }
-        lastRequestTime = Date.now()
+      // Process rules in current batch concurrently (bounded). Each rule is
+      // evaluated independently with deterministic settings (temperature 0,
+      // seed 42), so running them in parallel yields identical pass/fail
+      // results — only the wall-clock time changes.
+      await runWithConcurrency(batch, RULE_CONCURRENCY, async (rule) => {
 
         const ruleText = `${rule.title} ${rule.description}`.toLowerCase()
         const isFooterSocialRule =
@@ -6586,7 +6620,7 @@ export async function POST(request: NextRequest) {
               reason: formatUserFriendlyRuleResult(rule, detResult.passed, detResult.reason),
             }),
           )
-          continue
+          return
         }
 
         // Deterministic guard for video testimonials:
@@ -6640,7 +6674,7 @@ export async function POST(request: NextRequest) {
               }),
             )
           }
-          continue
+          return
         }
 
         // Using OpenRouter with Gemini model. Override via OPENROUTER_MODEL in .env.local (e.g. google/gemini-2.5-flash-lite)
@@ -8867,7 +8901,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           // Update last request time even on error to prevent rapid retries
           lastRequestTime = Date.now()
         }
-      }
+      })
 
       // Log batch completion
       console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${activeRules.length}`)
@@ -8877,6 +8911,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
         await sleep(300)
       }
     }
+
+    // Concurrent evaluation can complete rules out of order; restore the
+    // original rule order so the returned/displayed list is identical to the
+    // previous sequential behaviour.
+    const ruleOrderIndex = new Map(activeRules.map((r, i) => [r.id, i]))
+    results.sort(
+      (a, b) =>
+        (ruleOrderIndex.get(a.ruleId) ?? 0) - (ruleOrderIndex.get(b.ruleId) ?? 0),
+    )
 
     // Always return screenshot (even if null) so frontend can handle it
     // Log screenshot status for debugging Vercel issues
