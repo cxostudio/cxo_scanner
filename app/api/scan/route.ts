@@ -1325,6 +1325,83 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
+      // ── Speed: block analytics/ads/session-replay network requests, and track
+      //    in-flight requests so settle waits can finish early on network-quiet.
+      //    ONLY pure tracking hosts are aborted; review widgets, chat, newsletter
+      //    forms, video embeds, social embeds, CDNs and fonts all load normally, so
+      //    no rule loses content it reads. Falls back cleanly if interception fails.
+      const BLOCKED_TRACKER_HOSTS = [
+        'google-analytics.com', 'googletagmanager.com', 'analytics.google.com',
+        'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+        'hotjar.com', 'clarity.ms', 'fullstory.com', 'mouseflow.com',
+        'luckyorange.com', 'luckyorange.net', 'mixpanel.com', 'cdn.mxpnl.com',
+        'amplitude.com', 'segment.com', 'segment.io', 'heapanalytics.com',
+        'criteo.com', 'criteo.net', 'taboola.com', 'outbrain.com', 'bat.bing.com',
+        'ct.pinterest.com', 'analytics.tiktok.com', 'sc-static.net',
+        'tr.snapchat.com', 'static.ads-twitter.com', 'analytics.twitter.com',
+        'connect.facebook.net',
+      ]
+      const isBlockedTrackerRequest = (reqUrl: string): boolean => {
+        let host = ''
+        try {
+          host = new URL(reqUrl).hostname.toLowerCase()
+        } catch {
+          return false
+        }
+        if (BLOCKED_TRACKER_HOSTS.some((h) => host === h || host.endsWith('.' + h))) return true
+        if (/facebook\.com\/tr(\/|\?|$)/i.test(reqUrl)) return true // FB pixel only, not embeds
+        return false
+      }
+      let inFlightRequests = 0
+      let interceptionActive = false
+      try {
+        await page.setRequestInterception(true)
+        page.on('request', (req) => {
+          try {
+            if (isBlockedTrackerRequest(req.url())) {
+              req.abort()
+              return
+            }
+            inFlightRequests++
+            req.continue()
+          } catch {
+            try {
+              req.continue()
+            } catch {
+              /* request already handled */
+            }
+          }
+        })
+        const markSettled = () => {
+          if (inFlightRequests > 0) inFlightRequests--
+        }
+        page.on('requestfinished', markSettled)
+        page.on('requestfailed', markSettled)
+        interceptionActive = true
+      } catch (interceptErr) {
+        console.warn('Request interception unavailable; continuing without it:', interceptErr)
+      }
+      // Resolve once the network has had no in-flight requests for `quietMs`, but
+      // never wait longer than `capMs` (the original fixed settle time). When
+      // interception is off we keep the full fixed wait so behavior is unchanged.
+      const waitForNetworkQuiet = async (capMs: number, quietMs = 500): Promise<void> => {
+        if (!interceptionActive) {
+          await new Promise((r) => setTimeout(r, capMs))
+          return
+        }
+        const start = Date.now()
+        let quietSince = 0
+        while (Date.now() - start < capMs) {
+          if (inFlightRequests <= 0) {
+            if (quietSince === 0) quietSince = Date.now()
+            if (Date.now() - quietSince >= quietMs) return
+          } else {
+            quietSince = 0
+          }
+          await new Promise((r) => setTimeout(r, 50))
+        }
+      }
+
       // Navigate using domcontentloaded first.
       // Some ecommerce pages keep background requests open, making networkidle0 unreliable.
       await page.goto(validUrl, {
@@ -1340,12 +1417,12 @@ export async function POST(request: NextRequest) {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
       const hydrationSettleMs = process.env.VERCEL ? 1100 : 850
-      await new Promise((r) => setTimeout(r, hydrationSettleMs))
+      await waitForNetworkQuiet(hydrationSettleMs)
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
       const settleMs = getSettleDelayMs()
-      await new Promise((r) => setTimeout(r, settleMs))
+      await waitForNetworkQuiet(settleMs)
       console.log('Page fully loaded and scrolled; DOM stable for snapshot')
 
       // Optional debug log (legacy)
