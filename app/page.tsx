@@ -1109,27 +1109,12 @@ export default function Home() {
       });
       void streamPromise.catch((e) => console.error("Preview stream:", e));
 
-      // ✅ Website screenshot — start immediately, non-blocking. Runs alongside the
-      //    scan and the preview stream instead of waiting for the preview gate.
-      (async () => {
-        try {
-          const res = await fetch("/api/screenshot", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: validUrl }),
-          });
-
-          if (!res.ok) return;
-
-          const data = await res.json();
-          if (data?.screenshot) {
-            setWebsiteScreenshot(data.screenshot);
-            sessionStorage.setItem("lastScreenshot", data.screenshot);
-          }
-        } catch (err) {
-          console.warn("Screenshot  failed:", err);
-        }
-      })();
+      // Website screenshot is no longer captured separately here. /api/scan already
+      // returns a screenshot (handled in processBatches) that populates the same
+      // setWebsiteScreenshot state + sessionStorage 'lastScreenshot'. Dropping the
+      // extra /api/screenshot call removes one redundant full-page Puppeteer capture
+      // per scan; the results page prefers the preview image anyway and falls back to
+      // this same 'lastScreenshot' value.
 
       // Main scan: POST /api/scan per batch, then /api/scan/combine. Fires
       // immediately — in parallel with the preview stream and screenshot capture
