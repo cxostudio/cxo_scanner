@@ -9,6 +9,7 @@ import { toast } from 'react-toastify'
 import SelectButton from './components/SelectButton'
 import emailjs from '@emailjs/browser'
 import { DualViewportLoader, type InstantPreviewHint } from './components/DualViewportLoader';
+import { detectPageTypeFromUrl } from '@/lib/conversionCheckpoints/pageType';
 import { QuadrantScanSequence } from './components/QuadrantScanSequence';
 
 
@@ -889,9 +890,11 @@ export default function Home() {
         validUrl = `https://${validUrl}`
       }
 
-      // ✅ Rules filtered on the server by `url` (detected page type + Airtable Page Type IDs)
+      // ✅ Rules depend only on page type — request by `pageType` so all domains' homepages
+      //    (product / category / other) share ONE 3-day browser cache entry, not one per URL.
+      const pageTypeKey = detectPageTypeFromUrl(validUrl)
       const cpRes = await fetch(
-        `/api/conversion-checkpoints?url=${encodeURIComponent(validUrl)}`,
+        `/api/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}`,
       )
       const cpRaw = await cpRes.text()
       if (!cpRes.ok) {

@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
-import { filterCheckpointsByUrl } from '@/lib/conversionCheckpoints/filterByUrlPageType'
+import {
+  filterCheckpointsByUrl,
+  filterCheckpointsByPageType,
+} from '@/lib/conversionCheckpoints/filterByUrlPageType'
+import { isUrlPageType } from '@/lib/conversionCheckpoints/pageType'
 
-/** Airtable fetches use `cache: 'no-store'` — must not run during static generation. */
 export const dynamic = 'force-dynamic'
+
+/**
+ * How long a browser may reuse a scanned URL's rule set before refetching (default 3 days).
+ * Sent as a `Cache-Control: private, max-age=…` header so repeat scans skip the network, and a
+ * browser Hard Reload / "Empty Cache and Hard Reload" bypasses it and creates a fresh cache.
+ * localStorage would NOT respond to hard reload — the HTTP cache is what that menu clears.
+ */
+const CHECKPOINTS_BROWSER_CACHE_SECONDS = (() => {
+  const n = parseInt(process.env.CHECKPOINTS_BROWSER_CACHE_SECONDS ?? '', 10)
+  return Number.isFinite(n) && n >= 0 ? n : 3 * 24 * 60 * 60
+})()
 
 /**
  * Proxies Airtable using server-only env vars (API_KEY must not be exposed to the client).
@@ -24,8 +38,21 @@ export async function GET(request: NextRequest) {
     let rules = result.rules
     let filterMeta: Record<string, unknown> = {}
 
+    // Preferred: `?pageType=` — the rules only depend on page type, so keying by it lets every
+    // domain's homepage/product/category/other share ONE browser cache entry (not one per URL).
+    const rawPageType = request.nextUrl.searchParams.get('pageType')?.trim()
     const rawUrl = request.nextUrl.searchParams.get('url')?.trim()
-    if (rawUrl) {
+    if (rawPageType && isUrlPageType(rawPageType)) {
+      const filtered = filterCheckpointsByPageType(records, rules, rawPageType)
+      records = filtered.records
+      rules = filtered.rules
+      filterMeta = {
+        detectedPageType: filtered.pageType,
+        requiredPageTypeIds: filtered.requiredPageTypeIds,
+        filteredRulesCount: filtered.filteredCount,
+        filterUsedFallback: filtered.usedFallback,
+      }
+    } else if (rawUrl) {
       let normalized = rawUrl
       if (!/^https?:\/\//i.test(normalized)) {
         normalized = `https://${normalized}`
@@ -55,7 +82,7 @@ export async function GET(request: NextRequest) {
       ...filterMeta,
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       requestedIds: result.requestedIds,
       foundCount: result.foundCount,
       notFoundIds: result.notFoundIds,
@@ -63,6 +90,12 @@ export async function GET(request: NextRequest) {
       rules,
       ...filterMeta,
     })
+    // Browser-side cache: reuse this URL's rules for N days; hard reload bypasses it.
+    response.headers.set(
+      'Cache-Control',
+      `private, max-age=${CHECKPOINTS_BROWSER_CACHE_SECONDS}`,
+    )
+    return response
   } catch (err) {
     console.error('[conversion-checkpoints]', err)
     return NextResponse.json(
