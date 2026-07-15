@@ -8951,7 +8951,7 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
             }),
           )
         }
-      })
+      }
 
     // Drive all rules through a bounded-concurrency pool so the AI calls issue in
     // parallel (previously one sequential await per rule). Each worker pulls the
