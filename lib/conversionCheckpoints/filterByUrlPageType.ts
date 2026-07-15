@@ -3,8 +3,10 @@
  */
 
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 
-export type UrlPageType = 'homepage' | 'product' | 'category' | 'other'
+export { detectPageTypeFromUrl }
+export type { UrlPageType }
 
 const GENERAL_PAGE_TYPE_ID = 'reclgdsv5ric0dkku'
 const HOME_PAGE_TYPE_ID = 'rectbairzlgei24hg'
@@ -15,41 +17,6 @@ type AirtableRecord = { id: string; createdTime?: string; fields?: Record<string
 
 function normalizeId(id: string): string {
   return id.trim().toLowerCase()
-}
-
-export function detectPageTypeFromUrl(url: string): UrlPageType {
-  try {
-    const parsed = new URL(url)
-    const path = parsed.pathname.toLowerCase()
-    const cleanPath = path.replace(/^\/|\/$/g, '')
-    const segments = cleanPath ? cleanPath.split('/') : []
-
-    if (segments.length === 0) return 'homepage'
-
-    const localeRegex = /^[a-z]{2}(-[a-z]{2,3})?$/i
-    if (segments.length === 1 && localeRegex.test(segments[0])) return 'homepage'
-
-    const productPatterns = ['product', 'products', 'item', 'p', 'dp', 'gp', 'sku', 'buy']
-    const hasProductKeyword = segments.some((segment) => productPatterns.includes(segment))
-    const hasAmazonASIN = segments.some((segment) => /^[a-z0-9]{10}$/i.test(segment))
-    if (hasProductKeyword || hasAmazonASIN) return 'product'
-
-    const categoryPatterns = [
-      'category',
-      'categories',
-      'collection',
-      'collections',
-      'catalog',
-      'shop',
-      'store',
-    ]
-    const hasCategoryKeyword = segments.some((segment) => categoryPatterns.includes(segment))
-    if (hasCategoryKeyword) return 'category'
-
-    return 'other'
-  } catch {
-    return 'other'
-  }
 }
 
 export function getRequiredPageTypeIds(pageType: UrlPageType): string[] {
@@ -75,6 +42,15 @@ export function ruleMatchesPageTypes(record: AirtableRecord, requiredIds: string
   return requiredIds.some((id) => ruleTypes.has(id))
 }
 
+type CheckpointFilterResult = {
+  pageType: UrlPageType
+  requiredPageTypeIds: string[]
+  records: AirtableRecord[]
+  rules: ScanRule[]
+  filteredCount: number
+  usedFallback: boolean
+}
+
 /**
  * Returns filtered rules + records; if filter would remove everything, returns original rules/records.
  */
@@ -82,15 +58,19 @@ export function filterCheckpointsByUrl(
   records: AirtableRecord[],
   rules: ScanRule[],
   targetUrl: string,
-): {
-  pageType: UrlPageType
-  requiredPageTypeIds: string[]
-  records: AirtableRecord[]
-  rules: ScanRule[]
-  filteredCount: number
-  usedFallback: boolean
-} {
-  const pageType = detectPageTypeFromUrl(targetUrl)
+): CheckpointFilterResult {
+  return filterCheckpointsByPageType(records, rules, detectPageTypeFromUrl(targetUrl))
+}
+
+/**
+ * Same filtering as `filterCheckpointsByUrl` but keyed by a page type directly — used by the
+ * `?pageType=` cache-shared endpoint so every domain's homepage/product/etc. reuses one result.
+ */
+export function filterCheckpointsByPageType(
+  records: AirtableRecord[],
+  rules: ScanRule[],
+  pageType: UrlPageType,
+): CheckpointFilterResult {
   const requiredPageTypeIds = getRequiredPageTypeIds(pageType)
 
   const recordById = new Map(records.map((r) => [r.id, r]))

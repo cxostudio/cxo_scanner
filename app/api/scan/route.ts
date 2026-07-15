@@ -1359,6 +1359,83 @@ export async function POST(request: NextRequest) {
       await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
+      // ── Speed: block analytics/ads/session-replay network requests, and track
+      //    in-flight requests so settle waits can finish early on network-quiet.
+      //    ONLY pure tracking hosts are aborted; review widgets, chat, newsletter
+      //    forms, video embeds, social embeds, CDNs and fonts all load normally, so
+      //    no rule loses content it reads. Falls back cleanly if interception fails.
+      const BLOCKED_TRACKER_HOSTS = [
+        'google-analytics.com', 'googletagmanager.com', 'analytics.google.com',
+        'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+        'hotjar.com', 'clarity.ms', 'fullstory.com', 'mouseflow.com',
+        'luckyorange.com', 'luckyorange.net', 'mixpanel.com', 'cdn.mxpnl.com',
+        'amplitude.com', 'segment.com', 'segment.io', 'heapanalytics.com',
+        'criteo.com', 'criteo.net', 'taboola.com', 'outbrain.com', 'bat.bing.com',
+        'ct.pinterest.com', 'analytics.tiktok.com', 'sc-static.net',
+        'tr.snapchat.com', 'static.ads-twitter.com', 'analytics.twitter.com',
+        'connect.facebook.net',
+      ]
+      const isBlockedTrackerRequest = (reqUrl: string): boolean => {
+        let host = ''
+        try {
+          host = new URL(reqUrl).hostname.toLowerCase()
+        } catch {
+          return false
+        }
+        if (BLOCKED_TRACKER_HOSTS.some((h) => host === h || host.endsWith('.' + h))) return true
+        if (/facebook\.com\/tr(\/|\?|$)/i.test(reqUrl)) return true // FB pixel only, not embeds
+        return false
+      }
+      let inFlightRequests = 0
+      let interceptionActive = false
+      try {
+        await page.setRequestInterception(true)
+        page.on('request', (req) => {
+          try {
+            if (isBlockedTrackerRequest(req.url())) {
+              req.abort()
+              return
+            }
+            inFlightRequests++
+            req.continue()
+          } catch {
+            try {
+              req.continue()
+            } catch {
+              /* request already handled */
+            }
+          }
+        })
+        const markSettled = () => {
+          if (inFlightRequests > 0) inFlightRequests--
+        }
+        page.on('requestfinished', markSettled)
+        page.on('requestfailed', markSettled)
+        interceptionActive = true
+      } catch (interceptErr) {
+        console.warn('Request interception unavailable; continuing without it:', interceptErr)
+      }
+      // Resolve once the network has had no in-flight requests for `quietMs`, but
+      // never wait longer than `capMs` (the original fixed settle time). When
+      // interception is off we keep the full fixed wait so behavior is unchanged.
+      const waitForNetworkQuiet = async (capMs: number, quietMs = 500): Promise<void> => {
+        if (!interceptionActive) {
+          await new Promise((r) => setTimeout(r, capMs))
+          return
+        }
+        const start = Date.now()
+        let quietSince = 0
+        while (Date.now() - start < capMs) {
+          if (inFlightRequests <= 0) {
+            if (quietSince === 0) quietSince = Date.now()
+            if (Date.now() - quietSince >= quietMs) return
+          } else {
+            quietSince = 0
+          }
+          await new Promise((r) => setTimeout(r, 50))
+        }
+      }
+
       // Navigate using domcontentloaded first.
       // Some ecommerce pages keep background requests open, making networkidle0 unreliable.
       await page.goto(validUrl, {
@@ -1374,12 +1451,12 @@ export async function POST(request: NextRequest) {
         // Continue even if complete state times out; many storefronts keep loading beacons.
       }
       const hydrationSettleMs = process.env.VERCEL ? 1100 : 850
-      await new Promise((r) => setTimeout(r, hydrationSettleMs))
+      await waitForNetworkQuiet(hydrationSettleMs)
       console.log('Page JS/CSS fully hydrated; DOM ready for rule scanning')
       // Full page load: scroll gradually to bottom so lazy-loaded content is triggered
       await scrollPageToBottom(page)
       const settleMs = getSettleDelayMs()
-      await new Promise((r) => setTimeout(r, settleMs))
+      await waitForNetworkQuiet(settleMs)
       console.log('Page fully loaded and scrolled; DOM stable for snapshot')
 
       // Optional debug log (legacy)
@@ -6530,22 +6607,8 @@ export async function POST(request: NextRequest) {
     // Process all rules in optimized batches - no timeout concerns
     // Site already loaded above, now process all rules efficiently
     const results: ScanResult[] = []
-    const BATCH_SIZE = 10 // Increased for faster processing
-    // Max rule evaluations in flight at once within a batch. Rules are
-    // independent, so this only affects speed, not results. Kept conservative
-    // to stay well within OpenRouter rate limits. Override via env if needed.
-    const RULE_CONCURRENCY = Math.max(
-      1,
-      Number.parseInt(process.env.SCAN_RULE_CONCURRENCY || '6', 10) || 6,
-    )
 
-    // Split rules into batches
-    const batches: Rule[][] = []
-    for (let i = 0; i < activeRules.length; i += BATCH_SIZE) {
-      batches.push(activeRules.slice(i, i + BATCH_SIZE))
-    }
-
-    console.log(`Processing ${activeRules.length} rules in ${batches.length} batches of ${BATCH_SIZE}`)
+    console.log(`Processing ${activeRules.length} rules with parallel AI evaluation...`)
     console.log('Website already loaded, now processing all rules...')
 
     // Before-and-after rule: only evaluate imagery when visual transformation is plausibly expected (strict).
@@ -6554,9 +6617,6 @@ export async function POST(request: NextRequest) {
       validUrl
     )
 
-    // Minimal delay for API rate limiting only
-    const MIN_DELAY_BETWEEN_REQUESTS = 100 // Reduced to 100ms for faster processing
-    let lastRequestTime = 0
 
     // System prompt from skills file (skills/my-skill/SKILL.md)
     let systemPrompt: string
@@ -6567,16 +6627,12 @@ export async function POST(request: NextRequest) {
       systemPrompt = 'You are an expert website rule checker. Output only valid JSON: {"passed": true|false, "reason": "..."}. Be specific, human readable, actionable. Reason under 400 characters, only about the given rule.'
     }
 
-    // Process each batch sequentially
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex]
-      console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} rules`)
-
-      // Process rules in current batch concurrently (bounded). Each rule is
-      // evaluated independently with deterministic settings (temperature 0,
-      // seed 42), so running them in parallel yields identical pass/fail
-      // results — only the wall-clock time changes.
-      await runWithConcurrency(batch, RULE_CONCURRENCY, async (rule) => {
+    // Evaluate every rule with bounded concurrency so the per-rule AI calls run
+    // in parallel instead of one-at-a-time. Each rule pushes exactly one result;
+    // results are re-sorted to the original rule order after the pool drains.
+    // Override the concurrency with SCAN_AI_CONCURRENCY (default 5).
+    const AI_CONCURRENCY = Math.max(1, parseInt(process.env.SCAN_AI_CONCURRENCY || '', 10) || 5)
+    const runRule = async (rule: Rule): Promise<void> => {
 
         const ruleText = `${rule.title} ${rule.description}`.toLowerCase()
         const isFooterSocialRule =
@@ -8861,9 +8917,6 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
           console.log(`[Rule ${rule.id}] Result: passed=${result.passed}, reason preview: ${result.reason.substring(0, 50)}...`)
 
           results.push(result)
-
-          // Update last request time after successful API call
-          lastRequestTime = Date.now()
         } catch (error) {
           let errorMessage = 'Unknown error occurred'
 
@@ -8897,20 +8950,27 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
               reason: formatUserFriendlyRuleResult(rule, false, `Error: ${errorMessage}`),
             }),
           )
-
-          // Update last request time even on error to prevent rapid retries
-          lastRequestTime = Date.now()
         }
       })
 
-      // Log batch completion
-      console.log(`Batch ${batchIndex + 1}/${batches.length} completed. Total results: ${results.length}/${activeRules.length}`)
-
-      // Wait 300ms between batches (except after last batch) - minimal delay for speed
-      if (batchIndex < batches.length - 1) {
-        await sleep(300)
+    // Drive all rules through a bounded-concurrency pool so the AI calls issue in
+    // parallel (previously one sequential await per rule). Each worker pulls the
+    // next rule index until the list is exhausted.
+    let ruleCursor = 0
+    const runWorker = async (): Promise<void> => {
+      while (ruleCursor < activeRules.length) {
+        const idx = ruleCursor++
+        await runRule(activeRules[idx])
       }
     }
+    const workerCount = Math.min(AI_CONCURRENCY, Math.max(1, activeRules.length))
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
+
+    // Results were pushed in completion order; restore the original rule order so
+    // the response is identical to the previous sequential behavior.
+    const ruleOrder = new Map(activeRules.map((r, i) => [r.id, i] as const))
+    results.sort((a, b) => (ruleOrder.get(a.ruleId) ?? 0) - (ruleOrder.get(b.ruleId) ?? 0))
+    console.log(`All ${activeRules.length} rules evaluated (concurrency ${workerCount}). Total results: ${results.length}`)
 
     // Concurrent evaluation can complete rules out of order; restore the
     // original rule order so the returned/displayed list is identical to the

@@ -3,6 +3,8 @@
  * Field names match typical Airtable columns (override via env if yours differ).
  */
 
+import checkpointsSnapshot from './checkpoints.snapshot.json'
+
 export type ScanRule = {
   id: string
   title: string
@@ -303,10 +305,103 @@ export type GetCheckpointRulesResult =
     }
   | { ok: false; status: number; body: unknown }
 
+/** Shape of the committed snapshot (lib/conversionCheckpoints/checkpoints.snapshot.json). */
+export type CheckpointRulesSnapshot = {
+  generatedAt: string | null
+  requestedIds: string[]
+  foundCount: number
+  notFoundIds: string[]
+  records: AirtableSingleRecord[]
+  rules: ScanRule[]
+}
+
+type CheckpointRulesOk = Extract<GetCheckpointRulesResult, { ok: true }>
+
 /**
- * Loads Airtable rows and maps them to scan rules (title = Conversion Checkpoint, description = Required Actions).
+ * In-memory "fresh from Airtable" cache, populated by the refresh endpoint / button.
+ * When present and not expired it wins over the committed snapshot; otherwise scans fall
+ * back to the snapshot (zero network). Empting it (the button) reverts to the snapshot until
+ * the next refresh. Note: on serverless this lives per-instance.
+ */
+let liveCache: { data: CheckpointRulesOk; at: number } | null = null
+
+const DEFAULT_CACHE_TTL_MS = 60 * 60_000 // 1h; override with CHECKPOINTS_CACHE_TTL_MS
+
+function cacheTtlMs(): number {
+  const n = parseInt(process.env.CHECKPOINTS_CACHE_TTL_MS ?? '', 10)
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_CACHE_TTL_MS
+}
+
+/** The committed snapshot mapped to a result, or null when it hasn't been populated yet. */
+function snapshotResult(): CheckpointRulesOk | null {
+  const snapshot = checkpointsSnapshot as unknown as CheckpointRulesSnapshot
+  if (!snapshot || !Array.isArray(snapshot.rules) || snapshot.rules.length === 0) return null
+  return {
+    ok: true,
+    requestedIds: snapshot.requestedIds ?? [...TARGET_CHECKPOINT_RECORD_IDS],
+    foundCount: snapshot.foundCount ?? snapshot.records.length,
+    notFoundIds: snapshot.notFoundIds ?? [],
+    records: snapshot.records ?? [],
+    rules: snapshot.rules,
+  }
+}
+
+/** Store a fresh Airtable pull as the active cache (called by the refresh endpoint). */
+export function setCheckpointRulesCache(data: CheckpointRulesOk): void {
+  liveCache = { data, at: Date.now() }
+}
+
+/** "Empty cache" — drop the in-memory copy so reads revert to the committed snapshot. */
+export function clearCheckpointRulesCache(): void {
+  liveCache = null
+}
+
+/** Status for the admin UI: is there a live cache, how old, how many rules, snapshot date. */
+export function getCheckpointRulesCacheInfo(): {
+  source: 'live-cache' | 'snapshot' | 'empty'
+  cached: boolean
+  ageMs: number | null
+  ttlMs: number
+  rulesCount: number
+  snapshotGeneratedAt: string | null
+} {
+  const ttl = cacheTtlMs()
+  const snapshot = checkpointsSnapshot as unknown as CheckpointRulesSnapshot
+  const fresh = liveCache && Date.now() - liveCache.at < ttl
+  return {
+    source: fresh ? 'live-cache' : snapshotResult() ? 'snapshot' : 'empty',
+    cached: !!fresh,
+    ageMs: liveCache ? Date.now() - liveCache.at : null,
+    ttlMs: ttl,
+    rulesCount: fresh ? liveCache!.data.rules.length : (snapshotResult()?.rules.length ?? 0),
+    snapshotGeneratedAt: snapshot?.generatedAt ?? null,
+  }
+}
+
+/**
+ * Preferred entry point for all runtime reads (checkpoints route, scan route, analyze_image).
+ *
+ * Serves, in order: (1) the in-memory live cache if a refresh populated it and it's not expired,
+ * (2) the committed snapshot (ZERO network — the fast default), (3) a live Airtable fetch only
+ * when the snapshot hasn't been populated yet. Scans therefore never wait on Airtable on the
+ * critical path. Refresh the live cache via `POST /api/checkpoints/refresh` (the "Empty cache"
+ * button), which re-pulls Airtable so edits go live without a redeploy.
  */
 export async function getConversionCheckpointRules(): Promise<GetCheckpointRulesResult> {
+  if (liveCache && Date.now() - liveCache.at < cacheTtlMs()) {
+    return liveCache.data
+  }
+  const snapshot = snapshotResult()
+  if (snapshot) return snapshot
+  // Snapshot not populated yet — preserve previous behavior by fetching live from Airtable.
+  return fetchCheckpointRulesFromAirtable()
+}
+
+/**
+ * Loads Airtable rows and maps them to scan rules (title = Conversion Checkpoint, description = Required Actions).
+ * Live network fetch — use `getConversionCheckpointRules()` for runtime reads; this is for the refresh route.
+ */
+export async function fetchCheckpointRulesFromAirtable(): Promise<GetCheckpointRulesResult> {
   try {
     const apiUrl =
       process.env.API_URL ??
