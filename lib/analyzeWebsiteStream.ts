@@ -16,12 +16,15 @@ const READY_COMPLETE_WAIT_MS = 3_500
 const POST_NAV_SETTLE_MS = 450
 
 const DESKTOP_VIEWPORT = { width: 1280, height: 800, deviceScaleFactor: 1 as const }
+/**
+ * Width/height only — do NOT set isMobile/hasTouch on the shared desktop page.
+ * Those flags change client-hints and often re-trigger Cloudflare after the mobile shot,
+ * which used to poison the later quadrant thumbnails.
+ */
 const MOBILE_VIEWPORT = {
   width: 390,
   height: 844,
   deviceScaleFactor: 2 as const,
-  isMobile: true,
-  hasTouch: true,
 }
 /** Brief CSS reflow after viewport swap — no second navigation (keeps speed + CF cookies). */
 const MOBILE_REFLOW_MS = 220
@@ -223,9 +226,116 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           previewMobile: desktopDataUrl,
         })
 
-        // Mobile preview: reuse the cleared desktop session (viewport-only).
-        // Avoids a second navigation with a Safari UA that triggers Cloudflare on Vercel.
-        // Does not touch /api/scan rule evaluation — this stream is preview/quadrants only.
+        const finalUrl = page.url()
+        fallbackFinalUrl = finalUrl
+
+        let wasRedirected = false
+        try {
+          const requestedHost = new URL(url).hostname.replace(/^www\./, '')
+          const finalHost = new URL(finalUrl).hostname.replace(/^www\./, '')
+          wasRedirected = requestedHost !== finalHost
+        } catch {
+          // ignore
+        }
+
+        // Capture quadrants BEFORE any mobile viewport swap on this shared page.
+        // Mobile resize previously re-triggered Cloudflare and poisoned these bottom thumbs.
+        await retryOnContextReset(page, 'desktop pre-quadrant scroll reset', async () => {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0)
+          })
+        })
+
+        if (await pageLooksLikeCloudflareChallenge(page)) {
+          console.warn(
+            '[analyzeWebsiteStream] Cloudflare before quadrants; recovering with same-session reload',
+          )
+          await gotoForPreview(page, url)
+          await page.setViewport(DESKTOP_VIEWPORT)
+          await retryOnContextReset(page, 'post-cf-recovery scroll reset', async () => {
+            await page.evaluate(() => {
+              window.scrollTo(0, 0)
+              document.documentElement.scrollTop = 0
+              document.body.scrollTop = 0
+            })
+          })
+        }
+
+        const { height, innerHeight } = await retryOnContextReset(
+          page,
+          'measure viewport/document height',
+          async () =>
+            await page.evaluate(() => ({
+              height: document.documentElement.scrollHeight,
+              innerHeight: window.innerHeight,
+            })),
+        )
+
+        const safeH = Math.max(4, height)
+        const vh = Math.max(1, innerHeight)
+        const maxScrollY = Math.max(0, safeH - vh)
+
+        // Viewport screenshots at scroll positions (clip with fullPage:false only captures the
+        // viewport, so y offsets beyond the viewport produced blank tiles before).
+        const scrollTargets = [0, 1, 2, 3].map((i) => {
+          if (maxScrollY <= 0) return 0
+          if (i === 3) return maxScrollY
+          return Math.min(Math.floor((i * maxScrollY) / 3), maxScrollY)
+        })
+
+        const quadrants: string[] = []
+        let lastGoodQuadrant: string | null = null
+        for (let i = 0; i < 4; i++) {
+          try {
+            if (await pageLooksLikeCloudflareChallenge(page)) {
+              console.warn(
+                `[analyzeWebsiteStream] Cloudflare during quadrant ${i + 1}; using last good frame`,
+              )
+              quadrants.push(lastGoodQuadrant || desktopDataUrl)
+              continue
+            }
+            const targetY = scrollTargets[i] ?? 0
+            await retryOnContextReset(page, `quadrant ${i + 1} scroll`, async () => {
+              await page.evaluate((y) => {
+                window.scrollTo(0, y)
+                document.documentElement.scrollTop = y
+                document.body.scrollTop = y
+              }, targetY)
+            })
+            await sleep(280)
+            if (await pageLooksLikeCloudflareChallenge(page)) {
+              console.warn(
+                `[analyzeWebsiteStream] Cloudflare after quadrant ${i + 1} scroll; using last good frame`,
+              )
+              quadrants.push(lastGoodQuadrant || desktopDataUrl)
+              continue
+            }
+            const b64 = (await retryOnContextReset(page, `quadrant ${i + 1} screenshot`, async () => {
+              return (await page.screenshot({
+                type: 'png',
+                encoding: 'base64',
+                fullPage: false,
+              })) as string
+            })) as string
+            const dataUrl = `data:image/png;base64,${b64}`
+            quadrants.push(dataUrl)
+            lastGoodQuadrant = dataUrl
+          } catch (quadrantErr) {
+            console.warn(`[analyzeWebsiteStream] quadrant ${i + 1} capture failed:`, quadrantErr)
+            quadrants.push(lastGoodQuadrant || desktopDataUrl)
+          }
+        }
+
+        await retryOnContextReset(page, 'desktop post-quadrant scroll reset', async () => {
+          await page.evaluate(() => {
+            window.scrollTo(0, 0)
+            document.documentElement.scrollTop = 0
+            document.body.scrollTop = 0
+          })
+        })
+
+        // Mobile preview last: same session, width-only resize (no Safari UA / no isMobile flags).
+        // Preview-only path — does not affect /api/scan rules.
         let mobileDataUrl = desktopDataUrl
         try {
           await page.setViewport(MOBILE_VIEWPORT)
@@ -256,17 +366,8 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
         } catch (mobileErr) {
           console.warn('Mobile viewport capture failed, using desktop frame for both:', mobileErr)
         } finally {
-          // Restore desktop viewport so quadrant captures stay desktop (rules/speed unchanged).
           try {
             await page.setViewport(DESKTOP_VIEWPORT)
-            await retryOnContextReset(page, 'restore desktop viewport scroll', async () => {
-              await page.evaluate(() => {
-                window.scrollTo(0, 0)
-                document.documentElement.scrollTop = 0
-                document.body.scrollTop = 0
-              })
-            })
-            await sleep(80)
           } catch (restoreErr) {
             console.warn('[analyzeWebsiteStream] failed to restore desktop viewport:', restoreErr)
           }
@@ -277,83 +378,6 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           previewMobile: mobileDataUrl,
         })
         fallbackMobileDataUrl = mobileDataUrl
-
-        await retryOnContextReset(page, 'desktop pre-quadrant scroll reset', async () => {
-          await page.evaluate(() => {
-            window.scrollTo(0, 0)
-          })
-        })
-
-        const finalUrl = page.url()
-        fallbackFinalUrl = finalUrl
-
-        let wasRedirected = false
-        try {
-          const requestedHost = new URL(url).hostname.replace(/^www\./, '')
-          const finalHost = new URL(finalUrl).hostname.replace(/^www\./, '')
-          wasRedirected = requestedHost !== finalHost
-        } catch {
-          // ignore
-        }
-
-        const { height, innerHeight } = await retryOnContextReset(
-          page,
-          'measure viewport/document height',
-          async () =>
-            await page.evaluate(() => ({
-              height: document.documentElement.scrollHeight,
-              innerHeight: window.innerHeight,
-            })),
-        )
-
-        const safeH = Math.max(4, height)
-        const vh = Math.max(1, innerHeight)
-        const maxScrollY = Math.max(0, safeH - vh)
-
-        // Viewport screenshots at scroll positions (clip with fullPage:false only captures the
-        // viewport, so y offsets beyond the viewport produced blank tiles before).
-        const scrollTargets = [0, 1, 2, 3].map((i) => {
-          if (maxScrollY <= 0) return 0
-          if (i === 3) return maxScrollY
-          return Math.min(Math.floor((i * maxScrollY) / 3), maxScrollY)
-        })
-
-        const quadrants: string[] = []
-        let lastGoodQuadrant: string | null = null
-        for (let i = 0; i < 4; i++) {
-          try {
-            const targetY = scrollTargets[i] ?? 0
-            await retryOnContextReset(page, `quadrant ${i + 1} scroll`, async () => {
-              await page.evaluate((y) => {
-                window.scrollTo(0, y)
-                document.documentElement.scrollTop = y
-                document.body.scrollTop = y
-              }, targetY)
-            })
-            await sleep(280)
-            const b64 = (await retryOnContextReset(page, `quadrant ${i + 1} screenshot`, async () => {
-              return (await page.screenshot({
-                type: 'png',
-                encoding: 'base64',
-                fullPage: false,
-              })) as string
-            })) as string
-            const dataUrl = `data:image/png;base64,${b64}`
-            quadrants.push(dataUrl)
-            lastGoodQuadrant = dataUrl
-          } catch (quadrantErr) {
-            console.warn(`[analyzeWebsiteStream] quadrant ${i + 1} capture failed:`, quadrantErr)
-            quadrants.push(lastGoodQuadrant || desktopDataUrl)
-          }
-        }
-
-        await retryOnContextReset(page, 'desktop post-quadrant scroll reset', async () => {
-          await page.evaluate(() => {
-            window.scrollTo(0, 0)
-            document.documentElement.scrollTop = 0
-            document.body.scrollTop = 0
-          })
-        })
 
         await browser.close()
         browser = null
