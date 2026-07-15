@@ -318,18 +318,29 @@ export type CheckpointRulesSnapshot = {
 type CheckpointRulesOk = Extract<GetCheckpointRulesResult, { ok: true }>
 
 /**
- * In-memory "fresh from Airtable" cache, populated by the refresh endpoint / button.
- * When present and not expired it wins over the committed snapshot; otherwise scans fall
- * back to the snapshot (zero network). Empting it (the button) reverts to the snapshot until
- * the next refresh. Note: on serverless this lives per-instance.
+ * In-memory "fresh from Airtable" cache, populated by the refresh endpoint / button / auto-refresh.
+ * When present and within TTL it is served with zero network. When stale/missing we re-pull
+ * Airtable so Example attachment URLs stay fresh. Snapshot is only
+ * a fallback if Airtable is unreachable. Note: on serverless this lives per-instance.
  */
 let liveCache: { data: CheckpointRulesOk; at: number } | null = null
 
-const DEFAULT_CACHE_TTL_MS = 60 * 60_000 // 1h; override with CHECKPOINTS_CACHE_TTL_MS
+/** Dedupes concurrent refreshes (scan + checkpoints route + cron) on the same instance. */
+let refreshInFlight: Promise<CheckpointRulesOk | null> | null = null
+
+/**
+ * How long the in-memory Airtable cache is treated as fresh before a re-pull.
+ * Default 1 day; override with CHECKPOINTS_CACHE_TTL_MS (ms).
+ */
+const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60_000 // 1 day
 
 function cacheTtlMs(): number {
   const n = parseInt(process.env.CHECKPOINTS_CACHE_TTL_MS ?? '', 10)
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_CACHE_TTL_MS
+}
+
+function isLiveCacheFresh(): boolean {
+  return !!liveCache && Date.now() - liveCache.at < cacheTtlMs()
 }
 
 /** The committed snapshot mapped to a result, or null when it hasn't been populated yet. */
@@ -356,6 +367,51 @@ export function clearCheckpointRulesCache(): void {
   liveCache = null
 }
 
+/**
+ * Pull latest rules + example attachment URLs from Airtable and replace the live cache on success.
+ * Does not clear existing cache first (keeps stale-but-usable data if the pull fails).
+ */
+export async function refreshCheckpointRulesCache(): Promise<{
+  ok: true
+  data: CheckpointRulesOk
+} | {
+  ok: false
+  status: number
+  body: unknown
+}> {
+  const result = await fetchCheckpointRulesFromAirtable()
+  if (!result.ok) return result
+  setCheckpointRulesCache(result)
+  return { ok: true, data: result }
+}
+
+/**
+ * Ensure live cache is fresh. Concurrent callers share one in-flight Airtable pull.
+ * On pull failure returns prior live cache if any, else null (caller may use snapshot).
+ */
+async function ensureFreshLiveCache(): Promise<CheckpointRulesOk | null> {
+  if (isLiveCacheFresh()) return liveCache!.data
+
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const refreshed = await refreshCheckpointRulesCache()
+        if (refreshed.ok) return refreshed.data
+        console.warn(
+          '[getConversionCheckpointRules] Airtable refresh failed; keeping prior cache/snapshot',
+          refreshed.status,
+          refreshed.body,
+        )
+        return liveCache?.data ?? null
+      } finally {
+        refreshInFlight = null
+      }
+    })()
+  }
+
+  return refreshInFlight
+}
+
 /** Status for the admin UI: is there a live cache, how old, how many rules, snapshot date. */
 export function getCheckpointRulesCacheInfo(): {
   source: 'live-cache' | 'snapshot' | 'empty'
@@ -367,7 +423,7 @@ export function getCheckpointRulesCacheInfo(): {
 } {
   const ttl = cacheTtlMs()
   const snapshot = checkpointsSnapshot as unknown as CheckpointRulesSnapshot
-  const fresh = liveCache && Date.now() - liveCache.at < ttl
+  const fresh = isLiveCacheFresh()
   return {
     source: fresh ? 'live-cache' : snapshotResult() ? 'snapshot' : 'empty',
     cached: !!fresh,
@@ -381,19 +437,22 @@ export function getCheckpointRulesCacheInfo(): {
 /**
  * Preferred entry point for all runtime reads (checkpoints route, scan route, analyze_image).
  *
- * Serves, in order: (1) the in-memory live cache if a refresh populated it and it's not expired,
- * (2) the committed snapshot (ZERO network — the fast default), (3) a live Airtable fetch only
- * when the snapshot hasn't been populated yet. Scans therefore never wait on Airtable on the
- * critical path. Refresh the live cache via `POST /api/checkpoints/refresh` (the "Empty cache"
- * button), which re-pulls Airtable so edits go live without a redeploy.
+ * (1) In-memory live cache when younger than TTL (fast path — no network).
+ * (2) Otherwise refresh from Airtable so Example image URLs stay signed/valid, then serve that.
+ * (3) If Airtable fails: prior live cache if any, else committed snapshot (rules still work;
+ *     example images in the snapshot may be expired).
  */
 export async function getConversionCheckpointRules(): Promise<GetCheckpointRulesResult> {
-  if (liveCache && Date.now() - liveCache.at < cacheTtlMs()) {
-    return liveCache.data
+  if (isLiveCacheFresh()) {
+    return liveCache!.data
   }
+
+  const refreshed = await ensureFreshLiveCache()
+  if (refreshed) return refreshed
+
   const snapshot = snapshotResult()
   if (snapshot) return snapshot
-  // Snapshot not populated yet — preserve previous behavior by fetching live from Airtable.
+
   return fetchCheckpointRulesFromAirtable()
 }
 

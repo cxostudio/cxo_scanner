@@ -9,14 +9,12 @@ import { isUrlPageType } from '@/lib/conversionCheckpoints/pageType'
 export const dynamic = 'force-dynamic'
 
 /**
- * How long a browser may reuse a scanned URL's rule set before refetching (default 3 days).
- * Sent as a `Cache-Control: private, max-age=…` header so repeat scans skip the network, and a
- * browser Hard Reload / "Empty Cache and Hard Reload" bypasses it and creates a fresh cache.
- * localStorage would NOT respond to hard reload — the HTTP cache is what that menu clears.
+ * Browser cache for the checkpoints JSON (titles/descriptions used before a scan).
+ * Default 1 day (aligned with live cache TTL); override with CHECKPOINTS_BROWSER_CACHE_SECONDS.
  */
 const CHECKPOINTS_BROWSER_CACHE_SECONDS = (() => {
   const n = parseInt(process.env.CHECKPOINTS_BROWSER_CACHE_SECONDS ?? '', 10)
-  return Number.isFinite(n) && n >= 0 ? n : 3 * 24 * 60 * 60
+  return Number.isFinite(n) && n >= 0 ? n : 24 * 60 * 60
 })()
 
 /**
