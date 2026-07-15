@@ -15,7 +15,48 @@ const PREVIEW_GOTO_RETRY_MS = 45_000
 const READY_COMPLETE_WAIT_MS = 3_500
 const POST_NAV_SETTLE_MS = 450
 
+const DESKTOP_VIEWPORT = { width: 1280, height: 800, deviceScaleFactor: 1 as const }
+const MOBILE_VIEWPORT = {
+  width: 390,
+  height: 844,
+  deviceScaleFactor: 2 as const,
+  isMobile: true,
+  hasTouch: true,
+}
+/** Brief CSS reflow after viewport swap — no second navigation (keeps speed + CF cookies). */
+const MOBILE_REFLOW_MS = 220
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * Detect Cloudflare interstitial / managed challenge HTML.
+ * Challenge pages often return HTTP 200, so we must inspect DOM rather than status.
+ */
+async function pageLooksLikeCloudflareChallenge(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const title = (document.title || '').toLowerCase()
+      const bodyText = (document.body?.innerText || '').slice(0, 2500).toLowerCase()
+      const html = (document.documentElement?.innerHTML || '').slice(0, 8000).toLowerCase()
+      return (
+        title.includes('just a moment') ||
+        title.includes('attention required') ||
+        title.includes('security verification') ||
+        bodyText.includes('performing security verification') ||
+        bodyText.includes('checking your browser') ||
+        bodyText.includes('verify you are human') ||
+        bodyText.includes('verify you are not a bot') ||
+        bodyText.includes('this website uses a security service to protect against malicious bots') ||
+        html.includes('cf-challenge') ||
+        html.includes('challenge-platform') ||
+        html.includes('cdn-cgi/challenge') ||
+        html.includes('cf-browser-verification')
+      )
+    })
+  } catch {
+    return false
+  }
+}
 
 function isExecutionContextResetError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error ?? '')
@@ -142,7 +183,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
 
         await page.setDefaultNavigationTimeout(90_000)
         await page.setDefaultTimeout(90_000)
-        await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
+        await page.setViewport(DESKTOP_VIEWPORT)
 
         await page.setExtraHTTPHeaders({
           'Accept-Language': 'en-GB,en;q=0.9',
@@ -162,7 +203,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
             document.body.scrollTop = 0
           })
         })
-        await new Promise((r) => setTimeout(r, 100))
+        await sleep(100)
 
         const desktopB64 = (await retryOnContextReset(page, 'desktop screenshot', async () => {
           return (await page.screenshot({
@@ -182,51 +223,52 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
           previewMobile: desktopDataUrl,
         })
 
+        // Mobile preview: reuse the cleared desktop session (viewport-only).
+        // Avoids a second navigation with a Safari UA that triggers Cloudflare on Vercel.
+        // Does not touch /api/scan rule evaluation — this stream is preview/quadrants only.
         let mobileDataUrl = desktopDataUrl
-        let mobilePage: Awaited<ReturnType<typeof browser.newPage>> | null = null
         try {
-          mobilePage = await browser.newPage()
-          await mobilePage.setViewport({
-            width: 390,
-            height: 844,
-            deviceScaleFactor: 2,
-            isMobile: true,
-            hasTouch: true,
-          })
-          await mobilePage.setUserAgent(
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-          )
-          await mobilePage.setExtraHTTPHeaders({
-            'Accept-Language': 'en-GB,en;q=0.9',
-          })
-          await mobilePage.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true })
-          })
-          await mobilePage.setDefaultNavigationTimeout(90_000)
-          await mobilePage.setDefaultTimeout(90_000)
-          await gotoForPreview(mobilePage, url)
-          await retryOnContextReset(mobilePage, 'mobile scroll reset', async () => {
-            await mobilePage!.evaluate(() => {
+          await page.setViewport(MOBILE_VIEWPORT)
+          await retryOnContextReset(page, 'mobile scroll reset', async () => {
+            await page.evaluate(() => {
               window.scrollTo(0, 0)
               document.documentElement.scrollTop = 0
               document.body.scrollTop = 0
             })
           })
-          await new Promise((r) => setTimeout(r, 140))
-          const mobB64 = (await retryOnContextReset(mobilePage, 'mobile screenshot', async () => {
-            return (await mobilePage!.screenshot({
-              type: 'jpeg',
-              quality: 82,
-              encoding: 'base64',
-              fullPage: false,
+          await sleep(MOBILE_REFLOW_MS)
+
+          if (await pageLooksLikeCloudflareChallenge(page)) {
+            console.warn(
+              '[analyzeWebsiteStream] Cloudflare challenge in mobile viewport; keeping desktop frame for mobile preview',
+            )
+          } else {
+            const mobB64 = (await retryOnContextReset(page, 'mobile screenshot', async () => {
+              return (await page.screenshot({
+                type: 'jpeg',
+                quality: 82,
+                encoding: 'base64',
+                fullPage: false,
+              })) as string
             })) as string
-          })) as string
-          mobileDataUrl = `data:image/jpeg;base64,${mobB64}`
+            mobileDataUrl = `data:image/jpeg;base64,${mobB64}`
+          }
         } catch (mobileErr) {
           console.warn('Mobile viewport capture failed, using desktop frame for both:', mobileErr)
         } finally {
-          if (mobilePage) {
-            await mobilePage.close().catch(() => undefined)
+          // Restore desktop viewport so quadrant captures stay desktop (rules/speed unchanged).
+          try {
+            await page.setViewport(DESKTOP_VIEWPORT)
+            await retryOnContextReset(page, 'restore desktop viewport scroll', async () => {
+              await page.evaluate(() => {
+                window.scrollTo(0, 0)
+                document.documentElement.scrollTop = 0
+                document.body.scrollTop = 0
+              })
+            })
+            await sleep(80)
+          } catch (restoreErr) {
+            console.warn('[analyzeWebsiteStream] failed to restore desktop viewport:', restoreErr)
           }
         }
 
