@@ -54,3 +54,51 @@ export async function launchPuppeteerBrowser(options?: {
     args: baseArgs,
   })
 }
+
+/**
+ * Reuse one Chromium process across requests in the same (warm) server process,
+ * launching on first use and relaunching automatically if it has disconnected.
+ * Saves the per-scan cold-start. Callers MUST isolate each scan with its own
+ * `browser.createBrowserContext()` so cookies/cache/storage never leak between
+ * scans — behaviour stays identical to a fresh browser, only startup is skipped.
+ */
+let sharedBrowserPromise: Promise<LaunchedBrowser> | null = null
+
+export async function getReusableBrowser(options?: {
+  windowSizeArg?: string
+}): Promise<LaunchedBrowser> {
+  if (sharedBrowserPromise) {
+    try {
+      const existing = await sharedBrowserPromise
+      if (existing.connected) return existing
+    } catch {
+      // Previous launch failed; fall through and relaunch a fresh instance.
+    }
+    sharedBrowserPromise = null
+  }
+
+  const launching = launchPuppeteerBrowser(options)
+  sharedBrowserPromise = launching
+  try {
+    return await launching
+  } catch (err) {
+    if (sharedBrowserPromise === launching) sharedBrowserPromise = null
+    throw err
+  }
+}
+
+/**
+ * Close and forget the shared browser. Call this only after the browser has
+ * actually crashed/disconnected so the next scan gets a clean instance.
+ */
+export async function disposeSharedBrowser(): Promise<void> {
+  const pending = sharedBrowserPromise
+  sharedBrowserPromise = null
+  if (!pending) return
+  try {
+    const browser = await pending
+    await browser.close()
+  } catch {
+    // Already gone; nothing to clean up.
+  }
+}
