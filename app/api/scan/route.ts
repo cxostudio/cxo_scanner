@@ -50,7 +50,7 @@ import {
   buildCheckpointPresentationMap,
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
-import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { getReusableBrowser, disposeSharedBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export const runtime = 'nodejs'
 /** Full scan runs one Puppeteer session + all rules; needs headroom beyond Hobby 60s cap. */
@@ -889,110 +889,6 @@ function detectVideoHtmlMarkersFromHtml(rawHtml: string): {
   return { strong: hasUgcLike && hasPlayableLike, hits }
 }
 
-async function detectStickyCtaRuntime(validUrl: string): Promise<{
-  desktopSticky: boolean
-  mobileSticky: boolean
-  desktopEvidence: string
-  mobileEvidence: string
-  anySticky: boolean
-} | null> {
-  let localBrowser: any = null
-  try {
-    localBrowser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1280,800' })
-    const page = await localBrowser.newPage()
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    await page.goto(validUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    try {
-      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 })
-    } catch {
-      // Some storefronts never become fully idle due to tracking beacons.
-    }
-    await sleep(1000)
-
-    const evalStickyOnce = async (): Promise<{ found: boolean; evidence: string }> => {
-      return page.evaluate(() => {
-        const ATC_KEYWORDS = ['add to cart', 'add to bag', 'buy now', 'shop now', 'purchase']
-        const isCtaText = (t: string) => ATC_KEYWORDS.some(k => t.toLowerCase().includes(k))
-        const isVisible = (el: HTMLElement) => {
-          const cs = window.getComputedStyle(el)
-          if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false
-          const rect = el.getBoundingClientRect()
-          return rect.width >= 30 && rect.height >= 10
-        }
-        const isBottomBar = (el: HTMLElement) => {
-          const rect = el.getBoundingClientRect()
-          return rect.width >= window.innerWidth * 0.45 &&
-            rect.height >= 30 && rect.height <= 260 &&
-            (rect.top >= window.innerHeight * 0.52 || rect.bottom >= window.innerHeight * 0.9)
-        }
-
-        const controls = Array.from(document.querySelectorAll(
-          'button, a, [role="button"], input[type="submit"], input[type="button"]'
-        )) as HTMLElement[]
-
-        for (const el of controls) {
-          const text = (el.textContent || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim()
-          if (!isCtaText(text) || !isVisible(el)) continue
-
-          let cur: HTMLElement | null = el
-          while (cur && cur !== document.body) {
-            const cs = window.getComputedStyle(cur)
-            if ((cs.position === 'fixed' || cs.position === 'sticky') && isBottomBar(cur) && isVisible(cur)) {
-              return { found: true, evidence: `"${text.slice(0, 40)}" in ${cs.position} bottom bar` }
-            }
-            cur = cur.parentElement
-          }
-        }
-
-        const all = Array.from(document.querySelectorAll('*')) as HTMLElement[]
-        for (const el of all) {
-          const cs = window.getComputedStyle(el)
-          if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
-          if (!isVisible(el) || !isBottomBar(el)) continue
-          const text = (el.innerText || el.textContent || '').trim()
-          if (isCtaText(text)) return { found: true, evidence: `Bottom ${cs.position} bar with ATC text` }
-        }
-
-        return { found: false, evidence: '' }
-      })
-    }
-
-    const evalPersistentSticky = async (): Promise<{ found: boolean; evidence: string }> => {
-      await page.evaluate(() => window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.35)))
-      await sleep(500)
-      const first = await evalStickyOnce()
-      await page.evaluate(() => window.scrollBy(0, Math.round(window.innerHeight * 0.45)))
-      await sleep(400)
-      const second = await evalStickyOnce()
-      if (first.found && second.found) {
-        return { found: true, evidence: `${first.evidence}; persisted after scroll` }
-      }
-      return { found: false, evidence: first.found ? 'Candidate not persistent after scroll' : '' }
-    }
-
-    await page.setViewport({ width: 1280, height: 800 })
-    const desktopResult = await evalPersistentSticky()
-
-    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true })
-    await sleep(900)
-    const mobileResult = await evalPersistentSticky()
-
-    return {
-      desktopSticky: desktopResult.found,
-      mobileSticky: mobileResult.found,
-      desktopEvidence: desktopResult.evidence,
-      mobileEvidence: mobileResult.evidence,
-      anySticky: desktopResult.found || mobileResult.found,
-    }
-  } catch {
-    return null
-  } finally {
-    if (localBrowser) {
-      try { await localBrowser.close() } catch { /* ignore */ }
-    }
-  }
-}
-
 // Strip HTML to plain text so AI gets readable content (used when Puppeteer fails and we fall back to fetch)
 function htmlToPlainText(html: string): string {
   let text = html
@@ -1211,6 +1107,9 @@ export async function POST(request: NextRequest) {
     // we only send a shortened version to the AI model.
     let fullVisibleText = ''
     let browser
+    // Per-scan isolated context on the reused browser (fresh cookies/cache/storage).
+    // Hoisted so the catch/finally can close it; the page stays a const inside the try.
+    let browserContext: import('puppeteer-core').BrowserContext | null = null
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
@@ -1317,9 +1216,12 @@ export async function POST(request: NextRequest) {
     let footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
     let footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
     try {
-      browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
+      browser = await getReusableBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
-      const page = await browser.newPage()
+      // Isolate this scan in its own browser context so it can never inherit
+      // cookies/cache/storage from a previous scan on the reused browser.
+      browserContext = await browser.createBrowserContext()
+      const page = await browserContext.newPage()
 
       // Set viewport and user agent
       await page.setViewport({ width: 1920, height: 1080 })
@@ -1437,7 +1339,9 @@ export async function POST(request: NextRequest) {
           await page.evaluate(() => {
             window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.3))
           })
-          await new Promise((r) => setTimeout(r, 1000))
+          // Let JS-rendered sections paint, but finish early once the network is
+          // quiet — capped at the original 1000ms so slow pages are unchanged.
+          await waitForNetworkQuiet(1000)
           console.log('Capturing early screenshot for Vercel safety...')
           const earlyScreenshotBuffer = await page.screenshot({
             type: 'jpeg',
@@ -1462,7 +1366,9 @@ export async function POST(request: NextRequest) {
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
       const colorWaitMs = process.env.VERCEL ? 1100 : 700
-      await new Promise(r => setTimeout(r, colorWaitMs))
+      // Return early on a quiet network, but never wait longer than colorWaitMs —
+      // the original fixed buffer is preserved as the ceiling for slow pages.
+      await waitForNetworkQuiet(colorWaitMs)
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
@@ -6069,8 +5975,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Close browser
-      await browser.close()
+      // Close this scan's context (frees its pages) but keep the browser warm for reuse.
+      if (browserContext) {
+        try { await browserContext.close() } catch { /* ignore */ }
+        browserContext = null
+      }
 
       // Final limit to ensure we stay under token budget
       if (websiteContent.length > 6000) {
@@ -6083,13 +5992,18 @@ export async function POST(request: NextRequest) {
         console.log('Using early screenshot after error (Vercel timeout protection)')
       }
 
-      // Close browser if it's still open
-      if (browser) {
+      // Free this scan's context. Keep the reused browser unless it actually
+      // crashed — only then drop it so the next scan gets a clean instance.
+      if (browserContext) {
         try {
-          await browser.close()
+          await browserContext.close()
         } catch (closeError) {
           // Ignore close errors
         }
+        browserContext = null
+      }
+      if (browser && !browser.connected) {
+        await disposeSharedBrowser()
       }
 
       // Fallback to simple fetch if Puppeteer fails - use plain text so AI sees full page content, not raw HTML
@@ -6197,17 +6111,8 @@ export async function POST(request: NextRequest) {
 
         // Fallback sticky CTA detection must be conservative.
         // HTML-only fallback cannot prove runtime sticky behavior; require strong evidence.
-        const needsStickyCheckInFallback = false
-        const stickyContainerMarker = /(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)/i
-        const stickyPositionMarker = /(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)/i
-        const stickyCtaTextMarker = /(add to cart|add to bag|buy now|purchase)/i
-        let runtimeStickyFromFallback: Awaited<ReturnType<typeof detectStickyCtaRuntime>> = null
-        if (needsStickyCheckInFallback) {
-          runtimeStickyFromFallback = await detectStickyCtaRuntime(validUrl)
-        }
-        if (runtimeStickyFromFallback) {
-          stickyCTAContext = runtimeStickyFromFallback
-        }
+        // (A runtime second-browser check existed here but was permanently disabled;
+        // it has been removed so no scan can spawn a second Puppeteer page load.)
         const strongStickySnippetMatch = rawHtml.match(
           /(cxo-studio__sticky-atc|sticky-atc|add-to-cart-bar|mobile-cart|bottom-bar|floating[-_\s]?cart)[\s\S]{0,700}(position\s*:\s*(?:fixed|sticky)|bottom\s*:\s*0)[\s\S]{0,700}(add to cart|add to bag|buy now|purchase)/i
         ) || rawHtml.match(
@@ -6236,18 +6141,6 @@ export async function POST(request: NextRequest) {
               mobileEvidence: 'Fallback duplicated Add to cart cluster with mobile purchase signals',
               anySticky: true,
             }
-          }
-        } else if (needsStickyCheckInFallback && !stickyCTAContext) {
-          // Prevent false positives from class-name-only markers.
-          const weakMarkerFound = stickyContainerMarker.test(rawHtml) || stickyPositionMarker.test(rawHtml) || stickyCtaTextMarker.test(rawHtml)
-          stickyCTAContext = {
-            desktopSticky: false,
-            mobileSticky: false,
-            desktopEvidence: '',
-            mobileEvidence: weakMarkerFound
-              ? 'HTML fallback found weak sticky markers but no strong proof of a persistent sticky CTA'
-              : 'No sticky CTA evidence in HTML fallback',
-            anySticky: false,
           }
         }
 
