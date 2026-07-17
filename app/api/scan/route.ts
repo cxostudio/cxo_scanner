@@ -199,6 +199,40 @@ const ScanRequestSchema = z.object({
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
+ * Runs `worker` over every item with at most `limit` in flight at once.
+ * Each item is processed independently (no shared mutable state), so results
+ * are identical to a sequential loop — only wall-clock time changes. Rejections
+ * are swallowed per-item (workers already push their own error results), matching
+ * the previous per-rule try/catch behaviour.
+ */
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  const max = Math.max(1, Math.min(limit, items.length))
+  let cursor = 0
+  const runners: Promise<void>[] = []
+  for (let i = 0; i < max; i += 1) {
+    runners.push(
+      (async () => {
+        for (;;) {
+          const index = cursor
+          cursor += 1
+          if (index >= items.length) return
+          try {
+            await worker(items[index]!)
+          } catch {
+            // Worker owns its own error handling / result push; ignore here.
+          }
+        }
+      })(),
+    )
+  }
+  await Promise.all(runners)
+}
+
+/**
  * Fetch fallback has no computed styles. Infer common Tailwind / Shopify patterns where
  * the thumbnail strip is only shown from sm/md/lg up (hidden on phone).
  */
@@ -8937,6 +8971,15 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
     const ruleOrder = new Map(activeRules.map((r, i) => [r.id, i] as const))
     results.sort((a, b) => (ruleOrder.get(a.ruleId) ?? 0) - (ruleOrder.get(b.ruleId) ?? 0))
     console.log(`All ${activeRules.length} rules evaluated (concurrency ${workerCount}). Total results: ${results.length}`)
+
+    // Concurrent evaluation can complete rules out of order; restore the
+    // original rule order so the returned/displayed list is identical to the
+    // previous sequential behaviour.
+    const ruleOrderIndex = new Map(activeRules.map((r, i) => [r.id, i]))
+    results.sort(
+      (a, b) =>
+        (ruleOrderIndex.get(a.ruleId) ?? 0) - (ruleOrderIndex.get(b.ruleId) ?? 0),
+    )
 
     // Always return screenshot (even if null) so frontend can handle it
     // Log screenshot status for debugging Vercel issues
