@@ -1086,7 +1086,7 @@ export default function Home() {
       analysisStepRemoveTimeoutsRef.current = [];
       analysisStepRemovalScheduledRef.current = new Set();
 
-      // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay)
+      // One frame so the analyze panel paints before heavy work (avoid extra 200ms delay )
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
 
       let resolvePreviewGate!: () => void;
