@@ -50,7 +50,7 @@ import {
   buildCheckpointPresentationMap,
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
-import { getReusableBrowser, disposeSharedBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export const runtime = 'nodejs'
 /** Full scan runs one Puppeteer session + all rules; needs headroom beyond Hobby 60s cap. */
@@ -1141,9 +1141,6 @@ export async function POST(request: NextRequest) {
     // we only send a shortened version to the AI model.
     let fullVisibleText = ''
     let browser
-    // Per-scan isolated context on the reused browser (fresh cookies/cache/storage).
-    // Hoisted so the catch/finally can close it; the page stays a const inside the try.
-    let browserContext: import('puppeteer-core').BrowserContext | null = null
     let screenshotDataUrl: string | null = null // Screenshot for AI vision analysis
     let earlyScreenshot: string | null = null // Early screenshot to avoid Vercel timeout
     let reviewsSectionScreenshotDataUrl: string | null = null // Close-up of reviews section for video testimonial / customer photos
@@ -1250,19 +1247,12 @@ export async function POST(request: NextRequest) {
     let footerNewsletterSnapshot = emptyFooterNewsletterSnapshot()
     let footerCustomerSupportSnapshot = emptyFooterCustomerSupportSnapshot()
     try {
-      browser = await getReusableBrowser({ windowSizeArg: '--window-size=1920,1080' })
+      browser = await launchPuppeteerBrowser({ windowSizeArg: '--window-size=1920,1080' })
 
-      // Isolate this scan in its own browser context so it can never inherit
-      // cookies/cache/storage from a previous scan on the reused browser.
-      browserContext = await browser.createBrowserContext()
-      const page = await browserContext.newPage()
+      const page = await browser.newPage()
 
-      // Set viewport and user agent.
-      // Render layout at 1920 CSS px (unchanged), but rasterize screenshots at
-      // ~0.67x so the image sent to the AI is ~1280px wide instead of 1920px.
-      // Layout/DOM measurements use CSS pixels, so rule detection is unaffected —
-      // only the per-rule screenshot upload gets smaller/faster.
-      await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 0.67 })
+      // Set viewport and user agent
+      await page.setViewport({ width: 1920, height: 1080 })
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
       // ── Speed: block analytics/ads/session-replay network requests, and track
@@ -1377,15 +1367,13 @@ export async function POST(request: NextRequest) {
           await page.evaluate(() => {
             window.scrollTo(0, Math.floor(document.body.scrollHeight * 0.3))
           })
-          // Let JS-rendered sections paint, but finish early once the network is
-          // quiet — capped at the original 1000ms so slow pages are unchanged.
-          await waitForNetworkQuiet(1000)
+          await new Promise((r) => setTimeout(r, 1000))
           console.log('Capturing early screenshot for Vercel safety...')
           const earlyScreenshotBuffer = await page.screenshot({
             type: 'jpeg',
             fullPage: true,
             encoding: 'base64',
-            quality: 70, // Lower quality = smaller image uploaded with every rule's AI call
+            quality: 75, // Slightly lower quality for faster capture
           }) as string
           earlyScreenshot = `data:image/jpeg;base64,${earlyScreenshotBuffer}`
           console.log('Early screenshot captured successfully')
@@ -1404,9 +1392,7 @@ export async function POST(request: NextRequest) {
 
       // Longer wait on Vercel so CSS/computed styles are stable before color detection (avoids false pure-black)
       const colorWaitMs = process.env.VERCEL ? 1100 : 700
-      // Return early on a quiet network, but never wait longer than colorWaitMs —
-      // the original fixed buffer is preserved as the ceiling for slow pages.
-      await waitForNetworkQuiet(colorWaitMs)
+      await new Promise(r => setTimeout(r, colorWaitMs))
 
       // Get key HTML elements (buttons, links, headings) for CTA detection
       // Sort for consistency - same order every time
@@ -4209,7 +4195,7 @@ export async function POST(request: NextRequest) {
               type: 'jpeg',
               fullPage: true,
               encoding: 'base64',
-              quality: 70,
+              quality: 85,
             }) as string
             screenshotDataUrl = `data:image/jpeg;base64,${screenshot}`
             console.log('Final screenshot captured in JPEG format')
@@ -6013,11 +5999,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Close this scan's context (frees its pages) but keep the browser warm for reuse.
-      if (browserContext) {
-        try { await browserContext.close() } catch { /* ignore */ }
-        browserContext = null
-      }
+      // Close browser
+      await browser.close()
 
       // Final limit to ensure we stay under token budget
       if (websiteContent.length > 6000) {
@@ -6030,18 +6013,13 @@ export async function POST(request: NextRequest) {
         console.log('Using early screenshot after error (Vercel timeout protection)')
       }
 
-      // Free this scan's context. Keep the reused browser unless it actually
-      // crashed — only then drop it so the next scan gets a clean instance.
-      if (browserContext) {
+      // Close browser if it's still open
+      if (browser) {
         try {
-          await browserContext.close()
+          await browser.close()
         } catch (closeError) {
           // Ignore close errors
         }
-        browserContext = null
-      }
-      if (browser && !browser.connected) {
-        await disposeSharedBrowser()
       }
 
       // Fallback to simple fetch if Puppeteer fails - use plain text so AI sees full page content, not raw HTML

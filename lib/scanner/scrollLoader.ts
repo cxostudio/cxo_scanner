@@ -4,10 +4,8 @@
  */
 
 const SCROLL_STEP_RATIO = 0.4
-/** Shorter steps = faster scroll through long pages (lazy content still loads).
- *  Halved for speed; the post-scroll settle below is the safety net that lets
- *  lazily-fetched content finish loading before we snapshot. */
-const STEP_DELAY_MS = process.env.VERCEL ? 150 : 120
+/** Shorter steps = faster scroll through long pages (lazy content still loads). */
+const STEP_DELAY_MS = process.env.VERCEL ? 300 : 240
 /** Post-scroll settle; lower = faster scans, slightly higher lazy-load miss risk. */
 const SETTLE_AFTER_SCROLL_MS = process.env.VERCEL ? 2000 : 1500
 
