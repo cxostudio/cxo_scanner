@@ -61,6 +61,36 @@ async function pageLooksLikeCloudflareChallenge(page: Page): Promise<boolean> {
   }
 }
 
+/**
+ * Detect any bot-wall / rate-limit / error / empty capture (not just Cloudflare),
+ * e.g. an Envoy "local_rate_limited" body, an access-denied page, or a near-empty
+ * response. When true, the client keeps the logo loading screen instead of
+ * replacing it with the useless block/white screenshot.
+ */
+async function pageLooksBlocked(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => {
+      const text = (document.body?.innerText || '').trim()
+      const lower = text.toLowerCase()
+      const markers = [
+        'local_rate_limited', 'rate limited', 'too many requests',
+        'access denied', 'access to this page has been denied', 'request blocked',
+        'you have been blocked', 'ip address has been blocked', 'forbidden',
+        'are you a robot', 'verify you are human', 'verify you are a human',
+        'captcha', 'checking your browser', 'just a moment',
+        'attention required', 'pardon our interruption', 'unusual traffic',
+        'bot detection', 'ddos protection', 'ray id', 'cf-ray',
+        'enable javascript and cookies', 'please enable javascript',
+        'not available in your', 'this content is not available',
+        'service unavailable', 'temporarily unavailable',
+      ]
+      return text.length < 120 || markers.some((m) => lower.includes(m))
+    })
+  } catch {
+    return false
+  }
+}
+
 function isExecutionContextResetError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error ?? '')
   const lower = msg.toLowerCase()
@@ -219,11 +249,15 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
 
         let desktopDataUrl = `data:image/jpeg;base64,${desktopB64}`
         fallbackDesktopDataUrl = desktopDataUrl
+        // If the capture is a bot-wall / rate-limit / error / empty page, tell the
+        // client so it keeps the logo loading screen instead of showing this shot.
+        const previewBlocked = await pageLooksBlocked(page)
         send(controller, {
           type: 'preview',
           previewDesktop: desktopDataUrl,
           // Immediate mobile placeholder: replaced by real mobile frame below.
           previewMobile: desktopDataUrl,
+          blocked: previewBlocked,
         })
 
         const finalUrl = page.url()

@@ -864,12 +864,21 @@ export default function Home() {
       }
       const decoder = new TextDecoder();
       let buffer = "";
-      const streamState = { complete: null as NdComplete | null };
+      const streamState = { complete: null as NdComplete | null, blocked: false };
       const handleNdjsonLine = (line: string) => {
         if (!line.trim()) return;
         const msg = JSON.parse(line) as Record<string, unknown>;
         if (msg.type === "meta") return;
         if (msg.type === "preview") {
+          if (msg.blocked === true && !streamState.blocked) {
+            streamState.blocked = true;
+            // Preview is blocked — release the gate so the rule scan still proceeds.
+            releaseRuleScanGate();
+          }
+          // When the capture is blocked (bot-wall / rate-limit / error / empty page),
+          // ignore the screenshot frames so the UI stays on the logo loading screen
+          // instead of replacing it with the block/white page.
+          if (streamState.blocked) return;
           if (typeof msg.previewDesktop === "string") {
             setPreviewDesktop(msg.previewDesktop);
             persistScanPreview("scanPreviewDesktop", msg.previewDesktop);
