@@ -52,6 +52,8 @@ export default function ScannerPage() {
   const [visibleCount, setVisibleCount] = useState(8)
   const [desktopPreview, setDesktopPreview] = useState<string | null>(null)
   const [mobilePreview, setMobilePreview] = useState<string | null>(null)
+  /** true when the capture was blocked/errored → show the static placeholder image */
+  const [previewUnavailable, setPreviewUnavailable] = useState<boolean>(false)
   const [showScrollToggle, setShowScrollToggle] = useState(false)
   const [isAtTop, setIsAtTop] = useState(true)
 
@@ -150,6 +152,7 @@ export default function ScannerPage() {
       // Prefer analyze-step preview (top-of-page viewport); batch AI screenshots are often mid-page.
       setDesktopPreview(scanDesktop || lastScreenshot || null)
       setMobilePreview(scanMobile && scanMobile.length > 0 ? scanMobile : null)
+      setPreviewUnavailable(sessionStorage.getItem('previewUnavailable') === '1')
     } catch (error) {
       console.error('Error loading scanner data:', error)
       setResults(null)
@@ -263,7 +266,13 @@ export default function ScannerPage() {
                       </div>
                     </div>
                     <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-100">
-                      {desktopPreview ? (
+                      {previewUnavailable ? (
+                        <img
+                          src="/preview-unavailable.svg"
+                          alt="Live preview unavailable"
+                          className="absolute inset-0 h-full w-full object-cover object-center"
+                        />
+                      ) : desktopPreview ? (
                         <img
                           src={desktopPreview}
                           alt="Desktop view of scanned site"
@@ -291,7 +300,13 @@ export default function ScannerPage() {
                         />
                       </div>
                       <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100 max-h-[420px] overflow-y-scroll hide-scrollbar">
-                        {mobilePreviewSrc ? (
+                        {previewUnavailable ? (
+                          <img
+                            src="/preview-unavailable.svg"
+                            alt="Live preview unavailable"
+                            className="h-full w-full bg-white object-cover object-center"
+                          />
+                        ) : mobilePreviewSrc ? (
                           <img
                             src={mobilePreviewSrc}
                             alt="Mobile view of scanned site"

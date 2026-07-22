@@ -872,6 +872,8 @@ export default function Home() {
         if (msg.type === "preview") {
           if (msg.blocked === true && !streamState.blocked) {
             streamState.blocked = true;
+            // Persist so the /scanner results page can show the static placeholder.
+            try { sessionStorage.setItem("previewUnavailable", "1"); } catch {}
             // Preview is blocked — release the gate so the rule scan still proceeds.
             releaseRuleScanGate();
           }
@@ -924,19 +926,23 @@ export default function Home() {
         }
       }
       const gotComplete = streamState.complete;
-      if (
-        typeof gotComplete?.previewDesktop === "string" &&
-        gotComplete.previewDesktop.length > 0
-      ) {
-        setPreviewDesktop(gotComplete.previewDesktop);
-        persistScanPreview("scanPreviewDesktop", gotComplete.previewDesktop);
-        if (previewLooksReady(gotComplete.previewDesktop))
-          releaseRuleScanGate();
-      }
-      if (typeof gotComplete?.previewMobile === "string") {
-        setPreviewMobile(gotComplete.previewMobile);
-        persistScanPreview("scanPreviewMobile", gotComplete.previewMobile);
-        if (previewLooksReady(gotComplete.previewMobile)) releaseRuleScanGate();
+      // When blocked, don't set/persist the block screenshots — the /scanner page
+      // shows the static placeholder via the previewUnavailable flag instead.
+      if (!streamState.blocked) {
+        if (
+          typeof gotComplete?.previewDesktop === "string" &&
+          gotComplete.previewDesktop.length > 0
+        ) {
+          setPreviewDesktop(gotComplete.previewDesktop);
+          persistScanPreview("scanPreviewDesktop", gotComplete.previewDesktop);
+          if (previewLooksReady(gotComplete.previewDesktop))
+            releaseRuleScanGate();
+        }
+        if (typeof gotComplete?.previewMobile === "string") {
+          setPreviewMobile(gotComplete.previewMobile);
+          persistScanPreview("scanPreviewMobile", gotComplete.previewMobile);
+          if (previewLooksReady(gotComplete.previewMobile)) releaseRuleScanGate();
+        }
       }
       if (gotComplete?.quadrants != null && gotComplete.quadrants.length > 0) {
         setQuadrants(gotComplete.quadrants);
@@ -1080,6 +1086,7 @@ export default function Home() {
       try {
         sessionStorage.removeItem("scanPreviewMobile");
         sessionStorage.removeItem("scanPreviewDesktop");
+        sessionStorage.removeItem("previewUnavailable");
       } catch {
         /* ignore */
       }
