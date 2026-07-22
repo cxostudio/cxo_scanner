@@ -1602,7 +1602,10 @@ export default function Home() {
 
                     <div className="mx-auto mt-[30px] grid w-full min-w-0 max-w-[1400px] gap-5 px-0 max-sm:px-3 sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
                       <div className="flex min-h-0 min-w-0 flex-col">
-                        {isLoading && quadrants.length === 0 && (
+                        {/* Keep the scanning loader on desktop + mobile while the scan
+                            runs and no preview screenshot has appeared yet — even after
+                            quadrants arrive — so the panels never go blank. */}
+                        {isLoading && (quadrants.length === 0 || !previewDesktop) && (
                           <DualViewportLoader
                             align="start"
                             previewDesktop={previewDesktop}
@@ -1630,12 +1633,16 @@ export default function Home() {
                                 {redirectWarning}
                               </div>
                             )}
-                            <QuadrantScanSequence
-                              quadrants={quadrants}
-                              quadrantLabels={quadrantLabels}
-                              previewDesktop={previewDesktop}
-                              previewMobile={previewMobile}
-                            />
+                            {/* Bottom section thumbnails only make sense with a real
+                                screenshot — hide them entirely when none appeared. */}
+                            {previewDesktop && (
+                              <QuadrantScanSequence
+                                quadrants={quadrants}
+                                quadrantLabels={quadrantLabels}
+                                previewDesktop={previewDesktop}
+                                previewMobile={previewMobile}
+                              />
+                            )}
                           </div>
                         )}
                       </div>
