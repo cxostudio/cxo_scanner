@@ -1611,10 +1611,11 @@ export default function Home() {
 
                     <div className="mx-auto mt-[30px] grid w-full min-w-0 max-w-[1400px] gap-5 px-0 max-sm:px-3 sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
                       <div className="flex min-h-0 min-w-0 flex-col">
-                        {/* Keep the scanning loader on desktop + mobile while the scan
-                            runs and no preview screenshot has appeared yet — even after
-                            quadrants arrive — so the panels never go blank. */}
-                        {isLoading && (quadrants.length === 0 || !previewDesktop) && (
+                        {/* Keep the logo loading screen on desktop + mobile whenever no
+                            preview screenshot has appeared (not yet, or the capture was
+                            blocked/errored) — even after quadrants arrive and regardless
+                            of isLoading — so the panels never go blank until redirect. */}
+                        {(quadrants.length === 0 || !previewDesktop) && (
                           <DualViewportLoader
                             align="start"
                             previewDesktop={previewDesktop}
