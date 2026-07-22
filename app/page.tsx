@@ -1619,7 +1619,10 @@ export default function Home() {
                           <DualViewportLoader
                             align="start"
                             previewDesktop={previewDesktop}
-                            previewMobile={previewMobile}
+                            // Keep mobile consistent with desktop: if there's no desktop
+                            // screenshot (blocked/not loaded), don't show a mobile one
+                            // either — both stay on the logo loading screen.
+                            previewMobile={previewDesktop ? previewMobile : null}
                             instantPreview={analyzeInstantPreview}
                             scanning
                             statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
