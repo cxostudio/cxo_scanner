@@ -302,9 +302,9 @@ export default function ScannerPage() {
                       <div className="mx-2 min-h-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-100 max-h-[420px] overflow-y-scroll hide-scrollbar">
                         {previewUnavailable ? (
                           <img
-                            src="/preview-unavailable.svg"
+                            src="/preview-unavailable-mobile.svg"
                             alt="Live preview unavailable"
-                            className="h-full w-full bg-white object-cover object-center"
+                            className="block w-full"
                           />
                         ) : mobilePreviewSrc ? (
                           <img
