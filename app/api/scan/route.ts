@@ -51,6 +51,7 @@ import {
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
 /** Full scan runs one Puppeteer session + all rules; needs headroom beyond Hobby 60s cap. */
@@ -193,6 +194,8 @@ const ScanRequestSchema = z.object({
     .max(100, 'Maximum 100 rules allowed per scan'),
   captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
   iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
+  email: z.string().optional(), // for the per-email daily scan limit
+  scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
 })
 
 // Helper function to sleep/delay
@@ -1048,7 +1051,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId } = validationResult.data
+
+    // Per-email daily scan limit — CHECK ONLY here (block if already at the
+    // limit) so we don't do expensive work for a user who's out of scans.
+    // The scan is COUNTED only when it completes (see registerScan before the
+    // success return below). Defensive: the client also pre-checks via
+    // /api/scan/limit. Fails open if Supabase is unconfigured/unreachable.
+    if (email) {
+      const limit = await checkScanLimit(email)
+      if (!limit.allowed) {
+        return NextResponse.json(
+          {
+            error: `You've reached today's limit of ${limit.limit} scans. Please try again tomorrow.`,
+            code: 'daily_limit_reached',
+          },
+          { status: 429 },
+        )
+      }
+    }
+
     const activeRules = incomingRules
       .filter(isActiveConversionRule)
     const rules = activeRules
@@ -8862,6 +8884,17 @@ FAIL only if the screenshot does not show it AND FREE_SHIPPING_DOM_FOUND=false.
       console.log(`Returning screenshot (length: ${screenshotDataUrl.length} chars)`)
     } else {
       console.warn('No screenshot available to return - this may cause UI issues on Vercel')
+    }
+
+    // Scan completed successfully → COUNT it against the daily quota now.
+    // Deduped by scanId, so batch/retry/fallback requests of the same scan
+    // count once. Only reached on success, so failed scans don't burn a slot.
+    if (email && scanId) {
+      try {
+        await registerScan(email, scanId)
+      } catch (limitErr) {
+        console.warn('[scan] failed to record scan usage (non-fatal):', limitErr)
+      }
     }
 
     return NextResponse.json({

@@ -474,7 +474,10 @@ export default function Home() {
 
   const BATCH_MAX_ATTEMPTS = 2; // initial run + one repeat if any error occurs
 
-  const processBatches = async (batches: BatchData[]) => {
+  const processBatches = async (
+    batches: BatchData[],
+    scanMeta: { email: string; scanId: string },
+  ) => {
     const allResults: ScanResult[] = [];
 
     const progressTotalUnits = Math.max(
@@ -576,6 +579,8 @@ export default function Home() {
               rules: batch.rules,
               // Capture once for preview; doing this every batch increases timeout risk on Vercel.
               captureScreenshot: i === 0,
+              email: scanMeta.email,
+              scanId: scanMeta.scanId,
             }),
           });
 
@@ -672,6 +677,8 @@ export default function Home() {
                     url: batch.url,
                     rules: [rule],
                     captureScreenshot: false,
+                    email: scanMeta.email,
+                    scanId: scanMeta.scanId,
                   }),
                 });
                 if (!singleRes.ok) {
@@ -987,6 +994,34 @@ export default function Home() {
       );
     }
 
+    // One id per scan; shared by every /api/scan request (batches, retries,
+    // fallback) so the daily limit counts a scan once, not per request.
+    const scanId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    // Daily per-email scan-limit gate. If blocked, stop before any scanning
+    // (no AI spend). Fails open if the check itself errors.
+    try {
+      const limitRes = await fetch("/api/scan/limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailTrimmed, scanId }),
+      });
+      if (limitRes.status === 429) {
+        const info = (await limitRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        return setEmailError(
+          info.error ||
+            "You've reached today's scan limit. Please try again tomorrow.",
+        );
+      }
+    } catch (limitErr) {
+      console.warn("Scan limit check failed, allowing scan:", limitErr);
+    }
+
     try {
       setIsStartingScan(true);
 
@@ -1136,7 +1171,7 @@ export default function Home() {
       // immediately — in parallel with the preview stream and screenshot capture
       // above — instead of waiting for the website preview to be ready first.
       const batches = prepareBatches(validUrl, rulesToUse);
-      await processBatches(batches);
+      await processBatches(batches, { email: emailTrimmed, scanId });
 
       // The preview capture ran alongside the scan; make sure its gate has settled
       // (bounded by the 35s timeout) before finishing the analyze UI and redirecting.
