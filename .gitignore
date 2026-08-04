@@ -40,3 +40,9 @@ data/training-data.json
 data/training-data.jsonl
 data/fine-tune-jobs.json
 
+.playwright-mcp
+.agents/
+.claude/
+CLAUDE.md
+package-lock.json
+skills-lock.json

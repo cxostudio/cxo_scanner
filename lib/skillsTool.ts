@@ -1,7 +1,7 @@
 import { tool } from '@openrouter/sdk'
 import { readFileSync, existsSync } from 'fs'
 import path from 'path'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 
 const SKILLS_DIR = path.join(process.cwd(), 'skills')
 

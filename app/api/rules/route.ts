@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
 export const dynamic = 'force-dynamic'

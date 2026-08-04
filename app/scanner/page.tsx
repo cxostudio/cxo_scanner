@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
 import { X, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import type { CheckpointPresentation } from '../components/CheckpointResultBody'
 
@@ -537,12 +537,12 @@ export default function ScannerPage() {
                     className="flex flex-col items-start sm:items-center text-left sm:text-center sm:gap-[21px] gap-[17px]">
                     <span
                         className="inline-block border border-[#E4E4E7] rounded-[7px] px-[7.5px] sm:px-[11px] py-[5px] text-[13.2px] font-semibold text-gray-800 leading-[21px] tracking-[0.42px]">
-                        What's next?
+                        What&apos;s next?
                     </span>
                     <h2
                         className="text-[#09090B] font-bold text-[30px] leading-[48px] tracking-[-1.2px] md:text-[48px] md:leading-[67.2px] md:tracking-[-1.92px] text-left sm:text-center">
-                        You've started the process<br className="hidden sm:block" />
-                        — here's what happens next
+                        You&apos;ve started the process<br className="hidden sm:block" />
+                        — here&apos;s what happens next
                     </h2>
                 </div>
 
@@ -570,7 +570,7 @@ export default function ScannerPage() {
                             Today: Product page audit
                         </h3>
                         <p className="text-[#757575] text-[14.5px] font-normal leading-[25.6px] tracking-[0.48px]">
-                            You've completed a focused CRO audit covering <span className="font-bold">40 product page
+                            You&apos;ve completed a focused CRO audit covering <span className="font-bold">40 product page
                                 checkpoints</span>.
                         </p>
                     </div>

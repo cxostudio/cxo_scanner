@@ -1,14 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    serverComponentsExternalPackages: [
-      "puppeteer",
-      "puppeteer-core",
-      "@sparticuz/chromium",
-      "tesseract.js",
-    ],
-  },
+  serverExternalPackages: [
+    "puppeteer",
+    "puppeteer-core",
+    "@sparticuz/chromium",
+  ],
   onDemandEntries: {
     maxInactiveAge: 50 * 1000,
     pagesBufferLength: 2,

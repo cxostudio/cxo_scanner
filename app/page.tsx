@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Cog } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { toast } from "react-toastify";
 import SelectButton from "./components/SelectButton";
 import emailjs from "@emailjs/browser";
@@ -1363,7 +1363,7 @@ export default function Home() {
                         delay: 0.06,
                       }}
                     >
-                      What's your biggest challenge right now?
+                      What&apos;s your biggest challenge right now?
                     </motion.h2>
                     <div role="radiogroup" aria-label="Biggest challenge">
                       {step1Buttons.map((button, i) => (
@@ -1408,7 +1408,7 @@ export default function Home() {
                         delay: 0.06,
                       }}
                     >
-                      What's your average online revenue?
+                      What&apos;s your average online revenue?
                     </motion.h2>
                     <div
                       className="mt-8"
@@ -1458,11 +1458,11 @@ export default function Home() {
                       }}
                     >
                       <span className="text-[#757575]">
-                        <i>You're almost done!</i>
+                        <i>You&apos;re almost done!</i>
                       </span>
                       <br />
                       <span className="text-[#09090b]">
-                        Let's finish your audit
+                        Let&apos;s finish your audit
                       </span>
                     </motion.h2>
 
