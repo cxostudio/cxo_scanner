@@ -19,7 +19,7 @@ hash; an entry with no commit yet says `pending`.
 
 ### Changed — dependency upgrades (branch: `package_updates`, 2026-08-04)
 
-**Commit:** `pending` — not yet committed; all changes are in the working tree.
+**Commit:** `a063e03`
 
 Major-version moves:
 
