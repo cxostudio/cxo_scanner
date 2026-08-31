@@ -2,8 +2,8 @@ name: Supabase Keep Alive
 
 on:
   schedule:
-    - cron: '0 0 */3 * *'  # Runs every 3 days
-  workflow_dispatch:         # Allows manual run anytime
+    - cron: '0 3 * * 1,4' # Monday & Thursday at 03:00 UTC (08:30 AM IST)
+  workflow_dispatch:
 
 jobs:
   keep-alive:
@@ -11,17 +11,47 @@ jobs:
 
     steps:
       - name: Ping Supabase Database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
         run: |
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/user_progress?limit=1" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          # Remove whitespace and trailing slash from URL
+          URL="$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]' | sed 's:/*$::')"
 
-          echo "Response Code: $RESPONSE"
-
-          if [ "$RESPONSE" -eq 200 ]; then
-            echo "Supabase is alive!"
-          else
-            echo "Something went wrong. Response: $RESPONSE"
+          if [ -z "$URL" ]; then
+            echo "::error::SUPABASE_URL secret is empty"
             exit 1
           fi
+
+          echo "Host: $(printf '%s' "$URL" | sed -E 's#https?://([^/]+).*#\1#')"
+
+          set +e
+
+          RESPONSE=$(curl -sS \
+            --retry 3 \
+            --retry-all-errors \
+            --max-time 30 \
+            -o /dev/null \
+            -w "%{http_code}" \
+            -X GET "$URL/rest/v1/user_progress?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+
+          CURL_EXIT=$?
+
+          set -e
+
+          echo "curl exit: $CURL_EXIT | HTTP: $RESPONSE"
+
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "::error::curl failed (exit $CURL_EXIT)"
+            exit 1
+          fi
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "::error::Unexpected HTTP $RESPONSE"
+            exit 1
+          fi
+
+          echo "Supabase is alive."
