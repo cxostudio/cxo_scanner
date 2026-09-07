@@ -10,49 +10,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Programmatically resume the project using the correct Management API endpoint
-      - name: Programmatically Resume Supabase Project
-        env:
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          if [ -z "$PROJECT_REF" ] || [ -z "$ACCESS_TOKEN" ]; then
-            echo "::error::SUPABASE_PROJECT_REF or SUPABASE_ACCESS_TOKEN secret is missing"
-            exit 1
-          fi
-          echo "Sending activation command to Supabase Project ($PROJECT_REF)..."
-          
-          # FIXED: Swapped 'https://supabase.com' out for the correct API restore endpoint
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://supabase.com" \
-            -H "Authorization: Bearer $ACCESS_TOKEN")
-            
-          echo "Management API Response Code: $STATUS_CODE"
-          
-          if [ "$STATUS_CODE" = "201" ] || [ "$STATUS_CODE" = "200" ]; then
-            echo "Successfully triggered project restoration. Waiting 60 seconds for initialization..."
-            sleep 60
-          elif [ "$STATUS_CODE" = "409" ]; then
-            echo "Project is already active or currently initializing. Proceeding..."
-          else
-            echo "::error::Failed to communicate with Management API (HTTP $STATUS_CODE)"
-            exit 1
-          fi
-
-      # Step 2: Perform the database query validation
       - name: Ping Supabase Database
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
         run: |
           # Remove whitespace and trailing slash from URL
-          URL="$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]' | sed 's:/$::')"
+          URL="$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]' | sed 's:/*$::')"
+
           if [ -z "$URL" ]; then
             echo "::error::SUPABASE_URL secret is empty"
             exit 1
           fi
+
           echo "Host: $(printf '%s' "$URL" | sed -E 's#https?://([^/]+).*#\1#')"
+
           set +e
+
           RESPONSE=$(curl -sS \
             --retry 3 \
             --retry-all-errors \
@@ -62,15 +37,21 @@ jobs:
             -X GET "$URL/rest/v1/user_progress?select=id&limit=1" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+
           CURL_EXIT=$?
+
           set -e
+
           echo "curl exit: $CURL_EXIT | HTTP: $RESPONSE"
+
           if [ "$CURL_EXIT" -ne 0 ]; then
             echo "::error::curl failed (exit $CURL_EXIT)"
             exit 1
           fi
+
           if [ "$RESPONSE" != "200" ]; then
             echo "::error::Unexpected HTTP $RESPONSE"
             exit 1
           fi
-          echo "Supabase is alive and verified."
+
+          echo "Supabase is alive."
