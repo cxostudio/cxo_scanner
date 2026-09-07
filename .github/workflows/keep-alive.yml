@@ -2,7 +2,7 @@ name: Supabase Keep Alive
 
 on:
   schedule:
-    - cron: '*/5 * * * *'   # TESTING ONLY — change to '0 3 * * *' when verified
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
