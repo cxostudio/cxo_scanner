@@ -232,7 +232,7 @@ export default function Home() {
     "Analyzing user experience and interface",
     "Analyzing content and copy effectiveness",
     "Generating conversion recommendations",
-    "Finalizing your audit report",
+    "Finalizing your scan report",
   ] as const;
   const ANALYSIS_STEP_COUNT = analysisSteps.length;
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
@@ -1488,7 +1488,7 @@ export default function Home() {
                       </span>
                       <br />
                       <span className="text-[#09090b]">
-                        Let's finish your audit
+                        Let's finish your scan
                       </span>
                     </motion.h2>
 
