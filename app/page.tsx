@@ -232,7 +232,7 @@ export default function Home() {
     "Analyzing user experience and interface",
     "Analyzing content and copy effectiveness",
     "Generating conversion recommendations",
-    "Finalizing your audit report",
+    "Finalizing your scan report",
   ] as const;
   const ANALYSIS_STEP_COUNT = analysisSteps.length;
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
@@ -971,7 +971,35 @@ export default function Home() {
     }
   };
 
+  // Arriving from the cxo.studio onboarding (/start): the questions were already
+  // answered there, so prefill URL, email and revenue, jump to the last step and
+  // start the scan right away when `start=1`.
+  const [autoStart, setAutoStart] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const u = q.get("url");
+    const e = q.get("email");
+    if (!u || !e) return;
+    setWebsiteUrl(u);
+    setEmail(e);
+    setSelectedChallenge(q.get("challenge") || "Both");
+    const rev = q.get("revenue");
+    if (rev) setSelectedRevenue(rev);
+    setCurrentStep(3);
+    if (q.get("start") === "1") setAutoStart(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+  useEffect(() => {
+    if (autoStart && websiteUrl && email) {
+      setAutoStart(false);
+      handleStartScan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, websiteUrl, email]);
+
   const handleStartScan = async () => {
+    // the results page picks its next step from the revenue band (components/NextStep)
+    try { localStorage.setItem("scanRevenue", selectedRevenue ?? ""); } catch {}
     setUrlError("");
     setEmailError("");
 
@@ -1462,7 +1490,7 @@ export default function Home() {
                       </span>
                       <br />
                       <span className="text-[#09090b]">
-                        Let's finish your audit
+                        Let's finish your scan
                       </span>
                     </motion.h2>
 
