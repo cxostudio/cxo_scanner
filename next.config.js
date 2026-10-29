@@ -14,25 +14,9 @@ const nextConfig = {
     pagesBufferLength: 2,
   },
 
-  // app.cxo.studio is the single app: free scan at "/", client portal at "/portal".
-  // The old hostnames are attached to this same Vercel project and redirected here,
-  // so existing links and client bookmarks keep working.
-  async redirects() {
-    return [
-      {
-        source: "/:path*",
-        has: [{ type: "host", value: "portal.cxo.studio" }],
-        destination: "https://app.cxo.studio/portal",
-        permanent: true,
-      },
-      {
-        source: "/:path*",
-        has: [{ type: "host", value: "audit.cxo.studio" }],
-        destination: "https://app.cxo.studio/:path*",
-        permanent: true,
-      },
-    ];
-  },
+  // Host redirects (portal.cxo.studio / audit.cxo.studio -> the final app domain) are
+  // intentionally not set yet: app.cxo.studio still serves the old checklist project.
+  // Add them here once the final domain for this app is attached to this project.
 
   // The client portal is a single static page (public/portal/index.html) that talks
   // to the /api/hours, /api/timeline, /api/performance... routes in pages/api.
