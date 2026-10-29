@@ -998,6 +998,8 @@ export default function Home() {
   }, [autoStart, websiteUrl, email]);
 
   const handleStartScan = async () => {
+    // the results page picks its next step from the revenue band (components/NextStep)
+    try { localStorage.setItem("scanRevenue", selectedRevenue ?? ""); } catch {}
     setUrlError("");
     setEmailError("");
 
