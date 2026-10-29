@@ -971,6 +971,32 @@ export default function Home() {
     }
   };
 
+  // Arriving from the cxo.studio onboarding (/start): the questions were already
+  // answered there, so prefill URL, email and revenue, jump to the last step and
+  // start the scan right away when `start=1`.
+  const [autoStart, setAutoStart] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const u = q.get("url");
+    const e = q.get("email");
+    if (!u || !e) return;
+    setWebsiteUrl(u);
+    setEmail(e);
+    setSelectedChallenge(q.get("challenge") || "Both");
+    const rev = q.get("revenue");
+    if (rev) setSelectedRevenue(rev);
+    setCurrentStep(3);
+    if (q.get("start") === "1") setAutoStart(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+  useEffect(() => {
+    if (autoStart && websiteUrl && email) {
+      setAutoStart(false);
+      handleStartScan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, websiteUrl, email]);
+
   const handleStartScan = async () => {
     setUrlError("");
     setEmailError("");

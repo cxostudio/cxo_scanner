@@ -1,5 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+/* Shared CXO Studio design tokens: copied as-is from cxo-studio/src/styles/tokens.css (source of truth). */
+@import "./tokens.css";
 
 .loading {
   display: inline-block;

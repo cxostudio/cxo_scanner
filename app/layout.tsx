@@ -5,8 +5,8 @@ import 'react-toastify/dist/ReactToastify.css'
 import { ToastContainer } from 'react-toastify'
 
 export const metadata: Metadata = {
-  title: 'Website Rule Checker',
-  description: 'Scan websites and check if they meet your defined rules',
+  title: 'Free conversion scan | CXO studio',
+  description: 'Scan your product page against 40 conversion checkpoints and see what costs you sales.',
 }
 
 export const viewport: Viewport = {
