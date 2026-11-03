@@ -65,6 +65,33 @@ export async function POST(request: NextRequest) {
       .catch(() => undefined)
     await new Promise((r) => setTimeout(r, 700))
 
+    // newsletter popups and chat bubbles: Escape, then hide anything fixed that covers the page,
+    // and undo the scroll lock popups put on <html>/<body>
+    await page.keyboard.press('Escape').catch(() => undefined)
+    await page
+      .evaluate(() => {
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          if (st.position !== 'fixed' && st.position !== 'sticky') continue
+          const r = el.getBoundingClientRect()
+          const big = r.width * r.height > vw * vh * 0.25
+          const z = parseInt(st.zIndex || '0', 10)
+          const isHeader = r.top <= 1 && r.height < 160
+          if ((big && !isHeader) || (st.position === 'fixed' && z > 1000 && !isHeader && r.height < vh * 0.5 && r.top > vh * 0.5)) {
+            el.style.setProperty('display', 'none', 'important')
+          }
+        }
+        for (const el of [document.documentElement, document.body]) {
+          el.style.setProperty('overflow', 'visible', 'important')
+          el.style.setProperty('height', 'auto', 'important')
+          el.style.setProperty('position', 'static', 'important')
+        }
+      })
+      .catch(() => undefined)
+    await new Promise((r) => setTimeout(r, 300))
+
     // nudge lazy images into place, then back to the top
     await page.evaluate(async (h: number) => {
       for (let y = 0; y < h; y += 700) {
@@ -113,7 +140,7 @@ export async function POST(request: NextRequest) {
             out.push({ id: `e${out.length + 1}`, kind, text, box: { x: Math.round(r.left + window.scrollX), y: Math.round(y), w: Math.round(r.width), h: Math.round(r.height) } })
           }
         }
-        return { candidates: out, height: Math.min(maxH, document.documentElement.scrollHeight) }
+        return { candidates: out, height: Math.min(maxH, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)) }
       },
       MAX_HEIGHT,
       MAX_ELEMENTS,
@@ -122,8 +149,10 @@ export async function POST(request: NextRequest) {
     const shot = await page.screenshot({ type: 'jpeg', quality: 72, clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: true })
     const screenshot = `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`
 
-    const pins = await matchFindings(findings, candidates as Candidate[], screenshot)
-    return NextResponse.json({ screenshot, width: WIDTH, height, pins })
+    const debug: string[] = [`${candidates.length} elements`]
+    const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug)
+    const withDebug = request.nextUrl.searchParams.get('debug') === '1'
+    return NextResponse.json({ screenshot, width: WIDTH, height, pins, ...(withDebug ? { debug, candidates } : {}) })
   } catch (error) {
     console.error('/api/locate error:', error)
     return NextResponse.json({ error: 'Could not place the findings on the page' }, { status: 500 })
@@ -133,9 +162,12 @@ export async function POST(request: NextRequest) {
 }
 
 /** One AI call: finding → element id. Unknown ids and low-confidence matches are dropped. */
-async function matchFindings(findings: Finding[], candidates: Candidate[], screenshot: string) {
+async function matchFindings(findings: Finding[], candidates: Candidate[], screenshot: string, debug: string[] = []) {
   const apiKey = process.env.OPENROUTER_API_KEY
-  if (!apiKey || !candidates.length) return []
+  if (!apiKey || !candidates.length) {
+    debug.push(apiKey ? 'no elements' : 'no OPENROUTER_API_KEY')
+    return []
+  }
   const list = candidates.map((c) => `${c.id} | ${c.kind} | "${c.text}" | x${c.box.x} y${c.box.y} ${c.box.w}x${c.box.h}`).join('\n')
   const asked = findings.map((f) => `${f.id} | ${f.title}${f.reason ? ` | what we saw: ${f.reason.slice(0, 220)}` : ''}`).join('\n')
   const system =
@@ -166,6 +198,7 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
     } as never)
     const content = (res as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content
     const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p: { text?: string }) => p?.text || '').join('') : ''
+    debug.push(`ai: ${text.slice(0, 600)}`)
     const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { pins?: { finding?: string; element?: string | null; confidence?: number }[] }
     const byId = new Map(candidates.map((c) => [c.id, c]))
     const ids = new Set(findings.map((f) => f.id))
@@ -174,6 +207,7 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
       .map((p) => ({ findingId: p.finding as string, box: byId.get(p.element as string)!.box }))
   } catch (e) {
     console.error('[locate] matching failed:', e)
+    debug.push(`ai error: ${e instanceof Error ? e.message : String(e)}`)
     return []
   }
 }
