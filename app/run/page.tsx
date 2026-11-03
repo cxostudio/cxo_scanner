@@ -660,7 +660,10 @@ export default function Home() {
         // Fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
         if (batch.rules.length > 1) {
           console.warn(`Attempting single-rule fallback for batch ${i + 1}...`);
-          for (const rule of batch.rules) {
+          // 6 at a time: one by one, 42 checks took ~19 minutes; in parallel it stays ~2-3
+          const FALLBACK_CONCURRENCY = 6;
+          const queue = [...batch.rules];
+          const checkOne = async (rule: (typeof batch.rules)[number]) => {
             let singleRuleSucceeded = false;
             let singleRuleError: unknown = null;
             for (
@@ -719,7 +722,12 @@ export default function Home() {
                 reason: `Error processing rule ${rule.id} in fallback: ${singleRuleError instanceof Error ? singleRuleError.message : "Unknown error"}`,
               });
             }
-          }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(FALLBACK_CONCURRENCY, queue.length) }, async () => {
+              while (queue.length) await checkOne(queue.shift()!);
+            }),
+          );
         } else {
           batch.rules.forEach((rule) => {
             allResults.push({
@@ -1337,7 +1345,7 @@ export default function Home() {
         <p className="cxo-reveal cxo-reveal-1">
           {blocking
             ? "Check the details below, then try again."
-            : <>{host && <strong className="font-semibold text-[var(--text)]">{host}</strong>}{host && " · "}This takes a few minutes. Keep this tab open.</>}
+            : <>{host && <strong className="font-semibold text-[var(--text)]">{host}</strong>}{host && " · "}About a minute. Keep this tab open.</>}
         </p>
       </div>
 
