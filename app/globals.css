@@ -405,6 +405,8 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
   .cxo-logo { margin-bottom: var(--space-8); }
   .cxo-logo img { height: 20px; }
   .cxo-head { margin-bottom: var(--space-8); }
+  /* one line on phones, same rule as the /start heading */
+  .cxo-head h1 { font-size: clamp(20px, 5.6vw, 32px); }
   .cxo-card { padding: var(--space-5); border-radius: var(--radius-lg); }
   .cxo-q { font-size: var(--text-lg); }
 }

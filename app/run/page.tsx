@@ -1365,8 +1365,17 @@ export default function Home() {
         </div>
       ) : (
         <div className="mx-auto grid w-full min-w-0 max-w-[1180px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
-          {/* live preview of the page being scanned */}
+          {/* live preview of the page being scanned; on phones it comes first, with a compact
+              progress line on top so the visitor still sees the scan moving */}
           <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
+            <div className="mb-5 flex items-center gap-3 lg:hidden" aria-hidden="true">
+              <Spinner />
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
+                {STEP_LABELS[Math.min(displayedMounted, STEP_LABELS.length - 1)]}
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-[var(--text)]">{pct}%</span>
+            </div>
+            <div className="cxo-progress mb-6 lg:hidden" aria-hidden="true"><span style={{ width: `${displayProgressPercent}%` }} /></div>
             {error && (
               <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-critical-bg)] px-3 py-2 text-sm text-[var(--status-critical-fg)]">{error}</div>
             )}
@@ -1394,7 +1403,7 @@ export default function Home() {
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-reveal cxo-reveal-1 order-first min-w-0 lg:order-none lg:sticky lg:top-6" aria-label="Scan progress">
+          <aside className="cxo-card cxo-reveal cxo-reveal-1 min-w-0 lg:sticky lg:top-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${displayProgressPercent}%` }} />
