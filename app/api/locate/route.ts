@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       .addStyleTag({
         content: `
           html::before, html::after, body::before, body::after { display: none !important; }
-          [aria-modal="true"], dialog[open], [class*="backdrop" i], [class*="overlay" i]:not(img):not(picture),
+          [aria-modal="true"], dialog[open], [class*="modal-backdrop" i], [class*="modal__overlay" i], [class*="popup-overlay" i],
           [id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i], [id*="onetrust" i],
           [id*="didomi" i], [class*="klaviyo-form" i], [class*="needsclick" i][role="dialog"], [id*="usercentrics" i] {
             display: none !important;
