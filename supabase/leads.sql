@@ -15,6 +15,7 @@ create table if not exists public.leads (
   revenue_band  text,                   -- e-commerce: monthly online revenue band
   traffic_band  text,                   -- monthly visitors band (e-commerce and B2B)
   conversion_band text,                 -- e-commerce: conversion rate band ('unknown' allowed)
+  aov_band      text,                   -- e-commerce: average order value band
   goal          text,                   -- B2B: what the site should produce
   role          text,
   route         text not null,          -- 'scan' | 'call'
@@ -30,3 +31,4 @@ alter table public.leads enable row level security;
 
 -- Added later (Nov 2026). Safe to run on a table created with the first version:
 alter table public.leads add column if not exists conversion_band text;
+alter table public.leads add column if not exists aov_band text;

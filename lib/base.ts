@@ -9,7 +9,12 @@ export const asset = (p: string) => `${BASE}${p}`;
 // localhost) it is same-origin. Everywhere else the page is served through the cxo.studio
 // proxy, which cuts requests at 120s while a scan batch may need 300s, so API calls go
 // straight to the scanner project (CORS: middleware.ts).
-export const SCANNER_ORIGIN = "https://audit.cxo.studio";
+// Production: the scanner's own domain. Preview builds point at their own branch URL, so
+// the website preview (/start → /scan/run) talks to the scanner preview it is wired to.
+export const SCANNER_ORIGIN =
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" && process.env.NEXT_PUBLIC_VERCEL_BRANCH_URL
+    ? `https://${process.env.NEXT_PUBLIC_VERCEL_BRANCH_URL}`
+    : "https://audit.cxo.studio";
 const isScannerHost = (h: string) =>
   h === "audit.cxo.studio" || h === "scan.cxo.studio" || h.includes("cxo-scanner") || h.startsWith("localhost") || h.startsWith("127.");
 

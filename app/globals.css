@@ -383,8 +383,8 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 @media (prefers-reduced-motion: reduce) { .cxo-spin { animation: none; } }
 
 .cxo-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
-.cxo-pill.is-pass { color: var(--status-live-fg); background: var(--status-live-bg); }
-.cxo-pill.is-fail { color: var(--status-finding-fg); background: var(--status-finding-bg); }
+.cxo-pill.is-pass { color: var(--result-pass-fg); background: var(--result-pass-bg); }
+.cxo-pill.is-fail { color: var(--result-fail-fg); background: var(--result-fail-bg); }
 
 .cxo-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;

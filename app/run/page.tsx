@@ -990,9 +990,9 @@ export default function Home() {
     setSelectedChallenge(q.get("challenge") || "Both");
     const rev = q.get("revenue");
     if (rev) setSelectedRevenue(rev);
-    // traffic + conversion rate let the results page estimate revenue per visitor
+    // order value + conversion rate let the results page estimate visitors and revenue per visitor
     try {
-      localStorage.setItem("scanTraffic", q.get("traffic") || "");
+      localStorage.setItem("scanAov", q.get("aov") || "");
       localStorage.setItem("scanCr", q.get("cr") || "");
       localStorage.setItem("scanLocale", q.get("locale") || "en");
     } catch {}

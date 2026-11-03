@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
     revenue_band: str(body.revenueBand, 40),
     traffic_band: str(body.trafficBand, 40),
     conversion_band: str(body.crBand, 20),
+    aov_band: str(body.aovBand, 20),
     goal: str(body.goal, 60),
     role: str(body.role, 60),
     route,
@@ -70,10 +71,10 @@ export async function POST(request: NextRequest) {
     try {
       const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
       let { error } = await sb.from('leads').insert(row)
-      // conversion_band arrived later (supabase/leads.sql): still store the lead if the
-      // column has not been added yet
-      if (error && /conversion_band/.test(error.message)) {
-        const { conversion_band: _cr, ...rest } = row
+      // conversion_band / aov_band arrived later (supabase/leads.sql): still store the lead
+      // if those columns have not been added yet
+      if (error && /conversion_band|aov_band/.test(error.message)) {
+        const { conversion_band: _cr, aov_band: _aov, ...rest } = row
         ;({ error } = await sb.from('leads').insert(rest))
       }
       if (error) console.error('[leads] insert failed:', error.message)

@@ -112,6 +112,11 @@
   --status-observed-fg: var(--zinc-500);      --status-observed-bg: var(--zinc-100); /* render dashed */
   --status-critical-fg: var(--red-600);       --status-critical-bg: var(--red-50);
 
+  /* Scanner checkpoint verdicts: red "to fix", green "passed". A best-practice check, not a
+     test result, so it does not borrow "proven" (A/B tests only) or "finding" (audits). */
+  --result-pass-fg: var(--green-600);         --result-pass-bg: var(--green-50);
+  --result-fail-fg: var(--red-600);           --result-fail-bg: var(--red-50);
+
   --rating: var(--amber-400);
 
   /* brand gradient: marketing surfaces only (hero glow), never in the portal */
