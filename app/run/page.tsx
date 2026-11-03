@@ -1329,7 +1329,9 @@ export default function Home() {
   }, [isLoading]);
 
   const host = instantPreviewFromWebsiteUrl(websiteUrl)?.host ?? "";
-  const pct = Math.round(displayProgressPercent);
+  // the label never runs ahead of the bar: both read the same clamped value, the label rounds down
+  const barPct = Math.min(100, Math.max(0, displayProgressPercent));
+  const pct = Math.floor(barPct);
   const blocking = urlError || emailError;
 
   return (
@@ -1385,7 +1387,7 @@ export default function Home() {
               </span>
               <span className="text-sm font-semibold tabular-nums text-[var(--text)]">{pct}%</span>
             </div>
-            <div className="cxo-progress mb-6 lg:hidden" aria-hidden="true"><span style={{ width: `${displayProgressPercent}%` }} /></div>
+            <div className="cxo-progress mb-6 lg:hidden" aria-hidden="true"><span style={{ width: `${barPct}%`, transition: 'none' }} /></div>
             {error && (
               <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-critical-bg)] px-3 py-2 text-sm text-[var(--status-critical-fg)]">{error}</div>
             )}
@@ -1416,7 +1418,7 @@ export default function Home() {
           <aside className="cxo-card cxo-reveal cxo-reveal-1 min-w-0 lg:sticky lg:top-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-                <span style={{ width: `${displayProgressPercent}%` }} />
+                <span style={{ width: `${barPct}%`, transition: 'none' }} />
               </div>
               <span className="w-10 text-right text-sm font-semibold tabular-nums text-[var(--text)]">{pct}%</span>
             </div>
@@ -1448,17 +1450,17 @@ const Line = ({ d }: { d: string }) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: d }} />
 );
 const STEP_LABELS = [
-  "Page structure",
-  "User experience and layout",
-  "Content and copy",
-  "Conversion recommendations",
-  "Your scan report",
+  "Opening your page on desktop and mobile",
+  "Reading prices, buttons and reviews",
+  "Checking the conversion checkpoints",
+  "Ranking what to fix first",
+  "Writing your report",
 ];
 const STEP_ICONS = [
-  <Line key="0" d='<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>' />,
-  <Line key="1" d='<path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/><circle cx="12" cy="12" r="3"/>' />,
-  <Line key="2" d='<path d="M4 6h16M4 12h10M4 18h13"/>' />,
-  <Line key="3" d='<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z"/>' />,
+  <Line key="0" d='<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>' />,
+  <Line key="1" d='<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5.5 5.5M8 10.5h5M10.5 8v5"/>' />,
+  <Line key="2" d='<path d="m4 6.5 1.5 1.5L8.5 5M4 12.5 5.5 14 8.5 11M4 18.5 5.5 20l3-3"/><path d="M12 7h8M12 13h8M12 19h8"/>' />,
+  <Line key="3" d='<path d="M4 6h10M4 12h7M4 18h4"/><path d="m17 8 3-3 3 3M20 5v14"/>' />,
   <Line key="4" d='<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>' />,
 ];
 function Spinner() {

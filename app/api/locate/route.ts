@@ -17,8 +17,16 @@ import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
-const WIDTH = 1440
-const MAX_HEIGHT = 2600 // top of the page: where product-page findings live
+const DEVICES = {
+  desktop: { width: 1440, height: 900, maxHeight: 2600, mobile: false },
+  // a phone: the product area runs much longer, so capture deeper
+  mobile: { width: 390, height: 844, maxHeight: 3600, mobile: true },
+} as const
+type Device = keyof typeof DEVICES
+const MOBILE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'
+const DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const MAX_ELEMENTS = 140
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -28,7 +36,11 @@ type Finding = { id: string; title: string; reason?: string }
 const CONSENT_WORDS = ['accept', 'allow all', 'agree', 'aceptar', 'accepter', 'tout accepter', 'akzeptieren', 'accetta', 'aceitar', 'ok', 'got it', 'alle akzeptieren', 'accepteren']
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[] }
+  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string }
+  const device: Device = body.device === 'mobile' ? 'mobile' : 'desktop'
+  const D = DEVICES[device]
+  const WIDTH = D.width
+  const MAX_HEIGHT = D.maxHeight
   const raw = typeof body.url === 'string' ? body.url.trim() : ''
   const findings = (Array.isArray(body.findings) ? body.findings : [])
     .filter((f) => f && typeof f.id === 'string' && typeof f.title === 'string')
@@ -38,12 +50,10 @@ export async function POST(request: NextRequest) {
 
   let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
   try {
-    browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${WIDTH},900` })
+    browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${WIDTH},${D.height}` })
     const page = await browser.newPage()
-    await page.setViewport({ width: WIDTH, height: 900, deviceScaleFactor: 1 })
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    )
+    await page.setViewport({ width: WIDTH, height: D.height, deviceScaleFactor: 1, isMobile: D.mobile, hasTouch: D.mobile })
+    await page.setUserAgent(D.mobile ? MOBILE_UA : DESKTOP_UA)
     try {
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 45_000 })
     } catch {
@@ -91,6 +101,38 @@ export async function POST(request: NextRequest) {
       })
       .catch(() => undefined)
     await new Promise((r) => setTimeout(r, 300))
+
+    // backdrops that dim the whole page (cookie walls, modals) are often pseudo-elements or
+    // classed overlays rather than big fixed boxes: hide those too
+    await page
+      .addStyleTag({
+        content: `
+          html::before, html::after, body::before, body::after { display: none !important; }
+          [aria-modal="true"], dialog[open], [class*="backdrop" i], [class*="overlay" i]:not(img):not(picture),
+          [id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i], [id*="onetrust" i],
+          [id*="didomi" i], [class*="klaviyo-form" i], [class*="needsclick" i][role="dialog"], [id*="usercentrics" i] {
+            display: none !important;
+          }
+          html, body, main, #MainContent { filter: none !important; opacity: 1 !important; }
+        `,
+      })
+      .catch(() => undefined)
+    await page
+      .evaluate(() => {
+        // anything fixed or absolute that covers most of the viewport with a see-through dark fill
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          if (st.position !== 'fixed' && st.position !== 'absolute') continue
+          const r = el.getBoundingClientRect()
+          if (r.width < window.innerWidth * 0.8 || r.height < window.innerHeight * 0.6) continue
+          const bg = st.backgroundColor.match(/rgba?\(([^)]+)\)/)
+          const parts = bg ? bg[1].split(',').map((x) => parseFloat(x)) : []
+          const alpha = parts.length === 4 ? parts[3] : 1
+          const dark = parts.length >= 3 && parts[0] + parts[1] + parts[2] < 200
+          if (dark && alpha > 0 && alpha < 0.95 && !el.querySelector('img, h1, button')) el.style.setProperty('display', 'none', 'important')
+        }
+      })
+      .catch(() => undefined)
 
     // nudge lazy images into place, then back to the top
     await page.evaluate(async (h: number) => {
@@ -146,13 +188,13 @@ export async function POST(request: NextRequest) {
       MAX_ELEMENTS,
     )
 
-    const shot = await page.screenshot({ type: 'jpeg', quality: 72, clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: true })
+    const shot = await page.screenshot({ type: 'jpeg', quality: D.mobile ? 70 : 72, clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: true })
     const screenshot = `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`
 
     const debug: string[] = [`${candidates.length} elements`]
-    const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug)
+    const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug, device)
     const withDebug = request.nextUrl.searchParams.get('debug') === '1'
-    return NextResponse.json({ screenshot, width: WIDTH, height, pins, ...(withDebug ? { debug, candidates } : {}) })
+    return NextResponse.json({ device, screenshot, width: WIDTH, height, pins, ...(withDebug ? { debug, candidates } : {}) })
   } catch (error) {
     console.error('/api/locate error:', error)
     return NextResponse.json({ error: 'Could not place the findings on the page' }, { status: 500 })
@@ -162,7 +204,7 @@ export async function POST(request: NextRequest) {
 }
 
 /** One AI call: finding → element id. Unknown ids and low-confidence matches are dropped. */
-async function matchFindings(findings: Finding[], candidates: Candidate[], screenshot: string, debug: string[] = []) {
+async function matchFindings(findings: Finding[], candidates: Candidate[], screenshot: string, debug: string[] = [], device: Device = 'desktop') {
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey || !candidates.length) {
     debug.push(apiKey ? 'no elements' : 'no OPENROUTER_API_KEY')
@@ -171,7 +213,7 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
   const list = candidates.map((c) => `${c.id} | ${c.kind} | "${c.text}" | x${c.box.x} y${c.box.y} ${c.box.w}x${c.box.h}`).join('\n')
   const asked = findings.map((f) => `${f.id} | ${f.title}${f.reason ? ` | what we saw: ${f.reason.slice(0, 220)}` : ''}`).join('\n')
   const system =
-    'You place conversion-audit findings on a screenshot of an e-commerce product page. ' +
+    `You place conversion-audit findings on a screenshot of an e-commerce product page, seen on ${device === 'mobile' ? 'a phone' : 'a desktop screen'}. ` +
     'You get the page screenshot, a list of page elements (id | kind | text | position in px on the screenshot) and a list of findings. ' +
     'For each finding, pick the ONE element the finding is about. If something is missing, pick the element where it should be added ' +
     '(e.g. missing trust badges or free-shipping message → the main add-to-cart button; missing benefits → the product title; missing reviews near title → the product title). ' +
