@@ -374,7 +374,7 @@ export default function ResultsPage() {
                               aria-label={`Finding ${n}`}
                               className="absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-[3px] text-[13px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
                               style={{
-                                left: `calc(${((p.box.x + p.box.w) / located.width) * 100}% + ${k * 22}px)`,
+                                left: `min(calc(${((p.box.x + p.box.w) / located.width) * 100}% - ${k * 24}px), calc(100% - 16px))`,
                                 top: `${(p.box.y / located.height) * 100}%`,
                                 background: 'var(--result-fail-fg)',
                                 color: 'var(--text-inverse)',
