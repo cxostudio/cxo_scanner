@@ -1335,7 +1335,7 @@ export default function Home() {
         <p className="cxo-reveal cxo-reveal-1">
           {blocking
             ? "Check the details below, then try again."
-            : <>{host && <strong className="font-semibold text-[var(--text)]">{host}</strong>}{host && " · "}About 2 minutes. Keep this tab open.</>}
+            : <>{host && <strong className="font-semibold text-[var(--text)]">{host}</strong>}{host && " · "}This takes a few minutes. Keep this tab open.</>}
         </p>
       </div>
 
