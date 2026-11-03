@@ -89,7 +89,10 @@ export async function POST(request: NextRequest) {
           const big = r.width * r.height > vw * vh * 0.25
           const z = parseInt(st.zIndex || '0', 10)
           const isHeader = r.top <= 1 && r.height < 160
-          if ((big && !isHeader) || (st.position === 'fixed' && z > 1000 && !isHeader && r.height < vh * 0.5 && r.top > vh * 0.5)) {
+          void z
+          // floating widgets (chat, promo bubbles) in the lower half; full-width sticky add-to-cart bars stay
+          const floating = st.position === 'fixed' && !isHeader && r.top > vh * 0.45 && r.width < vw * 0.9
+          if ((big && !isHeader) || floating || (st.position === 'fixed' && z > 1000 && !isHeader && r.height < vh * 0.5 && r.top > vh * 0.5)) {
             el.style.setProperty('display', 'none', 'important')
           }
         }
