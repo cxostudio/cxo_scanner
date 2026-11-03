@@ -161,7 +161,9 @@ export default function ResultsPage() {
       return next
     })
 
-  // a pin opens its check; a check scrolls the page view to its pin
+  // a pin opens its check, a check shows its pin: both end up side by side at the top
+  // (the check at the sticky offset, the pin's element at the top of the page view)
+  const STICKY_TOP = 24
   const pick = (id: string, from: 'pin' | 'list') => {
     setSelected(id)
     if (!results) return
@@ -169,15 +171,24 @@ export default function ResultsPage() {
       const idx = results.findIndex((r) => r.ruleId === id)
       if (idx >= visible) setVisible(idx + 1)
       setOpen((prev) => new Set(prev).add(id))
-      requestAnimationFrame(() => document.getElementById(`f-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
-    } else if (shot && shotRef.current) {
-      const pin = shot.pins.find((p) => p.findingId === id)
-      if (pin) {
-        const el = shotRef.current
-        const y = (pin.box.y / shot.height) * el.scrollHeight - el.clientHeight / 3
-        el.scrollTo({ top: Math.max(0, y), behavior: 'smooth' })
-      }
     }
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const row = document.getElementById(`f-${id}`)
+        if (row && window.matchMedia('(min-width: 1024px)').matches) {
+          window.scrollTo({ top: window.scrollY + row.getBoundingClientRect().top - STICKY_TOP, behavior: 'smooth' })
+        } else if (row && from === 'pin') {
+          row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        const el = shotRef.current
+        const pin = shot?.pins.find((p) => p.findingId === id)
+        const img = el?.querySelector('img')
+        if (el && pin && shot && img) {
+          const y = (pin.box.y / shot.height) * img.offsetHeight - 16
+          el.scrollTo({ top: Math.max(0, y), behavior: 'smooth' })
+        }
+      }),
+    )
   }
 
   if (!results || !report) {
@@ -211,7 +222,7 @@ export default function ResultsPage() {
           <img src={asset('/cxo-logo.png')} alt="CXO studio" />
         </a>
 
-        <section className="mx-auto grid max-w-[1120px] items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]" aria-label="Verdict">
+        <section className="mx-auto grid max-w-[1280px] items-stretch gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col gap-5">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {host} · Product page · {report.total} checkpoints
@@ -268,16 +279,6 @@ export default function ResultsPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <a href="#checks" className="cxo-btn cxo-btn-primary">
-                See what to fix <Arrow />
-              </a>
-              {qualified && (
-                <a href={CALL_URL} className="cxo-btn cxo-btn-ghost">
-                  Book my CRO Audit call
-                </a>
-              )}
-            </div>
           </div>
 
           <Devices desktop={deskImg} mobile={phoneImg} />
@@ -346,7 +347,7 @@ export default function ResultsPage() {
                       <div
                         key={r.ruleId}
                         id={`f-${r.ruleId}`}
-                        className={`scroll-mt-6 rounded-[16px] border bg-[var(--surface)] px-4 transition-colors ${active ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
+                        className={`scroll-mt-6 rounded-[16px] border px-4 transition-colors ${active || isOpen ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
                         style={{ ['--result-fg' as string]: `var(--result-${t}-fg)`, ['--result-bg' as string]: `var(--result-${t}-bg)` }}
                       >
                         <button
@@ -474,22 +475,24 @@ function Ring({ score, color }: { score: number; color: string }) {
   )
 }
 
-/** The scanned page in a laptop and a phone, both cut off with a fade at the bottom. */
+/**
+ * The scanned page in a laptop and a phone. As tall as the verdict next to it, and the
+ * whole group fades out at the bottom together, so the phone never turns see-through
+ * over the laptop.
+ */
 function Devices({ desktop, mobile }: { desktop: string | null; mobile: string | null }) {
-  const fade = { WebkitMaskImage: 'linear-gradient(180deg, #000 62%, transparent 100%)', maskImage: 'linear-gradient(180deg, #000 62%, transparent 100%)' }
+  const fade = { WebkitMaskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)', maskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)' }
   return (
-    <div className="cxo-reveal cxo-reveal-1 relative mx-auto w-full max-w-[560px] pb-4 pr-[12%]" aria-hidden={!desktop && !mobile}>
-      <div style={fade}>
-        <div className="overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
-          <div className="h-[340px] overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)] max-[560px]:h-[220px]">
-            {desktop ? <img src={desktop} alt="Your product page on desktop" className="block w-full object-cover object-top" /> : null}
-          </div>
+    <div className="cxo-reveal cxo-reveal-1 relative min-h-[300px] w-full max-[1023px]:h-[360px] max-[560px]:h-[260px]" style={fade} aria-hidden={!desktop && !mobile}>
+      <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
+        <div className="h-full overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)]">
+          {desktop ? <img src={desktop} alt="Your product page on desktop" className="block w-full object-cover object-top" /> : null}
         </div>
       </div>
       {mobile && (
-        <div className="absolute bottom-0 right-0 w-[30%] min-w-[110px]" style={fade}>
+        <div className="absolute right-0 top-[18%] w-[30%] min-w-[110px] max-w-[200px]">
           <div className="overflow-hidden rounded-[26px] border-[7px] border-[var(--text)] bg-[var(--text)] shadow-[0_24px_48px_-18px_rgba(9,9,11,.35)]">
-            <div className="h-[300px] overflow-hidden rounded-[18px] bg-[var(--surface)] max-[560px]:h-[210px]">
+            <div className="aspect-[9/19] overflow-hidden rounded-[18px] bg-[var(--surface)]">
               <img src={mobile} alt="Your product page on a phone" className="block w-full object-cover object-top" />
             </div>
           </div>
@@ -522,7 +525,7 @@ function PageView({
   const frame =
     device === 'desktop'
       ? 'rounded-[var(--radius-lg)] border border-[var(--border-strong)]'
-      : 'mx-auto max-w-[340px] rounded-[30px] border-[8px] border-[var(--text)]'
+      : 'ml-auto w-full max-w-[340px] rounded-[34px] border-[8px] border-[var(--text)] max-[1023px]:mx-auto'
   return (
     <div className={`overflow-hidden bg-[var(--surface)] ${frame}`}>
       {device === 'desktop' && (
@@ -533,51 +536,57 @@ function PageView({
           <span className="ml-2 min-w-0 truncate text-xs text-[var(--text-muted)]">{url}</span>
         </div>
       )}
-      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)]' : 'max-h-[calc(100vh-80px)]'} max-[560px]:max-h-[460px]`}>
+      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
         {shot ? (
           <div className="relative">
             <img src={shot.screenshot} alt={`Your product page on ${device}, with the findings pinned`} className="block w-full" />
-            {shot.pins.map((p) => {
-              const n = num.get(p.findingId)
-              if (!n) return null
-              const same = shot.pins.filter((q) => q.box.x === p.box.x && q.box.y === p.box.y)
-              const k = same.indexOf(p)
-              const on = selected === p.findingId
+            {groupPins(shot.pins, num).map((g) => {
+              const on = g.items.some((it) => it.id === selected)
               return (
-                <span key={p.findingId}>
-                  {(k === 0 || on) && (
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute rounded-[6px] transition-all"
-                      style={{
-                        left: `${(p.box.x / shot.width) * 100}%`,
-                        top: `${(p.box.y / shot.height) * 100}%`,
-                        width: `${(p.box.w / shot.width) * 100}%`,
-                        height: `${(p.box.h / shot.height) * 100}%`,
-                        border: `${on ? 3 : 2}px solid var(--result-fail-fg)`,
-                        background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
-                      }}
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onPin(p.findingId)}
-                    aria-label={`Finding ${n}`}
-                    className="absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
+                <span key={g.key}>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute rounded-[6px] transition-all"
                     style={{
-                      left: `min(calc(${((p.box.x + p.box.w) / shot.width) * 100}% - ${k * 24}px), calc(100% - 16px))`,
-                      top: `max(${(p.box.y / shot.height) * 100}%, 14px)`,
-                      width: on ? 34 : 28,
-                      height: on ? 34 : 28,
-                      fontSize: on ? 14 : 13,
-                      background: 'var(--result-fail-fg)',
-                      color: 'var(--text-inverse)',
-                      borderColor: 'var(--surface)',
+                      left: `${(g.box.x / shot.width) * 100}%`,
+                      top: `${(g.box.y / shot.height) * 100}%`,
+                      width: `${(g.box.w / shot.width) * 100}%`,
+                      height: `${(g.box.h / shot.height) * 100}%`,
+                      border: `${on ? 3 : 2}px solid var(--result-fail-fg)`,
+                      background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
+                    }}
+                  />
+                  <span
+                    className="absolute flex -translate-x-full -translate-y-1/2 gap-1"
+                    style={{
+                      left: `min(calc(${((g.box.x + g.box.w) / shot.width) * 100}% + 10px), calc(100% - 4px))`,
+                      top: `max(${(g.box.y / shot.height) * 100}%, 16px)`,
                       zIndex: on ? 3 : 2,
                     }}
                   >
-                    {n}
-                  </button>
+                    {g.items.map((it) => {
+                      const sel = it.id === selected
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          onClick={() => onPin(it.id)}
+                          aria-label={`Finding ${it.n}`}
+                          className="grid shrink-0 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
+                          style={{
+                            width: sel ? 34 : 28,
+                            height: sel ? 34 : 28,
+                            fontSize: sel ? 14 : 12,
+                            background: 'var(--result-fail-fg)',
+                            color: 'var(--text-inverse)',
+                            borderColor: 'var(--surface)',
+                          }}
+                        >
+                          {it.n}
+                        </button>
+                      )
+                    })}
+                  </span>
                 </span>
               )
             })}
@@ -599,6 +608,19 @@ function PageView({
       </div>
     </div>
   )
+}
+
+/** Findings pinned on the same element become one group: one outline, numbers side by side. */
+function groupPins(pins: Located['pins'], num: Map<string, number>) {
+  const groups = new Map<string, { key: string; box: Box; items: { id: string; n: number }[] }>()
+  for (const p of pins) {
+    const n = num.get(p.findingId)
+    if (!n) continue
+    const key = `${p.box.x},${p.box.y},${p.box.w},${p.box.h}`
+    if (!groups.has(key)) groups.set(key, { key, box: p.box, items: [] })
+    groups.get(key)!.items.push({ id: p.findingId, n })
+  }
+  return [...groups.values()].map((g) => ({ ...g, items: g.items.sort((a, b) => a.n - b.n) }))
 }
 
 function Num({ n }: { n: number }) {
