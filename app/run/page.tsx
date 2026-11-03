@@ -519,6 +519,7 @@ export default function Home() {
               }),
             ),
           })
+          .passthrough()
           .optional(),
       }),
     );
@@ -778,6 +779,7 @@ export default function Home() {
                     }),
                   ),
                 })
+                .passthrough()
                 .optional(),
             }),
           )

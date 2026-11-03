@@ -11,7 +11,7 @@ const checkpointSchema = z.object({
       thumbnailUrl: z.string(),
     }),
   ),
-})
+}).passthrough()
 
 const CombineRequestSchema = z.object({
   results: z.array(

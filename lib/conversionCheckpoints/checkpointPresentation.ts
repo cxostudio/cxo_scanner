@@ -12,6 +12,12 @@ export type CheckpointPresentation = {
   requiredActions: string
   justificationsBenefits: string
   examples: CheckpointExampleImage[]
+  /** Airtable "Priority Level": High | Medium (results: score weight, fix order) */
+  priority?: string
+  /** Airtable "Difficulty Level": Easy | Moderate | Difficult */
+  difficulty?: string
+  /** Airtable "Target Performance Metrics", e.g. Add-to-Cart Rate (results: area) */
+  metrics?: string[]
 }
 
 type Fields = Record<string, unknown>
@@ -44,10 +50,17 @@ export function extractCheckpointPresentation(
     typeof f['Justifications & Benefits'] === 'string' ? f['Justifications & Benefits'].trim() : ''
   const examples = parseExamplesField(f['Examples'])
   if (!requiredActions && !justificationsBenefits && examples.length === 0) return null
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+  const metrics = Array.isArray(f['Target Performance Metrics'])
+    ? (f['Target Performance Metrics'] as unknown[]).filter((m): m is string => typeof m === 'string')
+    : undefined
   return {
     requiredActions,
     justificationsBenefits,
     examples,
+    priority: str(f['Priority Level']),
+    difficulty: str(f['Difficulty Level']),
+    metrics,
   }
 }
 
