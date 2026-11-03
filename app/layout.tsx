@@ -22,8 +22,8 @@ export default function RootLayout({
   children: ReactNode
 }) {
   return (
-    <html lang="en" className="overflow-x-hidden">
-      <body className="overflow-x-hidden min-w-0 w-full">
+    <html lang="en" className="overflow-x-clip">
+      <body className="overflow-x-clip min-w-0 w-full">
         <div className="cxo-wash" aria-hidden="true" />
         {children}
         <ToastContainer

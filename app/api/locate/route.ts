@@ -220,7 +220,8 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
     'You get the page screenshot, a list of page elements (id | kind | text | position in px on the screenshot) and a list of findings. ' +
     'For each finding, pick the ONE element the finding is about. If something is missing, pick the element where it should be added ' +
     '(e.g. missing trust badges or free-shipping message → the main add-to-cart button; missing benefits → the product title; missing reviews near title → the product title). ' +
-    'Prefer elements in the main product area over header or footer. If no listed element fits (the finding is about another page or something not in the screenshot), use null. ' +
+    'Prefer elements in the main product area over header or footer. Never park a finding on the header, menu or breadcrumb unless it is about navigation. ' +
+    'If no listed element fits (the finding is about the homepage, the footer, another page or something not in the screenshot), use null: fewer, correct pins beat many vague ones. ' +
     'Answer only JSON: {"pins":[{"finding":"<finding id>","element":"<element id or null>","confidence":0-1}]}'
   try {
     const openRouter = new OpenRouter({ apiKey })
@@ -247,8 +248,17 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
     const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { pins?: { finding?: string; element?: string | null; confidence?: number }[] }
     const byId = new Map(candidates.map((c) => [c.id, c]))
     const ids = new Set(findings.map((f) => f.id))
-    return (json.pins ?? [])
-      .filter((p) => p.finding && ids.has(p.finding) && p.element && byId.has(p.element) && (p.confidence ?? 1) >= 0.4)
+    const kept = (json.pins ?? [])
+      .filter((p) => p.finding && ids.has(p.finding) && p.element && byId.has(p.element) && (p.confidence ?? 1) >= 0.5)
+      .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
+    // at most 3 findings per element: beyond that the model is parking findings it can't place
+    const perEl = new Map<string, number>()
+    return kept
+      .filter((p) => {
+        const n = (perEl.get(p.element as string) ?? 0) + 1
+        perEl.set(p.element as string, n)
+        return n <= 3
+      })
       .map((p) => ({ findingId: p.finding as string, box: byId.get(p.element as string)!.box }))
   } catch (e) {
     console.error('[locate] matching failed:', e)

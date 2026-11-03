@@ -288,27 +288,6 @@ export default function ResultsPage() {
       <div className="relative mt-14 bg-[var(--surface)]">
         <div aria-hidden="true" className="absolute inset-x-0 -top-24 h-24 bg-gradient-to-b from-transparent to-[var(--surface)]" />
         <div className="relative mx-auto flex max-w-[1120px] flex-col gap-[var(--space-20)] px-[var(--gutter)] pb-[var(--section-y)] pt-8 max-[560px]:gap-14">
-          {/* fix these first: the top 3 of the list, same numbers */}
-          {report.failed.length > 0 && (
-            <section aria-label="Fix these first">
-              <h2 className="mb-6 font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Fix these first</h2>
-              <div className="grid gap-x-8 gap-y-6 md:grid-cols-3">
-                {report.failed.slice(0, 3).map((r) => (
-                  <button key={r.ruleId} type="button" onClick={() => pick(r.ruleId, 'pin')} className="flex flex-col gap-3 border-t-2 border-[var(--text)] pt-5 text-left">
-                    <span className="flex items-center gap-2.5">
-                      <Num n={report.num.get(r.ruleId)!} />
-                      <span className="text-xs font-semibold text-[var(--text-muted)]">
-                        {effortLabel(r)} · moves {LEVERS.find((l) => l.id === lever(r))?.moves}
-                      </span>
-                    </span>
-                    <span className="font-[family-name:var(--font-display)] text-[18px] font-bold leading-[1.3] tracking-[-0.02em] text-[var(--text)]">{r.ruleTitle}</span>
-                    <span className="line-clamp-3 text-[15px] leading-[1.55] text-[var(--text-muted)]">{r.reason}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
           {/* every check, next to the page it was checked on */}
           <section id="checks" className="scroll-mt-6" aria-label="Your page, check by check">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -343,7 +322,7 @@ export default function ResultsPage() {
 
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               {/* the page with pins: first on phones, sticky on desktop */}
-              <div className="lg:sticky lg:top-6 lg:order-2">
+              <div className="lg:sticky lg:top-6 lg:order-2 lg:self-start">
                 <PageView
                   device={device}
                   state={view}
@@ -357,7 +336,7 @@ export default function ResultsPage() {
               </div>
 
               <div className="relative min-w-0 lg:order-1">
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                   {results.slice(0, visible).map((r) => {
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
@@ -367,12 +346,12 @@ export default function ResultsPage() {
                       <div
                         key={r.ruleId}
                         id={`f-${r.ruleId}`}
-                        className={`scroll-mt-6 overflow-hidden rounded-[var(--radius-md)] border transition-colors ${active || isOpen ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
+                        className={`scroll-mt-6 rounded-[16px] border bg-[var(--surface)] px-4 transition-colors ${active ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
                         style={{ ['--result-fg' as string]: `var(--result-${t}-fg)`, ['--result-bg' as string]: `var(--result-${t}-bg)` }}
                       >
                         <button
                           type="button"
-                          className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+                          className="flex w-full items-center gap-3 py-4 text-left"
                           onClick={() => {
                             toggle(r.ruleId)
                             if (!r.passed) pick(r.ruleId, 'list')
@@ -380,15 +359,14 @@ export default function ResultsPage() {
                           aria-expanded={isOpen}
                         >
                           {r.passed ? <Pass /> : <Num n={n!} />}
-                          <span className="min-w-0 flex-1 text-[15px] font-semibold leading-[1.4] text-[var(--text)]">{r.ruleTitle}</span>
-                          {!r.passed && r.checkpoint?.priority && (
-                            <span className="shrink-0 text-xs text-[var(--text-muted)] max-[560px]:hidden">{effortLabel(r)}</span>
-                          )}
-                          <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden />
+                          <span className="min-w-0 flex-1 font-[family-name:var(--font-display)] text-[16px] font-bold leading-[1.35] tracking-[-0.01em] text-[var(--text)]">{r.ruleTitle}</span>
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-[var(--border)]">
+                            <ChevronDown className={`h-[18px] w-[18px] text-[var(--text)] transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden />
+                          </span>
                         </button>
                         {isOpen && (
-                          <div className="px-3 pb-3">
-                            <div className="flex flex-col gap-4 rounded-[var(--radius-md)] bg-[var(--result-bg)] p-4 sm:p-5">
+                          <div className="border-t border-[var(--border)] pb-4 pt-4">
+                            <div className="flex flex-col gap-4 rounded-[12px] bg-[var(--result-bg)] p-5">
                               <div className="flex flex-col gap-1.5">
                                 <p className="font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--result-fg)]">What we saw:</p>
                                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text)]">{r.reason}</p>
@@ -555,7 +533,7 @@ function PageView({
           <span className="ml-2 min-w-0 truncate text-xs text-[var(--text-muted)]">{url}</span>
         </div>
       )}
-      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[640px]' : 'max-h-[600px]'} max-[560px]:max-h-[460px]`}>
+      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)]' : 'max-h-[calc(100vh-80px)]'} max-[560px]:max-h-[460px]`}>
         {shot ? (
           <div className="relative">
             <img src={shot.screenshot} alt={`Your product page on ${device}, with the findings pinned`} className="block w-full" />
@@ -625,7 +603,7 @@ function PageView({
 
 function Num({ n }: { n: number }) {
   return (
-    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold" style={{ background: 'var(--result-fail-fg)', color: 'var(--text-inverse)' }} aria-label={`To fix, number ${n}`} role="img">
+    <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full text-xs font-bold" style={{ background: 'var(--result-fail-fg)', color: 'var(--text-inverse)' }} aria-label={`To fix, number ${n}`} role="img">
       {n}
     </span>
   )
@@ -633,7 +611,7 @@ function Num({ n }: { n: number }) {
 
 function Pass() {
   return (
-    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full" style={{ background: 'var(--result-pass-fg)', color: 'var(--text-inverse)' }} aria-label="Passed" role="img">
+    <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full" style={{ background: 'var(--result-pass-fg)', color: 'var(--text-inverse)' }} aria-label="Passed" role="img">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="m5 12.5 4.5 4.5L19 7.5" />
       </svg>
