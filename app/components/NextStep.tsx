@@ -49,17 +49,7 @@ export function NextStep() {
   const small = revenue === LOW_REVENUE
 
   return (
-    <section className="pb-[60px] pt-8 sm:pt-10" style={{ background: 'var(--bg)' }}>
-      <div className="mx-auto w-full max-w-[640px] px-4">
-        <div
-          className="flex flex-col gap-6 p-6 sm:p-10"
-          style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-xl)',
-            boxShadow: 'var(--shadow-raised), var(--shadow-card)',
-          }}
-        >
+    <section className="cxo-card flex flex-col gap-6" aria-label="Next step">
           <span
             className="self-start px-[11px] py-[5px] text-[13px] font-semibold"
             style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)' }}
@@ -70,14 +60,14 @@ export function NextStep() {
           {small ? (
             <>
               <div className="flex flex-col gap-3">
-                <h2 className="text-[28px] sm:text-[36px] leading-[1.2] font-bold tracking-[-0.03em]" style={{ fontFamily: 'var(--font-display)', color: 'var(--text)' }}>
+                <h2 className="text-[26px] sm:text-[32px] leading-[1.2] font-bold tracking-[-0.03em]" style={{ fontFamily: 'var(--font-display)', color: 'var(--text)' }}>
                   Fix the essentials yourself first
                 </h2>
                 <p className="text-[16px] leading-[1.6]" style={{ color: 'var(--text-muted)' }}>
                   At your current revenue, a full audit wouldn’t pay for itself yet. Our checklist covers every page of your store with 300+ conversion checkpoints, so you can fix the biggest leaks on your own.
                 </p>
               </div>
-              <a href={CHECKLIST_URL} className="flex items-center justify-center gap-1 px-5 py-[15px] font-semibold text-[15px]" style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', borderRadius: 'var(--radius-md)' }}>
+              <a href={CHECKLIST_URL} className="cxo-btn cxo-btn-primary cxo-btn-block">
                 Get the CRO checklist <Arrow />
               </a>
               <p className="text-center text-[14px]" style={{ color: 'var(--text-muted)' }}>
@@ -90,7 +80,7 @@ export function NextStep() {
           ) : (
             <>
               <div className="flex flex-col gap-3">
-                <h2 className="text-[28px] sm:text-[36px] leading-[1.2] font-bold tracking-[-0.03em]" style={{ fontFamily: 'var(--font-display)', color: 'var(--text)' }}>
+                <h2 className="text-[26px] sm:text-[32px] leading-[1.2] font-bold tracking-[-0.03em]" style={{ fontFamily: 'var(--font-display)', color: 'var(--text)' }}>
                   Turn these findings into revenue
                 </h2>
                 <p className="text-[16px] leading-[1.6]" style={{ color: 'var(--text-muted)' }}>
@@ -110,7 +100,7 @@ export function NextStep() {
                   </li>
                 ))}
               </ul>
-              <a href={CALL_URL} className="flex items-center justify-center gap-1 px-5 py-[15px] font-semibold text-[15px]" style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', borderRadius: 'var(--radius-md)' }}>
+              <a href={CALL_URL} className="cxo-btn cxo-btn-primary cxo-btn-block">
                 Book my CRO Audit call <Arrow />
               </a>
               <p className="-mt-2 text-center text-[13px]" style={{ color: 'var(--text-muted)' }}>
@@ -118,8 +108,6 @@ export function NextStep() {
               </p>
             </>
           )}
-        </div>
-      </div>
     </section>
   )
 }

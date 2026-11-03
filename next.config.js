@@ -14,38 +14,32 @@ const nextConfig = {
     pagesBufferLength: 2,
   },
 
-  // Domains (one Vercel project):
-  //  - scan.cxo.studio   free conversion scan. Canonical host: set CANONICAL_HOST=scan.cxo.studio
-  //                      in Vercel once that domain is attached.
-  //  - portal.cxo.studio client portal: "/" (and "/<client>") serve the cockpit
-  //  - audit.cxo.studio  old name: pages redirect to the canonical host when CANONICAL_HOST is set;
-  //                      /api stays reachable on every host so in-flight forms never break
+  // The scan lives on the main site: cxo.studio/scan/* is rewritten (cxo-studio vercel.json)
+  // to this project, so every route here sits under /scan (pages, /scan/_next assets,
+  // /scan/api). On cxo.studio itself, /scan is the website's landing page; the app owns
+  // /scan/run (scan in progress) and /scan/results.
+  // Long calls (/api/scan can run up to 300s) skip the cxo.studio proxy, which gives up
+  // after 120s, and go straight to this project: see lib/base.ts.
+  basePath: "/scan",
+
   async redirects() {
-    const canonical = process.env.CANONICAL_HOST;
-    if (!canonical) return [];
     return [
-      {
-        source: "/:path((?!api/).*)",
-        has: [{ type: "host", value: "audit.cxo.studio" }],
-        destination: `https://${canonical}/:path`,
-        permanent: true,
-      },
+      // old links and the scanner's own home: the questions now live on cxo.studio/start,
+      // a direct link with ?url&email still starts the scan
+      { source: "/", destination: "/scan/run", basePath: false, permanent: false },
+      { source: "/", destination: "/run", permanent: false },
+      { source: "/scanner", destination: "/results", permanent: false },
     ];
   },
 
-  // The client portal is a single static page (public/portal/index.html) that talks
-  // to the /api/hours, /api/timeline, /api/performance... routes in pages/api.
+  // Client portal: a single static page (public/portal/index.html) that calls /api/*.
+  // On portal.cxo.studio the paths carry no /scan prefix; that mapping lives in vercel.json
+  // (Next only allows rewrites outside the base path to external URLs).
   async rewrites() {
-    return {
-      beforeFiles: [
-        { source: "/", has: [{ type: "host", value: "portal.cxo.studio" }], destination: "/portal/index.html" },
-        { source: "/:client((?!api/|portal/|_next/).+)", has: [{ type: "host", value: "portal.cxo.studio" }], destination: "/portal/index.html" },
-      ],
-      afterFiles: [
-        { source: "/portal", destination: "/portal/index.html" },
-        { source: "/portal/:path((?!index\\.html$).*)", destination: "/portal/index.html" },
-      ],
-    };
+    return [
+      { source: "/portal", destination: "/portal/index.html" },
+      { source: "/portal/:path((?!index\\.html$).*)", destination: "/portal/index.html" },
+    ];
   },
 };
 

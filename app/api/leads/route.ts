@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
     url: str(body.url, 500),
     revenue_band: str(body.revenueBand, 40),
     traffic_band: str(body.trafficBand, 40),
+    conversion_band: str(body.crBand, 20),
     goal: str(body.goal, 60),
     role: str(body.role, 60),
     route,
@@ -68,7 +69,13 @@ export async function POST(request: NextRequest) {
   if (url && key) {
     try {
       const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
-      const { error } = await sb.from('leads').insert(row)
+      let { error } = await sb.from('leads').insert(row)
+      // conversion_band arrived later (supabase/leads.sql): still store the lead if the
+      // column has not been added yet
+      if (error && /conversion_band/.test(error.message)) {
+        const { conversion_band: _cr, ...rest } = row
+        ;({ error } = await sb.from('leads').insert(rest))
+      }
       if (error) console.error('[leads] insert failed:', error.message)
     } catch (e) {
       console.error('[leads] supabase unavailable:', e)
