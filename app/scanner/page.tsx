@@ -219,8 +219,8 @@ export default function ScannerPage() {
         </defs>
     </svg>
    
-    <main className="bg-[#FDFDFD] min-h-screen w-full overflow-x-visible">
-      <div className={`bg-[#F4F4F5] pt-[34px] pb-[46px] md:px-4 ${hasMore ? 'gradient' : ''}`}>
+    <main className="bg-transparent min-h-screen w-full overflow-x-visible">
+      <div className={`bg-transparent pt-[34px] pb-[46px] md:px-4 ${hasMore ? 'gradient' : ''}`}>
         <div className="max-w-[1000px] w-full mx-auto px-4 sm:px-6">
           {/* Logo */}
           <div className="text-center sm:mb-[34px]">

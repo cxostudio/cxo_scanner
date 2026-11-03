@@ -99,7 +99,7 @@ export function DualViewportLoader({
                     className="absolute inset-0 opacity-[0.26]"
                     style={{
                       backgroundImage:
-                        'radial-gradient(circle, rgba(139, 92, 246, 0.4) 1px, transparent 1px)',
+                        'radial-gradient(circle, rgba(0, 153, 255, 0.4) 1px, transparent 1px)',
                       backgroundSize: '14px 14px',
                     }}
                   />
@@ -107,12 +107,12 @@ export function DualViewportLoader({
                     className="absolute inset-0 opacity-[0.18]"
                     style={{
                       backgroundImage:
-                        'linear-gradient(rgba(139, 92, 246, 0.32) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 92, 246, 0.32) 1px, transparent 1px)',
+                        'linear-gradient(rgba(0, 153, 255, 0.32) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 153, 255, 0.32) 1px, transparent 1px)',
                       backgroundSize: '28px 28px',
                     }}
                   />
                   <div className="absolute inset-0 bg-violet-600/14" />
-                  <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(167,139,250,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
+                  <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(64, 197, 255,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
                 </div>
               )}
             </div>
@@ -147,7 +147,7 @@ export function DualViewportLoader({
                         className="absolute inset-0 opacity-[0.26]"
                         style={{
                           backgroundImage:
-                            'radial-gradient(circle, rgba(139, 92, 246, 0.4) 1px, transparent 1px)',
+                            'radial-gradient(circle, rgba(0, 153, 255, 0.4) 1px, transparent 1px)',
                           backgroundSize: '12px 12px',
                         }}
                       />
@@ -155,12 +155,12 @@ export function DualViewportLoader({
                         className="absolute inset-0 opacity-[0.18]"
                         style={{
                           backgroundImage:
-                            'linear-gradient(rgba(139, 92, 246, 0.32) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 92, 246, 0.32) 1px, transparent 1px)',
+                            'linear-gradient(rgba(0, 153, 255, 0.32) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 153, 255, 0.32) 1px, transparent 1px)',
                           backgroundSize: '20px 20px',
                         }}
                       />
                       <div className="absolute inset-0 bg-violet-600/14" />
-                      <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(167,139,250,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
+                      <div className="ux-ray-scan-line absolute inset-x-0 z-20 h-[3px] rounded-full bg-violet-400 shadow-[0_0_24px_rgba(64, 197, 255,0.95),0_0_2px_rgba(255,255,255,0.9)]" />
                     </div>
                   )}
                 </div>
@@ -181,7 +181,7 @@ export function DualViewportLoader({
         >
           <div className="flex max-w-[min(100%-1rem,28rem)] items-center gap-2.5 rounded-full border border-white/10 bg-zinc-950/90 px-4 py-2.5 text-sm text-white shadow-lg backdrop-blur-sm">
             <span
-              className="inline-flex h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400 shadow-[0_0_12px_rgba(167,139,250,0.9)]"
+              className="inline-flex h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400 shadow-[0_0_12px_rgba(64, 197, 255,0.9)]"
               aria-hidden
             />
             <span className="truncate font-medium tracking-tight">{statusText}</span>

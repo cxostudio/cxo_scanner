@@ -1308,7 +1308,7 @@ export default function Home() {
   }, [isLoading]);
 
   return (
-    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden  bg-gray-100">
+    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden bg-transparent">
       <div
         className={`w-full mx-auto px-4 sm:px-6  ${showAnalyze ? "max-w-[1400px]" : "sm:h-screen md:h-auto max-w-[600px]"}`}
       >
@@ -1358,7 +1358,7 @@ export default function Home() {
               {/* Progress Bar */}
               <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
                 <motion.div
-                  className="bg-gray-600 h-2 rounded-full"
+                  className="bg-zinc-950 h-2 rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: `${progressPercentage}%` }}
                   transition={{ duration: 0.65, ease: [0.4, 0, 0.2, 1] }}
@@ -1748,7 +1748,7 @@ export default function Home() {
                           </div>
                           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                             <div
-                              className="h-full rounded-full bg-gray-600"
+                              className="h-full rounded-full bg-zinc-950"
                               style={{ width: `${displayProgressPercent}%` }}
                             />
                           </div>

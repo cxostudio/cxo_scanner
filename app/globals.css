@@ -3,6 +3,16 @@
 /* Shared CXO Studio design tokens: copied as-is from cxo-studio/src/styles/tokens.css (source of truth). */
 @import "./tokens.css";
 
+/* The scan app is the next screen of cxo.studio/start: same tokens, same light page,
+   same drifting brand wash. Tailwind's violet scale (used by the scan beams) is
+   remapped to the CXO brand blue so every scanning effect is on-brand. */
+@theme {
+  --color-violet-300: #8fd3ff;
+  --color-violet-400: var(--blue-500);
+  --color-violet-600: var(--blue-600);
+  --color-violet-950: #003a63;
+}
+
 .loading {
   display: inline-block;
   width: 20px;
@@ -142,7 +152,7 @@
     content: "";
     width: 100%;
     height: 214px;
-    background: linear-gradient(180deg, rgba(243, 244, 246, 0.00) 0%, #F3F4F6 71.63%);
+    background: linear-gradient(180deg, transparent 0%, var(--bg) 71.63%);
     position: absolute;
     bottom: 0;
     left: 0;
@@ -175,8 +185,9 @@
    ============================================================================= */
 
 body {
-  font-family: 'Inter', sans-serif;
-  color: #4b5563;
+  font-family: var(--font-body);
+  color: var(--text-muted);
+  background: var(--bg);
   letter-spacing: 0.02em;
   line-height: 1.6;
 }
@@ -299,3 +310,18 @@ a.border-zinc-300 {
     letter-spacing: -0.01em;
   }
 }
+
+
+/* Brand wash behind the scan screens: identical to cxo.studio/start (drifts slowly left <-> right). */
+.cxo-wash { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.cxo-wash::before {
+  content: ''; position: absolute; inset: -30% -40%;
+  background: var(--gradient-brand); opacity: 0.26; filter: blur(48px);
+  animation: cxo-wash-drift 22s ease-in-out infinite alternate;
+}
+@keyframes cxo-wash-drift {
+  0%   { transform: translate3d(-18%, -3%, 0) rotate(-4deg) scale(1.05); }
+  50%  { transform: translate3d(0%, 3%, 0) rotate(3deg) scale(1.12); }
+  100% { transform: translate3d(18%, -2%, 0) rotate(8deg) scale(1.05); }
+}
+@media (prefers-reduced-motion: reduce) { .cxo-wash::before { animation: none; } }

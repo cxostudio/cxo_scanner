@@ -186,12 +186,12 @@ export function QuadrantScanSequence({
                           className="absolute inset-0 opacity-35"
                           style={{
                             backgroundImage:
-                              'linear-gradient(rgba(139, 92, 246, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 92, 246, 0.4) 1px, transparent 1px)',
+                              'linear-gradient(rgba(0, 153, 255, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 153, 255, 0.4) 1px, transparent 1px)',
                             backgroundSize: '18px 18px',
                           }}
                         />
                         <motion.div
-                          className="absolute left-0 right-0 z-10 h-[2px] rounded-full bg-violet-400 shadow-[0_0_20px_rgba(167,139,250,0.95)]"
+                          className="absolute left-0 right-0 z-10 h-[2px] rounded-full bg-violet-400 shadow-[0_0_20px_rgba(64, 197, 255,0.95)]"
                           initial={{ top: 0 }}
                           animate={{ top: 'calc(100% - 2px)' }}
                           transition={{
