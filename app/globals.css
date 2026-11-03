@@ -326,6 +326,7 @@ a.border-zinc-300 {
 }
 @media (prefers-reduced-motion: reduce) { .cxo-wash::before { animation: none; } }
 
+@layer components {
 /* ───────────────────────────────────────────────────────────────────────────
    CXO focus pages: the scan screens use the exact /start look from the website
    (cxo-studio src/components/Onboarding.astro). Keep these in step with it.
@@ -406,4 +407,6 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
   .cxo-head { margin-bottom: var(--space-8); }
   .cxo-card { padding: var(--space-5); border-radius: var(--radius-lg); }
   .cxo-q { font-size: var(--text-lg); }
+}
+
 }
