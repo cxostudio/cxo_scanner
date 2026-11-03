@@ -217,13 +217,13 @@ export default function ResultsPage() {
   return (
     <main className="min-h-screen">
       {/* ── top: on the brand wash ───────────────────────────────────────── */}
-      <div className="px-[var(--gutter)] pt-[34px] max-[560px]:pt-[26px]">
+      <div className="flex flex-col px-[var(--gutter)] pt-[34px] max-[560px]:pt-[26px] lg:min-h-[90vh]">
         <a className="cxo-logo !mb-10" href="https://cxo.studio" aria-label="CXO studio">
           <img src={asset('/cxo-logo.png')} alt="CXO studio" />
         </a>
 
-        <section className="mx-auto grid max-w-[1280px] items-stretch gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16" aria-label="Verdict">
-          <div className="cxo-reveal flex min-w-0 flex-col gap-5">
+        <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16 lg:pb-6" aria-label="Verdict">
+          <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {host} · Product page · {report.total} checkpoints
             </p>
@@ -286,9 +286,9 @@ export default function ResultsPage() {
       </div>
 
       {/* ── the rest: plain white, like the website ─────────────────────── */}
-      <div className="relative mt-14 bg-[var(--surface)]">
+      <div className="relative mt-6 bg-[var(--surface)]">
         <div aria-hidden="true" className="absolute inset-x-0 -top-24 h-24 bg-gradient-to-b from-transparent to-[var(--surface)]" />
-        <div className="relative mx-auto flex max-w-[1120px] flex-col gap-[var(--space-20)] px-[var(--gutter)] pb-[var(--section-y)] pt-8 max-[560px]:gap-14">
+        <div className="relative mx-auto flex max-w-[calc(1280px+2*var(--gutter))] flex-col gap-[var(--space-20)] px-[var(--gutter)] pb-[var(--section-y)] pt-8 max-[560px]:gap-14">
           {/* every check, next to the page it was checked on */}
           <section id="checks" className="scroll-mt-6" aria-label="Your page, check by check">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
