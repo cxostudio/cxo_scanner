@@ -73,7 +73,7 @@ const List = ({ items }: { items: string[] }) => (
   </ul>
 )
 
-export function NextStep() {
+export function NextStep({ plain = false }: { plain?: boolean } = {}) {
   const [revenue, setRevenue] = useState<string | null>(null)
   const [checked, setChecked] = useState<number | null>(null)
 
@@ -94,7 +94,7 @@ export function NextStep() {
   const small = revenue === LOW_REVENUE
 
   return (
-    <section className="cxo-card" aria-label="What's next">
+    <section className={plain ? '' : 'cxo-card'} aria-label="What's next">
       <span className="inline-block rounded-[var(--radius-sm)] border border-[var(--border)] px-[11px] py-[5px] text-[13px] font-semibold text-[var(--text)]">
         What’s next?
       </span>
