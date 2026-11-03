@@ -248,7 +248,7 @@ export default function ResultsPage() {
                   return (
                     <div key={a.id} className="min-w-0">
                       <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                        <span className="truncate font-semibold text-[var(--text)]">{a.label}</span>
+                        <span className="truncate font-semibold text-[var(--text)]" title={a.label}>{a.short}</span>
                         <span className="tabular-nums font-semibold" style={{ color: t.fg }}>
                           {a.passed}/{a.total}
                         </span>
@@ -434,8 +434,8 @@ export default function ResultsPage() {
                       className="rounded-[var(--radius-md)] border p-3.5 text-center"
                       style={k === 0.1 ? { background: 'var(--result-pass-bg)', borderColor: 'var(--result-pass-fg)' } : { background: 'var(--surface)', borderColor: 'var(--border)' }}
                     >
-                      <p className="text-xs text-[var(--text-muted)]">+{k * 100}% conversion</p>
-                      <p className="mt-1 text-[18px] font-bold" style={{ color: k === 0.1 ? 'var(--result-pass-fg)' : 'var(--text)' }}>
+                      <p className="text-xs text-[var(--text-muted)]">+{k * 100}%<span className="max-[560px]:hidden"> conversion</span></p>
+                      <p className="mt-1 whitespace-nowrap text-[18px] font-bold max-[560px]:text-[15px]" style={{ color: k === 0.1 ? 'var(--result-pass-fg)' : 'var(--text)' }}>
                         +{shortEur(numbers.revenue * k)}
                       </p>
                     </div>

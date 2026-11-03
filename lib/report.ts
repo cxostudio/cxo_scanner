@@ -20,11 +20,11 @@ export type ScanResult = {
 export type Lever = 'addtocart' | 'conversion' | 'order' | 'experience'
 
 /** The four areas a product page is scored on, named after the number each one moves. */
-export const LEVERS: { id: Lever; label: string; moves: string }[] = [
-  { id: 'addtocart', label: 'Add to cart', moves: 'add-to-cart rate' },
-  { id: 'conversion', label: 'Trust and conversion', moves: 'conversion rate' },
-  { id: 'order', label: 'Order value', moves: 'average order value' },
-  { id: 'experience', label: 'Navigation and experience', moves: 'pages per session' },
+export const LEVERS: { id: Lever; label: string; short: string; moves: string }[] = [
+  { id: 'addtocart', label: 'Add to cart', short: 'Add to cart', moves: 'add-to-cart rate' },
+  { id: 'conversion', label: 'Trust and conversion', short: 'Trust', moves: 'conversion rate' },
+  { id: 'order', label: 'Order value', short: 'Order value', moves: 'average order value' },
+  { id: 'experience', label: 'Navigation and experience', short: 'Navigation', moves: 'pages per session' },
 ]
 
 const METRIC_TO_LEVER: Record<string, Lever> = {
