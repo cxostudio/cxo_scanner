@@ -1366,7 +1366,7 @@ export default function Home() {
       ) : (
         <div className="mx-auto grid w-full min-w-0 max-w-[1180px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
           {/* live preview of the page being scanned */}
-          <section className="cxo-card cxo-reveal cxo-reveal-2 min-w-0 !p-4 sm:!p-6" aria-label="Live preview">
+          <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
             {error && (
               <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-critical-bg)] px-3 py-2 text-sm text-[var(--status-critical-fg)]">{error}</div>
             )}
