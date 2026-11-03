@@ -6,7 +6,7 @@ import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { NextStep } from '../components/NextStep'
-import { asset } from '@/lib/base'
+import { api, asset } from '@/lib/base'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type Lever, type ScanResult } from '@/lib/report'
 
@@ -56,6 +56,7 @@ export default function ResultsPage() {
   const [mobile, setMobile] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(8)
+  const [located, setLocated] = useState<Located | 'loading' | 'failed' | null>(null)
 
   useEffect(() => {
     try {
@@ -78,6 +79,56 @@ export default function ResultsPage() {
       setResults(null)
     }
   }, [])
+
+  // pin the findings on the page (app/api/locate): one page load + one AI call, cached per URL
+  useEffect(() => {
+    if (!results || !url) return
+    const failed = results.filter((r) => !r.passed)
+    if (!failed.length) return
+    try {
+      const cached = JSON.parse(localStorage.getItem('scanLocate') || 'null') as { url: string; data: Located } | null
+      if (cached?.url === url && cached.data?.screenshot) {
+        setLocated(cached.data)
+        return
+      }
+    } catch {}
+    setLocated('loading')
+    const ctrl = new AbortController()
+    fetch(api('/locate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, findings: failed.map((r) => ({ id: r.ruleId, title: r.ruleTitle, reason: r.reason })) }),
+      signal: ctrl.signal,
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data: Located) => {
+        setLocated(data)
+        try {
+          localStorage.setItem('scanLocate', JSON.stringify({ url, data }))
+        } catch {}
+      })
+      .catch((e) => {
+        if ((e as Error).name !== 'AbortError') setLocated('failed')
+      })
+    return () => ctrl.abort()
+  }, [results, url])
+
+  // pin numbers, top to bottom on the page; several findings on one element stack up
+  const pinNo = useMemo(() => {
+    const m = new Map<string, number>()
+    if (located && typeof located === 'object') {
+      ;[...located.pins].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x).forEach((p, i) => m.set(p.findingId, i + 1))
+    }
+    return m
+  }, [located])
+
+  const openFinding = (id: string) => {
+    if (!results) return
+    const idx = results.findIndex((r) => r.ruleId === id)
+    if (idx >= visible) setVisible(idx + 1)
+    setOpen((prev) => new Set(prev).add(id))
+    requestAnimationFrame(() => document.getElementById(`f-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }
 
   const report = useMemo(() => {
     if (!results) return null
@@ -273,27 +324,90 @@ export default function ResultsPage() {
             </section>
           )}
 
-          {/* 5. what we scanned */}
-          {(desktop || mobile) && (
-            <section className="cxo-card flex flex-wrap items-end justify-center gap-4 !p-5 sm:!p-6" aria-label="Scanned page">
-              {desktop && (
-                <div className="min-w-0 flex-[1_1_420px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-strong)] bg-[var(--surface)]">
-                  <div className="flex items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2">
-                    <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
-                    <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
-                    <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
-                    <span className="ml-2 min-w-0 truncate text-xs text-[var(--text-muted)]">{url}</span>
+          {/* 5. the page, with every finding pinned where it happens */}
+          <section className="cxo-card flex flex-col gap-4 !p-5 sm:!p-6" aria-label="Your page, annotated">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+              <h2 className="font-[family-name:var(--font-display)] text-[24px] font-bold tracking-[-0.03em] text-[var(--text)]">Where the problems are</h2>
+              <p className="text-sm text-[var(--text-muted)]">
+                {located === 'loading'
+                  ? 'Placing the findings on your page…'
+                  : typeof located === 'object' && located && pinNo.size
+                    ? `${pinNo.size} findings pinned. Click a pin to open it.`
+                    : 'Desktop and mobile, as we scanned them'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-start justify-center gap-4">
+              <div className="min-w-0 flex-[1_1_480px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-strong)] bg-[var(--surface)]">
+                <div className="flex items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2">
+                  <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--border-strong)]" />
+                  <span className="ml-2 min-w-0 truncate text-xs text-[var(--text-muted)]">{url}</span>
+                </div>
+                {typeof located === 'object' && located ? (
+                  <div className="max-h-[640px] overflow-y-auto max-[560px]:max-h-[420px]">
+                    <div className="relative">
+                      <img src={located.screenshot} alt="Your product page with the findings pinned" className="block w-full" />
+                      {located.pins.map((p) => {
+                        const n = pinNo.get(p.findingId)!
+                        const same = located.pins.filter((q) => q.box.x === p.box.x && q.box.y === p.box.y)
+                        const k = same.indexOf(p)
+                        return (
+                          <span key={p.findingId}>
+                            {k === 0 && (
+                              <span
+                                aria-hidden="true"
+                                className="pointer-events-none absolute rounded-[6px] border-2"
+                                style={{
+                                  left: `${(p.box.x / located.width) * 100}%`,
+                                  top: `${(p.box.y / located.height) * 100}%`,
+                                  width: `${(p.box.w / located.width) * 100}%`,
+                                  height: `${(p.box.h / located.height) * 100}%`,
+                                  borderColor: 'var(--result-fail-fg)',
+                                  background: 'color-mix(in srgb, var(--result-fail-fg) 7%, transparent)',
+                                }}
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openFinding(p.findingId)}
+                              aria-label={`Finding ${n}`}
+                              className="absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-[3px] text-[13px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
+                              style={{
+                                left: `calc(${((p.box.x + p.box.w) / located.width) * 100}% + ${k * 22}px)`,
+                                top: `${(p.box.y / located.height) * 100}%`,
+                                background: 'var(--result-fail-fg)',
+                                color: 'var(--text-inverse)',
+                                borderColor: 'var(--surface)',
+                              }}
+                            >
+                              {n}
+                            </button>
+                          </span>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <img src={desktop} alt="Desktop view of the scanned page" className="block aspect-[16/10] w-full object-cover object-top" />
-                </div>
-              )}
+                ) : desktop ? (
+                  <div className="relative">
+                    <img src={desktop} alt="Desktop view of the scanned page" className={`block aspect-[16/10] w-full object-cover object-top ${located === 'loading' ? 'opacity-60' : ''}`} />
+                    {located === 'loading' && (
+                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--cta-bg)] px-4 py-2 text-sm font-semibold text-[var(--cta-text)]">
+                        Placing the findings on your page…
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid aspect-[16/10] place-items-center text-sm text-[var(--text-muted)]">Preview unavailable</div>
+                )}
+              </div>
               {mobile && (
-                <div className="w-[150px] flex-none overflow-hidden rounded-[26px] border-[6px] border-[var(--text)] bg-[var(--surface)] max-[560px]:w-[120px]">
-                  <img src={mobile} alt="Mobile view of the scanned page" className="block h-[300px] w-full object-cover object-top max-[560px]:h-[240px]" loading="lazy" />
+                <div className="w-[150px] flex-none overflow-hidden rounded-[26px] border-[6px] border-[var(--text)] bg-[var(--surface)] max-[810px]:hidden">
+                  <img src={mobile} alt="Mobile view of the scanned page" className="block h-[300px] w-full object-cover object-top" loading="lazy" />
                 </div>
               )}
-            </section>
-          )}
+            </div>
+          </section>
 
           {/* 6. every check */}
           <section className="cxo-card min-w-0" aria-label="All checks">
@@ -306,11 +420,12 @@ export default function ResultsPage() {
                   return (
                     <div
                       key={r.ruleId}
-                      className={`overflow-hidden rounded-[var(--radius-md)] border bg-[var(--surface)] ${isOpen ? 'border-[var(--border-strong)]' : 'border-[var(--border)]'}`}
+                      id={`f-${r.ruleId}`}
+                      className={`scroll-mt-6 overflow-hidden rounded-[var(--radius-md)] border bg-[var(--surface)] ${isOpen ? 'border-[var(--border-strong)]' : 'border-[var(--border)]'}`}
                       style={{ ['--result-fg' as string]: `var(--result-${tone}-fg)`, ['--result-bg' as string]: `var(--result-${tone}-bg)` }}
                     >
                       <button type="button" className="cxo-row !rounded-none !border-0 !bg-transparent" onClick={() => toggle(r.ruleId)} aria-expanded={isOpen}>
-                        <Verdict passed={r.passed} />
+                        <Verdict passed={r.passed} n={pinNo.get(r.ruleId)} />
                         <span className="cxo-row-text">
                           <span className="cxo-row-label text-[15px] leading-[1.4]">{r.ruleTitle}</span>
                         </span>
@@ -389,7 +504,13 @@ function ScoreRing({ score }: { score: number }) {
   )
 }
 
-function Verdict({ passed }: { passed: boolean }) {
+function Verdict({ passed, n }: { passed: boolean; n?: number }) {
+  if (!passed && n)
+    return (
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold" style={{ background: 'var(--result-fail-fg)', color: 'var(--text-inverse)' }} aria-label={`To fix, pin ${n}`} role="img">
+        {n}
+      </span>
+    )
   return (
     <span
       className="grid h-6 w-6 shrink-0 place-items-center rounded-full"
@@ -409,5 +530,7 @@ function Verdict({ passed }: { passed: boolean }) {
     </span>
   )
 }
+
+type Located = { screenshot: string; width: number; height: number; pins: { findingId: string; box: { x: number; y: number; w: number; h: number } }[] }
 
 export type { Lever }
