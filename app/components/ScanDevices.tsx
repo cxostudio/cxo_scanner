@@ -64,7 +64,7 @@ export function ScanDevices({
   scanning?: boolean
   status?: string
 }) {
-  const mobileSrc = mobile || desktop
+  const mobileSrc = mobile
   return (
     <div className="relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden>
       <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">

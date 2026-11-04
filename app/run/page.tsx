@@ -1365,7 +1365,7 @@ export default function Home() {
         <h1 className="cxo-reveal break-words">
           {blocking ? "We couldn’t start your scan" : showAnalyze ? (host ? `Scanning ${host}` : "Scanning your product page") : "Preparing your scan"}
         </h1>
-        <p className="cxo-reveal cxo-reveal-1 !text-[14px] !leading-[1.5] sm:!text-[15px]">
+        <p className="cxo-reveal cxo-reveal-1 !text-[14px] !leading-[1.5] !tracking-normal sm:!text-[15px]">
           {blocking ? "Check the details below, then try again." : "About a minute. Keep this tab open."}
         </p>
       </div>
@@ -1405,7 +1405,7 @@ export default function Home() {
             {/* same frames and size as the results hero: the loading screen turns into the results */}
             <ScanDevices
               desktop={previewDesktop}
-              mobile={previewDesktop ? previewMobile : null}
+              mobile={previewMobile && previewMobile !== previewDesktop ? previewMobile : null}
               instant={analyzeInstantPreview}
               scanning
               status={pct < 25 ? "Capturing your page…" : pct < 75 ? "Scanning every section…" : "Almost there…"}
