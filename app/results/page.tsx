@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
-import { NextStep } from '../components/NextStep'
+import { YourPath } from '../components/YourPath'
 import { api, asset } from '@/lib/base'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
@@ -391,55 +391,17 @@ export default function ResultsPage() {
             </div>
           </section>
 
-          {/* what fixing it is worth, and the one next step that fits */}
-          {numbers && (
-            <section className="grid items-center gap-8 rounded-[var(--radius-xl)] bg-[var(--bg-subtle)] p-6 sm:p-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]" aria-label="What fixing this is worth">
-              <div className="flex min-w-0 flex-col gap-3">
-                <p className="text-sm font-semibold text-[var(--text-muted)]">What fixing this is worth</p>
-                <h2 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold leading-[1.2] tracking-[-0.03em] text-[var(--text)]">
-                  A 10% lift in conversion is about {eur(numbers.lift10)} more a month. {eur(numbers.lift10 * 12)} a year.
-                </h2>
-                <p className="text-sm leading-[1.6] text-[var(--text-muted)]">
-                  From your answers: about {eur(numbers.revenue)} a month
-                  {numbers.aov ? `, ${eur(numbers.aov)} orders` : ''}
-                  {numbers.cr ? `, ${(numbers.cr * 100).toFixed(1)}% conversion${numbers.crIsBenchmark ? ' (average)' : ''}` : ''}. A rough estimate, not a promise.
-                </p>
-              </div>
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-3 gap-2">
-                  {[0.05, 0.1, 0.15].map((k) => (
-                    <div
-                      key={k}
-                      className="rounded-[var(--radius-md)] border p-3.5 text-center"
-                      style={k === 0.1 ? { background: 'var(--result-pass-bg)', borderColor: 'var(--result-pass-fg)' } : { background: 'var(--surface)', borderColor: 'var(--border)' }}
-                    >
-                      <p className="text-xs text-[var(--text-muted)]">+{k * 100}%<span className="max-[560px]:hidden"> conversion</span></p>
-                      <p className="mt-1 whitespace-nowrap text-[18px] font-bold max-[560px]:text-[15px]" style={{ color: k === 0.1 ? 'var(--result-pass-fg)' : 'var(--text)' }}>
-                        +{shortEur(numbers.revenue * k)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                {qualified ? (
-                  <>
-                    <a href={CALL_URL} className="cxo-btn cxo-btn-primary cxo-btn-block">
-                      Book my CRO Audit call <Arrow />
-                    </a>
-                    <p className="text-center text-[13px] text-[var(--text-muted)]">30 minutes with Louis. We price every leak with you.</p>
-                  </>
-                ) : (
-                  <>
-                    <a href={CHECKLIST_URL} className="cxo-btn cxo-btn-primary cxo-btn-block">
-                      Get the full CRO checklist <Arrow />
-                    </a>
-                    <p className="text-center text-[13px] text-[var(--text-muted)]">At your size, an audit wouldn’t pay for itself yet. Fix the quick wins yourself first.</p>
-                  </>
-                )}
-              </div>
-            </section>
-          )}
-
-          <NextStep plain />
+          {/* what fixing it is worth, and the path from today's scan */}
+          <YourPath
+            money={numbers}
+            qualified={qualified}
+            checked={report?.total ?? 0}
+            toFix={report?.failed.length ?? 0}
+            eur={eur}
+            shortEur={shortEur}
+            callUrl={CALL_URL}
+            fullScanUrl={CHECKLIST_URL}
+          />
         </div>
       </div>
     </main>
