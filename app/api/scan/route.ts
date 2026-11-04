@@ -51,6 +51,7 @@ import {
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { runScanV2, PageCheckError } from '@/lib/scanV2'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -196,6 +197,7 @@ const ScanRequestSchema = z.object({
   iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
   email: z.string().optional(), // for the per-email daily scan limit
   scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
+  engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2; default comes from SCAN_ENGINE
 })
 
 // Helper function to sleep/delay
@@ -1051,7 +1053,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine } = validationResult.data
 
     // Per-email daily scan limit — CHECK ONLY here (block if already at the
     // limit) so we don't do expensive work for a user who's out of scans.
@@ -1154,6 +1156,20 @@ export async function POST(request: NextRequest) {
     ): R & { checkpoint?: CheckpointPresentation } {
       const c = checkpointByRuleId.get(row.ruleId)
       return c ? { ...row, checkpoint: c } : row
+    }
+
+    // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
+    if ((engine || process.env.SCAN_ENGINE || 'v1') === 'v2') {
+      try {
+        const v2 = await runScanV2(validUrl, rules, apiKey)
+        if (email && scanId) await registerScan(email, scanId).catch(() => {})
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings })
+      } catch (e) {
+        if (e instanceof PageCheckError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })
+        }
+        throw e
+      }
     }
 
     // Fetch website content with Puppeteer to detect JavaScript-loaded content
