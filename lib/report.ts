@@ -7,6 +7,8 @@ export type ScanResult = {
   ruleTitle: string
   passed: boolean
   reason: string
+  /** engine v2: 'na' (not relevant, counts as passed) and 'unknown' (couldn't check, left out of the score) */
+  status?: 'pass' | 'fail' | 'na' | 'unknown'
   checkpoint?: {
     requiredActions: string
     justificationsBenefits: string

@@ -3,6 +3,7 @@
 // cite what was seen. "unknown" is allowed: we never guess.
 import { OpenRouter } from '@openrouter/sdk'
 import type { Evidence } from './capture'
+import { definitionFor } from './definitions'
 
 export type Rule = { id: string; title: string; description: string }
 export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string }
@@ -31,18 +32,8 @@ First decide the product category (fashion: apparel, footwear, bags, jewellery /
 - Before-and-after images only apply to beauty, skincare, health, cleaning and similar products with a visible effect; otherwise "na".
 - "How to use in simple steps" applies to products that need instructions (beauty, food prep, supplements, tools, electronics); for clothing, shoes and furniture it is "na".
 
-Definitions we use (follow them exactly; where they differ from a checkpoint's "what good looks like", these win):
-- Thumbnails: a strip or grid of small clickable preview images next to or under the main image. Dots, progress bars, arrows only, or a stack of full-size images are NOT thumbnails.
-- Footer contact information: an actual phone number, email address or street address in the footer. A "Contact" link, a store-locator link or town names alone are NOT enough.
-- Complementary items: the product shown together with other products a shopper might also buy (an outfit styled with other pieces, the product in use with accessories). The parts of the product itself, its packaging or its case do NOT count.
-- Consistent image backgrounds: compare the product-only shots in the gallery. Lifestyle or model shots are expected and do not make it inconsistent. Pass when the product shots share one background style.
-- Cart count: use the image of the header taken after one item was added to the cart.
-- Button labels: judge the main add-to-cart button in its ready state. "Select a size" or "Choose an option" is a temporary state before a variant is picked: judge the label it becomes (usually "Add to cart"; check the page text and code). Pass when the main button starts with an action verb (Add, Buy, Shop, Get, Order, Book, Try...): "Add to cart" passes. Urgency words are a bonus and never a reason to fail.
-- Preselected size/colour: in fashion, sizes should NOT be preselected (it causes wrong-size orders and returns). Pass when the colour or style is preselected and the size is left to the shopper (a "Color: X" label, a highlighted swatch, or one product page per colour all mean the colour is preselected); "na" when the only choice is size. For other products (scent, flavour, pack size, model), pass when a default or best-selling option is preselected and the add-to-cart button works right away.
-- Important pages in the main navigation: pass when the main navigation links to the pages that make money (main product categories or collections, new, sale, bestsellers). Contact, About, Returns and FAQ belong in the footer and are NOT required in the main navigation. Fail only when main shopping categories are missing or the menu is overloaded (more than about 10 top-level items).
-- Gallery navigation: a desktop grid or stack of images you scroll through counts as easy to navigate, as do arrows, thumbnails or swipe on mobile.
-- Multiple angles: at least three gallery images showing the product from different sides or views (front, side, back, top, detail).
-- Free shipping threshold: pass only if an amount ("free shipping over €50") is shown near the price or add to cart. "Free shipping" without a threshold passes too when it applies to every order.
+Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
+
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
 Reply with JSON only: {"results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
@@ -80,7 +71,23 @@ function parse(raw: unknown): Verdict[] {
 
 async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }): Promise<Verdict[]> {
   const list = group
-    .map((r) => `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${r.description.replace(/\s+/g, ' ').slice(0, 900)}`)
+    .map((r) => {
+      const d = definitionFor(r.id)
+      const desc = r.description.replace(/\s+/g, ' ').slice(0, d ? 400 : 900)
+      if (!d) return `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${desc}`
+      return [
+        `- id: ${r.id}`,
+        `  question: ${d.new_q || r.title}`,
+        `  device: ${d.device === 'Both' ? 'judge desktop and mobile' : `judge on ${d.device.toLowerCase()} only`}`,
+        `  pass when: ${d.pass}`,
+        `  fail when: ${d.fail}`,
+        `  not relevant when: ${d.na}`,
+        d.niche ? `  niche notes: ${d.niche}` : '',
+        `  description (context only): ${desc}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    })
     .join('\n')
   const content = [
     { type: 'text' as const, text: shared.text },

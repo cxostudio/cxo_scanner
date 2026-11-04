@@ -101,7 +101,7 @@ export default function ResultsPage() {
   // place the findings on the page (app/api/locate), desktop and phone in parallel, cached per URL
   useEffect(() => {
     if (!results || !url) return
-    const failed = results.filter((r) => !r.passed)
+    const failed = results.filter((r) => !r.passed && r.status !== 'unknown')
     if (!failed.length) return
     const ctrls: AbortController[] = []
     ;(['desktop', 'mobile'] as Device[]).forEach((d) => {
@@ -138,14 +138,17 @@ export default function ResultsPage() {
 
   const report = useMemo(() => {
     if (!results) return null
-    const failed = results.filter((r) => !r.passed)
+    // "couldn't check" answers are never shown as failures or counted in the score
+    const unknown = results.filter((r) => r.status === 'unknown').length
+    const scored = results.filter((r) => r.status !== 'unknown')
+    const failed = scored.filter((r) => !r.passed)
     const areas = LEVERS.map((l) => {
-      const items = results.filter((r) => lever(r) === l.id)
+      const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { failed, passed: results.length - failed.length, total: results.length, score: scoreOf(results), areas, num, easyHigh }
+    return { rows: scored, failed, passed: scored.length - failed.length, total: scored.length + unknown, unknown, score: scoreOf(scored), areas, num, easyHigh }
   }, [results])
 
   const host = hostOf(url)
@@ -302,6 +305,7 @@ export default function ResultsPage() {
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
                     {report.passed} passed
                   </span>
+                  {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
                   {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
                 </p>
               </div>
@@ -338,7 +342,7 @@ export default function ResultsPage() {
 
               <div className="relative min-w-0 lg:order-1">
                 <div className="flex flex-col gap-3">
-                  {results.slice(0, visible).map((r) => {
+                  {report.rows.slice(0, visible).map((r) => {
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -380,7 +384,7 @@ export default function ResultsPage() {
                     )
                   })}
                 </div>
-                {visible < results.length && (
+                {visible < report.rows.length && (
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-36 items-end justify-center bg-gradient-to-b from-transparent to-[var(--surface)]">
                     <button type="button" onClick={() => setVisible((v) => v + 12)} className="cxo-btn cxo-btn-primary pointer-events-auto !px-7">
                       Load more results
