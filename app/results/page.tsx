@@ -217,12 +217,12 @@ export default function ResultsPage() {
   return (
     <main className="min-h-screen">
       {/* ── top: on the brand wash ───────────────────────────────────────── */}
-      <div className="flex flex-col px-[var(--gutter)] pt-[34px] max-[560px]:pt-[26px] lg:min-h-[90vh]">
+      <div className="flex flex-col px-[var(--gutter)] pt-[34px] max-[560px]:pt-[26px] lg:min-h-[min(90vh,860px)]">
         <a className="cxo-logo !mb-10" href="https://cxo.studio" aria-label="CXO studio">
           <img src={asset('/cxo-logo.png')} alt="CXO studio" />
         </a>
 
-        <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16 lg:pb-6" aria-label="Verdict">
+        <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {host} · Product page · {report.total} checkpoints
@@ -483,7 +483,7 @@ function Ring({ score, color }: { score: number; color: string }) {
 function Devices({ desktop, mobile }: { desktop: string | null; mobile: string | null }) {
   const fade = { WebkitMaskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)', maskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)' }
   return (
-    <div className="cxo-reveal cxo-reveal-1 relative min-h-[300px] w-full max-[1023px]:h-[360px] max-[560px]:h-[260px]" style={fade} aria-hidden={!desktop && !mobile}>
+    <div className="cxo-reveal cxo-reveal-1 relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden={!desktop && !mobile}>
       <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
         <div className="h-full overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)]">
           {desktop ? <img src={desktop} alt="Your product page on desktop" className="block w-full object-cover object-top" /> : null}
