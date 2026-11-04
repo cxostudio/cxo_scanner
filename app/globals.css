@@ -412,3 +412,7 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 }
 
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .ux-ray-scan-line { animation: none; top: 40%; }
+}

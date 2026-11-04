@@ -7,8 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { z } from "zod";
 import { toast } from "react-toastify";
 import emailjs from "@emailjs/browser";
+import { ScanDevices } from "../components/ScanDevices";
 import {
-  DualViewportLoader,
   type InstantPreviewHint,
 } from "../components/DualViewportLoader";
 import { api, asset, START_URL } from "@/lib/base";
@@ -985,7 +985,12 @@ export default function Home() {
   // answered there, so prefill URL, email and revenue, jump to the last step and
   // start the scan right away when `start=1`.
   const [autoStart, setAutoStart] = useState(false);
+  const prefillDone = useRef(false);
   useEffect(() => {
+    // runs once: the answers are removed from the address bar below, so a second run
+    // (React strict mode, fast refresh) must not mistake that for "no answers"
+    if (prefillDone.current) return;
+    prefillDone.current = true;
     const q = new URLSearchParams(window.location.search);
     const u = q.get("url");
     const e = q.get("email");
@@ -1342,13 +1347,11 @@ export default function Home() {
       </a>
 
       <div className="cxo-head">
-        <h1 className="cxo-reveal">
-          {blocking ? "We couldn’t start your scan" : showAnalyze ? "Scanning your product page" : "Preparing your scan"}
+        <h1 className="cxo-reveal break-words">
+          {blocking ? "We couldn’t start your scan" : showAnalyze ? (host ? `Scanning ${host}` : "Scanning your product page") : "Preparing your scan"}
         </h1>
-        <p className="cxo-reveal cxo-reveal-1">
-          {blocking
-            ? "Check the details below, then try again."
-            : <>{host && <strong className="font-semibold text-[var(--text)]">{host}</strong>}{host && " · "}About a minute. Keep this tab open.</>}
+        <p className="cxo-reveal cxo-reveal-1 !text-[14px] !leading-[1.5] sm:!text-[15px]">
+          {blocking ? "Check the details below, then try again." : "About a minute. Keep this tab open."}
         </p>
       </div>
 
@@ -1381,32 +1384,19 @@ export default function Home() {
           {/* live preview of the page being scanned; on phones it comes first, with a compact
               progress line on top so the visitor still sees the scan moving */}
           <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
-            <div className="mb-5 flex items-center gap-3 lg:hidden" aria-hidden="true">
-              <Spinner />
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
-                {STEP_LABELS[Math.min(displayedMounted, STEP_LABELS.length - 1)]}
-              </span>
-              <span className="text-sm font-semibold tabular-nums text-[var(--text)]">{pct}%</span>
-            </div>
-            <div className="cxo-progress mb-6 lg:hidden" aria-hidden="true"><span style={{ width: `${barPct}%`, transition: 'none' }} /></div>
             {error && (
               <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-critical-bg)] px-3 py-2 text-sm text-[var(--status-critical-fg)]">{error}</div>
             )}
-            {(quadrants.length === 0 || !previewDesktop) && (
-              <DualViewportLoader
-                align="start"
-                previewDesktop={previewDesktop}
-                previewMobile={previewDesktop ? previewMobile : null}
-                instantPreview={analyzeInstantPreview}
-                scanning
-                statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
-              />
-            )}
+            {/* same frames and size as the results hero: the loading screen turns into the results */}
+            <ScanDevices
+              desktop={previewDesktop}
+              mobile={previewDesktop ? previewMobile : null}
+              instant={analyzeInstantPreview}
+              scanning
+              status={pct < 25 ? "Capturing your page…" : pct < 75 ? "Scanning every section…" : "Almost there…"}
+            />
             {quadrants.length > 0 && previewDesktop && (
-              <div className="w-full min-w-0">
-                <div className="mb-6">
-                  <DualViewportLoader align="start" previewDesktop={previewDesktop} previewMobile={previewMobile} scanning={false} />
-                </div>
+              <div className="mt-6 hidden w-full min-w-0 lg:block">
                 {redirectWarning && (
                   <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-finding-bg)] p-3 text-sm text-[var(--status-finding-fg)]">{redirectWarning}</div>
                 )}
@@ -1416,7 +1406,7 @@ export default function Home() {
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-reveal cxo-reveal-1 min-w-0 lg:sticky lg:top-6" aria-label="Scan progress">
+          <aside className="cxo-card cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-24 max-[560px]:-mt-20 lg:sticky lg:top-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${barPct}%`, transition: 'none' }} />

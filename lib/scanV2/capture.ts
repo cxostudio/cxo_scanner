@@ -46,7 +46,8 @@ const BOT_WALL = /verify you are human|are you a robot|security check(point)?|ch
 const NOT_FOUND = /\b404\b|page not found|pagina niet gevonden|page introuvable|página no encontrada|seite nicht gefunden|pagina non trovata/i
 
 /** Accept cookie banners (multilingual), close popups, unroll inner scroll wrappers. */
-async function clean(page: Page) {
+export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
+  const unroll = opts.unroll !== false
   await page
     .evaluate(() => {
       const accept = /^(accept( all)?( cookies)?|allow( all)?|agree|i agree|ok|got it|alles accepteren|accepteren|akkoord|accepter( tout)?|tout accepter|j'accepte|aceptar( todo)?|alle akzeptieren|akzeptieren|accetta( tutti)?)$/i
@@ -66,7 +67,7 @@ async function clean(page: Page) {
     })
     .catch(() => {})
   await page
-    .evaluate(() => {
+    .evaluate((doUnroll: boolean) => {
       const vw = window.innerWidth
       const vh = window.innerHeight
       // big fixed overlays (newsletter popups, age gates) but never the header bar
@@ -77,6 +78,7 @@ async function clean(page: Page) {
         const isTopBar = r.top <= 5 && r.height < 220
         if (!isTopBar && r.width * r.height > vw * vh * 0.3) (el as HTMLElement).style.setProperty('display', 'none', 'important')
       }
+      if (!doUnroll) return
       // themes that scroll an inner wrapper instead of the document
       for (const el of [document.documentElement, document.body, ...Array.from(document.querySelectorAll('body > *, body > * > *'))]) {
         const s = getComputedStyle(el)
@@ -87,7 +89,7 @@ async function clean(page: Page) {
           h.style.setProperty('max-height', 'none', 'important')
         }
       }
-    })
+    }, unroll)
     .catch(() => {})
 }
 
@@ -306,7 +308,7 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   if (!note.startsWith('one item')) return { note }
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {})
   await new Promise((r) => setTimeout(r, 2500))
-  await clean(page)
+  await cleanPage(page)
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
   const badge = await page
     .evaluate(() => {
@@ -371,9 +373,9 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     if (/\/products?\//.test(wantedPath) && !/\/products?\//.test(gotPath))
       throw new PageCheckError('redirected', 'This link redirects away from the product page (the product may be gone). Try another product URL.')
 
-    await clean(desktop)
+    await cleanPage(desktop)
     await scrollForLazyContent(desktop)
-    await clean(desktop)
+    await cleanPage(desktop)
     const facts = await readFacts(desktop).catch((e) => {
       console.warn('[scanV2] facts failed', String(e).slice(0, 200))
       return {}
@@ -392,9 +394,9 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       await mobile.setUserAgent(MOBILE_UA)
       await prepare(mobile)
       await open(mobile, rawUrl)
-      await clean(mobile)
+      await cleanPage(mobile)
       await scrollForLazyContent(mobile)
-      await clean(mobile)
+      await cleanPage(mobile)
       mobileFacts = await mobile
         .evaluate(() => ({ viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null, horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5 }))
         .catch(() => ({}))
