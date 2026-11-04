@@ -69,6 +69,9 @@ function persistScanPreview(key: string, value: string) {
     /* ignore */
   }
 }
+/** Must match the server default in /api/scan (SCAN_ENGINE). */
+const SCAN_ENGINE = process.env.NEXT_PUBLIC_SCAN_ENGINE || "v2";
+
 const LOADER_MESSAGES = [
   "Capturing page screenshots",
   "Scanning sections",
@@ -590,6 +593,11 @@ export default function Home() {
               response,
               `Failed to scan batch ${i + 1}`,
             );
+            // 422: the page can't be scanned (404, redirect, bot wall); 429: daily limit.
+            // Retrying won't help: stop and show the message with "Try again".
+            if (response.status === 422 || response.status === 429) {
+              throw Object.assign(new Error(message), { final: true });
+            }
             throw new Error(message);
           }
 
@@ -636,6 +644,7 @@ export default function Home() {
           batchSucceeded = true;
           break;
         } catch (err) {
+          if ((err as { final?: boolean } | null)?.final) throw err;
           lastBatchError = err;
           console.error(
             `Error processing batch ${i + 1} (attempt ${attempt}/${BATCH_MAX_ATTEMPTS}):`,
@@ -657,7 +666,13 @@ export default function Home() {
         console.error(
           `Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`,
         );
-        // Fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
+        // Engine v2 judges the whole page at once: no per-rule fallback (it would rerun the
+        // full capture per rule). Show the error card with "Try again" instead.
+        if (SCAN_ENGINE !== "v1") {
+          console.error("Scan failed:", lastBatchError);
+          throw new Error("We couldn't finish the scan. This happens with some heavy pages, please try again.");
+        }
+        // Engine v1 fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
         if (batch.rules.length > 1) {
           console.warn(`Attempting single-rule fallback for batch ${i + 1}...`);
           // 6 at a time: one by one, 42 checks took ~19 minutes; in parallel it stays ~2-3

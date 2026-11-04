@@ -197,7 +197,7 @@ const ScanRequestSchema = z.object({
   iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
   email: z.string().optional(), // for the per-email daily scan limit
   scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
-  engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2; default comes from SCAN_ENGINE
+  engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2 (default); SCAN_ENGINE=v1 switches back
 })
 
 // Helper function to sleep/delay
@@ -1159,7 +1159,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
-    if ((engine || process.env.SCAN_ENGINE || 'v1') === 'v2') {
+    if ((engine || process.env.SCAN_ENGINE || 'v2') === 'v2') {
       try {
         const v2 = await runScanV2(validUrl, rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
