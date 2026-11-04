@@ -254,11 +254,32 @@ function readHiddenText(page: Page) {
     .catch(() => '')
 }
 
-async function open(page: Page, url: string) {
+// Trackers, chat widgets and video streams: heavy, and never needed to judge the page.
+const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadservices|facebook\.net|connect\.facebook|hotjar|clarity\.ms|tiktok|snapchat|pinterest\.com\/ct|bing\.com|criteo|taboola|outbrain|gorgias|intercom|zendesk|tidio|crisp\.chat|trustpilot\.com\/tracking|segment\.(com|io)|mixpanel|amplitude|fullstory|heap|newrelic|sentry|datadog|optimizely|vwo|abtasty|convert\.com|klaviyo\.com\/onsite|privy|justuno|attentive|postscript)/i
+
+async function prepare(page: Page) {
   // some bundlers wrap named functions in __name(); make it exist inside the page too
   await page.evaluateOnNewDocument('window.__name = function (f) { return f }').catch(() => {})
-  const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-  await page.waitForNetworkIdle({ idleTime: 800, timeout: 8000 }).catch(() => {})
+  await page.setRequestInterception(true).catch(() => {})
+  page.on('request', (req) => {
+    try {
+      const type = req.resourceType()
+      if (type === 'media' || type === 'websocket' || type === 'eventsource' || BLOCK_HOSTS.test(req.url())) return void req.abort().catch(() => {})
+      void req.continue().catch(() => {})
+    } catch {}
+  })
+}
+
+/** Open the page; a slow page that has in fact rendered is good enough. */
+async function open(page: Page, url: string) {
+  let res = null
+  try {
+    res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 })
+  } catch (e) {
+    const rendered = await page.evaluate(() => (document.body?.innerText || '').length).catch(() => 0)
+    if (rendered < 500) throw e
+  }
+  await page.waitForNetworkIdle({ idleTime: 800, timeout: 7000 }).catch(() => {})
   return res
 }
 
@@ -292,23 +313,18 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
   const t0 = Date.now()
   const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
   try {
+    // Desktop first, then mobile: one tab at a time keeps the serverless browser within memory.
     const desktop = await browser.newPage()
     await desktop.setViewport({ width: DESKTOP.width, height: DESKTOP.height })
     await desktop.setUserAgent(DESKTOP_UA)
     await desktop.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' })
-    const mobile = await browser.newPage()
-    await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
-    await mobile.setUserAgent(MOBILE_UA)
-
-    const [res] = await Promise.all([
-      open(desktop, rawUrl).catch((e) => {
-        throw new PageCheckError('unreachable', `We couldn't open this page (${String(e?.message || e).slice(0, 80)}).`)
-      }),
-      open(mobile, rawUrl).catch(() => null),
-    ])
+    await prepare(desktop)
+    const res = await open(desktop, rawUrl).catch((e) => {
+      throw new PageCheckError('unreachable', `We couldn't open this page (${String(e?.message || e).slice(0, 80)}).`)
+    })
 
     // page check: is this really the product page?
-    const status = res?.status() ?? 0
+    const status = res?.status() ?? 200
     const finalUrl = desktop.url()
     const title = await desktop.title().catch(() => '')
     const bodyText = await desktop.evaluate(() => document.body?.innerText || '').catch(() => '')
@@ -321,20 +337,38 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     if (/\/products?\//.test(wantedPath) && !/\/products?\//.test(gotPath))
       throw new PageCheckError('redirected', 'This link redirects away from the product page (the product may be gone). Try another product URL.')
 
-    await Promise.all([clean(desktop), clean(mobile)])
-    await Promise.all([scrollForLazyContent(desktop), scrollForLazyContent(mobile)])
-    await Promise.all([clean(desktop), clean(mobile)])
-
-    const [facts, mobileFacts, text, hiddenText, desktopTiles, mobileTiles] = await Promise.all([
-      readFacts(desktop).catch((e) => { console.warn('[scanV2] facts failed', String(e).slice(0, 200)); return {} }),
-      mobile.evaluate(() => ({ viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null, horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5 })).catch(() => ({})),
-      desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => ''),
-      readHiddenText(desktop),
-      tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles),
-      tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles),
-    ])
-    await mobile.close().catch(() => {})
+    await clean(desktop)
+    await scrollForLazyContent(desktop)
+    await clean(desktop)
+    const facts = await readFacts(desktop).catch((e) => {
+      console.warn('[scanV2] facts failed', String(e).slice(0, 200))
+      return {}
+    })
+    const text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
+    const hiddenText = await readHiddenText(desktop)
+    const desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles)
     const cart = await cartTest(desktop)
+    await desktop.close().catch(() => {})
+
+    let mobileTiles: Tile[] = []
+    let mobileFacts: Record<string, unknown> = {}
+    try {
+      const mobile = await browser.newPage()
+      await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+      await mobile.setUserAgent(MOBILE_UA)
+      await prepare(mobile)
+      await open(mobile, rawUrl)
+      await clean(mobile)
+      await scrollForLazyContent(mobile)
+      await clean(mobile)
+      mobileFacts = await mobile
+        .evaluate(() => ({ viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null, horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5 }))
+        .catch(() => ({}))
+      mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
+      await mobile.close().catch(() => {})
+    } catch (e) {
+      console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
+    }
 
     return {
       url: rawUrl,

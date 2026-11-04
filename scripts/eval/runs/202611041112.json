@@ -1,0 +1,3045 @@
+{
+ "base": "https://cxo-scanner-git-merge-portal-into-app-cxo-studio.vercel.app",
+ "at": "202611041112",
+ "engine": "v2",
+ "rules": [
+  {
+   "id": "recSs12TogM60Mf6w",
+   "title": "Do you use pure black for text or backgrounds?",
+   "description": "Avoid using pure black (#000000) for text or backgrounds. Opt for softer dark tones like charcoal (#333333) for text and off-black colors for backgrounds.\n\nUse high contrast between text and background, but ensure the tone isn't too harsh on the eyes, improving readability and visual comfort.\n\n**Detailed Actions:**\n- **Text:** Use colors with slightly lighter shades (e.g., #333333 or #444444) for body text instead of pure black. These tones reduce the starkness that pure black creates, making reading less fatiguing, especially for longer sessions.\n- **Backgrounds:** Avoid using pure black (#000000) as a background color. Instead, choose a dark gray like #212121 or #121212. This ensures that text and images stand out while reducing visual strain.\n- **Contrast:** Ensure there\u2019s sufficient contrast between text and background, especially for accessibility. Use tools like  [Contrast Checker](https://webaim.org/resources/contrastchecker/) to verify that your combinations meet accessibility standards."
+  },
+  {
+   "id": "recEcmUYxWGuOz3vK",
+   "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+   "description": "Make sure all button and link labels start with action verbs and convey a sense of urgency. Labels like \u201cShop Now\u201d or \u201cGet Yours Today\u201d are clear and actionable, guiding users toward making a purchase.\n\n**Detailed Actions:**\n- **Start with a Strong Verb:** Every button label should start with a verb that describes the action users will take, such as \"Buy,\" \"Explore,\" or \"Save.\" Use language that directly signals what will happen when the button is clicked.\n- **Convey Urgency:** Add a sense of immediacy by using words like \u201cNow,\u201d \u201cToday,\u201d or \u201cLimited Time\u201d where relevant. This creates a subtle pressure, nudging users to act promptly.\n- **Customize Language for Context:** Ensure buttons align with the specific goal of the page. For example, on a product page, \"Add to Cart\" or \"Buy Now\" works well, while on a homepage, \u201cExplore Collection\u201d might fit better.\n\n**WooCommerce and Shopify Tips:**\n- For WooCommerce, go to **Appearance > Customize** and adjust button text in your theme settings if available. Some themes support custom labels for product and checkout pages without additional plugins.\n- On Shopify, use the **Theme Editor** under **Online Store > Themes > Customize** to modify button labels. Most Shopify themes allow easy button text customization on product and homepage sections directly from the editor."
+  },
+  {
+   "id": "recXqQmYLbyuIil2a",
+   "title": "Does the footer display social media links?",
+   "description": "Include social media icons linked to your business profiles on platforms like Facebook, Instagram, Twitter, and LinkedIn."
+  },
+  {
+   "id": "rec1iBTNslYj4y05d",
+   "title": "Is the most common size/color preselected?",
+   "description": "Preselect the most common size/color to streamline the purchasing process.\n\nWe suggest test this point against **\"Is there a reminder to select size/color if users forget before adding to the cart?\"**\n\n**Pros**: Can streamline the purchasing process, reducing friction for users who prefer default choices, and speeding up the path to checkout.\n\n**Cons**: Increases the risk of users accidentally adding the wrong size/variant, potentially increasing returns and customer dissatisfaction, especially in categories like clothing where fit is crucial.\n\nBalancing ease of use with ensuring informed decisions is key. Testing will help identify the optimal approach, allowing for data-driven decisions tailored to the specific product category."
+  },
+  {
+   "id": "rec3kmxGigBELSAlu",
+   "title": "Is lazy loading enabled for images and videos?",
+   "description": "Ensure that lazy loading is enabled for all images and videos on your site to improve load time and user experience.\n\n**Detailed Actions**:\n- Lazy loading means images and videos only load when they come into view, which reduces initial page load time. If your theme doesn't support it by default, implementing a plugin or editing your theme\u2019s code may be necessary.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Most modern Shopify themes have lazy loading built-in. Check your theme settings or install an app like **[Tiny SEO Speed Image Optimizer](https://apps.shopify.com/smart-image-optimizer)** to enable it for non-video content.\n- **WooCommerce**\n    - If your theme doesn't support lazy loading, you can enable it through settings or use a plugin like **[WP Rocket](https://wp-rocket.me/)** or **[Smush](https://wordpress.org/plugins/wp-smushit/)** that adds lazy loading functionality.\n\n\u26a0\ufe0f Please avoid lazy loading images above the fold. They need to load first and fast."
+  },
+  {
+   "id": "recZ158fy5ndWroli",
+   "title": "Are product titles and descriptions concise, informative, and consistent?",
+   "description": "Make sure your product titles are clear, concise, and descriptive, focusing on key attributes (e.g., brand, model, color, size). Descriptions should briefly outline product benefits and specifications.\n\n**Detailed Actions:**\n- **Product Titles**\n    - Keep titles under 50 characters.\n    - Include essential details like the product type, brand, and key features (e.g., \u201cNike Air Zoom Sneakers\u201d).\n    - Avoid unnecessary keywords or jargon that clutter the title.\n- **Consistency**\n    - Ensure that all product titles follow a similar format across your category pages for a uniform experience.\n    - Avoid using different terminology for the same products or product types (e.g., don\u2019t alternate between \u201cT-shirt\u201d and \u201cTee\u201d in titles or descriptions)."
+  },
+  {
+   "id": "rectyUC9T4WUfFYvc",
+   "title": "Are product ratings displayed near the product title?",
+   "description": "Display product ratings directly on the product page near the product title to provide social proof and increase trust.\n\nWhen showing a rating, two things must be included:\n1. The review score (ex: \"4.3/5\")\n2. The total people who have rated the product (ex: \"203 reviews\")\n\nSome external product rating apps:\n- [Loox](https://apps.shopify.com/loox) (Shopify only)\n- [Judge.me](https://judge.me/)\n- [Yotpo](https://www.yotpo.com/)\n- [YITH WooCommerce Reviews](https://yithemes.com/themes/plugins/yith-woocommerce-advanced-reviews/) (WooCommerce only)\n\nWhen you click on the reviews, the website should take you to the reviews section (anchor link)."
+  },
+  {
+   "id": "rectt6VIDYK1SbaBH",
+   "title": "Is there a short list of key benefits highlighted near the product title?",
+   "description": "Ensure that key product benefits (e.g., \"Free Shipping\", \"Easy Returns\", \"Limited Stock\", \"Eco-friendly\") are clearly displayed near the product title, so customers quickly understand the value of purchasing this item.\n\n**Detailed Actions:**\n- Place a concise list (2-3 benefits) below or beside the product title to capture immediate attention.\n- Use bold or contrasting fonts to ensure these benefits stand out visually from the rest of the product description.\n- Make sure the benefits are specific, impactful, and aligned with the key selling points of the product (e.g., if it's a luxury item, focus on exclusivity; if it's a daily-use item, highlight convenience).\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - If your theme doesn't support it, consider specialized app such as [Iconic: Product Features](https://apps.shopify.com/modern-product-descriptions) for easier configuration.\n- **WooCommerce**\n    - If your theme doesn't support it, consider using a plugin like [WooCommerce Custom Product Tabs](https://wordpress.org/plugins/yikes-inc-easy-custom-woocommerce-product-tabs/) to customize the layout."
+  },
+  {
+   "id": "rec59tWeW27UFwDuX",
+   "title": "Is the product\u2019s material or composition information clearly provided?",
+   "description": "When applicable, include material or composition details, ideally near the product title or within the product description. Use a straightforward label like \"Material,\" \"Composition,\" or \"Fabric\" to make it easy for customers to find.\n\n**Detailed Actions**\n- Display material or composition information in a prominent location on the product page, next to key attributes.\n- Consider creating a separate tab or section specifically for product details (e.g., \"Product Information\" or \"Details\").\n- Use bullet points for clarity and consistency, making sure the details are easy to read.\n- If the product comes in multiple variations (e.g., different fabrics or materials), make sure the content is updated accordingly or display a dropdown or selectable option so users can see the material composition for each variant.\n- Make sure this information is easily accessible and visible on both desktop and mobile devices.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Add material information in the product description or use apps like [Metafields Guru](https://apps.shopify.com/metafields-editor-2) for additional fields.\n- **WooCommerce**\n    - Use custom fields or product attributes to display material information."
+  },
+  {
+   "id": "recoRfbr8slQLFqTB",
+   "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+   "description": "Ensure that before-and-after images are included for products where applicable to show their effectiveness and results. This can greatly influence purchase decisions, especially for products where transformation or improvement is a key selling point.\n\n**Detailed Actions:**\n- Include clear, high-quality before-and-after images on the product page where the product\u2019s effectiveness can be visually demonstrated.\n- Place the images near the product description or as part of the product gallery.\n- Use a clear, side-by-side comparison or a slider format that allows customers to easily see the transformation.\n- Ensure the images are consistent in lighting, angle, and background to maintain a professional look."
+  },
+  {
+   "id": "recBIykwniSTLYVjI",
+   "title": "Are video testimonials available on the product page?",
+   "description": "Add video testimonials from real customers that showcase their experience with the product.\n\n**Detailed Actions**:\n- Select happy, engaged customers willing to share their experiences in a video format.\n- Integrate video testimonials directly on the product page near the product description or below the main product image.\n- Use high-quality videos that are short (30 seconds to 1 minute) and focus on key product benefits, customer satisfaction, and the product in action.\n\n**For Shopify Users:**\n- You can maybe give a try to the app [Tolstoy](https://www.gotolstoy.com/)."
+  },
+  {
+   "id": "recDkT1jqcBJworBQ",
+   "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+   "description": "Make the free shipping threshold visible near the \"Add to Cart\" or \"Buy Now\" button to encourage customers to increase their order size. Display it in a clear, prominent, and visually appealing way.\n\n**Detailed Actions:**\n- **Placement**: Ensure the free shipping threshold message is placed near key CTAs like \"Add to Cart,\" \"Buy Now,\" or \"Proceed to Checkout.\" The closer to the decision-making process, the better.\n- **Messaging**: Use clear, direct language such as \"Add $X more to get free shipping!\" or \"You\u2019re just $X away from free shipping!\"\n- **Visuals**: Make the message stand out with a contrasting color or design that draws attention but doesn\u2019t overpower the CTA.\n- **Consistency**: If the site offers free shipping based on different conditions (e.g., specific product categories), make sure the messaging is dynamic and adapts based on the customer\u2019s cart.\n- **User-Friendly**: Ensure the message is mobile-responsive and easy to spot on all devices, especially mobile, where users are less likely to notice subtle design elements."
+  },
+  {
+   "id": "recihw16WgNwYG09z",
+   "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+   "description": "Position trust signals like secure checkout badges, SSL certificates, and payment security logos (e.g., Visa, MasterCard, PayPal) near the \"Add to Cart\" and \"Checkout\" buttons.\n\n**Detailed Actions**:\n- Add recognizable trust badges to key areas near the main Call to Action (CTA) buttons, such as on the product page next to the \"Add to Cart\" button or on the checkout page.\n- Ensure these badges are visible, clearly conveying secure payment options and protecting customer data.\n- For best results, make sure these badges match the design and are not overly intrusive. They should blend into the page without distracting the user from the main CTA."
+  },
+  {
+   "id": "rec74RD9IgZgfDUwl",
+   "title": "Are product prices and any discounts clearly displayed?",
+   "description": "Show prices prominently along with any discounts or offers, using striking visuals to highlight deals. Use bold or contrasting colors to make prices stand out.\n\n**Detailed Actions:**\n1. **Visibility**: Position prices near the product image and description for easy visibility. Use larger font sizes and a contrasting color to draw attention.\n2. **Discounts**: Clearly display any discounts alongside the original price, using strikethroughs for the original price and bold text for the discounted price.\n3. **Consistency**: Ensure that the formatting for prices and discounts is consistent across all product listings to provide a seamless shopping experience."
+  },
+  {
+   "id": "recVqogizZUTrTN4p",
+   "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+   "description": "Ensure that your product gallery can be easily navigated on mobile devices with swipe gestures or clearly visible arrows to move between images.\n\n**Detailed Actions:**\n- Implement touch-enabled swipe functionality for image galleries, ensuring users can swipe left or right to view different product images.\n- Add intuitive arrows on both sides of the product gallery for desktop and mobile users. These arrows should be easy to spot and large enough for easy clicking or tapping.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - If not supported natively by your theme, use apps like [Product Image Gallery & Zoom](https://apps.shopify.com/galaxio) to enable this feature.\n- **WooCommerce**\n    - If not supported natively by your theme, use plugins like [WooCommerce Product Gallery Slider](https://wordpress.org/plugins/woo-product-gallery-slider/) or [WP Image Zoom](https://wordpress.org/plugins/wp-image-zoooom/) to add swipe functionality and better navigation to product images."
+  },
+  {
+   "id": "recXmTTGKCp0rqOH8",
+   "title": "Is the breadcrumb navigation clearly visible?",
+   "description": "Implement breadcrumb navigation at the top of the page to show users their current location within the site hierarchy.\n\n**Detailed Actions**:\n- **Check Visibility**: Ensure that the breadcrumb is placed at the top of the category page, above the product listings.\n- **Use Clear Labels**: Ensure each crumb is labeled with relevant keywords that describe the path (e.g., Home > Category > Sub-category).\n- **Style for Clarity**: Use contrasting colors and adequate spacing to differentiate breadcrumbs from other text on the page. Ensure the font is legible and the size is appropriate for both desktop and mobile views.\n- **Responsive Design**: Test the breadcrumb navigation on various screen sizes to ensure it remains visible and functional on mobile devices.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Make sure your theme includes breadcrumb navigation or utilize apps like [PH Breadcrumbs](https://apps.shopify.com/breadcrumbs).\n- **WooCommerce**\n    - Ensure your theme supports breadcrumbs; if not, consider plugins like [Yoast SEO](https://yoast.com/wordpress/plugins/seo/) for breadcrumbs functionality."
+  },
+  {
+   "id": "recjK9IQ0T4rpu4iu",
+   "title": "Is there a visible newsletter subscription form in the footer?",
+   "description": "Add a simple and prominently placed email subscription form in the footer to encourage users to join your mailing list.\n\n**Detailed Actions:**\n- **Placement:** Add the newsletter subscription form in the footer of all key pages (e.g., homepage, product pages, and checkout) to maximize visibility.\n- **Design:** Use contrasting colors and clear typography to make the form stand out. Include a brief, enticing call-to-action (CTA) such as \"Sign up for exclusive offers!\".\n- **Fields:** Keep the form simple, asking for only the essential information (usually just an email address).\n- **Integration:** Ensure the form is integrated with your email marketing service (like Mailchimp or Klaviyo). \n- **Incentives:** Consider offering a discount code or free shipping for signing up to further entice users."
+  },
+  {
+   "id": "rechuFEvuIW0ULmFW",
+   "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+   "description": "Make sure the footer of your e-commerce site includes easy-to-find links to customer support options like live chat, help centers, FAQs, or contact forms.\n\n**Detailed Actions:**\n- **Positioning**: Add a dedicated \"Customer Support\" section in your footer with clear links to your support channels (e.g., live chat, FAQ, help center, or email support).\n- **Live Chat Integration**: If you don't already have it, integrate a live chat tool into your site. Popular options include **Tidio**, **LiveChat**, or **Zendesk Chat** for WooCommerce and Shopify.\n- **Help Center/FAQs**: Provide a link to a well-organized FAQ or Help Center. Organize this section by common issues like orders, payments, shipping, and returns.\n- **Contact Form**: Make sure there\u2019s a simple, easy-to-fill-out contact form for customer inquiries. Ensure this is easily accessible in the footer, or consider placing it in a \"Contact Us\" section."
+  },
+  {
+   "id": "recKjEZrP38rjqCoY",
+   "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+   "description": "Add a \"Back to Top\" button that allows users to quickly scroll back to the top of the page with a single click.\n\n**Detailed Actions:**\n- **Design and Placement:**\n    - Add a clearly labeled \"Back to Top\" button in the footer area of your website. Ensure it's visually distinct and accessible.\n    - Use a recognizable icon (e.g., an upward arrow) alongside the text for better visibility.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - You can add custom code to your theme\u2019s footer section or use an app like [Scrolly](https://apps.shopify.com/custom-scroll-to-top) for quick integration.\n- **WooCommerce**\n    - If your theme does not support this feature, consider using a plugin like [Back To Top Pro](https://wordpress.org/plugins/back-to-top-pro/) to easily add this functionality."
+  },
+  {
+   "id": "recdkYxD8QVU9j14p",
+   "title": "Does the cart icon display the number of items currently in the cart?",
+   "description": "Add a small counter or badge to the cart icon that dynamically updates to show the number of items added to the cart. \n\nThis provides users with immediate feedback on their selections and encourages them to proceed to checkout.\n\nReview your e-commerce theme settings to see if the cart icon number display is enabled. Many themes come with this feature built-in."
+  },
+  {
+   "id": "rec7DA1trGfVmAUET",
+   "title": "Is there a quick access link to the cart?",
+   "description": "Ensure that your e-commerce website features a prominent, easily accessible cart icon or link. This should be visible on every page, allowing users to quickly view their selected items without navigating away from their current browsing experience.\n\n**Detailed Actions:**\n1. **Positioning:** Place the cart icon/link in the top right corner of the header, where it is conventionally expected. Ensure it remains fixed while users scroll down the page for consistent access.\n2. **Visibility:** Use a contrasting color for the cart icon to ensure it stands out against the header background. Consider incorporating a small badge displaying the number of items in the cart.\n3. **Mobile Optimization:** Make sure the cart link is easy to tap on mobile devices. Test the touch target size to ensure it meets best practices (minimum 44px by 44px)."
+  },
+  {
+   "id": "recTUunKnIj3laNCO",
+   "title": "Does the footer include store location or contact information?",
+   "description": "Place your business\u2019s contact number, email address, and physical store location (if applicable) in the footer for easy accessibility."
+  },
+  {
+   "id": "recjEVPpCRkdi17EE",
+   "title": "Is there a clear and accessible \"Search\" button or icon?",
+   "description": "Include a clear \"Search\" button or magnifying glass icon that is intuitive and easily clickable, with appropriate touch targets for mobile users.\n\nUse a contrasting color for the search button to make it stand out against the background.\n\nConsider implementing a placeholder text in the search bar (e.g., \"Search products...\") to guide users."
+  },
+  {
+   "id": "rec5qkI2EcLQ5jQ9D",
+   "title": "Are all important pages linked in the main navigation?",
+   "description": "Ensure that your main navigation menu includes links to all essential pages. Prioritize the links bringing money. A common mistake is to add too many links, causing distraction.\n\nThe pages like Contact, About Us, and Customer Service can be down in the footer."
+  },
+  {
+   "id": "rec33A6aJXon8YXfR",
+   "title": "Do some images include annotations?",
+   "description": "Display annotations directly within product images or as badges.\n\nEnsure that these annotations are visible and easy to understand, emphasizing the product\u2019s unique qualities."
+  },
+  {
+   "id": "recLehZKzun1Rxv0Z",
+   "title": "Are dropdown menus easy to use on both desktop and mobile?",
+   "description": "Implement touch-friendly dropdowns with clear labels and avoid multiple levels that can be difficult to navigate on touch screens.\n\n**Detailed Actions:**\n- **Design for Touch:** For mobile, ensure that dropdown menus are appropriately sized for touch interaction. The touch targets should be at least 44x44 pixels to accommodate finger taps comfortably.\n- **Limit Menu Items:** Keep the number of items in dropdown menus manageable (ideally between 5-10 items) to prevent overwhelming users. Use submenus sparingly and ensure they are easy to access.\n- **Visual Feedback:** Implement hover states on desktop and tap states on mobile to provide visual feedback when users interact with the dropdowns."
+  },
+  {
+   "id": "recYUxusypKnfViyM",
+   "title": "Is the logo clickable and linked to the homepage?",
+   "description": "Ensure the logo in the header is clickable and links back to the homepage, providing users with an easy way to start over.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Go to **Online Store > Themes**, then click on **Customize**. In the header section, ensure the logo is set to link back to the homepage.\n- **WooCommerce**\n    - Navigate to **Appearance > Customize > Site Identity**. Ensure that your logo is uploaded and linked correctly."
+  },
+  {
+   "id": "recnbgJzDarhgi4RH",
+   "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+   "description": "Do you know what works best for you? If you can do it, test the use of \"color swatches\" and \"small images\" for product variants to determine which provides the most intuitive, engaging, and conversion-boosting experience, especially for fashion products.\n\n**Detailed Actions:**\n- **Evaluate Product Variants:** Display product variants (e.g., color, size, material) using both \"color swatches\" and \"small images\" to understand which format your users prefer.\n- **Run A/B Testing:** Implement A/B tests to track user engagement and conversion metrics for each variant display style. For fashion, color swatches tend to perform well for quick color selection, while small images might be preferred for products where the visual details (e.g., patterns, textures) are important.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use Shopify\u2019s built-in variant options\n- **WooCommerce**\n    - Use [Variation Swatches for WooCommerce](https://wordpress.org/plugins/woo-variation-swatches/)"
+  },
+  {
+   "id": "recNxnjMNyufvGsDX",
+   "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+   "description": "Clearly list all included items near the CTA. Frame it as an extra value.\n\n**Detailed Actions:**\n- Add a \u201cWhat\u2019s Included\u201d section directly below or next to the Add to Cart button.\n- Ensure the list is concise yet complete, using bullet points or icons for clarity.\n\n**Example Phrasing:**\n- \u2705 \"**You\u2019re getting:** Wireless Earbuds + \ud83c\udf81 Free Carrying Case + \ud83d\udd0b Charging Cable\"\n- \u2705 \"**Exclusive Bonus!** Free Travel Pouch ($15 value)\"\n- \u2705 \"**Get more for your money** \u2013 All accessories included, at no extra cost!\""
+  },
+  {
+   "id": "rec9Bd8mIKecasTPF",
+   "title": "Is the main product title visually prominent?",
+   "description": "Make sure\u00a0main product title is clearly visible, prominent, and easily readable. It should be the first thing users see when they land on the product page.\n\n**Detailed Actions**:\n- Use a large, bold font size that stands out from other page elements.\n- Position the title at the top of the product section, ideally just above the product image or close to the \"Add to Cart\" button.\n- Ensure the color of the text contrasts well with the background, making it easy to read on all devices.\n- Avoid clutter around the title\u2014ensure there is enough white space to make it stand out.\n- Test different font styles and sizes to find the most effective presentation."
+  },
+  {
+   "id": "rechQdZcW7EkLpi5J",
+   "title": "Does the product page have clickable tabs for easy access to more product details?",
+   "description": "Implement clickable tabs (e.g., \u201cDescription,\u201d \u201cReviews,\u201d \u201cSpecifications\u201d) for easy navigation to detailed information.\n\n**Detailed Actions:**\n- Implement tabs or accordion-style dropdowns that allow customers to quickly jump between sections of the product page without long scrolling.\n- Keep the tab labels clear and concise (e.g., \"Description,\" \"Details,\" \"Reviews,\" \"Shipping\").\n- Ensure tabs are easy to interact with and responsive, especially on mobile devices. Make sure the active tab is highlighted for clarity.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Some themes might not support tabs by default. \u00a0Use apps like** **[Tabs by Station](https://apps.shopify.com/tabs-by-station) to add tab functionality.\n- **WooCommerce**\n    - Most themes come with tab functionality. If not, you can use [YIKES Custom Product Tabs](https://wordpress.org/plugins/yikes-inc-easy-custom-woocommerce-product-tabs/) to add tabs."
+  },
+  {
+   "id": "recH6IBXpHPI1KIxY",
+   "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+   "description": "Display key product selling points (e.g., vegan, cruelty-free, organic, etc.) directly within product images or as badges.\n\nEnsure that these badges are visible and easy to understand, emphasizing the product\u2019s unique qualities.\n\n**Detailed Actions:**\n- Use high-quality, clear badges/icons that are easy to spot without cluttering the product image.\n- Position badges strategically within the image, ideally near the product or in a corner where they are not distracting but still visible."
+  },
+  {
+   "id": "receK3gEjM9yV2vi2",
+   "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+   "description": "Ensure that multiple product images are displayed as thumbnails below or beside the main image for easy viewing.\n\nIf your theme doesn't provide this feature:\n- **Shopify**: Use apps like[ Product Image Gallery & Zoom](https://apps.shopify.com/galaxio) to manage thumbnails efficiently.\n- **WooCommerce**: Use the [WooThumbs](https://iconicwp.com/products/woothumbs/) plugin to create thumbnail image galleries."
+  },
+  {
+   "id": "recxEGfZMHhvNPCUa",
+   "title": "Does the product gallery include videos to demonstrate the product?",
+   "description": "Integrate product demonstration videos in the gallery. Videos should show the product in use, highlighting key features.\n\n**Detailed Actions:**\n- Ensure the product videos are placed prominently in the product gallery, ideally as a main feature or within easy reach of the primary image.\n- The video should showcase the product in use, highlighting key features, benefits, and any unique selling points.\n- Consider adding customer reviews or tutorials in the video for added trust and engagement."
+  },
+  {
+   "id": "recKQWJU3qEuKGFA3",
+   "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+   "description": "Ensure product images are displayed from various angles and perspectives, such as front, side, back, and close-up views, to provide a complete picture. Additionally, include context to demonstrate scale, such as showing the product alongside a reference object, to help customers visualize its actual size.\n\nUse zoom or 360-degree functionality if possible and necessary, for furniture products particularly.\n\n**Detailed Actions:**\n- Upload high-quality images of the product from different angles and ensure they are clearly visible in the product gallery.\n- Include close-ups of important product details (e.g., stitching, texture, or special features).\n- Include images where the product is placed next to common items (e.g., a coffee cup, a coin, or a hand) to provide a reference for scale.\n- If the product is wearable or has variable dimensions, add a model or mannequin wearing or holding the product to highlight its fit or size.\n- For digital products (e.g., software or online services), use screenshots that show the product in use with a clear indication of its size in relation to other elements on the screen."
+  },
+  {
+   "id": "recxoLHExiwXLdy75",
+   "title": "Do product images include lifestyle shots that show the product in use?",
+   "description": "Incorporate lifestyle images that showcase the product being used in real-world scenarios to help users visualize its benefits.\n\nDetailed Actions:\n- Include at least 1-2 lifestyle images on each product page. These should complement product photos, showing the item in use in realistic settings.\n- Focus on images where the product is being worn, used, or displayed in context. For example, if selling clothing, show people wearing it; if selling kitchen tools, show them in use in a kitchen environment.\n- Choose settings and models that reflect your target audience. Make sure the shots are professionally taken to avoid pixelation or low-quality visuals.\n- Use images that enhance the emotional appeal of the product and convey how it solves the customer\u2019s problem or enhances their life."
+  },
+  {
+   "id": "rec7WWY98CVhOtAXo",
+   "title": "Is there a section explaining how to use the product in simple steps?",
+   "description": "Include a clear, concise section on the product page that outlines how to use the product in simple, easy-to-understand steps. This could be a step-by-step guide, instructional video, or visual tutorial.\n\n**Detailed Actions**\n- Create a dedicated \"How to Use\" section on the product page that explains the product's usage in 3-5 simple steps.\n- Use clear language and break down the process in bite-sized pieces, ideally with visuals (e.g., icons, images, or videos) accompanying each step.\n- Include common scenarios or FAQs that potential buyers may have about the product's usage.\n- For complex products, consider adding a \"How-to\" video demonstrating the product in action.\n- Integrate these explanations close to the product description or in a tab section for easy accessibility."
+  },
+  {
+   "id": "rec7hmBdP9rqP4gVw",
+   "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+   "description": "Make sure relevant cross-sell (related items) or up-sell (higher-value items) products are prominently displayed on the product page to encourage additional purchases.\n\n**Detailed Actions:**\n- **Positioning:** Display cross-sell and up-sell products below or next to the main product description or image.\n- **Relevance:** Use product data (e.g., related categories, purchase history, or customer behavior) to recommend items most likely to be bought together.\n- **Design:** Keep the design clean and visually distinct, making sure the recommendations are easy to browse but not distracting from the primary product.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use product recommendations that are powered by Shopify\u2019s native algorithm, or apps like [Bold Upsell](https://apps.shopify.com/product-upsell?locale=fr) or [Frequently Bought Together](https://apps.shopify.com/frequently-bought-together) for advanced features.\n- **WooCommerce**\n    - Use the built-in \"Related Products\" feature. To enhance cross-sells or up-sells, consider plugins like [WooCommerce Product Recommendations](https://woocommerce.com/products/product-recommendations/)."
+  },
+  {
+   "id": "recP2gybr9r0x8LYz",
+   "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+   "description": "Standardize image backgrounds across the product catalog. A clean, neutral background (e.g., white or light gray) helps maintain a professional, polished look across your product listings\n\n**Detailed Actions:**\n- Choose one background color or style for all product images and apply it to each product photo.\n- Use image editing tools to remove any distractions and create a consistent look.\n- Ensure that product photos are well-lit, clear, and focused, with no clutter or background elements competing for attention.\n- If your product images are shot in different settings (e.g., some with white backgrounds, others in a lifestyle setting), consider removing the lifestyle images or editing them to match the consistent background theme.\n\nUse this tool for free: <https://www.remove.bg/>"
+  },
+  {
+   "id": "recf9TVdWozjE1laI",
+   "title": "Are there images showing the product alongside complementary items?",
+   "description": "Display images showing the product with complementary or related items, such as accessories, to encourage cross-selling and increase average order value.\n\n**Detailed Actions:**\n- On your product pages, ensure that images show the product in context, paired with complementary items like matching accessories or alternative styles.\n- If selling clothing, showcase items like shoes, bags, or jewelry alongside the main product. For electronics, include related products such as chargers, cases, or stands.\n- Use lifestyle images that show the product in use with complementary items in the frame, enhancing the customer's vision of how they can use the product in real life.\n- Create a dedicated section or carousel in your product image gallery to highlight complementary items."
+  },
+  {
+   "id": "recYvb2wC1safMjpN",
+   "title": "Do you offer quantity discounts?",
+   "description": "Provide discounts for purchasing multiple items or in bulk quantities.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use [Xboost Bundle Quantity Breaks](https://apps.shopify.com/xboost-upsell)\n    - Use [P: Quantity & Volume Discounts](https://apps.shopify.com/quantity-price-breaks-limit-purchase)\n    - Use [Kaching Bundle Quantity Breaks](https://apps.shopify.com/bundle-deals)\n- **WooCommerce**\n    - Use [Discount Rules and Dynamic Pricing](https://wordpress.org/plugins/easy-woocommerce-discounts/)"
+  },
+  {
+   "id": "rechWSGCANIZS39ja",
+   "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+   "description": "Identify complementary products, design compelling upsell offers, integrate them into the CTA area of your product page.\n\n**Detailed Actions:**\n1. **Identify Upsell Opportunities:**\n    - Analyze the product catalog to identify complementary products or services that can be offered as upsells.\n    - Consider customer purchase history and behavior to determine the most relevant upsell items.\n2. **Design Upsell Offers:**\n    - Create compelling upsell offers that provide additional value to the customer.\n    - Ensure the offers are clearly communicated and easy to understand.\n3. **Integrate Upsell into Main CTA:**\n    - Modify the main Call-To-Action (CTA) on the product page to include the upsell offer.\n    - Use persuasive language and visual cues to highlight the upsell without distracting from the primary CTA."
+  }
+ ],
+ "pages": [
+  {
+   "id": "stateofart",
+   "url": "https://www.stateofart.com/products/racer-5-pocket-van-gekleurd-stretchdenim-26621-8900",
+   "seconds": 71,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black for some text elements, such as the header navigation links and the footer text.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button is labeled 'IN WINKELMAND' (In Shopping Cart), which does not start with a verb or convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media links for Facebook, Instagram, and LinkedIn.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": false,
+     "reason": "No size or color is preselected on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": true,
+     "reason": "Lazy loading is enabled for 61 out of 106 images on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and descriptive, and the product description is informative.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": false,
+     "reason": "Product ratings are displayed below the product description, not near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product's material composition is clearly stated as '99% Katoen, 1% Elastaan' under the 'PRODUCTOMSCHRIJVING' section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for this product type.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials available on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": true,
+     "reason": "The free shipping threshold of 'Gratis verzending vanaf \u20ac65,-' is highlighted below the 'IN WINKELMAND' button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no trust signals like secure checkout badges positioned near the 'IN WINKELMAND' button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price of \u20ac129,95 is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated by swiping and also has arrows for navigation.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "The breadcrumb navigation 'HOME \u2022 BROEKEN \u2022 JEANS \u2022 RACER 5-POCKET VAN GEKLEURD STRETCHDENIM' is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes a newsletter subscription form with an email input field and a call to action.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer has a 'Klantenservice' section with links for frequently asked questions, ordering, payment, delivery, and returns, as well as a phone number and email contact.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": true,
+     "reason": "A 'Back to Top' control is present on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": true,
+     "reason": "The cart icon in the header displays the number of items currently in the cart.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "A cart icon is prominently displayed in the top right corner of the header on all pages.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": true,
+     "reason": "The footer includes a phone number and an email link for customer service, and a link to 'Zoek een winkel' (Find a store).",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "A search button is clearly visible in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to 'SHOP THE LOOK', 'STATE STORIES', 'WINKELS', and 'ONS VERHAAL'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The dropdown menus in the header are touch-friendly and easy to use on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The State of Art logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": false,
+     "reason": "There is no information available about A/B testing for color swatches versus small images for product variants.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "This product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title is prominently displayed at the top of the product section with a large, bold font.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable tabs for 'PRODUCTOMSCHRIJVING', 'WASVOORSCHRIFTEN', and 'Reviews' to access more details.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display any key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page does not display thumbnails for quick navigation through the image gallery.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": true,
+     "reason": "The product images show the product from multiple angles and perspectives, including close-ups and on a model.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": true,
+     "reason": "The product images include lifestyle shots that show the product in use on a model.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no section explaining how to use the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "Relevant cross-sell products are displayed in an 'AANBEVOLEN VOOR JOU' section on the product page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": false,
+     "reason": "Product images have inconsistent backgrounds, with some being plain and others showing a full scene.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": true,
+     "reason": "Images show the product alongside complementary items, such as a sweater and shoes.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for purchasing multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the 'IN WINKELMAND' button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 66961,
+    "judgeMs": 3349
+   }
+  },
+  {
+   "id": "alpine",
+   "url": "https://www.alpine.nl/products/silence",
+   "seconds": 34,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigation timeout of 30000 ms exceeded).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "cafedesguerriers",
+   "url": "https://cafedesguerriers.fr/products/pack-cafe-immunite",
+   "seconds": 47,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black text for headings and body copy.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button says 'Ajouter au panier' which does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media icons for Instagram and Facebook.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "The product is a single coffee pack and does not have size or color variations to preselect.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": false,
+     "reason": "There is no information available to determine if lazy loading is enabled for images and videos.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and informative, and the description provides clear benefits and specifications.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a star rating and the number of reviews.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product's composition is clearly listed under the 'Ingr\u00e9dients' section on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for a coffee product.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials from customers on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no secure checkout badges or trust signals positioned near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated by swiping.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "Breadcrumb navigation is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": false,
+     "reason": "There is no newsletter subscription form in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer includes links to 'Contactez-nous' and 'FAQ'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": false,
+     "reason": "The cart icon does not display the number of items currently in the cart.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the header for quick access.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": false,
+     "reason": "The footer does not include store location or contact information.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a search icon in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to 'Boutique', 'Collections', 'Blog', and '\u00c0 Propos'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "We could not check this one.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "There are no dropdown menus on the product page.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "The product does not have variants that would require color swatches or small images.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "The product description clearly lists the items included in the pack.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title is visually prominent at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": false,
+     "reason": "The product page does not have clickable tabs for additional details; all information is displayed by scrolling.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "Product images do not display key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page displays a single main image without thumbnails for navigation.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": false,
+     "reason": "The product page only shows one image of the product, not multiple angles or perspectives.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": false,
+     "reason": "There are no lifestyle shots showing the product in use.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "We could not check this one.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": false,
+     "reason": "There are no cross-sell or up-sell products displayed on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": true,
+     "reason": "The single product image has a consistent white background.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": false,
+     "reason": "There are no images showing the product alongside complementary items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There is no quick complementary add-on upsell near the add to cart button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 42974,
+    "judgeMs": 2663
+   }
+  },
+  {
+   "id": "lugarde",
+   "url": "https://lugarde.com/nl/assortiment/tuinhuizen/tuinhuis-met-overkapping-nunspeet-300x300cm-plus-300cm",
+   "seconds": 9,
+   "error": "422 {\"error\":\"This store blocks automated visits, so we could not see the page.\",\"code\":\"blocked\"}",
+   "results": []
+  },
+  {
+   "id": "moovmore",
+   "url": "https://moovmore.com/products/moov-walk-plus",
+   "seconds": 36,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigation timeout of 30000 ms exceeded).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "doreandrose",
+   "url": "https://doreandrose.com/products/deep-face-sleep-mask-black",
+   "seconds": 33,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigation timeout of 30000 ms exceeded).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "skinlovers",
+   "url": "https://www.skinlovers.com/products/vichy-dercos-anti-dandruff-shampoo-for-oily-hair-95ml",
+   "seconds": 160,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black text for some elements, such as the product title and descriptions.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The 'ADD TO CART' button label does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": false,
+     "reason": "The footer does not display social media links.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "The product does not have size or color variants to preselect.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": true,
+     "reason": "Lazy loading is enabled for 35 of the 286 images on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and informative, and the description is brief and highlights key benefits.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": false,
+     "reason": "Product ratings are not displayed near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": true,
+     "reason": "A short list of key benefits is highlighted directly below the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": false,
+     "reason": "The product page does not clearly provide material or composition information for the shampoo.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": false,
+     "reason": "The product page does not include before-and-after images to demonstrate the shampoo's effectiveness.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "The product page does not feature video testimonials from customers.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": true,
+     "reason": "The free shipping threshold is highlighted near the add to cart button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": true,
+     "reason": "Payment method icons are displayed below the add to cart button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product's sale price and original price are clearly displayed with the discount percentage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": false,
+     "reason": "The provided screenshots and facts do not confirm if the product gallery has swipe functionality or arrows for navigation on mobile.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "Breadcrumb navigation is clearly visible at the top of the page, showing the user's location.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes an email subscription form with a call to action to get the latest news and a welcome gift.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer has a 'Customer Care' section with links to About Us, Contact Us, Track my order, FAQs, Terms of Service, Refund Policy, Privacy Policy, and Blog.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": true,
+     "reason": "A 'Back to top' button is present in the footer area.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": true,
+     "reason": "The cart icon in the header displays the number of items currently in the cart.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "A cart icon with the current total is prominently displayed in the header on all pages.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": true,
+     "reason": "The footer includes the store's location, email address, and phone number with a WhatsApp option.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "A search input field with a magnifying glass icon is clearly visible in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to All Brands, Facial Care, Hair Care, Bath & Body, Man, Sunscreen, and Mommy And Baby.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The dropdown menus in the header are touch-friendly and easy to use on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "This product does not have variants like color or size to display as swatches or small images.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "The product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title is large, bold, and positioned prominently at the top of the product section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable accordion-style tabs for product details, ingredients, characteristics, how to use, shipping, and return policy.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display any key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page does not display thumbnails for quick navigation through the image gallery.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": false,
+     "reason": "The product page only shows one image of the product, not multiple angles or perspectives.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": false,
+     "reason": "The product page does not include any lifestyle shots showing the product in use.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": true,
+     "reason": "There is a 'How to Use' section that explains how to use the product in simple steps.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "The product page displays a 'More from' section with relevant cross-sell products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": true,
+     "reason": "The single product image has a consistent white background.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": false,
+     "reason": "There are no images showing the product alongside complementary items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": true,
+     "reason": "The page displays quantity options with corresponding prices, showing a discount per item for buying more.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the 'ADD TO CART' button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 155267,
+    "judgeMs": 3334
+   }
+  },
+  {
+   "id": "pharmacie360",
+   "url": "https://www.pharmacie-360.com/products/dr-althea-345-relief-cream?variant=57664014385478",
+   "seconds": 27,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black text for headings and body copy.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button is labeled 'Add to cart' which does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media links for Facebook, Instagram, and TikTok.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "The product does not have size or color variants to preselect.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": false,
+     "reason": "There is no information available to determine if lazy loading is enabled for images or videos.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and informative, and the description provides clear benefits and specifications.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a star rating and the number of reviews.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": false,
+     "reason": "The product page does not clearly provide material or composition information for the cream.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": false,
+     "reason": "The product page does not include before-and-after images to demonstrate the product's effectiveness.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "The product page does not feature video testimonials from customers.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the main call to action button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "Trust signals like secure checkout badges are not positioned near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated using swipe functionality.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "Breadcrumb navigation is clearly visible at the top of the product page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": false,
+     "reason": "There is no newsletter subscription form in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer includes links to customer support options like Contact Us, Delivery, and Legal Notice.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": false,
+     "reason": "The cart icon does not display the number of items currently in the cart.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the header for quick access.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": true,
+     "reason": "The footer includes the store's contact information and address.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a clear search icon in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to essential pages like Shop, Brands, and Promotions.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "Product images do not include annotations.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "There are no dropdown menus on the product page.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "The product does not have variants that would require color swatches or small images.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "The product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title is visually prominent and easy to read at the top of the product section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable tabs for description, ingredients, and usage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "Product images do not display key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page displays a single main image without any thumbnails for navigation.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": false,
+     "reason": "The product page only shows one image, which does not provide multiple angles or perspectives.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": false,
+     "reason": "The product page does not include any lifestyle shots showing the product in use.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no section on the product page explaining how to use the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": false,
+     "reason": "There are no relevant cross-sell or up-sell products displayed on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": true,
+     "reason": "There is only one product image, so consistency of backgrounds is not applicable.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": false,
+     "reason": "There are no images showing the product alongside complementary items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "The page does not offer a quick complementary add-on upsell near the main call to action.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 22682,
+    "judgeMs": 2794
+   }
+  },
+  {
+   "id": "esteden",
+   "url": "https://www.esteden.be/products/ethnicraft-outdoor-canape-jack-teck-2-places-tissu-bourgogne-180-x-90-x-h73",
+   "seconds": 43,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black for text and backgrounds in several elements, such as the 'Ajouter au panier' button and some text.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button 'Ajouter au panier' does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays links to Facebook and Instagram.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "The product does not have multiple sizes or colors to preselect.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": true,
+     "reason": "Lazy loading is enabled for 45 out of 56 images on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and informative, including brand, product type, material, and dimensions.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": false,
+     "reason": "Product ratings are not displayed near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": true,
+     "reason": "A short list of key benefits like 'Marque belge de design intemporel' and 'Bois responsable, design durable' is highlighted near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product description mentions 'Teck' and 'Tissu bourgogne' as materials, and the 'Description du produit' tab details 'Canap\u00e9 d'ext\u00e9rieur en Teck \u2013 Tissu bourgogne'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for a sofa product.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the 'Ajouter au panier' button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": true,
+     "reason": "Secure payment badges for Visa, Mastercard, American Express, Google Pay, Apple Pay, and Alma are displayed below the 'Ajouter au panier' button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price of \u20ac2.947,00 is clearly displayed in a large font near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices has visible arrows for navigation.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "The breadcrumb navigation 'Ext\u00e9rieur > Canap\u00e9s > Canap\u00e9s de jardin' is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes a newsletter subscription form with a clear call to action.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer includes links to contact information such as email and phone.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button visible on the page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": true,
+     "reason": "The cart icon in the header displays the number of items currently in the cart.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the header that provides quick access to the cart.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": true,
+     "reason": "The footer includes the store's address, email, and phone number.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a clear search icon in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to essential pages like Home, Products, Brands, Promotions, and Contact.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The dropdown menus in the header are easy to use on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "The product does not have color swatches or small images for variants.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": false,
+     "reason": "The product page does not clearly list additional included items as a pack near the call to action.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title is visually prominent and easy to read at the top of the product section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable tabs for 'Description du produit' and '\u00c0 propos de la marque Ethnicraft' to access more details.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": true,
+     "reason": "The product page displays multiple small thumbnail images below the main product image for navigation.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": true,
+     "reason": "The product images show the sofa from various angles and include close-ups of the fabric texture.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": false,
+     "reason": "The product images do not include lifestyle shots showing the sofa in a real-world setting.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no section explaining how to use or assemble the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": false,
+     "reason": "The product page does not display any relevant cross-sell or up-sell products.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": true,
+     "reason": "All product images have a consistent light grey background, maintaining a professional appearance.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": false,
+     "reason": "There are no images showing the product alongside complementary items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the 'Ajouter au panier' button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 38448,
+    "judgeMs": 3333
+   }
+  },
+  {
+   "id": "iconamsterdam",
+   "url": "https://icon-amsterdam.com/collections/top/products/the-essential-jacket?variant=58873594446159",
+   "seconds": 5,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigating frame was detached).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "mothersearth",
+   "url": "https://nl.mothersearth.com/products/scent-beads-laundry?variant=54999709090130",
+   "seconds": 46,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigation timeout of 30000 ms exceeded).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "jafra",
+   "url": "https://jafra.com.mx/products/set-unstoppable-lujoso-brillo",
+   "seconds": 60,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black for some text elements.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The 'A\u00f1adir Al Carrito' button does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media links for Facebook, Tiktok, Instagram, and YouTube.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "There are no size or color options to preselect for this product.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": true,
+     "reason": "Lazy loading is enabled for most images on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title is concise and informative, and the description provides key details about the set.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a score of 4.0 out of 5.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": false,
+     "reason": "The product page does not clearly provide material or composition information for the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for this type of product.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials available on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the main 'A\u00f1adir Al Carrito' button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no trust signals like secure checkout badges positioned near the 'A\u00f1adir Al Carrito' button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The original price is struck through and the discounted price is prominently displayed in a larger, bold font next to the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": false,
+     "reason": "The product gallery on mobile does not have visible arrows or clear swipe functionality for navigation.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "The breadcrumb navigation 'INICIO \u203a SET UNSTOPPABLE + LUJOSO BRILLO' is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes an email input field labeled \"Tu correo para recibir ofertas\" for newsletter subscription.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": false,
+     "reason": "The footer does not include links to customer support options like live chat, help center, or contact forms.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": true,
+     "reason": "A 'Back to Top' control is present on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": true,
+     "reason": "The cart icon in the header displays the number of items currently in the cart.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "A cart icon is prominently displayed in the header with a count of items.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": true,
+     "reason": "The footer includes the physical store address and a notice with contact information.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "A search input field with placeholder text \"Buscar...\" is visible in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to Cuidado Personal, Maquillaje, Cuidado Facial, Fragancias, Ofertas, Blog, and Cat\u00e1logos.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The header navigation uses clear, single-level dropdowns that are easy to use on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The JAFRA MX logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "The product does not have variants like color or size, so color swatches or small images for variants are not applicable.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "The included products are listed in the description section, which is visible below the add to cart button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": false,
+     "reason": "We could not check this one.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses a clickable 'DESCRIPCI\u00d3N' tab to access more product details.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display any key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page does not display thumbnails for quick navigation through the image gallery.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": false,
+     "reason": "The product page only shows one image of the product, not multiple angles or perspectives.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": false,
+     "reason": "The product page does not include lifestyle shots that show the product in use.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no section explaining how to use the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "The product page displays a 'Productos recomendados' section with other fragrance products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": true,
+     "reason": "The product image has a consistent light pink background.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": true,
+     "reason": "The main product image shows the perfume bottle alongside a lip gloss, which are complementary items in the set.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page shows a single product with a sale price, but no quantity discounts are offered.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells near the main 'A\u00f1adir Al Carrito' button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 55648,
+    "judgeMs": 3097
+   }
+  },
+  {
+   "id": "allbirds-cruiser",
+   "url": "https://www.allbirds.com/products/womens-cruiser-slip-on-canvas",
+   "seconds": 37,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": true,
+     "reason": "The page uses dark grey for text and backgrounds, not pure black.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button is labeled 'Add To Cart' which does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media links for Facebook, Instagram, Pinterest, and YouTube.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": false,
+     "reason": "No size or color is preselected on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": false,
+     "reason": "The provided information does not indicate whether lazy loading is enabled for images and videos.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title 'Women's Cruiser Slip On Canvas' is concise and informative, and the description is brief and highlights benefits.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a star rating and the number of reviews.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product's material composition is clearly stated as 'Hemp & Cotton' near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for this product type.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials visible on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the main call to action button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no trust signals like secure checkout badges positioned near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated using swipe gestures and arrows.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "Breadcrumb navigation is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes a newsletter subscription form with a clear call to action.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer has links to a Help Center and Contact Us under the 'Help' section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": false,
+     "reason": "The cart icon does not display the number of items currently in the cart.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the header for quick access.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": false,
+     "reason": "The footer does not include a physical store location, contact number, or email address.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a clear search icon in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to essential pages like Shop, Women's, Men's, and Sustainability.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The dropdown menus for size and color are clearly labeled and easy to interact with on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The Allbirds logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": false,
+     "reason": "There is no information available to determine if A/B testing has been conducted on color swatches versus small images for variants.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "This product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title 'Women's Cruiser Slip On Canvas' is visually prominent and easy to read at the top of the product section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable accordion-style tabs for 'Details', 'Materials & Care', and 'Shipping & Returns' to access more information.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": true,
+     "reason": "The product page displays small image thumbnails below the main product image for navigation.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": true,
+     "reason": "The product gallery includes a video demonstrating the product in use.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": true,
+     "reason": "The product images show the shoes from multiple angles, including front, side, back, and close-up views.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": true,
+     "reason": "The product images include lifestyle shots showing the shoes being worn in various settings.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "We could not check this one.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "The product page displays a 'You Might Also Like' section with relevant cross-sell products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": false,
+     "reason": "Product images have inconsistent backgrounds, with some being plain and others showing lifestyle settings.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": true,
+     "reason": "Lifestyle images show the product being worn with complementary clothing items.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the main Add to Cart button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 33423,
+    "judgeMs": 2520
+   }
+  },
+  {
+   "id": "allbirds-runner",
+   "url": "https://www.allbirds.com/products/mens-tree-runners",
+   "seconds": 58,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": false,
+     "reason": "The page uses pure black text for headings and body copy.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button is labeled 'Add To Cart' which does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media icons for Facebook, Instagram, Pinterest, and YouTube.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": false,
+     "reason": "No size or color is preselected on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": false,
+     "reason": "The provided information does not indicate whether lazy loading is enabled for images and videos.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title 'Men's Tree Runners - Black - Everyday Sneakers' is concise and informative.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a star rating and the number of reviews.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product's material composition is detailed under the 'Materials' section on the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for this product type.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials visible on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the main call to action button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no trust signals like secure checkout badges positioned near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated using swipe gestures.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": true,
+     "reason": "Breadcrumb navigation is clearly visible at the top of the page.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": false,
+     "reason": "There is no newsletter subscription form in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer includes links to a help center and contact options.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button in the footer.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": false,
+     "reason": "The cart icon does not display the number of items currently in the cart.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the header for quick access.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": false,
+     "reason": "The footer does not include store location or contact information.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a clear search icon in the header.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to essential product categories and other important pages.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "The product images do not include any annotations or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "The dropdown menus for size and color are clearly labeled and easy to interact with on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The Allbirds logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "The page uses small images for color variants, which is a valid approach for fashion products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "This product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title 'Men's Tree Runners' is visually prominent and easy to read at the top of the product section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": false,
+     "reason": "We could not check this one.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "The product images do not display any key selling points or badges like 'vegan' or 'cruelty-free'.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": true,
+     "reason": "The product page displays small image thumbnails below the main product image for navigation.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": true,
+     "reason": "The product gallery includes a video demonstrating the product in use.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": true,
+     "reason": "Product images show the shoes from multiple angles, including front, side, back, and top views, and on a model for scale.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": true,
+     "reason": "The product images include lifestyle shots showing people wearing the shoes in various settings.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no dedicated section explaining how to use the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "The product page displays a 'You Might Also Like' section with relevant cross-sell products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": false,
+     "reason": "Product images have inconsistent backgrounds, with some being plain and others being lifestyle shots.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": true,
+     "reason": "Lifestyle images show the product being worn with complementary clothing items.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the main call to action button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 54366,
+    "judgeMs": 2572
+   }
+  },
+  {
+   "id": "drsquatch",
+   "url": "https://drsquatch.com/products/pine-tar",
+   "seconds": 27,
+   "results": [
+    {
+     "ruleId": "recSs12TogM60Mf6w",
+     "title": "Do you use pure black for text or backgrounds?",
+     "passed": true,
+     "reason": "The page uses dark grey for text and backgrounds, not pure black.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recEcmUYxWGuOz3vK",
+     "title": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+     "passed": false,
+     "reason": "The main call to action button is labeled 'Add to Cart', which does not convey urgency.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recXqQmYLbyuIil2a",
+     "title": "Does the footer display social media links?",
+     "passed": true,
+     "reason": "The footer displays social media icons for Facebook, Instagram, YouTube, and TikTok.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec1iBTNslYj4y05d",
+     "title": "Is the most common size/color preselected?",
+     "passed": true,
+     "reason": "This product is a single bar of soap and does not have size or color variants to preselect.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec3kmxGigBELSAlu",
+     "title": "Is lazy loading enabled for images and videos?",
+     "passed": false,
+     "reason": "The provided information does not indicate whether lazy loading is enabled for images and videos.",
+     "status": "unknown"
+    },
+    {
+     "ruleId": "recZ158fy5ndWroli",
+     "title": "Are product titles and descriptions concise, informative, and consistent?",
+     "passed": true,
+     "reason": "The product title 'Pine Tar Soap' is concise and informative, and the description is brief and highlights benefits.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectyUC9T4WUfFYvc",
+     "title": "Are product ratings displayed near the product title?",
+     "passed": true,
+     "reason": "Product ratings are displayed near the product title, showing a star rating and the number of reviews.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rectt6VIDYK1SbaBH",
+     "title": "Is there a short list of key benefits highlighted near the product title?",
+     "passed": false,
+     "reason": "There is no short list of key benefits highlighted near the product title.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec59tWeW27UFwDuX",
+     "title": "Is the product\u2019s material or composition information clearly provided?",
+     "passed": true,
+     "reason": "The product's ingredients are listed under the 'What's in this stuff?' section.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recoRfbr8slQLFqTB",
+     "title": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+     "passed": true,
+     "reason": "Before-and-after images are not applicable for a bar of soap.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recBIykwniSTLYVjI",
+     "title": "Are video testimonials available on the product page?",
+     "passed": false,
+     "reason": "There are no video testimonials available on the product page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recDkT1jqcBJworBQ",
+     "title": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+     "passed": false,
+     "reason": "The free shipping threshold is not highlighted near the main call to action button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recihw16WgNwYG09z",
+     "title": "Are trust signals like secure checkout badges positioned near the CTA?",
+     "passed": false,
+     "reason": "There are no trust signals like secure checkout badges positioned near the add to cart button.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec74RD9IgZgfDUwl",
+     "title": "Are product prices and any discounts clearly displayed?",
+     "passed": true,
+     "reason": "The product price is clearly displayed near the product title.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recVqogizZUTrTN4p",
+     "title": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+     "passed": true,
+     "reason": "The product gallery on mobile devices can be navigated by swiping.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recXmTTGKCp0rqOH8",
+     "title": "Is the breadcrumb navigation clearly visible?",
+     "passed": false,
+     "reason": "There is no breadcrumb navigation visible at the top of the page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recjK9IQ0T4rpu4iu",
+     "title": "Is there a visible newsletter subscription form in the footer?",
+     "passed": true,
+     "reason": "The footer includes a newsletter subscription form with an email input field and a 'Subscribe' button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechuFEvuIW0ULmFW",
+     "title": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+     "passed": true,
+     "reason": "The footer has a 'Support' section with links to 'Help Center' and 'Contact Us'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recKjEZrP38rjqCoY",
+     "title": "Does the footer have a \"Back to Top\" button for easy navigation?",
+     "passed": false,
+     "reason": "There is no 'Back to Top' button visible in the footer or on the page.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recdkYxD8QVU9j14p",
+     "title": "Does the cart icon display the number of items currently in the cart?",
+     "passed": false,
+     "reason": "The cart icon in the header does not display the number of items in the cart.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7DA1trGfVmAUET",
+     "title": "Is there a quick access link to the cart?",
+     "passed": true,
+     "reason": "There is a cart icon in the top right corner of the header for quick access.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recTUunKnIj3laNCO",
+     "title": "Does the footer include store location or contact information?",
+     "passed": false,
+     "reason": "The footer does not include a physical store location, contact number, or email address.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recjEVPpCRkdi17EE",
+     "title": "Is there a clear and accessible \"Search\" button or icon?",
+     "passed": true,
+     "reason": "There is a magnifying glass icon in the header that serves as a clear search button.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec5qkI2EcLQ5jQ9D",
+     "title": "Are all important pages linked in the main navigation?",
+     "passed": true,
+     "reason": "The main navigation includes links to 'Shop', 'Bundles', 'Subscriptions', 'About', and 'Reviews'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec33A6aJXon8YXfR",
+     "title": "Do some images include annotations?",
+     "passed": false,
+     "reason": "Product images do not include annotations or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recLehZKzun1Rxv0Z",
+     "title": "Are dropdown menus easy to use on both desktop and mobile?",
+     "passed": true,
+     "reason": "Dropdown menus in the header are touch-friendly and easy to use on both desktop and mobile.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recYUxusypKnfViyM",
+     "title": "Is the logo clickable and linked to the homepage?",
+     "passed": true,
+     "reason": "The Dr. Squatch logo in the header is clickable and links to the homepage.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recnbgJzDarhgi4RH",
+     "title": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+     "passed": true,
+     "reason": "This product page does not have variants that would require color swatches or small images.",
+     "status": "na"
+    },
+    {
+     "ruleId": "recNxnjMNyufvGsDX",
+     "title": "If the product includes additional items as a pack, are all included products visually displayed?",
+     "passed": true,
+     "reason": "This product is a single item and does not include additional items as a pack.",
+     "status": "na"
+    },
+    {
+     "ruleId": "rec9Bd8mIKecasTPF",
+     "title": "Is the main product title visually prominent?",
+     "passed": true,
+     "reason": "The main product title 'Pine Tar' is visually prominent with a large, bold font.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rechQdZcW7EkLpi5J",
+     "title": "Does the product page have clickable tabs for easy access to more product details?",
+     "passed": true,
+     "reason": "The product page uses clickable accordion-style tabs for 'Description', 'Ingredients', and 'Reviews'.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recH6IBXpHPI1KIxY",
+     "title": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+     "passed": false,
+     "reason": "Product images do not display key selling points or badges.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "receK3gEjM9yV2vi2",
+     "title": "Does the product page display thumbnails for quick navigation through the image gallery?",
+     "passed": false,
+     "reason": "The product page displays a main image with small dots below it to indicate more images, but not clickable thumbnails.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recxEGfZMHhvNPCUa",
+     "title": "Does the product gallery include videos to demonstrate the product?",
+     "passed": false,
+     "reason": "The product gallery does not include any videos to demonstrate the product.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recKQWJU3qEuKGFA3",
+     "title": "Are product images shown from multiple angles and perspectives to give a complete view?",
+     "passed": true,
+     "reason": "The product images show the soap from multiple angles and include a close-up of the texture.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recxoLHExiwXLdy75",
+     "title": "Do product images include lifestyle shots that show the product in use?",
+     "passed": true,
+     "reason": "The product images include lifestyle shots showing the soap in use in a shower setting.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "rec7WWY98CVhOtAXo",
+     "title": "Is there a section explaining how to use the product in simple steps?",
+     "passed": false,
+     "reason": "There is no dedicated section explaining how to use the product in simple steps.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rec7hmBdP9rqP4gVw",
+     "title": "Are relevant cross-sell or up-sell products displayed on the product page?",
+     "passed": true,
+     "reason": "The product page displays a 'You Might Also Like' section with relevant cross-sell products.",
+     "status": "pass"
+    },
+    {
+     "ruleId": "recP2gybr9r0x8LYz",
+     "title": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+     "passed": false,
+     "reason": "The product images have inconsistent backgrounds, with some being plain and others being lifestyle shots.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recf9TVdWozjE1laI",
+     "title": "Are there images showing the product alongside complementary items?",
+     "passed": false,
+     "reason": "There are no images showing the product alongside complementary items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "recYvb2wC1safMjpN",
+     "title": "Do you offer quantity discounts?",
+     "passed": false,
+     "reason": "The page does not show any quantity discounts for buying multiple items.",
+     "status": "fail"
+    },
+    {
+     "ruleId": "rechWSGCANIZS39ja",
+     "title": "Do you offer a quick complementary add-on upsell near the main CTA?",
+     "passed": false,
+     "reason": "There are no complementary add-on upsells presented near the main add to cart button.",
+     "status": "fail"
+    }
+   ],
+   "engine": "v2",
+   "model": "google/gemini-2.5-flash",
+   "timings": {
+    "captureMs": 23331,
+    "judgeMs": 2645
+   }
+  },
+  {
+   "id": "rothys",
+   "url": "https://rothys.com/products/womens-almond-toe-ballet-flat-revelvet-mulberry-lattice",
+   "seconds": 35,
+   "error": "422 {\"error\":\"We couldn't open this page (Navigation timeout of 30000 ms exceeded).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "kotn",
+   "url": "https://kotn.com/products/womens-curved-hem-3-4-sleeve-in-graphite",
+   "seconds": 4,
+   "error": "422 {\"error\":\"We couldn't open this page (net::ERR_INSUFFICIENT_RESOURCES at https://kotn.com/products/womens-curved-hem-3).\",\"code\":\"unreachable\"}",
+   "results": []
+  },
+  {
+   "id": "ourplace",
+   "url": "https://fromourplace.com/products/mini-always-pan",
+   "seconds": 1,
+   "error": "500 {\"error\":\"Protocol error (Emulation.setTouchEmulationEnabled): Session closed. Most likely the page has been closed.\"}",
+   "results": []
+  }
+ ]
+}
