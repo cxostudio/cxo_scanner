@@ -31,7 +31,18 @@ async function clean(page) {
     } catch {}
   }
   await page.keyboard.press('Escape').catch(() => {})
-  await page.addStyleTag({ content: `[aria-modal="true"],dialog[open],[class*="klaviyo"],[id*="klaviyo"],[class*="popup-overlay"],[class*="modal-backdrop"]{display:none!important} html,body{overflow:auto!important}` }).catch(() => {})
+  // Some themes scroll an inner wrapper instead of the document: unroll it so the page has its real height.
+  await page.evaluate(() => {
+    for (const el of [document.documentElement, document.body, ...document.querySelectorAll('body > *, body > * > *')]) {
+      const s = getComputedStyle(el)
+      if (el.scrollHeight > el.clientHeight + 50 && /(auto|scroll|hidden)/.test(s.overflowY)) {
+        el.style.setProperty('overflow', 'visible', 'important')
+        el.style.setProperty('height', 'auto', 'important')
+        el.style.setProperty('max-height', 'none', 'important')
+      }
+    }
+  }).catch(() => {})
+  await page.addStyleTag({ content: `body [aria-modal="true"],body dialog[open],body div[class*="klaviyo"],body div[id*="klaviyo"],body [class*="popup-overlay"],body [class*="modal-backdrop"]{display:none!important} html,body{overflow:auto!important}` }).catch(() => {})
 }
 
 async function scroll(page) {
@@ -120,7 +131,7 @@ async function facts(page) {
         await clean(page)
         info[name] = { loadMs: Date.now() - t0, facts: await facts(page) }
         if (name === 'desktop') fs.writeFileSync(path.join(dir, 'text.txt'), (await page.innerText('body')).replace(/\n{3,}/g, '\n\n').slice(0, 40000))
-        const h = Math.min(await page.evaluate(() => document.body.scrollHeight), d.viewport.height * maxTiles)
+        const h = Math.min(Math.max(d.viewport.height, await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, document.scrollingElement?.scrollHeight || 0))), d.viewport.height * maxTiles)
         await page.setViewportSize({ width: d.viewport.width, height: h }).catch(() => {})
         await page.waitForTimeout(600)
         const full = path.join(dir, `${name}-full.png`)
