@@ -103,7 +103,7 @@ export function YourPath({
             <div className="flex min-w-0 flex-col gap-4">
               <p className="text-sm font-semibold text-[var(--text-muted)]">What fixing this is worth</p>
               <h2 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold leading-[1.2] tracking-[-0.03em] text-[var(--text)]">
-                A {pct}% lift is about {eur(money.revenue * lift)} more a month, once your fixes are live.
+                A {pct}% lift is about {eur(money.revenue * lift)} more a month, and it keeps building.
               </h2>
               <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
                 <strong className="text-[var(--text)]">Same traffic, more sales.</strong> Turn a few more visitors into buyers, or make every basket a little bigger: either one adds {pct}% to your revenue.
@@ -149,7 +149,7 @@ export function YourPath({
                 <span className="inline-flex items-center gap-2"><span className="h-[3px] w-4 rounded-full" style={{ background: 'var(--result-pass-fg)' }} />With a {pct}% lift</span>
                 <span className="inline-flex items-center gap-2"><span className="h-[3px] w-4 rounded-full" style={{ background: 'var(--accent)' }} />If nothing changes</span>
                 <span className="inline-flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--border-strong)' }} />Other options</span>
-                <span>Fixes go live one by one</span>
+                <span>Gains stack up month after month</span>
               </div>
             </div>
           </div>

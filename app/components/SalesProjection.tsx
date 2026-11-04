@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 /**
  * Shopify-style chart of monthly sales over the next 12 months.
  *   - blue: if nothing changes (flat at today's revenue, the honest baseline)
- *   - green: with the chosen lift, easing in as fixes go live one by one;
+ *   - green: with the chosen lift, compounding month after month up to the full lift at month 12;
  *     the gap to the blue line is filled: that is the money left on the table
  *   - faint dashed: the other two options, for comparison
  * The y-axis is zoomed around today's revenue (it is an illustration), and the chart is
@@ -15,9 +15,9 @@ import { useEffect, useRef, useState } from 'react'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const LIFTS = [0.05, 0.1, 0.15]
-// share of the lift that is live after m months: fixes roll out one by one, so most of the
-// gain lands in the first months and the rest eases in (about 70% after 3 months, 99% after 12)
-const live = (m: number) => 1 - Math.exp(-m / 2.5)
+// gains stack up month after month (fixes go live, tests win): sales compound at a steady
+// monthly rate that reaches the full lift at month 12, so the curve keeps rising
+const grown = (lift: number, m: number) => Math.pow(1 + lift, m / 12) - 1
 const H = 230
 const PAD = { l: 50, r: 14, t: 14, b: 26 }
 
@@ -26,7 +26,7 @@ export function projection(monthly: number, lift: number) {
   const months: number[] = []
   let extra = 0
   for (let m = 1; m <= 12; m++) {
-    const add = monthly * lift * live(m)
+    const add = monthly * grown(lift, m)
     months.push(monthly + add)
     extra += add
   }
