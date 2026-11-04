@@ -1163,7 +1163,7 @@ export async function POST(request: NextRequest) {
       try {
         const v2 = await runScanV2(validUrl, rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
-        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings })
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag })
       } catch (e) {
         if (e instanceof PageCheckError) {
           return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })

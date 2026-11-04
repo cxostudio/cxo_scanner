@@ -28,7 +28,7 @@ def scan(base, page, rules, stamp):
         data = call(f"{base}/scan/api/scan", {"url": page["url"], "rules": rules, "captureScreenshot": False,
                                               "email": f"eval-{page['id']}-{stamp}@cxo.studio", "scanId": f"eval-{stamp}-{page['id']}", **({"engine": ENGINE} if ENGINE else {})})
         res = [{"ruleId": r["ruleId"], "title": r["ruleTitle"], "passed": r["passed"], "reason": r["reason"], **({"status": r["status"]} if "status" in r else {})} for r in data.get("results", [])]
-        return {**page, "seconds": round(time.time() - t0), "results": res, "engine": data.get("engine", "v1"), "model": data.get("model"), "timings": data.get("timings")}
+        return {**page, "seconds": round(time.time() - t0), "results": res, "engine": data.get("engine", "v1"), "model": data.get("model"), "timings": data.get("timings"), "diag": data.get("diag")}
     except urllib.error.HTTPError as e:
         return {**page, "seconds": round(time.time() - t0), "error": f"{e.code} {e.read().decode()[:200]}", "results": []}
     except Exception as e:

@@ -231,7 +231,7 @@ function readFacts(page: Page) {
           }
         : null,
       backToTopControl: !!Array.from(document.querySelectorAll('a, button')).find(
-        (e) => /back to top|scroll to top|naar boven|terug naar boven|haut de page|retour en haut|volver arriba|nach oben/i.test(`${(e as HTMLElement).innerText} ${e.getAttribute('aria-label') || ''} ${e.getAttribute('class') || ''}`) || /^#(top|page-top|main)?$/.test(e.getAttribute('href') || 'x'),
+        (e) => /back to top|scroll to top|naar boven|terug naar boven|haut de page|retour en haut|volver arriba|nach oben/i.test(`${(e as HTMLElement).innerText} ${e.getAttribute('aria-label') || ''} ${e.getAttribute('class') || ''}`) || /^#(top|page-top|pagetop|back-to-top|scroll-top)$/i.test(e.getAttribute('href') || ''),
       ),
       socialLinks: Array.from(new Set(Array.from(document.querySelectorAll('a[href]')).map((a) => (a as HTMLAnchorElement).hostname).filter((h) => /instagram|facebook|tiktok|youtube|pinterest|linkedin|twitter|x\.com/.test(h)))),
       thirdPartyScripts: Array.from(new Set(Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => { try { return new URL(s).hostname } catch { return '' } }).filter((h) => h && h !== location.hostname))).slice(0, 40),
@@ -308,8 +308,23 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   await new Promise((r) => setTimeout(r, 2500))
   await clean(page)
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  const badge = await page
+    .evaluate(() => {
+      const scope = document.querySelector('header, [role="banner"], #shopify-section-header') || document.body
+      const cartish = Array.from(scope.querySelectorAll('a[href*="/cart"], button[aria-controls*="cart" i], [class*="cart" i], [id*="cart" i], [data-cart-count], [class*="bag" i]'))
+      for (const el of cartish) {
+        const r = el.getBoundingClientRect()
+        if (r.top > 260 || r.width === 0) continue
+        const t = ((el as HTMLElement).innerText || el.getAttribute('data-cart-count') || '').replace(/\s+/g, ' ').trim()
+        const m = t.match(/(^|\D)([1-9]\d?)(\D|$)/)
+        if (m && t.length < 40) return m[2]
+      }
+      return null
+    })
+    .catch(() => null)
+  const noteWithBadge = badge ? `${note}; the cart icon now shows "${badge}"` : `${note}; no number found next to the cart icon in the page code`
   const b64 = await page.screenshot({ type: 'jpeg', quality: 70, encoding: 'base64', clip: { x: 0, y: 0, width: DESKTOP.width, height: 200 } }).catch(() => null)
-  return { note, tile: b64 ? { label: 'desktop header AFTER one item was added to the cart', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined }
+  return { note: noteWithBadge, tile: b64 ? { label: 'desktop header AFTER one item was added to the cart', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined }
 }
 
 /** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */

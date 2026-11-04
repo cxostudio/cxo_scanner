@@ -25,6 +25,15 @@ Rules:
 - Elements in the header are easy to miss in text: check the header screenshot and the measured header controls (icons without text, like a magnifier or bag icon, still count).
 - A sale price or "save X%" is not a quantity discount. A quantity discount means the price per item drops when buying more.
 - Labels: judge the main buttons of the page (add to cart, buy box), not navigation links.
+
+Definitions we use (follow them exactly):
+- Thumbnails: a strip or grid of small clickable preview images next to or under the main image. Dots, progress bars, arrows only, or a stack of full-size images are NOT thumbnails.
+- Footer contact information: an actual phone number, email address or street address in the footer. A "Contact" link, a store-locator link or town names alone are NOT enough.
+- Complementary items: the product shown together with other products a shopper might also buy (an outfit styled with other pieces, the product in use with accessories). The parts of the product itself, its packaging or its case do NOT count.
+- Consistent image backgrounds: compare the product-only shots in the gallery. Lifestyle or model shots are expected and do not make it inconsistent. Pass when the product shots share one background style.
+- Cart count: use the image of the header taken after one item was added to the cart.
+- Multiple angles: at least three gallery images showing the product from different sides or views (front, side, back, top, detail).
+- Free shipping threshold: pass only if an amount ("free shipping over €50") is shown near the price or add to cart. "Free shipping" without a threshold passes too when it applies to every order.
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
 Reply with JSON only: {"results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
