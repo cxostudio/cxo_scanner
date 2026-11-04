@@ -66,7 +66,7 @@ export function ScanDevices({
 }) {
   const mobileSrc = mobile
   return (
-    <div className="relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden>
+    <div className="max-[1023px]:px-2"><div className="relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden>
       <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
         <div className="relative h-full overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)]">
           {desktop ? <img src={desktop} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} />}
@@ -87,6 +87,7 @@ export function ScanDevices({
           </div>
         </div>
       </div>
+    </div>
     </div>
   )
 }

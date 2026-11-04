@@ -265,11 +265,28 @@ const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadserv
 async function prepare(page: Page) {
   // some bundlers wrap named functions in __name(); make it exist inside the page too
   await page.evaluateOnNewDocument('window.__name = function (f) { return f }').catch(() => {})
+  if (process.env.SCANV2_NOBLOCK) return
   await page.setRequestInterception(true).catch(() => {})
   page.on('request', (req) => {
     try {
       const type = req.resourceType()
-      if (type === 'media' || type === 'websocket' || type === 'eventsource' || BLOCK_HOSTS.test(req.url())) return void req.abort().catch(() => {})
+      let host = ''
+      try {
+        host = new URL(req.url()).hostname
+      } catch {}
+      const pageHost = (() => {
+        try {
+          return new URL(page.url()).hostname.replace(/^www\./, '')
+        } catch {
+          return ''
+        }
+      })()
+      // never block the store's own files (themes bundle scripts with tracker-like names)
+      const firstParty = !!pageHost && (host === pageHost || host.endsWith(`.${pageHost}`) || host.replace(/^www\./, '') === pageHost)
+      if (type === 'media' || (!firstParty && BLOCK_HOSTS.test(host))) {
+        if (process.env.SCANV2_DEBUG) console.log('[blocked]', type, req.url().slice(0, 110))
+        return void req.abort().catch(() => {})
+      }
       void req.continue().catch(() => {})
     } catch {}
   })
@@ -311,19 +328,44 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   await cleanPage(page)
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
   const badge = await page
-    .evaluate(() => {
-      const scope = document.querySelector('header, [role="banner"], #shopify-section-header') || document.body
-      const cartish = Array.from(scope.querySelectorAll('a[href*="/cart"], button[aria-controls*="cart" i], [class*="cart" i], [id*="cart" i], [data-cart-count], [class*="bag" i]'))
-      for (const el of cartish) {
+    .evaluate(async () => {
+      const find = () => {
+      // the cart count can sit in the link text ("Cart (1)"), an aria-label ("Cart, 1 item"),
+      // a data attribute or a small badge element next to the icon
+      const CART = /cart|bag|basket|panier|winkel|mand|warenkorb|carrito|cesta|carrello|koszyk/i
+      const nodes = Array.from(document.querySelectorAll('body *')).filter((el) => {
         const r = el.getBoundingClientRect()
-        if (r.top > 260 || r.width === 0) continue
-        const t = ((el as HTMLElement).innerText || el.getAttribute('data-cart-count') || '').replace(/\s+/g, ' ').trim()
-        const m = t.match(/(^|\D)([1-9]\d?)(\D|$)/)
-        if (m && t.length < 40) return m[2]
+        return r.top < 260 && r.bottom > 0 && r.width > 0 && r.height > 0
+      })
+      for (const el of nodes) {
+        const own = ((el as HTMLElement).innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
+        const aria = el.getAttribute('aria-label') || el.getAttribute('title') || ''
+        const data = el.getAttribute('data-cart-count') || el.getAttribute('data-count') || el.getAttribute('data-cart-item-count') || ''
+        if (data && /^[1-9]\d?$/.test(data)) return data
+        for (const t of [aria, own]) {
+          if (t.length > 40 || !CART.test(t)) continue
+          const m = t.match(/(?:\(|\b)([1-9]\d?)(?:\)|\b)/)
+          if (m) return m[1]
+        }
+        // a lone number inside or right next to a cart link / button
+        if (/^[1-9]\d?$/.test(own)) {
+          const host = el.closest('a, button, [class*="cart" i], [class*="bag" i], [id*="cart" i]')
+          const label = host ? `${host.getAttribute('href') || ''} ${host.getAttribute('aria-label') || ''} ${host.getAttribute('class') || ''} ${host.id || ''}` : ''
+          if (CART.test(label)) return own
+        }
+      }
+      return null
+      }
+      // headers often hydrate the count a few seconds after load
+      for (let i = 0; i < 12; i++) {
+        const hit = find()
+        if (hit) return hit
+        await new Promise((r) => setTimeout(r, 500))
       }
       return null
     })
     .catch(() => null)
+  if (process.env.SCANV2_DEBUG) console.log('[cart debug]', await page.evaluate(() => Array.from(document.querySelectorAll('button[aria-label], a[href*="cart"]')).filter((e) => e.getBoundingClientRect().top < 260).slice(0, 8).map((e) => `${e.tagName} aria=${e.getAttribute('aria-label')} inner=${JSON.stringify((e as HTMLElement).innerText)} text=${JSON.stringify(e.textContent?.trim().slice(0, 20))} top=${Math.round(e.getBoundingClientRect().top)}`).join(' | ')).catch((e) => String(e)))
   const noteWithBadge = badge ? `${note}; the cart icon now shows "${badge}"` : `${note}; no number found next to the cart icon in the page code`
   const b64 = await page.screenshot({ type: 'jpeg', quality: 70, encoding: 'base64', clip: { x: 0, y: 0, width: DESKTOP.width, height: 200 } }).catch(() => null)
   return { note: noteWithBadge, tile: b64 ? { label: 'desktop header AFTER one item was added to the cart', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined }

@@ -26,12 +26,21 @@ Rules:
 - A sale price or "save X%" is not a quantity discount. A quantity discount means the price per item drops when buying more.
 - Labels: judge the main buttons of the page (add to cart, buy box), not navigation links.
 
+First decide the product category (fashion: apparel, footwear, bags, jewellery / beauty and skincare / food and drink / home and furniture / electronics / health and supplements / other). Some checkpoints depend on it:
+- Fashion: image annotations and selling-point badges on images are "na" (writing benefits on a T-shirt photo does not fit the category). Before-and-after images are "na".
+- Before-and-after images only apply to beauty, skincare, health, cleaning and similar products with a visible effect; otherwise "na".
+- "How to use in simple steps" applies to products that need instructions (beauty, food prep, supplements, tools, electronics); for clothing, shoes and furniture it is "na".
+
 Definitions we use (follow them exactly):
 - Thumbnails: a strip or grid of small clickable preview images next to or under the main image. Dots, progress bars, arrows only, or a stack of full-size images are NOT thumbnails.
 - Footer contact information: an actual phone number, email address or street address in the footer. A "Contact" link, a store-locator link or town names alone are NOT enough.
 - Complementary items: the product shown together with other products a shopper might also buy (an outfit styled with other pieces, the product in use with accessories). The parts of the product itself, its packaging or its case do NOT count.
 - Consistent image backgrounds: compare the product-only shots in the gallery. Lifestyle or model shots are expected and do not make it inconsistent. Pass when the product shots share one background style.
 - Cart count: use the image of the header taken after one item was added to the cart.
+- Button labels: judge the main add-to-cart button in its ready state. "Select a size" or "Choose an option" is a temporary state before a variant is picked: judge the label it becomes (usually "Add to cart"; check the page text and code). Pass when the main button starts with an action verb (Add, Buy, Shop, Get, Order, Book, Try...). Urgency words are a bonus, not required.
+- Preselected size/colour: in fashion, sizes should NOT be preselected (it causes wrong-size orders and returns). Pass when the colour or style is preselected and the size is left to the shopper; "na" when the only choice is size. For other products (scent, flavour, pack size, model), pass when a default or best-selling option is preselected and the add-to-cart button works right away.
+- Important pages in the main navigation: pass when the main navigation links to the pages that make money (main product categories or collections, new, sale, bestsellers). Contact, About, Returns and FAQ belong in the footer and are NOT required in the main navigation. Fail only when main shopping categories are missing or the menu is overloaded (more than about 10 top-level items).
+- Gallery navigation: a desktop grid or stack of images you scroll through counts as easy to navigate, as do arrows, thumbnails or swipe on mobile.
 - Multiple angles: at least three gallery images showing the product from different sides or views (front, side, back, top, detail).
 - Free shipping threshold: pass only if an amount ("free shipping over €50") is shown near the price or add to cart. "Free shipping" without a threshold passes too when it applies to every order.
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.

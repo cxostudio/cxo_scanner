@@ -321,9 +321,9 @@ export default function ResultsPage() {
               </div>
             </div>
 
-            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               {/* the page with pins: first on phones, sticky on desktop */}
-              <div className="lg:sticky lg:top-6 lg:order-2 lg:self-start">
+              <div className="min-w-0 lg:sticky lg:top-6 lg:order-2 lg:self-start">
                 <PageView
                   device={device}
                   state={view}
