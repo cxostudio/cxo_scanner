@@ -4,6 +4,9 @@
 //   - the header after one item is added to the cart (Shopify), for the cart-count check
 //   - a page check first: 404s, redirects away from the product, bot walls
 import type { Page } from 'puppeteer-core'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export type Tile = { label: string; dataUrl: string }
@@ -309,8 +312,24 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   return { note, tile: b64 ? { label: 'desktop header AFTER one item was added to the cart', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined }
 }
 
+/** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */
+function sweepStaleProfiles() {
+  try {
+    const dir = os.tmpdir()
+    const cutoff = Date.now() - 6 * 60 * 1000 // older than the longest possible scan
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith('puppeteer_dev_chrome_profile-')) continue
+      const full = path.join(dir, name)
+      try {
+        if (fs.statSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true })
+      } catch {}
+    }
+  } catch {}
+}
+
 export async function captureEvidence(rawUrl: string): Promise<Evidence> {
   const t0 = Date.now()
+  sweepStaleProfiles()
   const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
   try {
     // Desktop first, then mobile: one tab at a time keeps the serverless browser within memory.
@@ -386,6 +405,10 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       loadMs: Date.now() - t0,
     }
   } finally {
-    await browser.close().catch(() => {})
+    const proc = browser.process()
+    await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
+    try {
+      proc?.kill('SIGKILL')
+    } catch {}
   }
 }
