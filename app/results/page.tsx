@@ -10,7 +10,7 @@ import { api, asset } from '@/lib/base'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
 
-// Calendly once available; until then the existing booking form (same as NextStep)
+// Calendly once available; until then the existing booking form (same as YourPath)
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
 
