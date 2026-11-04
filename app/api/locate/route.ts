@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
         const vh = window.innerHeight
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
           const st = getComputedStyle(el)
-          if (st.position !== 'fixed' && st.position !== 'sticky') continue
+          if (st.position !== 'fixed') continue // never sticky: buy boxes are often sticky on desktop
           const r = el.getBoundingClientRect()
           const big = r.width * r.height > vw * vh * 0.25
           const z = parseInt(st.zIndex || '0', 10)
