@@ -106,7 +106,7 @@ export function YourPath({
                 A {pct}% lift is about {eur(money.revenue * lift)} more a month, once your fixes are live.
               </h2>
               <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-                Revenue is visitors × conversion rate × order value. Lift conversion <em>or</em> average order value by {pct}% and revenue follows. Do both and it compounds.
+                <strong className="text-[var(--text)]">Same traffic, more sales.</strong> Turn a few more visitors into buyers, or make every basket a little bigger: either one adds {pct}% to your revenue.
               </p>
               <div className="grid grid-cols-3 gap-2" role="group" aria-label="Lift">
                 {[0.05, 0.1, 0.15].map((k) => {
@@ -137,7 +137,7 @@ export function YourPath({
             <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <p className="text-[13px] font-semibold text-[var(--text-muted)]">Extra sales, next 12 months</p>
+                  <p className="text-[13px] font-semibold text-[var(--text-muted)]">Extra sales over the next 12 months</p>
                   <p className="mt-1 font-[family-name:var(--font-display)] text-[26px] font-bold tracking-[-0.03em]" style={{ color: 'var(--result-pass-fg)' }}>+{eur(p.total)}</p>
                 </div>
                 <span className="rounded-full px-2.5 py-1 text-[13px] font-semibold" style={{ background: 'var(--result-pass-bg)', color: 'var(--result-pass-fg)' }}>
@@ -147,8 +147,9 @@ export function YourPath({
               <SalesProjection monthly={money.revenue} lift={lift} shortEur={shortEur} />
               <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-[var(--text-muted)]">
                 <span className="inline-flex items-center gap-2"><span className="h-[3px] w-4 rounded-full" style={{ background: 'var(--result-pass-fg)' }} />With a {pct}% lift</span>
+                <span className="inline-flex items-center gap-2"><span className="h-[3px] w-4 rounded-full" style={{ background: 'var(--accent)' }} />If nothing changes</span>
                 <span className="inline-flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--border-strong)' }} />Other options</span>
-                <span>Fixes go live over 3 months</span>
+                <span>Fixes go live one by one</span>
               </div>
             </div>
           </div>
