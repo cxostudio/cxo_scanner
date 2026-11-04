@@ -22,7 +22,12 @@ export type CheckpointPresentation = {
 
 type Fields = Record<string, unknown>
 
-function parseExamplesField(v: unknown): CheckpointExampleImage[] {
+// Airtable attachment links expire within hours; results point at our own image route instead
+// (app/api/checkpoint-image), which fetches a fresh link when the image is shown.
+const imageRoute = (recordId: string, i: number, size: 'thumb' | 'full') =>
+  `/scan/api/checkpoint-image?r=${recordId}&i=${i}&s=${size}`
+
+function parseExamplesField(v: unknown, recordId?: string): CheckpointExampleImage[] {
   if (!Array.isArray(v)) return []
   const out: CheckpointExampleImage[] = []
   for (const item of v) {
@@ -36,7 +41,12 @@ function parseExamplesField(v: unknown): CheckpointExampleImage[] {
       | undefined
     const thumbnailUrl =
       thumbs?.large?.url || thumbs?.full?.url || thumbs?.small?.url || url
-    out.push({ url, filename, thumbnailUrl })
+    const i = out.length
+    out.push(
+      recordId
+        ? { url: imageRoute(recordId, i, 'full'), filename, thumbnailUrl: imageRoute(recordId, i, 'thumb') }
+        : { url, filename, thumbnailUrl },
+    )
   }
   return out
 }
@@ -48,7 +58,7 @@ export function extractCheckpointPresentation(
   const requiredActions = typeof f['Required Actions'] === 'string' ? f['Required Actions'].trim() : ''
   const justificationsBenefits =
     typeof f['Justifications & Benefits'] === 'string' ? f['Justifications & Benefits'].trim() : ''
-  const examples = parseExamplesField(f['Examples'])
+  const examples = parseExamplesField(f['Examples'], record.id)
   if (!requiredActions && !justificationsBenefits && examples.length === 0) return null
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
   const metrics = Array.isArray(f['Target Performance Metrics'])
