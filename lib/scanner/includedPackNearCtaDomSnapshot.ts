@@ -24,6 +24,30 @@ export function snapshotIncludedPackDom(): {
       'place order',
       'add pack',
       'get it now',
+      // not every store says "add to cart": size-first buttons, and NL / FR / ES / DE / IT labels
+      'select a size',
+      'select size',
+      'choose a size',
+      'choose options',
+      'select options',
+      'pre-order',
+      'preorder',
+      'in winkelwagen',
+      'in winkelmand',
+      'in mijn winkelwagen',
+      'toevoegen',
+      'bestellen',
+      'ajouter au panier',
+      'ajouter',
+      'acheter',
+      'commander',
+      'añadir',
+      'agregar',
+      'comprar',
+      'in den warenkorb',
+      'jetzt kaufen',
+      'aggiungi al carrello',
+      'acquista',
     ]
     const selectors =
       'button, [type="submit"], [role="button"], a[href*="/cart"], input[type="submit"], input[type="button"]'
@@ -35,7 +59,9 @@ export function snapshotIncludedPackDom(): {
       const aria = (el.getAttribute('aria-label') || '').toLowerCase()
       const val = el instanceof HTMLInputElement ? el.value.toLowerCase() : ''
       const combined = `${text} ${aria} ${val}`
-      if (!ctaPatterns.some((p) => combined.includes(p))) continue
+      // Shopify's own add-to-cart markup counts whatever the label says
+      const structural = el.matches('[name="add"], form[action*="/cart/add"] [type="submit"], form[action*="/cart/add"] button')
+      if (!structural && !ctaPatterns.some((p) => combined.includes(p))) continue
       const st = window.getComputedStyle(el)
       if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.05) continue
       const r = el.getBoundingClientRect()
@@ -241,6 +267,30 @@ export function snapshotIncludedPackDom(): {
     'out of stock',
     'add pack',
     'get it now',
+    // not every store says "add to cart": size-first buttons, and NL / FR / ES / DE / IT labels
+    'select a size',
+    'select size',
+    'choose a size',
+    'choose options',
+    'select options',
+    'pre-order',
+    'preorder',
+    'in winkelwagen',
+    'in winkelmand',
+    'in mijn winkelwagen',
+    'toevoegen',
+    'bestellen',
+    'ajouter au panier',
+    'ajouter',
+    'acheter',
+    'commander',
+    'añadir',
+    'agregar',
+    'comprar',
+    'in den warenkorb',
+    'jetzt kaufen',
+    'aggiungi al carrello',
+    'acquista',
   ]
   let buyIdx = -1
   for (const term of buyAnchorTerms) {
