@@ -2,17 +2,13 @@
 
 /**
  * The page being scanned, in the same black laptop + phone frames as the results hero
- * (app/results/page.tsx `Devices`), at the same size. The loading screen turns into the
- * results: same devices, same place. Inside each screen: a light grid and a sweeping
+ * (app/results/page.tsx `Devices`). The laptop screen keeps a real 16:10 ratio so the
+ * whole group fits one screen with the checklist next to it. Inside each screen: a light grid and a sweeping
  * scan line; a small status chip sits on the laptop screen.
  */
 
 export type InstantPreviewHint = { host: string; faviconUrl: string }
 
-const fade = {
-  WebkitMaskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)',
-  maskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)',
-}
 
 function ScanOverlay({ grid }: { grid: number }) {
   return (
@@ -65,29 +61,34 @@ export function ScanDevices({
   status?: string
 }) {
   const mobileSrc = mobile
+  // a laptop screen at a real 16:10 ratio and a phone overlapping its right edge;
+  // the box is 5:3, so both devices are fully visible and nothing runs on forever
   return (
-    <div className="max-[1023px]:px-2"><div className="relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden>
-      <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
-        <div className="relative h-full overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)]">
-          {desktop ? <img src={desktop} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} />}
-          {scanning && <ScanOverlay grid={28} />}
-          {scanning && status && (
-            <div className="absolute left-3 top-3 z-30 inline-flex max-w-[calc(100%-24px)] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[12px] font-semibold text-[var(--text)] shadow-[var(--shadow-card)]">
-              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
-              <span className="truncate">{status}</span>
+    <div className="max-[1023px]:px-2">
+      <div className="relative aspect-[5/3] w-full" aria-hidden>
+        <div className="absolute left-0 top-0 w-[86%]">
+          <div className="overflow-hidden rounded-[16px] border-[9px] border-[var(--text)] bg-[var(--text)] max-[560px]:rounded-[10px] max-[560px]:border-[5px]">
+            <div className="relative aspect-[16/10] overflow-hidden rounded-[6px] bg-[var(--surface-muted)] max-[560px]:rounded-[4px]">
+              {desktop ? <img src={desktop} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} />}
+              {scanning && <ScanOverlay grid={28} />}
+              {scanning && status && (
+                <div className="absolute left-3 top-3 z-30 inline-flex max-w-[calc(100%-24px)] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[12px] font-semibold text-[var(--text)] shadow-[var(--shadow-card)] max-[560px]:left-2 max-[560px]:top-2 max-[560px]:px-2.5 max-[560px]:py-1 max-[560px]:text-[11px]">
+                  <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" style={{ background: 'var(--accent)' }} />
+                  <span className="truncate">{status}</span>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
-      <div className="absolute right-0 top-[18%] w-[30%] min-w-[110px] max-w-[200px]">
-        <div className="overflow-hidden rounded-[26px] border-[7px] border-[var(--text)] bg-[var(--text)] shadow-[0_24px_48px_-18px_rgba(9,9,11,.35)]">
-          <div className="relative aspect-[9/19] overflow-hidden rounded-[18px] bg-[var(--surface)]">
-            {mobileSrc ? <img src={mobileSrc} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} small />}
-            {scanning && <ScanOverlay grid={18} />}
+        <div className="absolute bottom-0 right-0 w-[26%]">
+          <div className="overflow-hidden rounded-[22px] border-[6px] border-[var(--text)] bg-[var(--text)] shadow-[0_24px_48px_-18px_rgba(9,9,11,.35)] max-[560px]:rounded-[14px] max-[560px]:border-[4px]">
+            <div className="relative aspect-[9/19] overflow-hidden rounded-[16px] bg-[var(--surface)] max-[560px]:rounded-[10px]">
+              {mobileSrc ? <img src={mobileSrc} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} small />}
+              {scanning && <ScanOverlay grid={18} />}
+            </div>
           </div>
         </div>
       </div>
-    </div>
     </div>
   )
 }

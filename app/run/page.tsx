@@ -1356,13 +1356,13 @@ export default function Home() {
   const blocking = urlError || emailError;
 
   return (
-    <main className="cxo-page" ref={analyzeTopRef}>
-      <a className="cxo-logo" href="https://cxo.studio" aria-label="CXO studio">
+    <main className={`cxo-page ${showAnalyze ? "lg:!pb-8" : ""}`} ref={analyzeTopRef}>
+      <a className={`cxo-logo ${showAnalyze ? "lg:!mb-8" : ""}`} href="https://cxo.studio" aria-label="CXO studio">
         <img src={asset("/cxo-logo.png")} alt="CXO studio" />
       </a>
 
-      <div className="cxo-head">
-        <h1 className="cxo-reveal break-words">
+      <div className={`cxo-head ${showAnalyze ? "lg:!mb-10" : ""}`}>
+        <h1 className={`cxo-reveal break-words ${showAnalyze ? "lg:!mb-2 lg:!mt-0 lg:!text-[clamp(30px,3.4vw,44px)]" : ""}`}>
           {blocking ? "We couldn’t start your scan" : showAnalyze ? (host ? `Scanning ${host}` : "Scanning your product page") : "Preparing your scan"}
         </h1>
         <p className="cxo-reveal cxo-reveal-1 !text-[14px] !leading-[1.5] !tracking-normal sm:!text-[15px]">
@@ -1395,7 +1395,7 @@ export default function Home() {
           )}
         </div>
       ) : (
-        <div className="mx-auto grid w-full min-w-0 max-w-[1180px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center lg:gap-14">
           {/* live preview of the page being scanned; on phones it comes first, with a compact
               progress line on top so the visitor still sees the scan moving */}
           <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
@@ -1421,7 +1421,7 @@ export default function Home() {
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-24 max-[560px]:-mt-20 lg:sticky lg:top-6" aria-label="Scan progress">
+          <aside className="cxo-card cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-8" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${barPct}%`, transition: 'none' }} />
@@ -1457,11 +1457,11 @@ const Line = ({ d }: { d: string }) => (
 );
 // what happens under the hood, in five short lines; step 3 carries the real checkpoint count
 const stepLabels = (rules: number) => [
-  "Loading your page on desktop and mobile",
-  "Scanning every interface element",
-  `Testing it against ${rules || 42} proven conversion rules`,
-  "Putting a cost on each leak",
-  "Building your fix list",
+  "Loading your page",
+  "Scanning every element",
+  `Benchmarking ${rules || 42} conversion rules`,
+  "Calculating lost revenue",
+  "Building your action plan",
 ];
 const STEP_ICONS = [
   <Line key="0" d='<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>' />,

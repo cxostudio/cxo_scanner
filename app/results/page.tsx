@@ -401,6 +401,7 @@ export default function ResultsPage() {
             shortEur={shortEur}
             callUrl={CALL_URL}
             fullScanUrl={CHECKLIST_URL}
+            host={host}
           />
         </div>
       </div>

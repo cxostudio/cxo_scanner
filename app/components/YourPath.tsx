@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { SalesProjection, projection } from './SalesProjection'
 
 /**
  * End of the results page: what fixing the leaks is worth, and the path from today's scan.
@@ -52,6 +53,7 @@ export function YourPath({
   shortEur,
   callUrl,
   fullScanUrl,
+  host = '',
 }: {
   money: Money | null
   qualified: boolean
@@ -61,7 +63,9 @@ export function YourPath({
   shortEur: (n: number) => string
   callUrl: string
   fullScanUrl: string
+  host?: string
 }) {
+  const [lift, setLift] = useState(0.1)
   const ref = useRef<HTMLElement | null>(null)
   const [on, setOn] = useState(false)
 
@@ -88,45 +92,77 @@ export function YourPath({
   const ease = 'cubic-bezier(.22,1,.36,1)'
 
   return (
+    <>
     <section ref={ref} className="rounded-[var(--radius-xl)] bg-[var(--bg-subtle)] p-6 sm:p-10" aria-label="What fixing this is worth">
-      {/* what it is worth */}
-      {money && (
-        <div className="grid items-end gap-6 border-b border-[var(--border)] pb-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="flex min-w-0 flex-col gap-3">
-            <p className="text-sm font-semibold text-[var(--text-muted)]">What fixing this is worth</p>
-            <h2 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold leading-[1.2] tracking-[-0.03em] text-[var(--text)]">
-              A 10% lift in conversion is about {eur(money.lift10)} more a month. {eur(money.lift10 * 12)} a year.
-            </h2>
-            <p className="text-sm leading-[1.6] text-[var(--text-muted)]">
-              From your answers: about {eur(money.revenue)} a month
-              {money.aov ? `, ${eur(money.aov)} orders` : ''}
-              {money.cr ? `, ${(money.cr * 100).toFixed(1)}% conversion${money.crIsBenchmark ? ' (average)' : ''}` : ''}. A rough estimate, not a promise.
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[0.05, 0.1, 0.15].map((k) => (
-              <div
-                key={k}
-                className="rounded-[var(--radius-md)] border p-3.5 text-center"
-                style={k === 0.1 ? { background: 'var(--result-pass-bg)', borderColor: 'var(--result-pass-fg)' } : { background: 'var(--surface)', borderColor: 'var(--border)' }}
-              >
-                <p className="text-xs text-[var(--text-muted)]">
-                  +{k * 100}%<span className="max-[560px]:hidden"> conversion</span>
-                </p>
-                <p className="mt-1 whitespace-nowrap text-[18px] font-bold max-[560px]:text-[15px]" style={{ color: k === 0.1 ? 'var(--result-pass-fg)' : 'var(--text)' }}>
-                  +{shortEur(money.revenue * k)}
-                </p>
+      {/* what it is worth: pick a lift, watch the next 12 months */}
+      {money && (() => {
+        const p = projection(money.revenue, lift)
+        const pct = Math.round(lift * 100)
+        return (
+          <div className="grid items-center gap-8 border-b border-[var(--border)] pb-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-12">
+            <div className="flex min-w-0 flex-col gap-4">
+              <p className="text-sm font-semibold text-[var(--text-muted)]">What fixing this is worth</p>
+              <h2 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold leading-[1.2] tracking-[-0.03em] text-[var(--text)]">
+                A {pct}% lift is about {eur(money.revenue * lift)} more a month, once your fixes are live.
+              </h2>
+              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
+                Revenue is visitors × conversion rate × order value. Lift conversion <em>or</em> average order value by {pct}% and revenue follows. Do both and it compounds.
+              </p>
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Lift">
+                {[0.05, 0.1, 0.15].map((k) => {
+                  const on = k === lift
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setLift(k)}
+                      className="rounded-[var(--radius-md)] border p-3.5 text-center transition-colors"
+                      style={on ? { background: 'var(--result-pass-bg)', borderColor: 'var(--result-pass-fg)' } : { background: 'var(--surface)', borderColor: 'var(--border)' }}
+                    >
+                      <span className="block text-xs text-[var(--text-muted)]">+{Math.round(k * 100)}% lift</span>
+                      <span className="mt-1 block whitespace-nowrap text-[18px] font-bold max-[560px]:text-[15px]" style={{ color: on ? 'var(--result-pass-fg)' : 'var(--text)' }}>
+                        +{shortEur(money.revenue * k)}<span className="text-[12px] font-semibold text-[var(--text-muted)]">/mo</span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-            ))}
+              <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
+                From your answers: about {eur(money.revenue)} a month
+                {money.aov ? `, ${eur(money.aov)} orders` : ''}
+                {money.cr ? `, ${(money.cr * 100).toFixed(1)}% conversion${money.crIsBenchmark ? ' (average)' : ''}` : ''}. A rough estimate, not a promise.
+              </p>
+            </div>
+            <div className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-[var(--text-muted)]">Extra sales, next 12 months</p>
+                  <p className="mt-1 font-[family-name:var(--font-display)] text-[26px] font-bold tracking-[-0.03em]" style={{ color: 'var(--result-pass-fg)' }}>+{eur(p.total)}</p>
+                </div>
+                <span className="rounded-full px-2.5 py-1 text-[13px] font-semibold" style={{ background: 'var(--result-pass-bg)', color: 'var(--result-pass-fg)' }}>
+                  +{pct}% lift
+                </span>
+              </div>
+              <SalesProjection monthly={money.revenue} lift={lift} shortEur={shortEur} />
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-[var(--text-muted)]">
+                <span className="inline-flex items-center gap-2"><span className="h-[3px] w-4 rounded-full" style={{ background: 'var(--result-pass-fg)' }} />With a {pct}% lift</span>
+                <span className="inline-flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--border-strong)' }} />Other options</span>
+                <span>Fixes go live over 3 months</span>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* the path */}
       <div className={`grid gap-6 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-10 ${money ? 'pt-8' : ''}`}>
         <div className="min-w-0">
-          <p className="font-[family-name:var(--font-display)] text-[20px] font-bold tracking-[-0.02em] text-[var(--text)] sm:text-[24px]">Your path from here</p>
-          <p className="mt-2 text-[15px] leading-[1.6] text-[var(--text-muted)]">You’ve done step one. Here’s what comes next, at your pace.</p>
+          <p className="text-sm font-semibold text-[var(--text-muted)]">What’s next</p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-[22px] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)] sm:text-[26px]">One page scanned. Your whole store is next.</p>
+          <p className="mt-3 text-[15px] leading-[1.6] text-[var(--text-muted)]">
+            This was a snapshot: one product page, {checked} checkpoints. If the findings ring true, the full scan does the same on every page your shoppers go through.
+          </p>
         </div>
         <ol className="flex min-w-0 flex-col">
           {/* 1. today */}
@@ -177,7 +213,7 @@ export function YourPath({
               style={{ opacity: on ? 1 : 0.55, transform: on ? 'none' : 'translateY(6px)', transition: `opacity .5s ${ease} 1.35s, transform .5s ${ease} 1.35s` }}
             >
               <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">Next: scan your full website</p>
-              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">300+ checkpoints across every page shoppers go through:</p>
+              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">300+ checkpoints, the same way you just saw:</p>
               <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart', 'Checkout', 'Thank you page']} />
               <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
                 Scan the full website <Arrow />
@@ -199,7 +235,7 @@ export function YourPath({
                   <a href={callUrl} className="cxo-btn cxo-btn-primary self-start">
                     Book my CRO Audit call <Arrow />
                   </a>
-                  <p className="text-[13px] text-[var(--text-muted)]">30 minutes with Louis. We go through your results and tell you honestly if an audit is worth it.</p>
+                  <p className="text-[13px] text-[var(--text-muted)]">We go through your results and tell you honestly if working together is worth it.</p>
                 </>
               ) : (
                 <>
@@ -214,5 +250,14 @@ export function YourPath({
         </ol>
       </div>
     </section>
+    <p className="mx-auto mt-6 max-w-[640px] text-center text-[13px] leading-[1.6] text-[var(--text-muted)]">
+      This scan is done by AI against our CRO checklist. In our tests it agrees with a CRO specialist on about 9 checks in 10, so it can get one wrong.
+      Spot a mistake?{' '}
+      <a className="font-semibold text-[var(--text)] underline underline-offset-2" href={`mailto:info@cxo.studio?subject=${encodeURIComponent(`Scan feedback${host ? `: ${host}` : ''}`)}`}>
+        Tell us
+      </a>{' '}
+      and we’ll check it by hand.
+    </p>
+    </>
   )
 }
