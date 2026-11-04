@@ -367,7 +367,7 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
   button.cxo-row:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
   button.cxo-row:hover .cxo-icon { background: var(--surface); border-color: var(--border-strong); }
 }
-.cxo-row.is-active { border-color: var(--text); background: var(--bg-subtle); }
+.cxo-row.is-active { border-color: var(--border-strong); background: var(--bg-subtle); }
 .cxo-row.is-pending { opacity: 0.5; }
 .cxo-row-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .cxo-row-label { font-weight: 600; color: var(--text); }
