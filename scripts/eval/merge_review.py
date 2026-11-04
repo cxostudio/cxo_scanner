@@ -3,8 +3,7 @@
 Usage: python3 merge_review.py <out.csv>
 Scanner answers: latest run per page (runs/*.json, newest first wins).
 Review: review/<page>/verdicts.json.
-"Check this" = review disagrees with the scanner, or review confidence is low,
-or the two scanner runs disagreed with each other.
+"Check this?" = the review itself is unsure (low confidence): the only rows a human must look at.
 """
 import csv, glob, json, os, re, sys
 
@@ -47,24 +46,18 @@ for page in pages:
         conf = v.get('confidence', '')
         flip = len(history.get((pid, r['ruleId']), ())) > 1
         agree = mine == said
-        flags = []
-        if mine and not agree:
-            flags.append('Claude disagrees' if mine != 'Not applicable' else 'Not applicable?')
-        if conf == 'low':
-            flags.append('Claude unsure')
-        if flip:
-            flags.append('Scanner flipped between runs')
+        right = 'Not applicable' if mine == 'Not applicable' else ('Yes' if agree else 'No')
         rows.append([
             pid, page['url'], r['title'], prio.get(r['ruleId'], ''), said, clean(r['reason']),
-            mine, conf, v.get('evidence', ''), 'Yes' if flags else '', '; '.join(flags),
-            mine or said, '', r['ruleId'],
+            mine, conf, v.get('evidence', ''), right, 'Yes' if conf == 'low' else '',
+            'Yes' if flip else '', mine or said, '', r['ruleId'],
         ])
 
 with open(sys.argv[1], 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
     w.writerow(['Page', 'Product page', 'Checkpoint', 'Priority', 'Scanner said', 'What the scanner saw',
-                "Claude's answer", 'Confidence', 'What Claude saw', 'Check this?', 'Why check',
-                'Final answer', 'Note', 'Checkpoint ID'])
+                "Claude's answer", 'Confidence', 'What Claude saw', 'Scanner right?', 'Check this?',
+                'Scanner flipped between runs', 'Final answer', 'Note', 'Checkpoint ID'])
     w.writerows(rows)
 
 n = len(rows)
@@ -73,4 +66,4 @@ na = sum(1 for r in rows if r[6] == 'Not applicable')
 judged = [r for r in rows if r[6] in ('Pass', 'Fail')]
 print(f'{n} rows, missing review for: {missing or "none"}')
 print(f'scanner = Claude on {agree}/{n}; on Pass/Fail rows {sum(r[6]==r[4] for r in judged)}/{len(judged)} = {sum(r[6]==r[4] for r in judged)/max(1,len(judged)):.0%}; Not applicable {na}')
-print(f'rows to check: {sum(1 for r in rows if r[9])}')
+print(f'rows to check (Claude unsure): {sum(1 for r in rows if r[10])}')
