@@ -232,7 +232,17 @@ export const MEASURED: Record<string, Measure> = {
     if (!ev.isShopify || !f.footer) return null
     const links: string[] = f.footer.links || []
     // collections, or the products themselves on stores with a small range
-    const shop = links.filter((l) => /\/(collections|products)\//.test(l))
+    // the link target, not the label; anchors on this same page (privacy pop-ups like "#dns") are not shop links
+    const here = (() => { try { return new URL(ev.url).pathname.replace(/\/$/, '') } catch { return '' } })()
+    const shop = links.filter((l) => {
+      const href = l.split(' -> ').pop() || l
+      try {
+        const u = new URL(href, ev.url)
+        return /\/(collections|products)\//.test(u.pathname) && u.pathname.replace(/\/$/, '') !== here
+      } catch {
+        return false
+      }
+    })
     if (shop.length >= 2) return { answer: 'pass', evidence: `The footer links to products or collections such as ${shop.slice(0, 3).map((l) => `"${l.split(' -> ')[0]}"`).join(', ')}.` }
     if (shop.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories, popular collections or products, only company and help pages.' }
     return null
