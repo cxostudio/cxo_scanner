@@ -1,11 +1,13 @@
 // Test lab: scans from test emails (CXO Studio, +test) are kept so Louis can label them blind
 // and we can measure the scanner's accuracy per checkpoint before a checkpoint goes Live.
 // Everything lives in one private Supabase Storage bucket, no database table needed:
-//   scans/{id}/meta.json   url, niche, checkpoints with their definitions, the scanner's answers
+//   scans/{id}/meta/{t}.json  url, niche, checkpoints with their definitions, the scanner's answers
 //   scans/{id}/{n}.jpg     the screenshots the scanner judged from
 //   scans/{id}/evidence.json  page text, measured facts, cart test: with the screenshots, all the
 //                          judge needs to answer again (re-judge after a definition or prompt change)
-//   labels/{id}.json       Louis's answers, per checkpoint
+//   labels/{id}/{t}.json   Louis's answers, per checkpoint
+// Files that change are never overwritten: each save is a new timestamped file and reads take the
+// newest from the folder listing. Supabase's CDN served stale copies of overwritten files for minutes.
 // Customer scans are never stored here.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Evidence, Tile } from '@/lib/scanV2/capture'
@@ -125,8 +127,7 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
     judgedAt: new Date().toISOString(),
     model: input.model,
   }
-  await upload(store, `scans/${id}/meta.json`, meta)
-  await addToIndex(store, id, meta.createdAt)
+  await writeVersion(store, `scans/${id}/meta`, meta)
   return id
 }
 
@@ -143,17 +144,29 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
 })
 const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
 
-// cacheControl 0: answers and labels change, and a cached copy would read back stale (default is 1 hour)
 async function upload(store: Awaited<ReturnType<typeof bucket>>, path: string, data: unknown) {
   const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true, cacheControl: '0' })
   if (error) throw error
 }
 
-/** index.json: every saved test scan, newest first (folder listings proved unreliable). */
-async function addToIndex(store: Awaited<ReturnType<typeof bucket>>, id: string, createdAt: string) {
-  const index = (await readJson<{ id: string; createdAt: string }[]>('index.json')) || []
-  const next = [{ id, createdAt }, ...index.filter((s) => s.id !== id)]
-  await upload(store, 'index.json', next)
+const KEEP_VERSIONS = 5
+
+/** Save a new version under `folder` (never overwrite), keep the last few. */
+async function writeVersion(store: Awaited<ReturnType<typeof bucket>>, folder: string, data: unknown) {
+  await upload(store, `${folder}/${String(Date.now()).padStart(15, '0')}.json`, data)
+  const { data: files } = await store.list(folder, { limit: 100 })
+  const old = (files || []).map((f) => f.name).filter((n) => n.endsWith('.json')).sort().reverse().slice(KEEP_VERSIONS)
+  if (old.length) await store.remove(old.map((n) => `${folder}/${n}`)).catch(() => {})
+}
+
+/** The newest version under `folder`, or the legacy single file. */
+async function readLatest<T>(folder: string, legacy?: string): Promise<T | null> {
+  const store = await bucket()
+  const { data: files, error } = await store.list(folder, { limit: 100 })
+  if (error) lastReadError = `${folder}: list failed ${error.message}`
+  const newest = (files || []).map((f) => f.name).filter((n) => n.endsWith('.json')).sort().pop()
+  if (newest) return readJson<T>(`${folder}/${newest}`)
+  return legacy ? readJson<T>(legacy) : null
 }
 
 /** Rebuild the judge's evidence from a saved test scan. Null for scans saved before evidence was kept. */
@@ -196,7 +209,7 @@ export async function saveRejudge(scan: LabScan, input: { rules: ScanRule[]; res
     judgedAt: new Date().toISOString(),
     model: input.model,
   }
-  await upload(store, `scans/${scan.id}/meta.json`, next)
+  await writeVersion(store, `scans/${scan.id}/meta`, next)
   return next
 }
 
@@ -205,49 +218,34 @@ export let lastReadError = ''
 
 async function readJson<T>(path: string): Promise<T | null> {
   const store = await bucket()
-  // Supabase's CDN can serve the previous version of an updated file for up to an hour: read through
-  // a signed link with a unique query so every read is a fresh copy; fall back to a plain download
-  const { data: signed, error } = await store.createSignedUrl(path, 60)
-  if (signed?.signedUrl) {
-    try {
-      const res = await fetch(`${signed.signedUrl}&fresh=${Date.now()}`, { cache: 'no-store' })
-      if (res.ok) return (await res.json()) as T
-      lastReadError = `${path}: signed read ${res.status} ${(await res.text()).slice(0, 160)}`
-    } catch (e) {
-      lastReadError = `${path}: signed read failed ${String(e).slice(0, 160)}`
-    }
-  } else if (error) lastReadError = `${path}: sign failed ${error.message}`
-  const { data, error: dlError } = await store.download(path)
-  if (dlError || !data) {
-    lastReadError += ` | download: ${dlError?.message || 'no data'}`
+  const { data, error } = await store.download(path)
+  if (error || !data) {
+    lastReadError = `${path}: ${error?.message || 'no data'}`
     return null
   }
   try {
     return JSON.parse(await data.text()) as T
   } catch (e) {
-    lastReadError += ` | parse: ${String(e).slice(0, 120)}`
+    lastReadError = `${path}: parse ${String(e).slice(0, 120)}`
     return null
   }
 }
 
 export async function listTestScans(): Promise<{ id: string; createdAt: string }[]> {
-  const index = (await readJson<{ id: string; createdAt: string }[]>('index.json')) || []
-  // scans saved before the index existed: pick them up from the folder listing
   const store = await bucket()
-  const { data } = await store.list('scans', { limit: 1000 })
-  const known = new Set(index.map((s) => s.id))
-  const extra = (data || []).filter((d) => d.name && !known.has(d.name)).map((d) => ({ id: d.name, createdAt: d.created_at || '' }))
-  return [...index, ...extra]
+  const { data, error } = await store.list('scans', { limit: 1000 })
+  if (error) throw error
+  return (data || []).filter((d) => d.name).map((d) => ({ id: d.name, createdAt: d.created_at || '' }))
 }
 
-export const getTestScan = (id: string) => readJson<LabScan>(`scans/${safeId(id)}/meta.json`)
+export const getTestScan = (id: string) => readLatest<LabScan>(`scans/${safeId(id)}/meta`, `scans/${safeId(id)}/meta.json`)
 
 export async function getLabels(id: string): Promise<Record<string, LabLabel>> {
-  return (await readJson<Record<string, LabLabel>>(`labels/${safeId(id)}.json`)) || {}
+  return (await readLatest<Record<string, LabLabel>>(`labels/${safeId(id)}`, `labels/${safeId(id)}.json`)) || {}
 }
 
 export async function saveLabels(id: string, labels: Record<string, LabLabel>) {
-  await upload(await bucket(), `labels/${safeId(id)}.json`, labels)
+  await writeVersion(await bucket(), `labels/${safeId(id)}`, labels)
 }
 
 /** Short-lived links to a scan's screenshots (the bucket is private). */
