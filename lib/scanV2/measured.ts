@@ -255,7 +255,8 @@ export const MEASURED: Record<string, Measure> = {
       const href = l.split(' -> ').pop() || l
       try {
         const u = new URL(href, ev.url)
-        return /\/(collections|products)\//.test(u.pathname) && u.pathname.replace(/\/$/, '') !== here
+        // a link with a #fragment opens something on the current page (privacy pop-ups), not a shop page
+        return /\/(collections|products)\//.test(u.pathname) && !u.hash && u.pathname.replace(/\/$/, '') !== here
       } catch {
         return false
       }
