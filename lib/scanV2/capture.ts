@@ -580,6 +580,13 @@ async function prepare(page: Page) {
 }
 
 /** Open the page; a slow page that has in fact rendered is good enough. */
+/** The page shows a bot check (Cloudflare and the like) instead of the store. */
+async function walled(page: Page) {
+  const title = await page.title().catch(() => '')
+  const text = await page.evaluate(() => (document.body?.innerText || '').slice(0, 2000)).catch(() => '')
+  return text.length < 1500 && (BOT_WALL.test(`${title} ${text}`) || /verify you are human|needs to be verified/i.test(text))
+}
+
 async function open(page: Page, url: string) {
   let res = null
   try {
@@ -926,6 +933,17 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       await mobile.setUserAgent(MOBILE_UA)
       await prepare(mobile)
       await open(mobile, rawUrl)
+      // a bot wall on the phone visit only (Cloudflare ties its pass to the browser it gave it to):
+      // wait for the challenge to clear, then retry with the desktop browser's identity on a phone screen
+      // (themes lay out by screen width, not by browser name). Never judge a challenge page.
+      if (await walled(mobile)) {
+        await mobile.waitForFunction(() => !/verify you are human|needs to be verified|checking your browser|just a moment/i.test(document.body?.innerText || ''), { timeout: 10000 }).catch(() => {})
+        if (await walled(mobile)) {
+          await mobile.setUserAgent(DESKTOP_UA)
+          await open(mobile, rawUrl)
+        }
+        if (await walled(mobile)) throw new Error('mobile visit blocked by a bot check')
+      }
       await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
       const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
       await cleanPage(mobile)
