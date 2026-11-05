@@ -600,7 +600,7 @@ async function prepare(page: Page) {
  * Footer tap targets on a phone: for every visible footer link or button, the size of its tappable box
  * and the distance to the nearest other target (centre to centre). A small link is still easy to tap
  * when its neighbours are far enough away, so a target counts as comfortable when nothing else sits
- * within 40px of its centre, or its own box is 44px tall (Apple's minimum).
+ * within 36px of its centre, or its own box is 44px tall (Apple's minimum).
  */
 async function measureFooterTargets(page: Page) {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {})
@@ -616,11 +616,13 @@ async function measureFooterTargets(page: Page) {
     if (boxes.length < 4) return null
     let comfortable = 0
     const gaps: number[] = []
+    const nearestOf: number[] = []
     for (const b of boxes) {
       let nearest = Infinity
       for (const o of boxes) if (o !== b) nearest = Math.min(nearest, Math.hypot(o.x - b.x, o.y - b.y))
       gaps.push(nearest)
-      if (nearest >= 40 || b.h >= 44) comfortable++
+      nearestOf.push(nearest)
+      if (nearest >= 36 || b.h >= 44) comfortable++
     }
     gaps.sort((a, b) => a - b)
     const heights = boxes.map((b) => b.h).sort((a, b) => a - b)
@@ -629,6 +631,8 @@ async function measureFooterTargets(page: Page) {
       comfortable,
       medianHeight: Math.round(heights[Math.floor(heights.length / 2)]),
       typicalGap: Math.round(gaps[Math.floor(gaps.length / 2)]),
+      // each target's nearest neighbour and height, so the thresholds can change without a re-scan
+      links: boxes.map((b, i) => [Math.round(nearestOf[i]), Math.round(b.h)]),
       overflow: document.documentElement.scrollWidth > window.innerWidth + 2,
     }
   })
