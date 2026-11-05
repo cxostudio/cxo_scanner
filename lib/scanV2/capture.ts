@@ -594,6 +594,17 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
   if (process.env.SCANV2_DEBUG) console.log('[cart view]', device, JSON.stringify(point), await page.evaluate((p) => { if (!p) return null; const e = document.elementFromPoint(p.x, p.y); return e ? `${e.tagName} ${e.getAttribute('aria-label') || ''} ${(e.getAttribute('class') || '').slice(0, 50)}` : null }, point).catch(String))
   if (!point) return undefined
   const startUrl = page.url()
+  // remember the floating panels already on screen, so a drawer that appears can be told apart
+  await page
+    .evaluate(() => {
+      for (const el of Array.from(document.querySelectorAll('body *'))) {
+        const s = getComputedStyle(el)
+        if (s.position !== 'fixed' && s.position !== 'absolute' && el.tagName !== 'DIALOG') continue
+        const r = el.getBoundingClientRect()
+        if (r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && s.visibility !== 'hidden' && s.display !== 'none') el.setAttribute('data-cxo-before', '')
+      }
+    })
+    .catch(() => {})
   // a link to /cart may still open a drawer (themes intercept it): watch for a navigation, but not forever
   const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: point.toCartPage ? 10000 : 4000 }).catch(() => null)
   await page.mouse.click(point.x, point.y).catch(() => {})
@@ -605,13 +616,14 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
     .evaluate((before) => {
       if (/\/cart\/?($|\?)/.test(location.pathname) && location.href !== before) return 'page'
       const CART = /cart|bag|basket|panier|winkel|warenkorb|carrito|carrello|koszyk/i
-      const overlays = Array.from(document.querySelectorAll('[role="dialog"], dialog[open], [aria-modal="true"], aside, [class*="drawer" i], [id*="drawer" i], [class*="cart" i], [id*="cart" i]'))
-      const drawer = overlays.find((el) => {
+      // a floating panel that is on screen now, was not before the click, and is about the cart
+      const drawer = Array.from(document.querySelectorAll('body *')).find((el) => {
+        if (el.hasAttribute('data-cxo-before')) return false
         const s = getComputedStyle(el)
+        if (s.position !== 'fixed' && s.position !== 'absolute' && el.tagName !== 'DIALOG') return false
         const r = el.getBoundingClientRect()
-        const onScreen = r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.5
-        const floating = s.position === 'fixed' || s.position === 'absolute' || el.tagName === 'DIALOG'
-        return onScreen && floating && CART.test(`${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('aria-label') || ''} ${((el as HTMLElement).innerText || '').slice(0, 300)}`)
+        const onScreen = r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && r.top < window.innerHeight - 100 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.5
+        return onScreen && CART.test(`${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('aria-label') || ''} ${((el as HTMLElement).innerText || '').slice(0, 400)}`)
       })
       return drawer ? 'drawer' : null
     }, startUrl)

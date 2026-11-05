@@ -175,14 +175,22 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
   const stored = await readJson<StoredEvidence>(`scans/${scan.id}/evidence.json`)
   if (!stored || scan.images.some((i) => !i.role)) return null
   const store = await bucket()
-  const tiles = await Promise.all(
-    scan.images.map(async (img) => {
-      const { data, error } = await store.download(img.file)
-      if (error || !data) throw error || new Error(`missing ${img.file}`)
-      const b64 = Buffer.from(await data.arrayBuffer()).toString('base64')
-      return { role: img.role as ImageRole, tile: { label: img.label, dataUrl: `data:image/jpeg;base64,${b64}` } }
-    }),
-  )
+  // a few at a time, with one retry: storage drops downloads when many run at once
+  const download = async (file: string) => {
+    for (let attempt = 0; ; attempt++) {
+      const { data, error } = await store.download(file)
+      if (data) return Buffer.from(await data.arrayBuffer()).toString('base64')
+      if (attempt >= 2) throw new Error(`could not download ${file}: ${error?.message || JSON.stringify(error)}`)
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+    }
+  }
+  const tiles: { role: ImageRole; tile: Tile }[] = []
+  for (let i = 0; i < scan.images.length; i += 6) {
+    const chunk = await Promise.all(
+      scan.images.slice(i, i + 6).map(async (img) => ({ role: img.role as ImageRole, tile: { label: img.label, dataUrl: `data:image/jpeg;base64,${await download(img.file)}` } })),
+    )
+    tiles.push(...chunk)
+  }
   const of = (role: ImageRole) => tiles.filter((t) => t.role === role).map((t) => t.tile)
   return {
     ...stored,

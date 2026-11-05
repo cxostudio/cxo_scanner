@@ -53,8 +53,8 @@ export async function POST(req: NextRequest) {
     const ids = one ? [one] : (await listTestScans()).map((s) => s.id)
     const out: Awaited<ReturnType<typeof rejudgeOne>>[] = []
     // a few at a time: each re-judge sends ~20 screenshots per checkpoint group
-    for (let i = 0; i < ids.length; i += 4) {
-      const batch = await Promise.all(ids.slice(i, i + 4).map((id) => rejudgeOne(id, current, apiKey).catch((e) => ({ id, ok: false, error: String((e as Error)?.message || e) }))))
+    for (let i = 0; i < ids.length; i += 3) {
+      const batch = await Promise.all(ids.slice(i, i + 3).map((id) => rejudgeOne(id, current, apiKey).catch((e) => ({ id, ok: false, error: (e as Error)?.message || JSON.stringify(e) }))))
       out.push(...batch)
     }
     return NextResponse.json({ model: V2_MODEL(), scans: out })
