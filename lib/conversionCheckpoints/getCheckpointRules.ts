@@ -19,6 +19,8 @@ export type ScanRule = {
   /** Scanner status. Missing on the legacy snapshot, which only held live checkpoints. */
   status?: ScannerStatus
   pageTypeIds?: string[]
+  /** Part of the page the checkpoint is about (Airtable "Page area"). */
+  area?: string
   device?: 'Both' | 'Desktop only' | 'Mobile only'
   method?: string
   pass?: string
@@ -99,6 +101,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     description,
     status: status === 'Live' || status === 'Draft' || status === 'Off' ? status : undefined,
     pageTypeIds: list('Page Type'),
+    area: text('Page area'),
     device: device === 'Desktop only' || device === 'Mobile only' || device === 'Both' ? device : undefined,
     method: text('Check method'),
     pass: text('Pass when'),
@@ -123,7 +126,7 @@ function sleep(ms: number): Promise<void> {
 const SCANNER_FORMULA = "AND(NOT({Archived}), OR({Scanner status}='Live', {Scanner status}='Draft'))"
 
 /** Base list URL for the table (no `/rec…` retrieve suffix, no query string). */
-function getListRecordsBaseUrl(apiUrl: string): string {
+export function getListRecordsBaseUrl(apiUrl: string): string {
   const u = new URL(apiUrl)
   let segments = u.pathname.split('/').filter(Boolean)
   if (segments.length >= 4 && /^rec[a-zA-Z0-9]+$/.test(segments[segments.length - 1]!)) {

@@ -16,8 +16,8 @@ import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
 /** Which part of the evidence each saved image is, so it can be rebuilt for a re-judge. */
-type ImageRole = 'desktop' | 'mobile' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
-type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
+type ImageRole = 'desktop' | 'mobile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
+type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
 
 const BUCKET = 'test-scans'
 
@@ -34,6 +34,10 @@ export type LabCheckpoint = {
   na?: string
   nicheNotes?: string
   pageTypeIds?: string[]
+  area?: string
+  method?: string
+  /** Why the checkpoint is left out of the labelling queue: answered by code, or not for this niche. */
+  skip?: 'measured' | 'niche'
 }
 
 export type LabScan = {
@@ -56,13 +60,14 @@ export type LabScan = {
   history?: { judgedAt: string; model?: string; answers: LabScan['answers'] }[]
 }
 
-const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
+const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
 
 function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   const out: { role: ImageRole; tile: Tile }[] = []
   const add = (role: ImageRole, t?: Tile | Tile[]) => (Array.isArray(t) ? t : t ? [t] : []).forEach((tile) => out.push({ role, tile }))
   add('desktop', ev.desktopTiles)
   add('mobile', ev.mobileTiles)
+  add('mobileMenu', ev.mobileMenu)
   add('cartHeader', ev.cartHeader)
   add('emptyCart', ev.emptyCart)
   add('cartView', ev.cartView)
@@ -100,15 +105,27 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
   const store = await bucket()
   const id = safeId(input.id) || `scan-${Date.now()}`
   const ev = input.evidence
-  const images = await Promise.all(
-    roleTiles(ev).map(async ({ role, tile }, i) => {
-      const file = `scans/${id}/${String(i).padStart(2, '0')}.jpg`
-      const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
-      const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
-      if (error) throw error
-      return { label: tile.label, file, role }
-    }),
-  )
+  // six at a time, with retries: storage refuses uploads when several scans save at once
+  const tiles = roleTiles(ev)
+  // unique names per save: a re-scan never overwrites a screenshot (overwritten files read back stale)
+  const stamp = Date.now().toString(36)
+  const images: { label: string; file: string; role: ImageRole }[] = []
+  for (let start = 0; start < tiles.length; start += 6) {
+    const chunk = await Promise.all(
+      tiles.slice(start, start + 6).map(async ({ role, tile }, j) => {
+        const file = `scans/${id}/${stamp}-${String(start + j).padStart(2, '0')}.jpg`
+        const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
+        for (let attempt = 0; ; attempt++) {
+          const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
+          if (!error) break
+          if (attempt >= 2) throw new Error(`could not save ${file}: ${error.message}`)
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+        }
+        return { label: tile.label, file, role }
+      }),
+    )
+    images.push(...chunk)
+  }
   // everything but the images (saved above as files)
   const stored: Record<string, unknown> = { ...ev }
   for (const k of IMAGE_KEYS) delete stored[k]
@@ -129,6 +146,11 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
     model: input.model,
   }
   await writeVersion(store, `scans/${id}/meta`, meta)
+  // a re-scan of the same scan id: remove the previous screenshots (labels are kept)
+  const { data: files } = await store.list(`scans/${id}`, { limit: 1000 })
+  const keep = new Set(images.map((i) => i.file))
+  const old = (files || []).filter((f) => f.id && f.name.endsWith('.jpg') && !keep.has(`scans/${id}/${f.name}`)).map((f) => `scans/${id}/${f.name}`)
+  if (old.length) await store.remove(old).catch(() => {})
   return id
 }
 
@@ -142,6 +164,8 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
   na: r.na,
   nicheNotes: r.nicheNotes,
   pageTypeIds: r.pageTypeIds,
+  area: r.area,
+  method: r.method,
 })
 const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
 
@@ -196,6 +220,7 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
     ...stored,
     desktopTiles: of('desktop'),
     mobileTiles: of('mobile'),
+    mobileMenu: of('mobileMenu')[0],
     cartHeader: of('cartHeader')[0],
     emptyCart: of('emptyCart')[0],
     cartView: of('cartView')[0],
@@ -259,6 +284,7 @@ export async function saveLabels(id: string, labels: Record<string, LabLabel>) {
 
 /** Short-lived links to a scan's screenshots (the bucket is private). */
 export async function imageUrls(scan: LabScan): Promise<string[]> {
+  if (!scan.images?.length) return []
   const store = await bucket()
   const { data, error } = await store.createSignedUrls(scan.images.map((i) => i.file), 60 * 60 * 6)
   if (error) throw error
@@ -270,4 +296,68 @@ export function labAllowed(key: string | null | undefined) {
   const expected = process.env.LAB_KEY?.trim()
   if (expected) return key === expected
   return process.env.VERCEL_ENV === 'preview' || process.env.NODE_ENV === 'development'
+}
+
+/** Remove a test scan: its screenshots, evidence, answers and labels. */
+export async function deleteTestScan(id: string) {
+  const store = await bucket()
+  const safe = safeId(id)
+  const files: string[] = []
+  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`]) {
+    const { data } = await store.list(folder, { limit: 1000 })
+    for (const f of data || []) if (f.id) files.push(`${folder}/${f.name}`)
+  }
+  files.push(`labels/${safe}.json`)
+  for (let i = 0; i < files.length; i += 100) await store.remove(files.slice(i, i + 100))
+  return files.length
+}
+
+/** Page areas in the order a shopper meets them: the labelling queue follows it. */
+const AREA_ORDER = ['Header', 'Hero', 'Product grid', 'Filters and sorting', 'Gallery', 'Buy box', 'Description and details', 'Reviews and social proof', 'Recommendations', 'Cart drawer', 'Checkout form', 'Order summary', 'Page-wide', 'Footer', 'Technical']
+
+/**
+ * What Louis labels for a scan, in page order. Left out (with the reason): checkpoints the scanner
+ * answers by code ("Measured"; checked against technical tools instead) and checkpoints that do not
+ * apply to the store's niche (the scanner answers "not relevant" by rule).
+ */
+export function labelQueue(scan: LabScan): LabCheckpoint[] {
+  const full = new Map((scan.rules || []).map((r) => [r.id, r]))
+  const rank = (a?: string) => {
+    const i = AREA_ORDER.indexOf(a || '')
+    return i < 0 ? AREA_ORDER.length : i
+  }
+  return scan.checkpoints
+    .map((c, i) => {
+      const r = full.get(c.id)
+      const method = c.method || r?.method
+      const area = c.area || r?.area
+      const only = (r?.niches || []).filter((n) => n !== 'All')
+      const niche = scan.niche as string
+      const outOfNiche = !!r && ((r.notRelevantNiches || []).includes(niche) || (only.length > 0 && !only.includes(niche)))
+      const skip: LabCheckpoint['skip'] = method === 'Measured' ? 'measured' : outOfNiche ? 'niche' : undefined
+      return { cp: { ...c, method, area, ...(skip ? { skip } : {}) }, i }
+    })
+    .sort((a, b) => rank(a.cp.area) - rank(b.cp.area) || a.i - b.i)
+    .map((x) => x.cp)
+}
+
+/** Louis's notes per checkpoint ("the definition is wrong because..."), versioned like labels. */
+export async function getNotes(id: string): Promise<Record<string, string>> {
+  return (await readLatest<Record<string, string>>(`notes/${safeId(id)}`)) || {}
+}
+
+/** A status change made from the lab (who promoted what, at which score), kept for the record. */
+export async function logPromotion(entry: Record<string, unknown>) {
+  const store = await bucket()
+  await upload(store, `promotions/${Date.now().toString(36)}.json`, { ...entry, at: new Date().toISOString() })
+}
+
+export async function saveNotes(id: string, notes: Record<string, string>) {
+  await writeVersion(await bucket(), `notes/${safeId(id)}`, notes)
+}
+
+/** The text inside closed tabs / accordions the scanner read: the labelling page shows it. */
+export async function getHiddenText(id: string): Promise<string> {
+  const ev = await readJson<{ hiddenText?: string }>(`scans/${safeId(id)}/evidence.json`)
+  return ev?.hiddenText || ''
 }

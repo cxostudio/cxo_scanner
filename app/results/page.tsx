@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
 import { api, asset } from '@/lib/base'
+import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
 
@@ -56,6 +57,8 @@ const TONE = {
   mid: { fg: 'var(--status-finding-fg)', bg: 'var(--status-finding-bg)', word: 'Room to grow' },
   weak: { fg: 'var(--result-fail-fg)', bg: 'var(--result-fail-bg)', word: 'Leaking sales' },
 } as const
+
+const PAGE_NAME: Record<UrlPageType, string> = { product: 'Product page', homepage: 'Homepage', category: 'Collection page', other: 'Page' }
 
 const shortEur = (n: number) => (n >= 1000 ? `€${(Math.round(n / 100) / 10).toString().replace(/\.0$/, '')}k` : eur(n))
 
@@ -161,6 +164,7 @@ export default function ResultsPage() {
   }, [results])
 
   const host = hostOf(url)
+  const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
   const qualified = isQualified(revenueBand)
   const view = located[device]
   const shot = view && typeof view === 'object' ? view : null
@@ -246,15 +250,15 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · Product page · {report.total} checkpoints
+              {host} · {pageName} · {report.total} checkpoints
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
                 <>
-                  Your product page leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
+                  Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
                 </>
               ) : (
-                <>Your product page has {report.failed.length} things to fix</>
+                <>Your {pageName.toLowerCase()} has {report.failed.length} things to fix</>
               )}
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">

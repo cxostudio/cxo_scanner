@@ -1,6 +1,9 @@
 // Scan engine v2: capture evidence once, judge every checkpoint with it.
 // Returns rows in the same shape as engine v1, so the run and results pages are unchanged.
 // Extra field `status` separates "not relevant" and "couldn't check" from real passes and fails.
+import { applyGuards } from './guards'
+
+const EMPTY_CART = 'rec53BnzEh3jbjz4O'
 import { captureEvidence, PageCheckError, type Evidence, type Tile } from './capture'
 import { judge, V2_MODEL, type Niche, type Rule, type Verdict } from './judge'
 import { MEASURED } from './measured'
@@ -31,7 +34,7 @@ function nicheVerdict(r: Rule, niche: Niche): Answer | null {
 
 /** Every image the judge sees, in order. Test scans store them in this order (lib/lab). */
 export function evidenceImages(ev: Evidence): Tile[] {
-  return [...ev.desktopTiles, ...ev.mobileTiles, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  return [...ev.desktopTiles, ...ev.mobileTiles, ev.mobileMenu, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
 }
 
 const UNMEASURED = 'This is measured in the page code, and the scanner could not measure it on this page.'
@@ -40,7 +43,41 @@ const UNMEASURED = 'This is measured in the page code, and the scanner could not
  * Judge captured evidence: Shopify defaults and code measurements first, the model for the rest,
  * then the hard niche rules. Used by live scans and by the lab to re-judge saved test scans.
  */
+/**
+ * Buying checkpoints of the product page itself (buy box): not relevant when the page does not sell
+ * online. The cart is the store's and stays judged (the store sells other products online).
+ */
+const PURCHASE = /add-to-cart button|main add-to-cart|shipping|deliver|arrive|return|in stock|stock is low|restock|quantity discount|trust signals|time-based urgency/i
+const STORE_ONLY = /find in (a )?store|where to buy|store locator|find a (store|retailer)|buy in store|vind een winkel|trouver un magasin|händler finden/i
+const ADD_TO_CART = /add to (cart|bag|basket)|ajouter au panier|in (de )?winkel(wagen|mand)|in den warenkorb|añadir al carrito|aggiungi al carrello|subscribe & save|pre-?order/i
+
+/** A product page that sends shoppers to stores instead of selling: a store-locator button and no add-to-cart. */
+function sellsOnline(ev: Evidence): boolean {
+  if (typeof ev.sellsOnline === 'boolean') return ev.sellsOnline
+  const f = ev.facts as Record<string, any>
+  const buttons: string[] = f.buttons || []
+  const text = `${buttons.join(' | ')} ${f.buyBox || ''}`
+  if (f.variants?.atc?.ready) return true
+  return !(STORE_ONLY.test(text) && !ADD_TO_CART.test(text))
+}
+
+/** Scans saved before discounts were measured: read the product's compare-at prices now (Shopify product .js). */
+async function backfillDiscounts(ev: Evidence) {
+  const v = (ev.facts as Record<string, any>)?.variants
+  if (!ev.isShopify || !v || typeof v.discounted === 'number') return
+  try {
+    const u = new URL(ev.url)
+    if (!/\/products\//.test(u.pathname)) return
+    const r = await fetch(`${u.origin}${u.pathname.replace(/\/$/, '')}.js`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    if (!r.ok) return
+    const p = await r.json()
+    v.discounted = (p.variants || []).filter((x: any) => x.compare_at_price && x.compare_at_price > x.price).length
+  } catch {}
+}
+
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
+  ev.sellsOnline = sellsOnline(ev)
+  await backfillDiscounts(ev)
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
@@ -60,6 +97,17 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
   const { niche, verdicts } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
   const byId = new Map<string, Answer & { coveredByShopify?: boolean }>(verdicts.map((v) => [v.id, v]))
   for (const [id, m] of Array.from(settled)) byId.set(id, m)
+  // a page that does not sell online: buying checkpoints are not relevant, whatever the model said
+  if (ev.sellsOnline === false)
+    for (const r of rules) if (r.area === 'Buy box' && PURCHASE.test(r.title)) byId.set(r.id, { answer: 'na', evidence: 'This page does not sell online (the main button sends shoppers to stores), so this does not apply.' })
+  // definitions the model keeps breaking (threshold read as a shipping cost, generic header entries, cart read as the buy box)
+  applyGuards(rules, byId)
+  // no picture of a filled cart: cart checkpoints cannot be judged (the model otherwise borrows the product page)
+  const filledCart = !!(ev.cartView || ev.cartPage?.length || ev.mobileCartView || ev.mobileCartPage?.length)
+  if (!filledCart)
+    for (const r of rules)
+      if (/cart/i.test(r.area || '') && r.id !== EMPTY_CART && !settled.has(r.id) && !byId.get(r.id)?.coveredByShopify && byId.get(r.id)?.answer !== 'na')
+        byId.set(r.id, { answer: 'unknown', evidence: 'We could not open the cart with a product in it on this store, so we could not check this.' })
   // niche rules are facts in Airtable, not the model's call: they override any answer
   for (const r of rules) {
     const n = nicheVerdict(r, niche)

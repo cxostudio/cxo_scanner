@@ -10,6 +10,12 @@ type Measure = (ev: Evidence, f: F) => Omit<Verdict, 'id'> | null
 const SOCIAL = /instagram|facebook|tiktok|youtube|pinterest|linkedin|twitter|x\.com|threads/i
 const SEARCH = /search|zoek|recherch|buscar|busca|suche|cerca|szukaj|sök|søg/i
 
+/** One Shopify variant and no option pickers on the page. Kits and bundles (one variant in Shopify,
+ * with a colour or size picker per item, e.g. Wild One's harness kit) still let the shopper choose. */
+function singleVersion(v: any) {
+  return !!v && v.total === 1 && !(v.pickers > 0)
+}
+
 export const MEASURED: Record<string, Measure> = {
   // Do you use pure black for text or backgrounds? (pass = no pure black)
   recSs12TogM60Mf6w: (_ev, f) => {
@@ -190,4 +196,83 @@ export const MEASURED: Record<string, Measure> = {
     if (hosts.some((h) => /cdn\.shopify\.com|cloudfront|akamai|fastly|cloudinary|imgix|bunny|^cdn\./i.test(h))) return { answer: 'pass', evidence: 'Images are served from a CDN.' }
     return null
   },
+
+  // Does a sticky 'Add to Cart' appear when the main 'Add to Cart' button is out of view? (mobile)
+  recWeoj4QACWSKPuX: (ev) => {
+    const st = (ev.mobileFacts as F).stickyAtc
+    if (!st) return null
+    if (st.sticky) return { answer: 'pass', evidence: `On a phone, an add-to-cart button ("${st.label}") stays on screen after scrolling past the main one.` }
+    return { answer: 'fail', evidence: 'On a phone, once you scroll past the main button there is no add-to-cart button on screen until you scroll back up.' }
+  },
+
+  // Are sold-out options clearly marked in the colour and size selector?
+  recZsTWnkPB7mQHyC: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total) return null
+    if (v.total > 1 && v.soldOut === 0) return { answer: 'na', evidence: 'Every option of this product is in stock, so there is nothing to mark.' }
+    if (v.soldOut > 0 && v.marked > 0) return { answer: 'pass', evidence: `Sold-out options are visibly marked in the selector (${v.marked} marked as unavailable).` }
+    return null // sold out somewhere, nothing marked in the code: the screenshots decide
+  },
+
+  // Is a default variant preselected, so the shopper can add to cart right away (except sizes in fashion)?
+  // The button as the page loads tells: enabled and saying "Add to cart" means a variant is already chosen.
+  rec1iBTNslYj4y05d: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total) return null
+    if (singleVersion(v)) return { answer: 'na', evidence: 'This product has a single version, so there is nothing to preselect.' }
+    if (v.atc && v.atc.ready && !v.atc.disabled) return { answer: 'pass', evidence: `A version is already selected when the page opens: the button reads "${v.atc.label}" and works right away.` }
+    return null // the button asks for a choice: fine for sizes in fashion, a fail elsewhere; the judge decides with the niche
+  },
+
+  // Do discounted items in the cart show the old price struck through, or the saving?
+  // No version of the product has a compare-at price: the item added to the cart is not discounted.
+  recbEhE51TXFkDDnC: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total || typeof v.discounted !== 'number') return null
+    if (v.discounted === 0) return { answer: 'na', evidence: 'The product added to the cart is not on sale, so there is no old price to show.' }
+    return null
+  },
+
+  // Is the footer designed to be responsive and mobile-friendly? Measured on a 390px phone screen:
+  // no sideways scroll, and at least 75% of footer links comfortable to tap (36px+ from the next one, or 44px+ tall).
+  recgYs2tKWTQRQV7i: (ev) => {
+    const t = (ev.mobileFacts as F)?.footerTargets
+    if (!t) return null
+    const GAP = 36 // px between link centres
+    const TALL = 44 // px, a link this tall is easy to tap whatever its neighbours
+    const comfortable = Array.isArray(t.links) ? t.links.filter(([gap, h]: number[]) => gap >= GAP || h >= TALL).length : t.comfortable
+    t.comfortable = comfortable
+    const share = comfortable / t.targets
+    if (t.overflow) return { answer: 'fail', evidence: 'On a phone the page scrolls sideways at the footer: it is wider than the screen.' }
+    if (share >= 0.75) return { answer: 'pass', evidence: `On a phone, ${t.comfortable} of ${t.targets} footer links are easy to tap: big enough and spaced apart.` }
+    return { answer: 'fail', evidence: `On a phone, only ${t.comfortable} of ${t.targets} footer links are easy to tap: they sit about ${t.typicalGap}px apart, under the 36px a thumb needs.` }
+  },
+
+  // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
+  recEgJJ3Ja7iD3B63: (ev, f) => {
+    if (!ev.isShopify || !f.footer) return null
+    const links: string[] = f.footer.links || []
+    // collections, or the products themselves on stores with a small range
+    // the link target, not the label; anchors on this same page (privacy pop-ups like "#dns") are not shop links
+    const here = (() => { try { return new URL(ev.url).pathname.replace(/\/$/, '') } catch { return '' } })()
+    const shop = links.filter((l) => {
+      const href = l.split(' -> ').pop() || l
+      try {
+        const u = new URL(href, ev.url)
+        // a link with a #fragment opens something on the current page (privacy pop-ups), not a shop page
+        return /\/(collections|products)\//.test(u.pathname) && !u.hash && u.pathname.replace(/\/$/, '') !== here
+      } catch {
+        return false
+      }
+    })
+    if (shop.length >= 2) return { answer: 'pass', evidence: `The footer links to products or collections such as ${shop.slice(0, 3).map((l) => `"${l.split(' -> ')[0]}"`).join(', ')}.` }
+    if (shop.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories, popular collections or products, only company and help pages.' }
+    return null
+  },
+
+  // Are product variant options easily accessible and touch-friendly on mobile? A single version: nothing to choose.
+  recEyoHMH2oyA0Hk3: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
+
+  // Do colour variants show as image thumbnails or clear swatches? A single version has no colour choice.
+  recnbgJzDarhgi4RH: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
 }

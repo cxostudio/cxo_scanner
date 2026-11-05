@@ -5,12 +5,11 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/base'
-
-const MIN_LABELS = 5
-const TARGET = 0.9
+import { MIN_LABELS, TARGET, VERDICT_LABEL, type Verdict } from '@/lib/lab/verdict'
 
 type ScanRow = { id: string; url: string; createdAt: string; niche: string; checkpoints: number; labelled: number }
-type AccRow = { id: string; title: string; status?: string; labelled: number; agree: number; unknown: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
+type NoteRow = { scan: string; url: string; id: string; title: string; note: string }
+type AccRow = { id: string; title: string; status?: string; area?: string; labelled: number; agree: number; unknown: number; flips: number; runs: number; verdict: Verdict; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
 
 const host = (u: string) => {
   try {
@@ -21,13 +20,41 @@ const host = (u: string) => {
 }
 const pct = (n: number) => `${Math.round(n * 100)}%`
 const WORD: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'Not relevant', unknown: "Couldn't check" }
+const VERDICT_ORDER: Verdict[] = ['ready', 'demote', 'audit', 'testing', 'live']
+const VERDICT_COLOR: Record<Verdict, { bg: string; fg: string }> = {
+  ready: { bg: 'var(--result-pass-bg)', fg: 'var(--result-pass-fg)' },
+  live: { bg: 'var(--surface-muted)', fg: 'var(--text-muted)' },
+  demote: { bg: 'var(--result-fail-bg)', fg: 'var(--result-fail-fg)' },
+  audit: { bg: 'var(--result-fail-bg)', fg: 'var(--result-fail-fg)' },
+  testing: { bg: 'var(--surface-muted)', fg: 'var(--text-muted)' },
+}
 
 export default function LabHome() {
   const [key, setKey] = useState('')
-  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[] } | null>(null)
+  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[]; notes?: NoteRow[] } | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [rejudge, setRejudge] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
+  const [filter, setFilter] = useState<Verdict | 'all'>('all')
+  const [acting, setActing] = useState<Record<string, string>>({})
+
+  /** Change the checkpoint's status in Airtable (Live, Draft, audit only), then reload. */
+  const act = async (a: AccRow, action: 'live' | 'draft' | 'audit') => {
+    setActing((m) => ({ ...m, [a.id]: 'Saving…' }))
+    try {
+      const r = await fetch(api(`/lab/promote${key ? `?key=${encodeURIComponent(key)}` : ''}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: a.id, action, title: a.title, score: `${a.agree}/${a.labelled}, ${a.flips} unstable` }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || String(r.status))
+      setActing((m) => ({ ...m, [a.id]: action === 'live' ? 'Now Live' : action === 'audit' ? 'Moved to audit only' : 'Back to Draft' }))
+      await load(key)
+    } catch (e) {
+      setActing((m) => ({ ...m, [a.id]: `Failed: ${String((e as Error).message || e)}` }))
+    }
+  }
 
   const load = (k: string) =>
     fetch(api(`/lab/scans${k ? `?key=${encodeURIComponent(k)}` : ''}`))
@@ -68,7 +95,9 @@ export default function LabHome() {
   }
 
   const q = key ? `?key=${encodeURIComponent(key)}` : ''
-  const ready = data?.accuracy.filter((a) => a.labelled >= MIN_LABELS && a.agree / a.labelled >= TARGET) ?? []
+  const ready = data?.accuracy.filter((a) => a.verdict === 'ready') ?? []
+  const counts = VERDICT_ORDER.map((v) => [v, data?.accuracy.filter((a) => a.verdict === v).length ?? 0] as const)
+  const shown = (data?.accuracy ?? []).filter((a) => filter === 'all' || a.verdict === filter).sort((a, b) => VERDICT_ORDER.indexOf(a.verdict) - VERDICT_ORDER.indexOf(b.verdict) || a.agree / a.labelled - b.agree / b.labelled)
 
   return (
     <main className="min-h-screen bg-[var(--bg)] px-[var(--gutter)] py-10 font-[family-name:var(--font-body)] text-[var(--text)]">
@@ -120,9 +149,19 @@ export default function LabHome() {
                   {data.accuracy.length} checkpoints labelled · <span className="font-semibold text-[var(--result-pass-fg)]">{ready.length} ready for Live</span>
                 </p>
               </div>
+              <p className="max-w-[760px] text-sm leading-relaxed text-[var(--text-muted)]">
+                Ready for Live: {pct(TARGET)}+ agreement on {MIN_LABELS}+ labelled stores and the same answer on every recent run. Unstable means the answer changed when the same screenshots were judged again. Promoting writes the status to Airtable; the free scan uses it within minutes.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {([['all', data.accuracy.length] as const, ...counts]).map(([v, n]) => (
+                  <button key={v} type="button" onClick={() => setFilter(v)} className="rounded-[var(--radius-pill)] border border-[var(--border)] px-3 py-1 text-xs font-semibold" style={{ background: filter === v ? 'var(--text)' : 'var(--surface)', color: filter === v ? 'var(--surface)' : 'var(--text)' }}>
+                    {v === 'all' ? 'All' : VERDICT_LABEL[v]} ({n})
+                  </button>
+                ))}
+              </div>
               {data.accuracy.length === 0 && <p className="text-sm text-[var(--text-muted)]">Label a scan to see accuracy.</p>}
               <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
-                {data.accuracy.map((a) => {
+                {shown.map((a) => {
                   const rate = a.agree / a.labelled
                   const enough = a.labelled >= MIN_LABELS
                   const fg = !enough ? 'var(--text-muted)' : rate >= TARGET ? 'var(--result-pass-fg)' : 'var(--result-fail-fg)'
@@ -131,6 +170,10 @@ export default function LabHome() {
                       <button type="button" onClick={() => setOpen(open === a.id ? null : a.id)} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-[var(--bg-subtle)]">
                         <span className="min-w-0 flex-1 text-sm font-semibold">{a.title}</span>
                         <span className="text-xs text-[var(--text-muted)]">{a.status}</span>
+                        <span className="rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-semibold" style={{ background: VERDICT_COLOR[a.verdict].bg, color: VERDICT_COLOR[a.verdict].fg }}>
+                          {VERDICT_LABEL[a.verdict]}
+                        </span>
+                        {a.flips > 0 && <span className="text-xs text-[var(--result-fail-fg)]">{a.flips} unstable</span>}
                         <span className="w-24 text-right text-sm text-[var(--text-muted)]">
                           {a.agree}/{a.labelled}
                           {a.unknown ? ` · ${a.unknown}?` : ''}
@@ -139,8 +182,25 @@ export default function LabHome() {
                           {pct(rate)}
                         </span>
                       </button>
-                      {open === a.id && a.mismatches.length > 0 && (
+                      {open === a.id && (
                         <div className="flex flex-col gap-1 border-t border-[var(--border)] bg-[var(--bg-subtle)] px-4 py-3 text-sm">
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
+                            {a.status !== 'Live' && (
+                              <button type="button" className="cxo-btn cxo-btn-primary" disabled={!!acting[a.id] && acting[a.id] === 'Saving…'} onClick={() => act(a, 'live')}>
+                                Promote to Live
+                              </button>
+                            )}
+                            {a.status === 'Live' && (
+                              <button type="button" className="cxo-btn cxo-btn-ghost" onClick={() => act(a, 'draft')}>
+                                Back to Draft
+                              </button>
+                            )}
+                            <button type="button" className="cxo-btn cxo-btn-ghost" onClick={() => act(a, 'audit')}>
+                              Move to audit only
+                            </button>
+                            {acting[a.id] && <span className="text-xs text-[var(--text-muted)]">{acting[a.id]}</span>}
+                          </div>
+                          {a.mismatches.length === 0 && <span className="text-[var(--text-muted)]">No disagreement with your labels.</span>}
                           {a.mismatches.map((m, i) => (
                             <Link key={i} href={`/lab/${m.scan}${q ? `${q}&` : '?'}compare=1#${a.id}`} className="flex gap-3 hover:underline">
                               <span className="min-w-0 flex-1 truncate">{host(m.url)}</span>
@@ -156,6 +216,20 @@ export default function LabHome() {
                 })}
               </div>
             </section>
+            {!!data.notes?.length && (
+              <section className="flex flex-col gap-3">
+                <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Notes on definitions ({data.notes.length})</h2>
+                <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+                  {data.notes.map((n, i) => (
+                    <Link key={i} href={`/lab/${n.scan}${q}`} className="flex flex-col gap-0.5 px-4 py-3 hover:bg-[var(--bg-subtle)]">
+                      <span className="text-sm font-semibold">{n.title}</span>
+                      <span className="text-sm text-[var(--text)]">{n.note}</span>
+                      <span className="text-xs text-[var(--text-muted)]">{host(n.url)}</span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>
