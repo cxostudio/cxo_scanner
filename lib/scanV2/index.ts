@@ -1,6 +1,7 @@
 // Scan engine v2: capture evidence once, judge every checkpoint with it.
 // Returns rows in the same shape as engine v1, so the run and results pages are unchanged.
 // Extra field `status` separates "not relevant" and "couldn't check" from real passes and fails.
+import { applyGuards } from './guards'
 import { captureEvidence, PageCheckError, type Evidence, type Tile } from './capture'
 import { judge, V2_MODEL, type Niche, type Rule, type Verdict } from './judge'
 import { MEASURED } from './measured'
@@ -82,6 +83,8 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
   // a page that does not sell online: buying checkpoints are not relevant, whatever the model said
   if (ev.sellsOnline === false)
     for (const r of rules) if (r.area === 'Buy box' && PURCHASE.test(r.title)) byId.set(r.id, { answer: 'na', evidence: 'This page does not sell online (the main button sends shoppers to stores), so this does not apply.' })
+  // definitions the model keeps breaking (threshold read as a shipping cost, generic header entries, cart read as the buy box)
+  applyGuards(rules, byId)
   // niche rules are facts in Airtable, not the model's call: they override any answer
   for (const r of rules) {
     const n = nicheVerdict(r, niche)
