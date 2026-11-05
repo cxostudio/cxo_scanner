@@ -3,10 +3,26 @@
 // cite what was seen. "unknown" is allowed: we never guess.
 import { OpenRouter } from '@openrouter/sdk'
 import type { Evidence } from './capture'
-import { definitionFor } from './definitions'
+import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
-export type Rule = { id: string; title: string; description: string }
+// A checkpoint with CXO Studio's definitions, straight from Airtable (getCheckpointRules.ts).
+export type Rule = ScanRule
 export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string }
+
+/** Niche names as in the Airtable "Niches" and "Not relevant for niches" fields. */
+export const NICHES = [
+  'Fashion',
+  'Beauty and skincare',
+  'Food and drink',
+  'Home and furniture',
+  'Electronics',
+  'Health and supplements',
+  'Pets',
+  'Sports and outdoor',
+  'Kids',
+  'Other',
+] as const
+export type Niche = (typeof NICHES)[number]
 
 export const V2_MODEL = () => process.env.SCAN_V2_MODEL || 'google/gemini-2.5-flash'
 const GROUP_SIZE = 8
@@ -27,16 +43,16 @@ Rules:
 - A sale price or "save X%" is not a quantity discount. A quantity discount means the price per item drops when buying more.
 - Labels: judge the main buttons of the page (add to cart, buy box), not navigation links.
 
-First decide the product category (fashion: apparel, footwear, bags, jewellery / beauty and skincare / food and drink / home and furniture / electronics / health and supplements / other). Some checkpoints depend on it:
-- Fashion: image annotations and selling-point badges on images are "na" (writing benefits on a T-shirt photo does not fit the category). Before-and-after images are "na".
-- Before-and-after images only apply to beauty, skincare, health, cleaning and similar products with a visible effect; otherwise "na".
-- "How to use in simple steps" applies to products that need instructions (beauty, food prep, supplements, tools, electronics); for clothing, shoes and furniture it is "na".
+First decide the store's niche, from the product on this page. Use exactly one of: ${NICHES.join(', ')}. Fashion covers apparel, footwear, bags and jewellery.
 
 Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
+- "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device.
+- "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
+- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
-Reply with JSON only: {"results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
+Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
 
 function evidenceText(ev: Evidence) {
   return [
@@ -44,7 +60,9 @@ function evidenceText(ev: Evidence) {
     `TITLE: ${ev.title}`,
     `MEASURED FACTS (desktop): ${JSON.stringify(ev.facts)}`,
     `MEASURED FACTS (mobile): ${JSON.stringify(ev.mobileFacts)}`,
-    `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}`,
+    `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
+    `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
+    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
     `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}`,
     ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
   ]
@@ -53,42 +71,50 @@ function evidenceText(ev: Evidence) {
 }
 
 function images(ev: Evidence) {
-  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : [])]
+  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.cartPage || []), ...(ev.mobileCartView ? [ev.mobileCartView] : []), ...(ev.mobileCartPage || [])]
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },
   ])
 }
 
-function parse(raw: unknown): Verdict[] {
+function parse(raw: unknown): { niche?: string; results: Verdict[] } {
   let s = ''
   if (typeof raw === 'string') s = raw
   else if (Array.isArray(raw)) s = raw.filter((p: any) => p?.type === 'text').map((p: any) => p.text).join('')
   s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim()
   const j = JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1))
-  return (j.results || []) as Verdict[]
+  return { niche: typeof j.niche === 'string' ? j.niche : undefined, results: (j.results || []) as Verdict[] }
 }
 
-async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }): Promise<Verdict[]> {
-  const list = group
-    .map((r) => {
-      const d = definitionFor(r.id)
-      const desc = r.description.replace(/\s+/g, ' ').slice(0, d ? 400 : 900)
-      if (!d) return `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${desc}`
-      return [
-        `- id: ${r.id}`,
-        `  question: ${d.new_q || r.title}`,
-        `  device: ${d.device === 'Both' ? 'judge desktop and mobile' : `judge on ${d.device.toLowerCase()} only`}`,
-        `  pass when: ${d.pass}`,
-        `  fail when: ${d.fail}`,
-        `  not relevant when: ${d.na}`,
-        d.niche ? `  niche notes: ${d.niche}` : '',
-        `  description (context only): ${desc}`,
-      ]
-        .filter(Boolean)
-        .join('\n')
-    })
+const DEVICE: Record<string, string> = {
+  Both: 'judge desktop and mobile',
+  'Desktop only': 'judge on desktop only',
+  'Mobile only': 'judge on mobile only',
+}
+
+function describe(r: Rule): string {
+  const desc = r.description.replace(/\s+/g, ' ').slice(0, r.pass ? 400 : 900)
+  if (!r.pass) return `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${desc}`
+  const only = (r.niches || []).filter((n) => n !== 'All')
+  return [
+    `- id: ${r.id}`,
+    `  question: ${r.title}`,
+    `  device: ${DEVICE[r.device || 'Both'] || DEVICE.Both}`,
+    `  pass when: ${r.pass}`,
+    r.fail ? `  fail when: ${r.fail}` : '',
+    r.na ? `  not relevant when: ${r.na}` : '',
+    only.length ? `  only for niches: ${only.join(', ')}` : '',
+    r.notRelevantNiches?.length ? `  not relevant for niches: ${r.notRelevantNiches.join(', ')}` : '',
+    r.nicheNotes ? `  niche notes: ${r.nicheNotes}` : '',
+    `  description (context only): ${desc}`,
+  ]
+    .filter(Boolean)
     .join('\n')
+}
+
+async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }): Promise<{ niche?: string; verdicts: Verdict[] }> {
+  const list = group.map(describe).join('\n')
   const content = [
     { type: 'text' as const, text: shared.text },
     ...shared.imgs,
@@ -110,26 +136,40 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
         stream: false,
         responseFormat: { type: 'json_object' },
       } as any)
-      const verdicts = parse(res?.choices?.[0]?.message?.content)
-      const byId = new Map(verdicts.map((v) => [v.id, v]))
-      return group.map((r) => {
+      const parsed = parse(res?.choices?.[0]?.message?.content)
+      const byId = new Map(parsed.results.map((v) => [v.id, v]))
+      const verdicts = group.map((r) => {
         const v = byId.get(r.id)
         const answer = v && ['pass', 'fail', 'na', 'unknown'].includes(String(v.answer).toLowerCase()) ? (String(v.answer).toLowerCase() as Verdict['answer']) : 'unknown'
         return { id: r.id, answer, evidence: (v?.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') }
       })
+      return { niche: parsed.niche, verdicts }
     } catch (e) {
       lastErr = e
     }
   }
   console.warn('[scanV2] group failed', lastErr)
-  return group.map((r) => ({ id: r.id, answer: 'unknown', evidence: 'We could not check this one.' }))
+  return { verdicts: group.map((r) => ({ id: r.id, answer: 'unknown', evidence: 'We could not check this one.' })) }
 }
 
-export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<Verdict[]> {
+/** The niche most groups agreed on, matched to the Airtable names. */
+function majorityNiche(answers: (string | undefined)[]): Niche {
+  const counts = new Map<Niche, number>()
+  for (const a of answers) {
+    const n = NICHES.find((x) => x.toLowerCase() === (a || '').trim().toLowerCase())
+    if (n) counts.set(n, (counts.get(n) || 0) + 1)
+  }
+  let best: Niche = 'Other'
+  let max = 0
+  for (const [n, c] of Array.from(counts)) if (c > max) [best, max] = [n, c]
+  return best
+}
+
+export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[] }> {
   const client = new OpenRouter({ apiKey })
   const shared = { text: evidenceText(ev), imgs: images(ev) }
   const groups: Rule[][] = []
   for (let i = 0; i < rules.length; i += GROUP_SIZE) groups.push(rules.slice(i, i + GROUP_SIZE))
   const out = await Promise.all(groups.map((g) => judgeGroup(client, ev, g, shared)))
-  return out.flat()
+  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts: out.flatMap((o) => o.verdicts) }
 }

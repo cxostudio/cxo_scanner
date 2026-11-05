@@ -12,7 +12,7 @@ import {
   type InstantPreviewHint,
 } from "../components/DualViewportLoader";
 import { api, asset, START_URL } from "@/lib/base";
-import { detectPageTypeFromUrl } from "@/lib/conversionCheckpoints/pageType";
+import { detectPageTypeFromUrl, isTestEmail } from "@/lib/conversionCheckpoints/pageType";
 import { QuadrantScanSequence } from "../components/QuadrantScanSequence";
 
 interface Rule {
@@ -510,6 +510,8 @@ export default function Home() {
         ruleTitle: z.string(),
         passed: z.boolean(),
         reason: z.string(),
+        status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
+        coveredByShopify: z.boolean().optional(),
         checkpoint: z
           .object({
             requiredActions: z.string(),
@@ -603,6 +605,10 @@ export default function Home() {
 
           const data = await response.json();
           const batchResults = ScanResultsSchema.parse(data.results);
+          // test scans are saved to the lab (app/lab): the results page links there
+          if (data.labId) {
+            try { localStorage.setItem("scanLabId", data.labId); } catch {}
+          }
 
           // Remove duplicates before adding (check by ruleId)
           const existingRuleIds = new Set(allResults.map((r) => r.ruleId));
@@ -790,6 +796,8 @@ export default function Home() {
               ruleTitle: z.string(),
               passed: z.boolean(),
               reason: z.string(),
+              status: z.enum(["pass", "fail", "na", "unknown"]).optional(),
+              coveredByShopify: z.boolean().optional(),
               checkpoint: z
                 .object({
                   requiredActions: z.string(),
@@ -1104,7 +1112,11 @@ export default function Home() {
       //    (product / category / other) share ONE 3-day browser cache entry, not one per URL.
       const pageTypeKey = detectPageTypeFromUrl(validUrl);
       const cpRes = await fetch(
-        api(`/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}`),
+        api(
+          `/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}` +
+            // test mode also lists Draft checkpoints; everyone else shares one cached list
+            (isTestEmail(emailTrimmed) ? `&email=${encodeURIComponent(emailTrimmed)}` : ""),
+        ),
       );
       const cpRaw = await cpRes.text();
       if (!cpRes.ok) {
@@ -1196,6 +1208,7 @@ export default function Home() {
       }
       try {
         localStorage.removeItem("scanPreviewMobile");
+        localStorage.removeItem("scanLabId");
         localStorage.removeItem("scanPreviewDesktop");
       } catch {
         /* ignore */

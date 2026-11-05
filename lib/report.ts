@@ -9,6 +9,8 @@ export type ScanResult = {
   reason: string
   /** engine v2: 'na' (not relevant, counts as passed) and 'unknown' (couldn't check, left out of the score) */
   status?: 'pass' | 'fail' | 'na' | 'unknown'
+  /** Shopify does it by default: counted as passed, shown as one grouped line */
+  coveredByShopify?: boolean
   checkpoint?: {
     requiredActions: string
     justificationsBenefits: string

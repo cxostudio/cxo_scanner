@@ -46,3 +46,9 @@ export function detectPageTypeFromUrl(url: string): UrlPageType {
     return 'other'
   }
 }
+
+/** Test mode: CXO Studio addresses and any +test address also run Draft checkpoints. */
+export function isTestEmail(email: string | null | undefined): boolean {
+  const e = (email || '').trim().toLowerCase()
+  return /@cxo\.studio$/.test(e) || /\+test[^@]*@/.test(e)
+}
