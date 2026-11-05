@@ -191,7 +191,9 @@ function describe(r: Rule): string {
     .join('\n')
 }
 
-async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }): Promise<{ niche?: string; verdicts: Verdict[] }> {
+export type Usage = { calls: number; inputTokens: number; outputTokens: number; costUsd: number }
+
+async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }, usage?: Usage): Promise<{ niche?: string; verdicts: Verdict[] }> {
   const list = group.map(describe).join('\n')
   const content = [
     { type: 'text' as const, text: shared.text },
@@ -214,6 +216,13 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
         stream: false,
         responseFormat: { type: 'json_object' },
       } as any)
+      if (usage) {
+        const u = res?.usage || {}
+        usage.calls++
+        usage.inputTokens += Number(u.promptTokens ?? u.prompt_tokens ?? 0)
+        usage.outputTokens += Number(u.completionTokens ?? u.completion_tokens ?? 0)
+        usage.costUsd += Number(u.cost ?? 0)
+      }
       const parsed = parse(res?.choices?.[0]?.message?.content)
       const byId = new Map(parsed.results.map((v) => [v.id, v]))
       const verdicts = group.map((r) => {
@@ -244,8 +253,9 @@ function majorityNiche(answers: (string | undefined)[]): Niche {
   return best
 }
 
-export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[] }> {
+export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[]; usage: Usage }> {
   const client = new OpenRouter({ apiKey })
+  const usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
   // one set of requests per part of the page, each with only that part's images; a stable order
   // (by id) so the same checkpoints are always judged together from one run to the next
   const byScope = new Map<Scope, Rule[]>()
@@ -258,14 +268,14 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
     const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc) }
     for (let i = 0; i < list.length; i += GROUP_SIZE) jobs.push({ group: list.slice(i, i + GROUP_SIZE), shared })
   }
-  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared)))
+  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage)))
   const verdicts = out.flatMap((o) => o.verdicts)
   // checkpoints the model skipped get one more try, together
   const skipped = rules.filter((r) => verdicts.find((v) => v.id === r.id)?.evidence === MISSING)
   if (skipped.length) {
-    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) })).verdicts.map((v) => [v.id, v]))
+    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) }, usage)).verdicts.map((v) => [v.id, v]))
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
-  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts }
+  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts, usage }
 }
