@@ -8,6 +8,7 @@ import { V2_MODEL } from '@/lib/scanV2/judge'
 import { getLabels, getTestScan, labAllowed, listTestScans, loadEvidence, saveRejudge, type LabLabel, type LabScan } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 export const maxDuration = 300
 
 /** Share of labelled checkpoints (not "can't tell") where the scanner gave the same answer. */

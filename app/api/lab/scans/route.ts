@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getLabels, getTestScan, labAllowed, listTestScans, type LabLabel, type LabScan } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function GET(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })

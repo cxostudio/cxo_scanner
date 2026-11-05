@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { getTestScan, labAllowed, saveLabels } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 const Labels = z.record(z.enum(['pass', 'fail', 'na', 'skip']))
 

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { isTestEmail } from '@/lib/conversionCheckpoints/pageType'
+import { noStoreFetch } from '@/lib/supabaseFetch'
 
 /**
  * Per-email daily scan limit.
@@ -30,6 +31,7 @@ function getSupabase(): SupabaseClient | null {
   if (!cached) {
     cached = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: noStoreFetch },
     })
   }
   return cached

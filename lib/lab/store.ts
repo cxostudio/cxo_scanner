@@ -10,6 +10,7 @@
 // newest from the folder listing. Supabase's CDN served stale copies of overwritten files for minutes.
 // Customer scans are never stored here.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { noStoreFetch } from '@/lib/supabaseFetch'
 import type { Evidence, Tile } from '@/lib/scanV2/capture'
 import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -78,7 +79,7 @@ function supabase(): SupabaseClient {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Supabase is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).')
-  if (!client) client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+  if (!client) client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: noStoreFetch } })
   return client
 }
 
