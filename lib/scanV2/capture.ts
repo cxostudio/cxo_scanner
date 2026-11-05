@@ -446,7 +446,19 @@ async function measureVariants(page: Page) {
         )
       })
     }).length
-    return { total, soldOut, options: options.length, marked }
+    // the main button as the page loads: ready to add (a variant is preselected) or asking for a choice
+    const ATC = /add to (cart|bag|basket)|ajouter au panier|in (de )?winkel(wagen|mand)|in den warenkorb|añadir al carrito|aggiungi al carrello|buy now|^add$/i
+    const text = (b: Element) => ((b as HTMLElement).innerText || (b as HTMLInputElement).value || b.getAttribute('aria-label') || b.textContent || '').replace(/\s+/g, ' ').trim()
+    const visible = (b: Element) => {
+      const r = b.getBoundingClientRect()
+      return r.width > 80 && r.height > 25
+    }
+    // the theme's own form first, then any large button that reads like add to cart / choose an option
+    const btn = ((document.querySelector('form[action*="/cart/add"] [type="submit"], form[action*="/cart/add"] button[name="add"]') as HTMLButtonElement | null) ||
+      (Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"]')).find((b) => visible(b) && (ATC.test(text(b)) || /select (a )?size|choose (a )?(size|option)|kies (een )?maat|sold out|uitverkocht/i.test(text(b)))) as HTMLButtonElement | undefined) ||
+      null)
+    const atc = btn ? { label: text(btn).slice(0, 40), disabled: btn.disabled === true || btn.getAttribute('aria-disabled') === 'true', ready: ATC.test(text(btn)) } : null
+    return { total, soldOut, options: options.length, marked, atc }
   })
 }
 
@@ -879,7 +891,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     if (opts.extended) (facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
     ;(facts as Record<string, unknown>).network = netStats(desktop)
-    if (opts.extended) (facts as Record<string, unknown>).variants = await measureVariants(desktop).catch(() => null)
+    // cheap (one product JSON fetch): the Live default-variant checkpoint uses it on every scan
+    ;(facts as Record<string, unknown>).variants = await measureVariants(desktop).catch(() => null)
     // the empty cart first (fresh browser, nothing added yet), then back to the product
     let emptyCart: Tile | undefined
     // cart checkpoints run on product scans only (they add the item there too)

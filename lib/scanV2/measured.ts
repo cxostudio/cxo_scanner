@@ -207,4 +207,24 @@ export const MEASURED: Record<string, Measure> = {
     if (v.soldOut > 0 && v.marked > 0) return { answer: 'pass', evidence: `Sold-out options are visibly marked in the selector (${v.marked} marked as unavailable).` }
     return null // sold out somewhere, nothing marked in the code: the screenshots decide
   },
+
+  // Is a default variant preselected, so the shopper can add to cart right away (except sizes in fashion)?
+  // The button as the page loads tells: enabled and saying "Add to cart" means a variant is already chosen.
+  rec1iBTNslYj4y05d: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total) return null
+    if (v.total === 1) return { answer: 'na', evidence: 'This product has a single version, so there is nothing to preselect.' }
+    if (v.atc && v.atc.ready && !v.atc.disabled) return { answer: 'pass', evidence: `A version is already selected when the page opens: the button reads "${v.atc.label}" and works right away.` }
+    return null // the button asks for a choice: fine for sizes in fashion, a fail elsewhere; the judge decides with the niche
+  },
+
+  // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
+  recEgJJ3Ja7iD3B63: (ev, f) => {
+    if (!ev.isShopify || !f.footer) return null
+    const links: string[] = f.footer.links || []
+    const collections = links.filter((l) => /\/collections\//.test(l))
+    if (collections.length >= 2) return { answer: 'pass', evidence: `The footer links to collections such as ${collections.slice(0, 3).map((l) => `"${l.split(' -> ')[0]}"`).join(', ')}.` }
+    if (collections.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories or popular collections, only company and help pages.' }
+    return null
+  },
 }
