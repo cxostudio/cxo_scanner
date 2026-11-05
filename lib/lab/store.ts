@@ -126,6 +126,7 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
     model: input.model,
   }
   await upload(store, `scans/${id}/meta.json`, meta)
+  await addToIndex(store, id, meta.createdAt)
   return id
 }
 
@@ -142,9 +143,17 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
 })
 const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
 
+// cacheControl 0: answers and labels change, and a cached copy would read back stale (default is 1 hour)
 async function upload(store: Awaited<ReturnType<typeof bucket>>, path: string, data: unknown) {
-  const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true })
+  const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true, cacheControl: '0' })
   if (error) throw error
+}
+
+/** index.json: every saved test scan, newest first (folder listings proved unreliable). */
+async function addToIndex(store: Awaited<ReturnType<typeof bucket>>, id: string, createdAt: string) {
+  const index = (await readJson<{ id: string; createdAt: string }[]>('index.json')) || []
+  const next = [{ id, createdAt }, ...index.filter((s) => s.id !== id)]
+  await upload(store, 'index.json', next)
 }
 
 /** Rebuild the judge's evidence from a saved test scan. Null for scans saved before evidence was kept. */
@@ -203,10 +212,13 @@ async function readJson<T>(path: string): Promise<T | null> {
 }
 
 export async function listTestScans(): Promise<{ id: string; createdAt: string }[]> {
+  const index = (await readJson<{ id: string; createdAt: string }[]>('index.json')) || []
+  // scans saved before the index existed: pick them up from the folder listing
   const store = await bucket()
-  const { data, error } = await store.list('scans', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } })
-  if (error) throw error
-  return (data || []).filter((d) => d.name).map((d) => ({ id: d.name, createdAt: d.created_at || '' }))
+  const { data } = await store.list('scans', { limit: 1000 })
+  const known = new Set(index.map((s) => s.id))
+  const extra = (data || []).filter((d) => d.name && !known.has(d.name)).map((d) => ({ id: d.name, createdAt: d.created_at || '' }))
+  return [...index, ...extra]
 }
 
 export const getTestScan = (id: string) => readJson<LabScan>(`scans/${safeId(id)}/meta.json`)
