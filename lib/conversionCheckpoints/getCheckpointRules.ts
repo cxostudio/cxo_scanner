@@ -126,7 +126,7 @@ function sleep(ms: number): Promise<void> {
 const SCANNER_FORMULA = "AND(NOT({Archived}), OR({Scanner status}='Live', {Scanner status}='Draft'))"
 
 /** Base list URL for the table (no `/rec…` retrieve suffix, no query string). */
-function getListRecordsBaseUrl(apiUrl: string): string {
+export function getListRecordsBaseUrl(apiUrl: string): string {
   const u = new URL(apiUrl)
   let segments = u.pathname.split('/').filter(Boolean)
   if (segments.length >= 4 && /^rec[a-zA-Z0-9]+$/.test(segments[segments.length - 1]!)) {

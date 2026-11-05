@@ -346,6 +346,12 @@ export async function getNotes(id: string): Promise<Record<string, string>> {
   return (await readLatest<Record<string, string>>(`notes/${safeId(id)}`)) || {}
 }
 
+/** A status change made from the lab (who promoted what, at which score), kept for the record. */
+export async function logPromotion(entry: Record<string, unknown>) {
+  const store = await bucket()
+  await upload(store, `promotions/${Date.now().toString(36)}.json`, { ...entry, at: new Date().toISOString() })
+}
+
 export async function saveNotes(id: string, notes: Record<string, string>) {
   await writeVersion(await bucket(), `notes/${safeId(id)}`, notes)
 }
