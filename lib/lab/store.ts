@@ -107,11 +107,13 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
   const ev = input.evidence
   // six at a time, with retries: storage refuses uploads when several scans save at once
   const tiles = roleTiles(ev)
+  // unique names per save: a re-scan never overwrites a screenshot (overwritten files read back stale)
+  const stamp = Date.now().toString(36)
   const images: { label: string; file: string; role: ImageRole }[] = []
   for (let start = 0; start < tiles.length; start += 6) {
     const chunk = await Promise.all(
       tiles.slice(start, start + 6).map(async ({ role, tile }, j) => {
-        const file = `scans/${id}/${String(start + j).padStart(2, '0')}.jpg`
+        const file = `scans/${id}/${stamp}-${String(start + j).padStart(2, '0')}.jpg`
         const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
         for (let attempt = 0; ; attempt++) {
           const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
@@ -144,6 +146,11 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
     model: input.model,
   }
   await writeVersion(store, `scans/${id}/meta`, meta)
+  // a re-scan of the same scan id: remove the previous screenshots (labels are kept)
+  const { data: files } = await store.list(`scans/${id}`, { limit: 1000 })
+  const keep = new Set(images.map((i) => i.file))
+  const old = (files || []).filter((f) => f.id && f.name.endsWith('.jpg') && !keep.has(`scans/${id}/${f.name}`)).map((f) => `scans/${id}/${f.name}`)
+  if (old.length) await store.remove(old).catch(() => {})
   return id
 }
 
