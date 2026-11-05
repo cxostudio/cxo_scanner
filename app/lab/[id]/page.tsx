@@ -2,12 +2,14 @@
 
 // Test lab, one scan: label each checkpoint blind (the scanner's answer is not loaded),
 // then compare. Keys: P pass, F fail, N not relevant, S can't tell, ← → move.
+// The queue comes in page order and leaves out what the scanner settles without judgement:
+// "Measured" checkpoints (code) and checkpoints outside the store's niche (rule).
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/base'
 
 type Label = 'pass' | 'fail' | 'na' | 'skip'
-type Checkpoint = { id: string; title: string; status?: string; device?: string; pass?: string; fail?: string; na?: string; nicheNotes?: string; pageTypeIds?: string[] }
+type Checkpoint = { id: string; title: string; status?: string; device?: string; pass?: string; fail?: string; na?: string; nicheNotes?: string; pageTypeIds?: string[]; area?: string; method?: string; skip?: 'measured' | 'niche' }
 type Answer = { id: string; answer: string; reason: string; coveredByShopify?: boolean }
 type Scan = {
   id: string
@@ -19,6 +21,9 @@ type Scan = {
   answers?: Answer[]
   images: { label: string; url: string }[]
   labels: Record<string, Label>
+  notes?: Record<string, string>
+  /** left out of the queue: answered by code / not for this niche */
+  leftOut?: { measured: number; niche: number }
 }
 type Tab = 'desktop' | 'mobile' | 'cart'
 
@@ -37,6 +42,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
   const [scan, setScan] = useState<Scan | null>(null)
   const [error, setError] = useState('')
   const [labels, setLabels] = useState<Record<string, Label>>({})
+  const [notes, setNotes] = useState<Record<string, string>>({})
   const [i, setI] = useState(0)
   const [tab, setTab] = useState<Tab>('desktop')
   const [compare, setCompare] = useState(false)
@@ -50,10 +56,18 @@ export default function LabScan({ params }: { params: { id: string } }) {
       if (reveal) qs.set('reveal', '1')
       return fetch(api(`/lab/scans/${params.id}?${qs}`))
         .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({})))?.error || String(r.status)))))
-        .then((s: Scan) => {
+        .then((raw: Scan) => {
+          const s: Scan = {
+            ...raw,
+            checkpoints: raw.checkpoints.filter((c) => !c.skip),
+            leftOut: { measured: raw.checkpoints.filter((c) => c.skip === 'measured').length, niche: raw.checkpoints.filter((c) => c.skip === 'niche').length },
+          }
           setScan(s)
           // keep what was just labelled: the debounced save may not have landed yet
-          if (!keepLabels) setLabels(s.labels || {})
+          if (!keepLabels) {
+            setLabels(s.labels || {})
+            setNotes(s.notes || {})
+          }
           return s
         })
         .catch((e) => setError(String(e.message || e)))
@@ -86,14 +100,14 @@ export default function LabScan({ params }: { params: { id: string } }) {
   }, [cp])
 
   const persist = useCallback(
-    (next: Record<string, Label>) => {
+    (next: Record<string, Label>, nextNotes: Record<string, string>) => {
       window.clearTimeout(saveTimer.current)
       setSaved('saving')
       saveTimer.current = window.setTimeout(() => {
         fetch(api(`/lab/labels/${params.id}${key ? `?key=${encodeURIComponent(key)}` : ''}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(next),
+          body: JSON.stringify({ labels: next, notes: nextNotes }),
         })
           .then((r) => setSaved(r.ok ? 'saved' : 'error'))
           .catch(() => setSaved('error'))
@@ -107,16 +121,23 @@ export default function LabScan({ params }: { params: { id: string } }) {
       if (!cp || !scan) return
       const next = { ...labels, [cp.id]: label }
       setLabels(next)
-      persist(next)
+      persist(next, notes)
       setI((n) => Math.min(n + 1, scan.checkpoints.length - 1))
     },
-    [cp, scan, labels, persist],
+    [cp, scan, labels, notes, persist],
   )
+
+  const setNote = (text: string) => {
+    if (!cp) return
+    const next = { ...notes, [cp.id]: text }
+    setNotes(next)
+    persist(labels, next)
+  }
 
   useEffect(() => {
     if (compare) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement)?.tagName === 'INPUT') return
+      if (e.metaKey || e.ctrlKey || e.altKey || ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
       const k = e.key.toLowerCase()
       const b = BUTTONS.find((x) => x.key.toLowerCase() === k)
       if (b) setLabel(b.label)
@@ -181,7 +202,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
       </header>
 
       {compare ? (
-        <Compare scan={scan} labels={labels} />
+        <Compare scan={scan} labels={labels} notes={notes} />
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
           {/* the checkpoint, with CXO Studio's definitions */}
@@ -189,6 +210,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
             <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
               <span>
                 {i + 1} / {scan.checkpoints.length}
+                {cp.area ? ` · ${cp.area}` : ''}
               </span>
               <span className="flex gap-1.5">
                 {cp.status && <Chip>{cp.status}</Chip>}
@@ -233,6 +255,23 @@ export default function LabScan({ params }: { params: { id: string } }) {
                 Next unlabelled →
               </button>
             </div>
+            <label className="flex flex-col gap-1.5 text-xs text-[var(--text-muted)]">
+              Note on the definition (optional)
+              <textarea
+                value={notes[cp.id] || ''}
+                onChange={(e) => setNote(e.target.value)}
+                rows={2}
+                maxLength={1000}
+                placeholder="e.g. the definition asks for two benefits, one is enough here because…"
+                className="resize-y rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--border-strong)]"
+              />
+            </label>
+            {scan.leftOut && scan.leftOut.measured + scan.leftOut.niche > 0 && (
+              <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+                Not in this list: {scan.leftOut.measured} checked in the page code (validated with technical tools)
+                {scan.leftOut.niche ? `, ${scan.leftOut.niche} not for ${scan.niche.toLowerCase()} stores` : ''}.
+              </p>
+            )}
           </section>
 
           {/* what the scanner saw */}
@@ -268,7 +307,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
 }
 
 /** Your label next to the scanner's answer and reasoning: disagreements first. */
-function Compare({ scan, labels }: { scan: Scan; labels: Record<string, Label> }) {
+function Compare({ scan, labels, notes }: { scan: Scan; labels: Record<string, Label>; notes: Record<string, string> }) {
   const answers = new Map((scan.answers || []).map((a) => [a.id, a]))
   const rows = scan.checkpoints.map((cp) => {
     const a = answers.get(cp.id)
@@ -304,6 +343,7 @@ function Compare({ scan, labels }: { scan: Scan; labels: Record<string, Label> }
               </span>
             </div>
             {a?.reason && <p className="text-sm leading-relaxed text-[var(--text-muted)]">{a.reason}</p>}
+            {notes[cp.id] && <p className="text-sm leading-relaxed text-[var(--text)]">Your note: {notes[cp.id]}</p>}
           </div>
         ))}
       </div>

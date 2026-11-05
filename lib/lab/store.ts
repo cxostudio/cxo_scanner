@@ -34,6 +34,10 @@ export type LabCheckpoint = {
   na?: string
   nicheNotes?: string
   pageTypeIds?: string[]
+  area?: string
+  method?: string
+  /** Why the checkpoint is left out of the labelling queue: answered by code, or not for this niche. */
+  skip?: 'measured' | 'niche'
 }
 
 export type LabScan = {
@@ -143,6 +147,8 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
   na: r.na,
   nicheNotes: r.nicheNotes,
   pageTypeIds: r.pageTypeIds,
+  area: r.area,
+  method: r.method,
 })
 const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
 
@@ -286,4 +292,42 @@ export async function deleteTestScan(id: string) {
   files.push(`labels/${safe}.json`)
   for (let i = 0; i < files.length; i += 100) await store.remove(files.slice(i, i + 100))
   return files.length
+}
+
+/** Page areas in the order a shopper meets them: the labelling queue follows it. */
+const AREA_ORDER = ['Header', 'Hero', 'Product grid', 'Filters and sorting', 'Gallery', 'Buy box', 'Description and details', 'Reviews and social proof', 'Recommendations', 'Cart drawer', 'Checkout form', 'Order summary', 'Page-wide', 'Footer', 'Technical']
+
+/**
+ * What Louis labels for a scan, in page order. Left out (with the reason): checkpoints the scanner
+ * answers by code ("Measured"; checked against technical tools instead) and checkpoints that do not
+ * apply to the store's niche (the scanner answers "not relevant" by rule).
+ */
+export function labelQueue(scan: LabScan): LabCheckpoint[] {
+  const full = new Map((scan.rules || []).map((r) => [r.id, r]))
+  const rank = (a?: string) => {
+    const i = AREA_ORDER.indexOf(a || '')
+    return i < 0 ? AREA_ORDER.length : i
+  }
+  return scan.checkpoints
+    .map((c, i) => {
+      const r = full.get(c.id)
+      const method = c.method || r?.method
+      const area = c.area || r?.area
+      const only = (r?.niches || []).filter((n) => n !== 'All')
+      const niche = scan.niche as string
+      const outOfNiche = !!r && ((r.notRelevantNiches || []).includes(niche) || (only.length > 0 && !only.includes(niche)))
+      const skip: LabCheckpoint['skip'] = method === 'Measured' ? 'measured' : outOfNiche ? 'niche' : undefined
+      return { cp: { ...c, method, area, ...(skip ? { skip } : {}) }, i }
+    })
+    .sort((a, b) => rank(a.cp.area) - rank(b.cp.area) || a.i - b.i)
+    .map((x) => x.cp)
+}
+
+/** Louis's notes per checkpoint ("the definition is wrong because..."), versioned like labels. */
+export async function getNotes(id: string): Promise<Record<string, string>> {
+  return (await readLatest<Record<string, string>>(`notes/${safeId(id)}`)) || {}
+}
+
+export async function saveNotes(id: string, notes: Record<string, string>) {
+  await writeVersion(await bucket(), `notes/${safeId(id)}`, notes)
 }

@@ -19,6 +19,8 @@ export type ScanRule = {
   /** Scanner status. Missing on the legacy snapshot, which only held live checkpoints. */
   status?: ScannerStatus
   pageTypeIds?: string[]
+  /** Part of the page the checkpoint is about (Airtable "Page area"). */
+  area?: string
   device?: 'Both' | 'Desktop only' | 'Mobile only'
   method?: string
   pass?: string
@@ -99,6 +101,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     description,
     status: status === 'Live' || status === 'Draft' || status === 'Off' ? status : undefined,
     pageTypeIds: list('Page Type'),
+    area: text('Page area'),
     device: device === 'Desktop only' || device === 'Mobile only' || device === 'Both' ? device : undefined,
     method: text('Check method'),
     pass: text('Pass when'),

@@ -1,6 +1,6 @@
 // Test lab: every saved test scan, with labelling progress and accuracy per checkpoint.
 import { NextRequest, NextResponse } from 'next/server'
-import { getLabels, getTestScan, labAllowed, listTestScans, type LabLabel, type LabScan } from '@/lib/lab/store'
+import { getLabels, getNotes, getTestScan, labAllowed, labelQueue, listTestScans, type LabLabel, type LabScan } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
   try {
     const list = await listTestScans()
-    const loaded = await Promise.all(list.map(async (s) => ({ scan: await getTestScan(s.id), labels: await getLabels(s.id) })))
-    const scans = loaded.filter((x): x is { scan: LabScan; labels: Record<string, LabLabel> } => !!x.scan)
+    const loaded = await Promise.all(list.map(async (s) => ({ scan: await getTestScan(s.id), labels: await getLabels(s.id), notes: await getNotes(s.id) })))
+    const scans = loaded.filter((x): x is { scan: LabScan; labels: Record<string, LabLabel>; notes: Record<string, string> } => !!x.scan)
     scans.sort((a, b) => b.scan.createdAt.localeCompare(a.scan.createdAt))
 
     // accuracy per checkpoint: scanner answer vs Louis's label, on labelled scans ("skip" and
@@ -34,14 +34,21 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      scans: scans.map(({ scan, labels }) => ({
-        id: scan.id,
-        url: scan.url,
-        createdAt: scan.createdAt,
-        niche: scan.niche,
-        checkpoints: scan.checkpoints.length,
-        labelled: Object.keys(labels).filter((k) => scan.checkpoints.some((c) => c.id === k)).length,
-      })),
+      scans: scans.map(({ scan, labels }) => {
+        const queue = labelQueue(scan).filter((c) => !c.skip)
+        return {
+          id: scan.id,
+          url: scan.url,
+          createdAt: scan.createdAt,
+          niche: scan.niche,
+          checkpoints: queue.length,
+          labelled: queue.filter((c) => labels[c.id]).length,
+        }
+      }),
+      // every note, for the definition fixes
+      notes: scans.flatMap(({ scan, notes }) =>
+        Object.entries(notes).map(([id, note]) => ({ scan: scan.id, url: scan.url, id, title: scan.checkpoints.find((c) => c.id === id)?.title || id, note })),
+      ),
       accuracy: Array.from(acc.values()).sort((a, b) => a.agree / a.labelled - b.agree / b.labelled),
     })
   } catch (e) {

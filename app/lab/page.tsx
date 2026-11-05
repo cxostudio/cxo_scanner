@@ -10,6 +10,7 @@ const MIN_LABELS = 5
 const TARGET = 0.9
 
 type ScanRow = { id: string; url: string; createdAt: string; niche: string; checkpoints: number; labelled: number }
+type NoteRow = { scan: string; url: string; id: string; title: string; note: string }
 type AccRow = { id: string; title: string; status?: string; labelled: number; agree: number; unknown: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
 
 const host = (u: string) => {
@@ -24,7 +25,7 @@ const WORD: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'Not rele
 
 export default function LabHome() {
   const [key, setKey] = useState('')
-  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[] } | null>(null)
+  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[]; notes?: NoteRow[] } | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [rejudge, setRejudge] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
@@ -156,6 +157,20 @@ export default function LabHome() {
                 })}
               </div>
             </section>
+            {!!data.notes?.length && (
+              <section className="flex flex-col gap-3">
+                <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Notes on definitions ({data.notes.length})</h2>
+                <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+                  {data.notes.map((n, i) => (
+                    <Link key={i} href={`/lab/${n.scan}${q}`} className="flex flex-col gap-0.5 px-4 py-3 hover:bg-[var(--bg-subtle)]">
+                      <span className="text-sm font-semibold">{n.title}</span>
+                      <span className="text-sm text-[var(--text)]">{n.note}</span>
+                      <span className="text-xs text-[var(--text-muted)]">{host(n.url)}</span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>
