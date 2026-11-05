@@ -83,7 +83,11 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
 - Empty-cart checkpoints are judged ONLY on the "EMPTY cart" image. Without it they are "unknown"; never judge them from a cart that holds an item.
 - Pass only for something you can point to in the screenshots, the page text or the measured facts. Do not infer a feature from a nearby word (a shipping badge is not a coupon field).
-- Hover, focus, keyboard type, animation and load speed cannot be seen in screenshots: unless the measured facts settle it, answer "unknown".
+- Hover, focus, keyboard type, animation, load speed and sticky or fixed elements while scrolling cannot be seen in screenshots: unless the measured facts settle it, answer "unknown".
+- Live activity ("24 people have this in their cart", "12 viewing now") is not how many people bought or use the product: that needs a count of customers, orders or reviews.
+- An FAQ means questions with answers. Product detail tabs or accordions (Details, Dimensions, Care, Shipping) are not an FAQ.
+- Footer checkpoints: the measured footer links are the list of what the footer contains. Never name a footer link that is not in that list.
+- Variant options drawn crossed out, struck through, greyed out or with a diagonal line are sold out or unavailable, and that marking counts as clearly showing it.
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 

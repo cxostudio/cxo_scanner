@@ -408,6 +408,85 @@ async function measureHover(page: Page) {
   return results
 }
 
+/**
+ * Sold-out options: how many variants Shopify reports as unavailable, and how many option values the
+ * selector visibly marks as unavailable (disabled, struck through, greyed or labelled).
+ */
+async function measureVariants(page: Page) {
+  return page.evaluate(async () => {
+    let total = 0
+    let soldOut = 0
+    try {
+      if (/\/products\//.test(location.pathname)) {
+        const r = await fetch(location.pathname.replace(/\/$/, '') + '.js')
+        if (r.ok) {
+          const p = await r.json()
+          total = p.variants.length
+          soldOut = p.variants.filter((v: any) => !v.available).length
+        }
+      }
+    } catch {}
+    const scope = document.querySelector('form[action*="/cart/add"]')?.closest('section, [class*="product" i]') || document.body
+    const UNAVAILABLE = /sold|unavailable|disabled|out-of-stock|outofstock|crossed|strike|is-disabled|not-available/i
+    const options = Array.from(scope.querySelectorAll('input[type="radio"], [role="radio"], [data-value], [data-option-value], option, button[class*="swatch" i], button[class*="variant" i], label[class*="swatch" i]')).filter((el) => {
+      const r = el.getBoundingClientRect()
+      return el.tagName === 'OPTION' || el.tagName === 'INPUT' || (r.width > 0 && r.height > 0)
+    })
+    const marked = options.filter((el) => {
+      const label = el.tagName === 'INPUT' ? (el.closest('label') || document.querySelector(`label[for="${el.id}"]`)) : el
+      const els = [el, label].filter(Boolean) as Element[]
+      return els.some((e) => {
+        const cs = getComputedStyle(e)
+        return (
+          (e as HTMLInputElement).disabled === true ||
+          e.getAttribute('aria-disabled') === 'true' ||
+          UNAVAILABLE.test(`${e.getAttribute('class') || ''} ${e.getAttribute('data-available') === 'false' ? 'unavailable' : ''}`) ||
+          /line-through/.test(cs.textDecorationLine) ||
+          /sold out|unavailable|uitverkocht|épuisé|ausverkauft|agotado|esaurito/i.test((e as HTMLElement).innerText || e.textContent || '')
+        )
+      })
+    }).length
+    return { total, soldOut, options: options.length, marked }
+  })
+}
+
+/**
+ * Mobile: scroll well past the main add-to-cart button; is an add-to-cart button still on screen,
+ * in a fixed or sticky bar (or the main button itself sticks)?
+ */
+async function measureStickyAtc(page: Page) {
+  return page.evaluate(async () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const ATC = /add to (cart|bag|basket)|ajouter au panier|in (de )?winkel(wagen|mand)|in den warenkorb|añadir al carrito|aggiungi al carrello|buy now|select (a )?size|choose (a )?(size|option)|kies (een )?maat/i
+    const isAtc = (el: Element) => ATC.test(((el as HTMLElement).innerText || (el as HTMLInputElement).value || el.getAttribute('aria-label') || '').trim())
+    const pinned = (el: Element) => {
+      for (let e: Element | null = el; e && e !== document.body; e = e.parentElement) {
+        const p = getComputedStyle(e).position
+        if (p === 'fixed' || p === 'sticky') return true
+      }
+      return false
+    }
+    const candidates = () => Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"], a[class*="btn" i], a[class*="button" i]')).filter(isAtc)
+    window.scrollTo(0, 0)
+    await sleep(300)
+    const main = (document.querySelector('form[action*="/cart/add"] [type="submit"], form[action*="/cart/add"] button[name="add"]') as HTMLElement | null) || (candidates()[0] as HTMLElement | undefined) || null
+    if (!main) return null
+    const top = main.getBoundingClientRect().top + window.scrollY
+    window.scrollTo(0, top + window.innerHeight * 1.5)
+    await sleep(1000)
+    const onTop = (b: Element) => {
+      const r = b.getBoundingClientRect()
+      const s = getComputedStyle(b)
+      if (r.width < 40 || r.height < 20 || r.top < 0 || r.bottom > window.innerHeight || s.visibility === 'hidden' || Number(s.opacity) < 0.3) return false
+      const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return !!h && (h === b || b.contains(h))
+    }
+    const hit = candidates().find((b) => onTop(b) && pinned(b))
+    window.scrollTo(0, 0)
+    return { sticky: !!hit, label: hit ? ((hit as HTMLElement).innerText || '').trim().slice(0, 40) : null }
+  })
+}
+
 /** Text inside closed tabs / accordions, which innerText leaves out. */
 function readHiddenText(page: Page) {
   return page
@@ -800,6 +879,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     if (opts.extended) (facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
     ;(facts as Record<string, unknown>).network = netStats(desktop)
+    if (opts.extended) (facts as Record<string, unknown>).variants = await measureVariants(desktop).catch(() => null)
     // the empty cart first (fresh browser, nothing added yet), then back to the product
     let emptyCart: Tile | undefined
     // cart checkpoints run on product scans only (they add the item there too)
@@ -856,6 +936,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         .catch(() => ({}))
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
+      if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       if (opts.extended) {
         menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
         // back to a clean page before the cart (the open menu would sit over the cart icon)

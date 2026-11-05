@@ -190,4 +190,21 @@ export const MEASURED: Record<string, Measure> = {
     if (hosts.some((h) => /cdn\.shopify\.com|cloudfront|akamai|fastly|cloudinary|imgix|bunny|^cdn\./i.test(h))) return { answer: 'pass', evidence: 'Images are served from a CDN.' }
     return null
   },
+
+  // Does a sticky 'Add to Cart' appear when the main 'Add to Cart' button is out of view? (mobile)
+  recWeoj4QACWSKPuX: (ev) => {
+    const st = (ev.mobileFacts as F).stickyAtc
+    if (!st) return null
+    if (st.sticky) return { answer: 'pass', evidence: `On a phone, an add-to-cart button ("${st.label}") stays on screen after scrolling past the main one.` }
+    return { answer: 'fail', evidence: 'On a phone, once you scroll past the main button there is no add-to-cart button on screen until you scroll back up.' }
+  },
+
+  // Are sold-out options clearly marked in the colour and size selector?
+  recZsTWnkPB7mQHyC: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total) return null
+    if (v.total > 1 && v.soldOut === 0) return { answer: 'na', evidence: 'Every option of this product is in stock, so there is nothing to mark.' }
+    if (v.soldOut > 0 && v.marked > 0) return { answer: 'pass', evidence: `Sold-out options are visibly marked in the selector (${v.marked} marked as unavailable).` }
+    return null // sold out somewhere, nothing marked in the code: the screenshots decide
+  },
 }

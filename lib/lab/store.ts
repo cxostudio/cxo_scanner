@@ -105,15 +105,25 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
   const store = await bucket()
   const id = safeId(input.id) || `scan-${Date.now()}`
   const ev = input.evidence
-  const images = await Promise.all(
-    roleTiles(ev).map(async ({ role, tile }, i) => {
-      const file = `scans/${id}/${String(i).padStart(2, '0')}.jpg`
-      const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
-      const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
-      if (error) throw error
-      return { label: tile.label, file, role }
-    }),
-  )
+  // six at a time, with retries: storage refuses uploads when several scans save at once
+  const tiles = roleTiles(ev)
+  const images: { label: string; file: string; role: ImageRole }[] = []
+  for (let start = 0; start < tiles.length; start += 6) {
+    const chunk = await Promise.all(
+      tiles.slice(start, start + 6).map(async ({ role, tile }, j) => {
+        const file = `scans/${id}/${String(start + j).padStart(2, '0')}.jpg`
+        const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
+        for (let attempt = 0; ; attempt++) {
+          const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
+          if (!error) break
+          if (attempt >= 2) throw new Error(`could not save ${file}: ${error.message}`)
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+        }
+        return { label: tile.label, file, role }
+      }),
+    )
+    images.push(...chunk)
+  }
   // everything but the images (saved above as files)
   const stored: Record<string, unknown> = { ...ev }
   for (const k of IMAGE_KEYS) delete stored[k]
