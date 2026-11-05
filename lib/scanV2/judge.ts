@@ -91,7 +91,7 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - Footer checkpoints: the measured footer links are the list of what the footer contains. Never name a footer link that is not in that list.
 - Variant options drawn crossed out, struck through, greyed out or with a diagonal line are sold out or unavailable, and that marking counts as clearly showing it.
 - Cart line checkpoints (product lines, discounts, quantities) are about the items IN the cart only. Products recommended inside the cart ("You may also like", "Optimize your routine") are not cart items.
-- When ONLINE PURCHASE is NOT OFFERED, every checkpoint about buying online is "na": the add-to-cart button, shipping, delivery dates, returns, stock status, quantity discounts, payment and cart checkpoints.
+- When ONLINE PURCHASE is NOT OFFERED on this product page, the buy box checkpoints about buying it are "na" (add-to-cart button, shipping, delivery dates, returns, stock status, quantity discounts). The cart, header, footer and the rest of the page are still judged: the store sells other products online.
 - The answer must match the evidence: when your evidence says the checkpoint does not apply (product in stock, no bundle, single option), the answer is "na", never "fail".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
