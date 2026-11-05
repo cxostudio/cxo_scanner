@@ -239,7 +239,8 @@ function readFacts(page: Page) {
       images: {
         total: imgs.length,
         lazyLoaded: imgs.filter((i) => i.loading === 'lazy' || !!(i as HTMLImageElement).dataset.src || /lazy/i.test(i.className)).length,
-        missingAlt: imgs.filter((i) => !i.hasAttribute('alt')).length,
+        // like Lighthouse: only images a person could see (tracking pixels and hidden images do not need alt text)
+        missingAlt: imgs.filter((i) => !i.hasAttribute('alt') && (i as HTMLImageElement).width > 2 && (i as HTMLImageElement).height > 2 && !i.closest('[aria-hidden="true"]')).length,
         modernFormat: imgs.filter((i) => /\.(webp|avif)|format=(webp|avif)|fm=(webp|avif)/i.test(i.currentSrc || i.src)).length,
       },
       videos: Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"], iframe[data-src*="youtube"], iframe[data-src*="vimeo"]')).map((v) => ({
