@@ -200,17 +200,32 @@ export async function saveRejudge(scan: LabScan, input: { rules: ScanRule[]; res
   return next
 }
 
+/** Last read problem, reported by the lab APIs (storage errors are otherwise silent). */
+export let lastReadError = ''
+
 async function readJson<T>(path: string): Promise<T | null> {
   const store = await bucket()
   // Supabase's CDN can serve the previous version of an updated file for up to an hour: read through
-  // a signed link with a unique query so every read is a fresh copy
+  // a signed link with a unique query so every read is a fresh copy; fall back to a plain download
   const { data: signed, error } = await store.createSignedUrl(path, 60)
-  if (error || !signed?.signedUrl) return null
+  if (signed?.signedUrl) {
+    try {
+      const res = await fetch(`${signed.signedUrl}&fresh=${Date.now()}`, { cache: 'no-store' })
+      if (res.ok) return (await res.json()) as T
+      lastReadError = `${path}: signed read ${res.status} ${(await res.text()).slice(0, 160)}`
+    } catch (e) {
+      lastReadError = `${path}: signed read failed ${String(e).slice(0, 160)}`
+    }
+  } else if (error) lastReadError = `${path}: sign failed ${error.message}`
+  const { data, error: dlError } = await store.download(path)
+  if (dlError || !data) {
+    lastReadError += ` | download: ${dlError?.message || 'no data'}`
+    return null
+  }
   try {
-    const res = await fetch(`${signed.signedUrl}&fresh=${Date.now()}`, { cache: 'no-store' })
-    if (!res.ok) return null
-    return (await res.json()) as T
-  } catch {
+    return JSON.parse(await data.text()) as T
+  } catch (e) {
+    lastReadError += ` | parse: ${String(e).slice(0, 120)}`
     return null
   }
 }
