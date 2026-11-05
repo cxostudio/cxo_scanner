@@ -202,10 +202,14 @@ export async function saveRejudge(scan: LabScan, input: { rules: ScanRule[]; res
 
 async function readJson<T>(path: string): Promise<T | null> {
   const store = await bucket()
-  const { data, error } = await store.download(path)
-  if (error || !data) return null
+  // Supabase's CDN can serve the previous version of an updated file for up to an hour: read through
+  // a signed link with a unique query so every read is a fresh copy
+  const { data: signed, error } = await store.createSignedUrl(path, 60)
+  if (error || !signed?.signedUrl) return null
   try {
-    return JSON.parse(await data.text()) as T
+    const res = await fetch(`${signed.signedUrl}&fresh=${Date.now()}`, { cache: 'no-store' })
+    if (!res.ok) return null
+    return (await res.json()) as T
   } catch {
     return null
   }
