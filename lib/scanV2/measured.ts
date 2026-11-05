@@ -227,4 +227,10 @@ export const MEASURED: Record<string, Measure> = {
     if (collections.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories or popular collections, only company and help pages.' }
     return null
   },
+
+  // Are product variant options easily accessible and touch-friendly on mobile? A single version: nothing to choose.
+  recEyoHMH2oyA0Hk3: (_ev, f) => (f.variants?.total === 1 ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
+
+  // Do colour variants show as image thumbnails or clear swatches? A single version has no colour choice.
+  recnbgJzDarhgi4RH: (_ev, f) => (f.variants?.total === 1 ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
 }
