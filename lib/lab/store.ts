@@ -346,6 +346,17 @@ export async function getNotes(id: string): Promise<Record<string, string>> {
   return (await readLatest<Record<string, string>>(`notes/${safeId(id)}`)) || {}
 }
 
+/** A cropped screenshot saved as a good example of a checkpoint; returns a link Airtable can fetch. */
+export async function saveExample(checkpointId: string, jpeg: Buffer): Promise<string> {
+  const store = await bucket()
+  const file = `examples/${checkpointId.replace(/[^a-zA-Z0-9]/g, '')}/${Date.now().toString(36)}.jpg`
+  const { error } = await store.upload(file, jpeg, { contentType: 'image/jpeg', upsert: true })
+  if (error) throw new Error(`could not save the example: ${error.message}`)
+  const { data, error: e2 } = await store.createSignedUrl(file, 60 * 60 * 24 * 7)
+  if (e2 || !data?.signedUrl) throw new Error('could not sign the example link')
+  return data.signedUrl
+}
+
 /** A status change made from the lab (who promoted what, at which score), kept for the record. */
 export async function logPromotion(entry: Record<string, unknown>) {
   const store = await bucket()
