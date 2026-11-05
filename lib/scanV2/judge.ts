@@ -103,7 +103,8 @@ Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoi
 /** The kind of page: captured with the evidence, or read from the URL for scans saved before that. */
 export const pageKindOf = (ev: Evidence): PageKind => ev.pageType || detectPageTypeFromUrl(ev.finalUrl || ev.url)
 
-function evidenceText(ev: Evidence) {
+function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
+  const pageText = scope !== 'cart'
   return [
     `PAGE: ${ev.finalUrl} (${PAGE[pageKindOf(ev)].name})`,
     `TITLE: ${ev.title}`,
@@ -113,15 +114,42 @@ function evidenceText(ev: Evidence) {
     ev.sellsOnline === false ? 'ONLINE PURCHASE: NOT OFFERED on this page. The main button sends shoppers to a store locator ("Find in store" / "Where to buy"); there is no add-to-cart.' : '',
     `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
     `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
-    `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}`,
-    ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
+    pageText ? `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}` : 'Judge these cart checkpoints ONLY on the cart images below. The product page is not shown on purpose.',
+    pageText && ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
 }
 
-function images(ev: Evidence) {
-  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.emptyCart ? [ev.emptyCart] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.cartPage || []), ...(ev.mobileCartView ? [ev.mobileCartView] : []), ...(ev.mobileCartPage || [])]
+type Tile = Evidence['desktopTiles'][number]
+type Scope = 'header' | 'footer' | 'cart' | 'page'
+
+/** Which part of the evidence a page area is judged on. */
+function scopeOf(area?: string): Scope {
+  const a = (area || '').toLowerCase()
+  if (/header|navigation|menu/.test(a)) return 'header'
+  if (/footer/.test(a)) return 'footer'
+  if (/cart|checkout/.test(a)) return 'cart'
+  return 'page'
+}
+
+/**
+ * Only the images an area needs: the cart is judged on cart images and never on the product page,
+ * the buy box never on the cart drawer, the footer on the footer. Fewer images, fewer wrong reads.
+ */
+function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
+  const isFooter = (t: Tile) => /footer|page bottom/i.test(t.label)
+  const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  const page = [...ev.desktopTiles, ...ev.mobileTiles]
+  if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
+  if (scope === 'footer') return page.filter(isFooter)
+  if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+  if (scope === 'page') return page
+  return [...page, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+}
+
+function images(ev: Evidence, scope: Scope | 'all' = 'all') {
+  const tiles = tilesFor(ev, scope)
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },
@@ -218,15 +246,24 @@ function majorityNiche(answers: (string | undefined)[]): Niche {
 
 export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[] }> {
   const client = new OpenRouter({ apiKey })
-  const shared = { text: evidenceText(ev), imgs: images(ev) }
-  const groups: Rule[][] = []
-  for (let i = 0; i < rules.length; i += GROUP_SIZE) groups.push(rules.slice(i, i + GROUP_SIZE))
-  const out = await Promise.all(groups.map((g) => judgeGroup(client, ev, g, shared)))
+  // one set of requests per part of the page, each with only that part's images; a stable order
+  // (by id) so the same checkpoints are always judged together from one run to the next
+  const byScope = new Map<Scope, Rule[]>()
+  for (const r of [...rules].sort((x, y) => x.id.localeCompare(y.id))) {
+    const sc = scopeOf(r.area)
+    byScope.set(sc, [...(byScope.get(sc) || []), r])
+  }
+  const jobs: { group: Rule[]; shared: { text: string; imgs: ReturnType<typeof images> } }[] = []
+  for (const [sc, list] of Array.from(byScope)) {
+    const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc) }
+    for (let i = 0; i < list.length; i += GROUP_SIZE) jobs.push({ group: list.slice(i, i + GROUP_SIZE), shared })
+  }
+  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared)))
   const verdicts = out.flatMap((o) => o.verdicts)
   // checkpoints the model skipped get one more try, together
   const skipped = rules.filter((r) => verdicts.find((v) => v.id === r.id)?.evidence === MISSING)
   if (skipped.length) {
-    const retry = new Map((await judgeGroup(client, ev, skipped, shared)).verdicts.map((v) => [v.id, v]))
+    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) })).verdicts.map((v) => [v.id, v]))
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
