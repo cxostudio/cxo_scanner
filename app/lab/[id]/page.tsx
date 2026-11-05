@@ -22,10 +22,19 @@ type Scan = {
   images: { label: string; url: string }[]
   labels: Record<string, Label>
   notes?: Record<string, string>
+  /** text inside closed tabs / accordions, as the scanner read it */
+  hiddenText?: string
   /** left out of the queue: answered by code / not for this niche */
   leftOut?: { measured: number; niche: number }
 }
-type Tab = 'desktop' | 'mobile' | 'cart'
+type Tab = 'desktop' | 'mobile' | 'menu' | 'cart' | 'text'
+const TABS: { tab: Tab; word: string }[] = [
+  { tab: 'desktop', word: 'Desktop' },
+  { tab: 'mobile', word: 'Mobile' },
+  { tab: 'menu', word: 'Menu' },
+  { tab: 'cart', word: 'Cart' },
+  { tab: 'text', word: 'Hidden text' },
+]
 
 const CART_PAGE_TYPE = 'recDYiScpsBfRbbha'
 const BUTTONS: { label: Label; word: string; key: string; fg: string; bg: string }[] = [
@@ -35,7 +44,10 @@ const BUTTONS: { label: Label; word: string; key: string; fg: string; bg: string
   { label: 'skip', word: "Can't tell", key: 'S', fg: 'var(--text-muted)', bg: 'var(--surface-muted)' },
 ]
 const WORD: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'Not relevant', skip: "Can't tell", unknown: "Couldn't check" }
-const tabOf = (label: string): Tab => (/cart (view|page)|CART PAGE|cart drawer|header AFTER/i.test(label) ? 'cart' : /^mobile/i.test(label) ? 'mobile' : 'desktop')
+const tabOf = (label: string): Tab =>
+  /MENU opened/.test(label) ? 'menu' : /cart (view|page)|CART PAGE|cart drawer|header AFTER|EMPTY cart/i.test(label) ? 'cart' : /^mobile/i.test(label) ? 'mobile' : 'desktop'
+/** Cart tab: the empty cart first, then the cart with one item, the cart page, the header last. */
+const cartRank = (label: string) => (/EMPTY cart/.test(label) ? 0 : /cart view/i.test(label) ? 1 : /CART PAGE/.test(label) ? 2 : 3)
 
 export default function LabScan({ params }: { params: { id: string } }) {
   const [key, setKey] = useState('')
@@ -94,7 +106,8 @@ export default function LabScan({ params }: { params: { id: string } }) {
   // open the screenshots the checkpoint is about
   useEffect(() => {
     if (!cp) return
-    if (cp.pageTypeIds?.includes(CART_PAGE_TYPE)) setTab('cart')
+    if (cp.pageTypeIds?.includes(CART_PAGE_TYPE) || cp.area === 'Cart drawer') setTab('cart')
+    else if (/menu|navigation/i.test(cp.title) && /mobile/i.test(`${cp.title} ${cp.device}`)) setTab('menu')
     else if (cp.device === 'Mobile only') setTab('mobile')
     else if (cp.device === 'Desktop only') setTab('desktop')
   }, [cp])
@@ -148,7 +161,10 @@ export default function LabScan({ params }: { params: { id: string } }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [compare, setLabel, scan])
 
-  const images = useMemo(() => (scan?.images || []).filter((img) => tabOf(img.label) === tab), [scan, tab])
+  const images = useMemo(() => {
+    const list = (scan?.images || []).filter((img) => tabOf(img.label) === tab)
+    return tab === 'cart' ? [...list].sort((a, b) => cartRank(a.label) - cartRank(b.label)) : list
+  }, [scan, tab])
   const done = scan ? scan.checkpoints.filter((c) => labels[c.id]).length : 0
   const q = key ? `?key=${encodeURIComponent(key)}` : ''
 
@@ -276,8 +292,8 @@ export default function LabScan({ params }: { params: { id: string } }) {
 
           {/* what the scanner saw */}
           <section className="flex min-w-0 flex-col gap-3">
-            <div role="group" aria-label="Screenshots" className="inline-flex w-fit gap-0.5 rounded-[var(--radius-pill)] bg-[var(--surface-muted)] p-[3px]">
-              {(['desktop', 'mobile', 'cart'] as Tab[]).map((t) => (
+            <div role="group" aria-label="Screenshots" className="inline-flex w-fit max-w-full overflow-x-auto gap-0.5 rounded-[var(--radius-pill)] bg-[var(--surface-muted)] p-[3px]">
+              {TABS.map(({ tab: t, word }) => (
                 <button
                   key={t}
                   type="button"
@@ -285,11 +301,18 @@ export default function LabScan({ params }: { params: { id: string } }) {
                   aria-pressed={tab === t}
                   className={`rounded-[var(--radius-pill)] px-4 py-1.5 text-[13px] font-semibold ${tab === t ? 'bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-xs)]' : 'text-[var(--text-muted)]'}`}
                 >
-                  {t === 'desktop' ? 'Desktop' : t === 'mobile' ? 'Mobile' : 'Cart'}
+                  {word}
                 </button>
               ))}
             </div>
-            {images.length === 0 && <p className="text-sm text-[var(--text-muted)]">No {tab} screenshots for this scan.</p>}
+            {tab === 'text' ? (
+              <div className="flex flex-col gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4">
+                <p className="text-xs text-[var(--text-muted)]">Text inside closed tabs and accordions (Details, Dimensions, Care…), as the scanner read it. Not visible in the screenshots.</p>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed">{scan.hiddenText || 'None found on this page.'}</p>
+              </div>
+            ) : (
+              images.length === 0 && <p className="text-sm text-[var(--text-muted)]">No {tab === 'menu' ? 'menu' : tab} screenshots for this scan.</p>
+            )}
             <div className="flex flex-col gap-3">
               {images.map((img) => (
                 <figure key={img.url} className={`overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] ${/^mobile/i.test(img.label) ? 'max-w-[420px]' : ''}`}>

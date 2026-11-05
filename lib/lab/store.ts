@@ -331,3 +331,9 @@ export async function getNotes(id: string): Promise<Record<string, string>> {
 export async function saveNotes(id: string, notes: Record<string, string>) {
   await writeVersion(await bucket(), `notes/${safeId(id)}`, notes)
 }
+
+/** The text inside closed tabs / accordions the scanner read: the labelling page shows it. */
+export async function getHiddenText(id: string): Promise<string> {
+  const ev = await readJson<{ hiddenText?: string }>(`scans/${safeId(id)}/evidence.json`)
+  return ev?.hiddenText || ''
+}
