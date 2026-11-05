@@ -2,6 +2,7 @@
 //   - desktop (1440) and mobile (390) screenshots, cut into viewport tiles + the footer
 //   - visible text, hidden tab/accordion text, header/footer links, measured DOM facts
 //   - the header after one item is added to the cart (Shopify), for the cart-count check
+//   - the cart view after that (drawer or cart page), desktop and mobile, for cart checkpoints
 //   - a page check first: 404s, redirects away from the product, bot walls
 import type { Page } from 'puppeteer-core'
 import fs from 'fs'
@@ -19,6 +20,10 @@ export type Evidence = {
   mobileTiles: Tile[]
   cartHeader?: Tile
   cartTest?: string
+  /** What a shopper sees after opening the cart with one item in it (drawer or cart page). */
+  cartView?: Tile
+  mobileCartView?: Tile
+  isShopify?: boolean
   text: string
   hiddenText: string
   facts: Record<string, unknown>
@@ -65,6 +70,8 @@ export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
       content:
         'body [aria-modal="true"],body dialog[open],body div[class*="klaviyo" i],body div[id*="klaviyo" i],body [class*="popup-overlay" i],body [class*="modal-backdrop" i],#onetrust-consent-sdk,#didomi-host,#usercentrics-root,#CybotCookiebotDialog,[id*="cookie-banner" i],[class*="cookie-banner" i]{display:none!important}',
     })
+    // marked so cartView() can lift it: cart drawers are modal dialogs too
+    .then((h) => h.evaluate((el) => el.setAttribute('id', 'cxo-clean')))
     .catch(() => {})
   await page
     .evaluate((doUnroll: boolean) => {
@@ -76,7 +83,10 @@ export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
         if (s.position !== 'fixed') continue
         const r = el.getBoundingClientRect()
         const isTopBar = r.top <= 5 && r.height < 220
-        if (!isTopBar && r.width * r.height > vw * vh * 0.3) (el as HTMLElement).style.setProperty('display', 'none', 'important')
+        if (!isTopBar && r.width * r.height > vw * vh * 0.3) {
+          ;(el as HTMLElement).style.setProperty('display', 'none', 'important')
+          el.setAttribute('data-cxo-hidden', '')
+        }
       }
       if (!doUnroll) return
       // themes that scroll an inner wrapper instead of the document
@@ -371,6 +381,63 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   return { note: noteWithBadge, tile: b64 ? { label: 'desktop header AFTER one item was added to the cart', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined }
 }
 
+/**
+ * Open the cart from the header (one item is already in it) and capture what opens:
+ * a cart drawer, or the cart page when the icon links there. Undefined when no cart control is found.
+ */
+async function cartView(page: Page, device: 'desktop' | 'mobile', width: number, height: number): Promise<Tile | undefined> {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  // undo cleanPage's popup hiding: it also hides the (closed) cart drawer
+  await page
+    .evaluate(() => {
+      document.querySelectorAll('#cxo-clean').forEach((el) => el.remove())
+      document.querySelectorAll('[data-cxo-hidden]').forEach((el) => {
+        ;(el as HTMLElement).style.removeProperty('display')
+        el.removeAttribute('data-cxo-hidden')
+      })
+    })
+    .catch(() => {})
+  // find the cart control in the header, then click it with a real mouse click (themes ignore synthetic clicks)
+  const point = await page
+    .evaluate(() => {
+      const CART = /\b(cart|bag|basket|panier|winkelwagen|winkelmand|mand|warenkorb|carrito|cesta|carrello|koszyk)\b/i
+      const scored = Array.from(document.querySelectorAll('a[href], button, [role="button"]'))
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          if (r.top > 260 || r.bottom <= 0 || r.width === 0 || r.height === 0 || r.width > 300) return null
+          if (r.left >= window.innerWidth || r.right <= 0) return null // off-screen (a closed drawer's own buttons)
+          const href = el.getAttribute('href') || ''
+          const aria = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`
+          const meta = `${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('data-action') || ''}`
+          const text = ((el as HTMLElement).innerText || '').trim()
+          if (/add to|ajouter|toevoegen|in den|añadir|aggiungi|close|fermer|sluiten|schließen|cerrar|chiudi/i.test(`${aria} ${text}`)) return null
+          let score = 0
+          if (/\/cart\/?($|\?|#)/.test(href)) score += 3
+          if (CART.test(aria)) score += 2
+          if (/cart|bag|basket|minicart/i.test(meta)) score += 1
+          if (text.length < 20 && CART.test(text)) score += 1
+          return score ? { score, x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+        })
+        .filter(Boolean) as { score: number; x: number; y: number }[]
+      scored.sort((a, b) => b.score - a.score || b.x - a.x)
+      return scored[0] || null
+    })
+    .catch(() => null)
+  if (process.env.SCANV2_DEBUG) console.log('[cart view]', device, JSON.stringify(point), await page.evaluate((p) => { if (!p) return null; const e = document.elementFromPoint(p.x, p.y); return e ? `${e.tagName} ${e.getAttribute('aria-label') || ''} ${(e.getAttribute('class') || '').slice(0, 50)}` : null }, point).catch(String))
+  if (!point) return undefined
+  await page.mouse.click(point.x, point.y).catch(() => {})
+  const clicked = true
+  if (!clicked) return undefined
+  // a drawer animates in; a cart page loads
+  await Promise.race([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 6000 }).catch(() => {}), new Promise((r) => setTimeout(r, 2500))])
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 4000 }).catch(() => {})
+  await new Promise((r) => setTimeout(r, 800))
+  const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
+  if (!b64) return undefined
+  const where = /\/cart\/?($|\?)/.test(new URL(page.url()).pathname) ? 'the cart page' : 'the cart drawer'
+  return { label: `${device} cart view after one item was added (${where})`, dataUrl: `data:image/jpeg;base64,${b64}` }
+}
+
 /** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */
 function sweepStaleProfiles() {
   try {
@@ -425,11 +492,15 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     const text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
     const hiddenText = await readHiddenText(desktop)
     const desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles)
+    const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     const cart = await cartTest(desktop)
+    const itemInCart = cart.note.startsWith('one item')
+    const desktopCartView = itemInCart ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
     await desktop.close().catch(() => {})
 
     let mobileTiles: Tile[] = []
     let mobileFacts: Record<string, unknown> = {}
+    let mobileCartView: Tile | undefined
     try {
       const mobile = await browser.newPage()
       await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
@@ -443,6 +514,8 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
         .evaluate(() => ({ viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null, horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5 }))
         .catch(() => ({}))
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
+      // same browser, same cart cookie: the item added on desktop is in the cart here too
+      if (itemInCart) mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
       await mobile.close().catch(() => {})
     } catch (e) {
       console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
@@ -457,6 +530,9 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       mobileTiles,
       cartHeader: cart.tile,
       cartTest: cart.note,
+      cartView: desktopCartView,
+      mobileCartView,
+      isShopify,
       text: text.slice(0, 14000),
       hiddenText,
       facts: facts as Record<string, unknown>,

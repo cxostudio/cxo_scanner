@@ -45,7 +45,8 @@ import {
 } from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
-import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { getConversionCheckpointRules, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { filterCheckpointsByUrl, isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import {
   buildCheckpointPresentationMap,
   type CheckpointPresentation,
@@ -192,7 +193,7 @@ const ScanRequestSchema = z.object({
     }, 'URL must be a valid HTTP or HTTPS URL'),
   rules: z.array(RuleSchema)
     .min(1, 'At least one rule is required')
-    .max(100, 'Maximum 100 rules allowed per scan'),
+    .max(300, 'Maximum 300 rules allowed per scan'),
   captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
   iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
   email: z.string().optional(), // for the per-email daily scan limit
@@ -1073,8 +1074,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const activeRules = incomingRules
-      .filter(isActiveConversionRule)
+    const useV2 = (engine || process.env.SCAN_ENGINE || 'v2') === 'v2'
+    // Engine v2 takes its checkpoints from Airtable (below); the keyword filter is engine v1 only.
+    const activeRules = useV2 ? incomingRules : incomingRules.filter(isActiveConversionRule)
     const rules = activeRules
 
     if (rules.length === 0) {
@@ -1142,10 +1144,24 @@ export async function POST(request: NextRequest) {
     })
 
     let checkpointByRuleId = new Map<string, CheckpointPresentation>()
+    // Engine v2: Airtable decides which checkpoints run (page type, Live, Draft in test mode),
+    // with their definitions. The list the browser sent is only a fallback.
+    let v2Rules: ScanRule[] = rules
     try {
       const cpRes = await getConversionCheckpointRules()
       if (cpRes.ok) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
+        const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {
+          includeDrafts: isTestEmail(email),
+        })
+        if (selected.rules.length) v2Rules = selected.rules
+        // Chunked scans (NEXT_PUBLIC_SCAN_BATCH_RULES): each request judges only its own slice.
+        if (parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10) > 0) {
+          const sent = new Set(rules.map((r) => r.id))
+          const slice = v2Rules.filter((r) => sent.has(r.id))
+          if (slice.length) v2Rules = slice
+        }
+        console.log(`[scan] ${selected.rules.length} checkpoints for ${selected.pageType} page${isTestEmail(email) ? ' (test mode: Live + Draft)' : ''}`)
       }
     } catch (e) {
       console.warn('[scan] conversion checkpoint metadata not loaded:', e)
@@ -1159,9 +1175,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
-    if ((engine || process.env.SCAN_ENGINE || 'v2') === 'v2') {
+    if (useV2) {
       try {
-        const v2 = await runScanV2(validUrl, rules, apiKey)
+        const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
         return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag })
       } catch (e) {

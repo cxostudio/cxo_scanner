@@ -12,7 +12,7 @@ import {
   type InstantPreviewHint,
 } from "../components/DualViewportLoader";
 import { api, asset, START_URL } from "@/lib/base";
-import { detectPageTypeFromUrl } from "@/lib/conversionCheckpoints/pageType";
+import { detectPageTypeFromUrl, isTestEmail } from "@/lib/conversionCheckpoints/pageType";
 import { QuadrantScanSequence } from "../components/QuadrantScanSequence";
 
 interface Rule {
@@ -1104,7 +1104,11 @@ export default function Home() {
       //    (product / category / other) share ONE 3-day browser cache entry, not one per URL.
       const pageTypeKey = detectPageTypeFromUrl(validUrl);
       const cpRes = await fetch(
-        api(`/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}`),
+        api(
+          `/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}` +
+            // test mode also lists Draft checkpoints; everyone else shares one cached list
+            (isTestEmail(emailTrimmed) ? `&email=${encodeURIComponent(emailTrimmed)}` : ""),
+        ),
       );
       const cpRaw = await cpRes.text();
       if (!cpRes.ok) {
