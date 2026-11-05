@@ -43,7 +43,7 @@ export default function RulesAdminPage() {
 
   async function loadStatus() {
     try {
-      const res = await fetch('/api/checkpoints/refresh', { method: 'GET', cache: 'no-store' })
+      const res = await fetch('/scan/api/checkpoints/refresh', { method: 'GET', cache: 'no-store' })
       setInfo((await res.json()) as CacheInfo)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load status')
@@ -59,7 +59,7 @@ export default function RulesAdminPage() {
     setMsg(null)
     setErr(null)
     try {
-      const res = await fetch('/api/checkpoints/refresh', { method: 'POST', cache: 'no-store' })
+      const res = await fetch('/scan/api/checkpoints/refresh', { method: 'POST', cache: 'no-store' })
       const data = (await res.json()) as RefreshResult
       if (!res.ok || !data.ok) {
         setErr(

@@ -5,6 +5,7 @@ import {
   filterCheckpointsByPageType,
 } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import { isUrlPageType } from '@/lib/conversionCheckpoints/pageType'
+import { isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,8 +41,10 @@ export async function GET(request: NextRequest) {
     // domain's homepage/product/category/other share ONE browser cache entry (not one per URL).
     const rawPageType = request.nextUrl.searchParams.get('pageType')?.trim()
     const rawUrl = request.nextUrl.searchParams.get('url')?.trim()
+    // Draft checkpoints only for test emails (the scan route re-checks this server-side)
+    const opts = { includeDrafts: isTestEmail(request.nextUrl.searchParams.get('email')) }
     if (rawPageType && isUrlPageType(rawPageType)) {
-      const filtered = filterCheckpointsByPageType(records, rules, rawPageType)
+      const filtered = filterCheckpointsByPageType(records, rules, rawPageType, opts)
       records = filtered.records
       rules = filtered.rules
       filterMeta = {
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest) {
       }
       try {
         void new URL(normalized)
-        const filtered = filterCheckpointsByUrl(records, rules, normalized)
+        const filtered = filterCheckpointsByUrl(records, rules, normalized, opts)
         records = filtered.records
         rules = filtered.rules
         filterMeta = {

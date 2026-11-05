@@ -5,10 +5,33 @@
 
 import checkpointsSnapshot from './checkpoints.snapshot.json'
 
+export type ScannerStatus = 'Live' | 'Draft' | 'Off'
+
+/**
+ * One checkpoint as the scanner uses it. Airtable is the single source of truth:
+ * the question, CXO Studio's pass / fail / not-relevant definitions, device, niches,
+ * check method and status all come from the "Conversion Checkpoints" table.
+ */
 export type ScanRule = {
   id: string
   title: string
   description: string
+  /** Scanner status. Missing on the legacy snapshot, which only held live checkpoints. */
+  status?: ScannerStatus
+  pageTypeIds?: string[]
+  /** Part of the page the checkpoint is about (Airtable "Page area"). */
+  area?: string
+  device?: 'Both' | 'Desktop only' | 'Mobile only'
+  method?: string
+  pass?: string
+  fail?: string
+  na?: string
+  nicheNotes?: string
+  /** Niches where the checkpoint applies. Empty or 'All' = every store. */
+  niches?: string[]
+  /** Hard rule: 'not relevant' for these niches. */
+  notRelevantNiches?: string[]
+  shopifyControl?: string
 }
 
 type AirtableSingleRecord = {
@@ -62,80 +85,48 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
   if (!titleRaw && !descRaw) return null
   const title = truncate(titleRaw || 'Conversion checkpoint', 200)
   const description = truncate(descRaw || '(No required actions text)', 5000)
+  const text = (key: string) => {
+    const v = fields[key]
+    return typeof v === 'string' && v.trim() ? v.trim() : undefined
+  }
+  const list = (key: string) => {
+    const v = fields[key]
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
+  }
+  const status = text('Scanner status')
+  const device = text('Device')
   return {
     id: record.id,
     title,
     description,
+    status: status === 'Live' || status === 'Draft' || status === 'Off' ? status : undefined,
+    pageTypeIds: list('Page Type'),
+    area: text('Page area'),
+    device: device === 'Desktop only' || device === 'Mobile only' || device === 'Both' ? device : undefined,
+    method: text('Check method'),
+    pass: text('Pass when'),
+    fail: text('Fail when'),
+    na: text('Not relevant when'),
+    nicheNotes: text('Niche notes'),
+    niches: list('Niches'),
+    notRelevantNiches: list('Not relevant for niches'),
+    shopifyControl: text('Shopify control'),
   }
 }
-
-function isStickyAddToCartRule(rule: ScanRule): boolean {
-  const haystack = `${rule.title} ${rule.description}`.toLowerCase()
-  return (
-    rule.id === 'cta-sticky-add-to-cart' ||
-    (haystack.includes('sticky') && haystack.includes('cart'))
-  )
-}
-
-/**
- * Airtable record IDs (30 checkpoints). Full rows supply rule text + Justifications/Examples in scan results.
- * Edit this list when you add or replace rows in Airtable.
- */
-export const TARGET_CHECKPOINT_RECORD_IDS = [
-  'recSs12TogM60Mf6w',
-  'recEcmUYxWGuOz3vK',
-  'recXqQmYLbyuIil2a',
-  'rec1iBTNslYj4y05d',
-  'rec3kmxGigBELSAlu',
-  'recZ158fy5ndWroli',
-  'rectyUC9T4WUfFYvc',
-  'rectt6VIDYK1SbaBH',
-  'rec59tWeW27UFwDuX',
-  'recoRfbr8slQLFqTB',
-  'recBIykwniSTLYVjI',
-  'recDkT1jqcBJworBQ',
-  'recihw16WgNwYG09z',
-  'rec74RD9IgZgfDUwl',
-  'recVqogizZUTrTN4p',
-  'recXmTTGKCp0rqOH8',
-  'recUSgWqCEq0anlm2',  
-  'recjK9IQ0T4rpu4iu',
-  'rechuFEvuIW0ULmFW',
-  'recKjEZrP38rjqCoY',
-  'recdkYxD8QVU9j14p',
-  'rec7DA1trGfVmAUET',
-  'recTUunKnIj3laNCO',
-  'recjEVPpCRkdi17EE',
-  'rec5qkI2EcLQ5jQ9D',
-  'recbtnaZ7nEchnx8O',
-  'rece6cI4zL9uA7dyO',
-  'rec33A6aJXon8YXfR',
-  'recLehZKzun1Rxv0Z',
-  'recYUxusypKnfViyM',
-  'recnbgJzDarhgi4RH',
-  'recNxnjMNyufvGsDX',
-  'rec9Bd8mIKecasTPF',
-  'rechQdZcW7EkLpi5J',
-  'recH6IBXpHPI1KIxY',
-  'receK3gEjM9yV2vi2',
-  'recxEGfZMHhvNPCUa',
-  'recKQWJU3qEuKGFA3',
-  'recxoLHExiwXLdy75',
-  'rec7WWY98CVhOtAXo',
-  'rec7hmBdP9rqP4gVw',
-  'recP2gybr9r0x8LYz',
-  'recf9TVdWozjE1laI',
-  'recYvb2wC1safMjpN',
-  'rechWSGCANIZS39ja'
-
-] as const
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+/**
+ * Every checkpoint the scanner may run: not archived, Scanner status Live or Draft.
+ * Which of them a given scan uses (page type, Live vs Draft, check method) is decided in
+ * filterByUrlPageType.ts. Off and archived checkpoints never leave Airtable.
+ */
+const SCANNER_FORMULA = "AND(NOT({Archived}), OR({Scanner status}='Live', {Scanner status}='Draft'))"
+
 /** Base list URL for the table (no `/rec…` retrieve suffix, no query string). */
-function getListRecordsBaseUrl(apiUrl: string): string {
+export function getListRecordsBaseUrl(apiUrl: string): string {
   const u = new URL(apiUrl)
   let segments = u.pathname.split('/').filter(Boolean)
   if (segments.length >= 4 && /^rec[a-zA-Z0-9]+$/.test(segments[segments.length - 1]!)) {
@@ -143,19 +134,6 @@ function getListRecordsBaseUrl(apiUrl: string): string {
   }
   const path = `/${segments.join('/')}`
   return `${u.origin}${path}`
-}
-
-function chunkIds<T>(arr: readonly T[], size: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size) as T[])
-  return out
-}
-
-/** Airtable formula: match any of the given record IDs (sanitized). */
-function buildOrRecordIdFormula(ids: readonly string[]): string {
-  const safe = ids.map((id) => id.trim()).filter((id) => /^rec[a-zA-Z0-9]+$/.test(id))
-  if (safe.length === 0) return ''
-  return `OR(${safe.map((id) => `RECORD_ID()='${id}'`).join(',')})`
 }
 
 function bodyLooksRateLimited(data: unknown): boolean {
@@ -234,66 +212,6 @@ async function fetchAllRecordsForFormula(
   return { ok: true, records: all }
 }
 
-/**
- * Loads many checkpoint rows with **few list API calls** (batched `filterByFormula`).
- * Avoids one HTTP request per ID — that pattern trips Airtable `RATE_LIMIT_REACHED` quickly.
- */
-async function fetchRecordsByIds(
-  apiUrl: string,
-  apiKey: string,
-  recordIds: readonly string[],
-): Promise<
-  | {
-      ok: true
-      records: AirtableSingleRecord[]
-      requestedIds: readonly string[]
-      foundCount: number
-      notFoundIds: string[]
-    }
-  | { ok: false; status: number; body: unknown }
-> {
-  const unique = [...new Set(recordIds.map((id) => id.trim()).filter(Boolean))]
-  if (unique.length === 0) {
-    return { ok: true, records: [], requestedIds: recordIds, foundCount: 0, notFoundIds: [] }
-  }
-
-  const listBaseUrl = getListRecordsBaseUrl(apiUrl)
-  const idChunks = chunkIds(unique, 20)
-  const mergedById = new Map<string, AirtableSingleRecord>()
-
-  for (let i = 0; i < idChunks.length; i += 1) {
-    const formula = buildOrRecordIdFormula(idChunks[i]!)
-    if (!formula) continue
-
-    const chunkRes = await fetchAllRecordsForFormula(listBaseUrl, apiKey, formula)
-    if (!chunkRes.ok) return chunkRes
-
-    for (const rec of chunkRes.records) {
-      mergedById.set(rec.id, rec)
-    }
-
-    if (i < idChunks.length - 1) {
-      await sleep(250)
-    }
-  }
-
-  const ordered: AirtableSingleRecord[] = []
-  for (const id of unique) {
-    const rec = mergedById.get(id)
-    if (rec) ordered.push(rec)
-  }
-
-  const notFoundIds = unique.filter((id) => !mergedById.has(id))
-
-  return {
-    ok: true,
-    records: ordered,
-    requestedIds: unique,
-    foundCount: ordered.length,
-    notFoundIds,
-  }
-}
-
 export type GetCheckpointRulesResult =
   | {
       ok: true
@@ -349,7 +267,7 @@ function snapshotResult(): CheckpointRulesOk | null {
   if (!snapshot || !Array.isArray(snapshot.rules) || snapshot.rules.length === 0) return null
   return {
     ok: true,
-    requestedIds: snapshot.requestedIds ?? [...TARGET_CHECKPOINT_RECORD_IDS],
+    requestedIds: snapshot.requestedIds ?? [],
     foundCount: snapshot.foundCount ?? snapshot.records.length,
     notFoundIds: snapshot.notFoundIds ?? [],
     records: snapshot.records ?? [],
@@ -457,7 +375,8 @@ export async function getConversionCheckpointRules(): Promise<GetCheckpointRules
 }
 
 /**
- * Loads Airtable rows and maps them to scan rules (title = Conversion Checkpoint, description = Required Actions).
+ * Loads every Live and Draft checkpoint and maps it to a scan rule (title = Conversion Checkpoint,
+ * description = Required Actions, plus the definition fields).
  * Live network fetch — use `getConversionCheckpointRules()` for runtime reads; this is for the refresh route.
  */
 export async function fetchCheckpointRulesFromAirtable(): Promise<GetCheckpointRulesResult> {
@@ -470,7 +389,7 @@ export async function fetchCheckpointRulesFromAirtable(): Promise<GetCheckpointR
       return { ok: false, status: 500, body: { error: 'Missing API_URL or API_KEY in environment.' } }
     }
 
-    const result = await fetchRecordsByIds(apiUrl, apiKey, TARGET_CHECKPOINT_RECORD_IDS)
+    const result = await fetchAllRecordsForFormula(getListRecordsBaseUrl(apiUrl), apiKey, SCANNER_FORMULA)
     if (!result.ok) {
       return { ok: false, status: result.status, body: result.body }
     }
@@ -478,14 +397,14 @@ export async function fetchCheckpointRulesFromAirtable(): Promise<GetCheckpointR
     const rules: ScanRule[] = []
     for (const rec of result.records) {
       const rule = mapAirtableRecordToRule(rec)
-      if (rule && !isStickyAddToCartRule(rule)) rules.push(rule)
+      if (rule) rules.push(rule)
     }
 
     return {
       ok: true,
-      requestedIds: result.requestedIds,
-      foundCount: result.foundCount,
-      notFoundIds: result.notFoundIds,
+      requestedIds: [],
+      foundCount: result.records.length,
+      notFoundIds: [],
       records: result.records,
       rules,
     }

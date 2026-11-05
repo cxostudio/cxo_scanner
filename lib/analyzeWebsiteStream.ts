@@ -1,5 +1,6 @@
 import type { Page } from 'puppeteer-core'
 import { NextRequest } from 'next/server'
+import { cleanPage } from '@/lib/scanV2/capture'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 
 export interface AnalyzeWebsiteStreamBody {
@@ -226,6 +227,8 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
         )
 
         await gotoForPreview(page, url)
+        // same popup / cookie cleanup as the scan engine, so visitors watch their page, not a newsletter popup
+        await cleanPage(page, { unroll: false }).catch(() => {})
 
         // Ensure desktop preview is above-the-fold (same as fresh mobile tab). Some sites
         // restore scroll or paint mid-page before first capture without this.
@@ -344,6 +347,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
               quadrants.push(lastGoodQuadrant || desktopDataUrl)
               continue
             }
+            await cleanPage(page, { unroll: false }).catch(() => {})
             const b64 = (await retryOnContextReset(page, `quadrant ${i + 1} screenshot`, async () => {
               return (await page.screenshot({
                 type: 'png',
@@ -387,6 +391,7 @@ export async function analyzeWebsiteStream(request: NextRequest): Promise<Respon
               '[analyzeWebsiteStream] Cloudflare challenge in mobile viewport; keeping desktop frame for mobile preview',
             )
           } else {
+            await cleanPage(page, { unroll: false }).catch(() => {})
             const mobB64 = (await retryOnContextReset(page, 'mobile screenshot', async () => {
               return (await page.screenshot({
                 type: 'jpeg',

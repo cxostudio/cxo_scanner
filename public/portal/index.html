@@ -1,0 +1,1151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CXO Studio — client cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FAFAFA; --card:#FFFFFF; --surface:#F4F4F5; --ink:#09090B; --muted:#71717A; --subtle:#A1A1AA;
+    --line:#E4E4E7; --line-strong:#D4D4D8; --track:#EDEDF0;
+    --cta:#09090B; --cta-text:#FAFAFA;
+    --good:#22A06B; --warn:#FB923C; --over:#E0453F; --blue:#0099FF; --state:var(--good);
+    --shadow:0 .6px .6px -1.25px rgba(0,0,0,.11), 0 2.29px 2.29px -2.5px rgba(0,0,0,.1), 0 10px 10px -3.75px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  html{overflow-x:clip}
+  body{background:var(--bg); color:var(--ink); font-family:'Inter Tight',Inter,system-ui,sans-serif; line-height:1.5; -webkit-font-smoothing:antialiased;
+    display:flex; justify-content:center; align-items:flex-start; min-height:100vh; overflow-x:clip; padding:28px 22px}
+  .shell{width:100%; max-width:1280px; position:relative; z-index:1}
+  .glow{position:fixed; inset:0 0 auto; height:78vh; z-index:0; pointer-events:none;
+    background:linear-gradient(282deg,#fff 11%,#f3f0e8b8 25%,#40c6ff9e 34%,#79dfffd9 47%,#4bfe85f5 57.67%,#fff 90%);
+    opacity:.24; filter:blur(48px)}
+  .head{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; padding:0 2px; min-height:34px}
+  .head img{display:block; width:auto}
+  .logo-cxo{height:24px} .logo-sl{height:34px}
+  .wordmark{font-family:'Plus Jakarta Sans',sans-serif; font-weight:600; font-size:19px}
+  .hide{display:none}
+  /* These four set `display` further down the sheet at the same specificity, which would
+     otherwise beat the .hide utility. Keep this list in sync when adding display rules. */
+  .scorecard.hide,.perfcard.hide,.grid.hide,.mnav.hide{display:none}
+  .scorecard{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:16px}
+  .score{background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:15px 16px; display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0}
+  .score .n{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:31px; line-height:1; letter-spacing:-.04em; font-variant-numeric:tabular-nums}
+  .score .l{font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:#52525B; font-weight:600}
+  .score.t .n{color:#FF6969} .score.p .n{color:#FB923C} .score.d .n{color:#48D87D} .score.b .n{color:#A1A1AA}
+  .perfcard{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px;
+    background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:var(--shadow);
+    padding:15px 20px; text-decoration:none; color:var(--ink); transition:border-color .15s}
+  .perfcard:hover{border-color:var(--line-strong)}
+  .perftitle{font-size:12.5px; letter-spacing:.05em; text-transform:uppercase; color:#52525B; font-weight:600; margin-bottom:3px}
+  .perfdesc{font-size:15px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .perfbtn{font-size:14px; font-weight:600; color:var(--cta-text); background:var(--cta); border-radius:10px; padding:9px 16px; white-space:nowrap; flex-shrink:0}
+  .grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:auto auto 1fr; gap:16px; align-items:start; grid-template-areas:"tasks hours" "tasks request" "tasks ."}
+  #tasksPanel{grid-area:tasks} #hoursPanel{grid-area:hours} .reqbox{grid-area:request}
+  @media (max-width:860px){
+    .grid{grid-template-columns:minmax(0,1fr); grid-template-rows:auto; grid-template-areas:"hours" "tasks" "request"}
+    .scorecard{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media (max-width:560px){
+    body{padding:16px 14px}
+    .panel{padding:18px 16px}
+    .scorecard{gap:10px}
+    .score{flex-direction:column; align-items:flex-start; gap:3px}
+    .head .logo-cxo{height:20px} .head .logo-sl{height:28px}
+    .foot{flex-wrap:wrap; gap:8px}
+    .big{font-size:46px} .payg-hero .big{font-size:48px}
+    .pill-row{gap:8px} .pill{padding:10px 9px}
+    #basisPill{display:none}
+    .perfcard{flex-direction:column; align-items:flex-start; gap:12px}
+    .perfbtn{width:100%; text-align:center}
+  }
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:var(--shadow); padding:20px 22px}
+  .paneltitle{font-size:12.5px; letter-spacing:.05em; text-transform:uppercase; color:#52525B; font-weight:600; margin:0 0 14px}
+  .group{margin-bottom:16px}
+  .grouphd{display:flex; align-items:center; gap:8px; margin:0 0 9px}
+  .grouphd .t{font-size:12.5px; letter-spacing:.04em; text-transform:uppercase; color:#52525B; font-weight:600}
+  .grouphd .c{font-size:12px; color:var(--muted); background:var(--surface); border-radius:20px; padding:1px 9px; font-variant-numeric:tabular-nums}
+  .titem{margin-bottom:7px}
+  .tcard{display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; font-size:15px; line-height:1.4}
+  .tcard.clk{cursor:pointer}
+  .tcard.clk:hover{border-color:var(--muted)}
+  .tcard .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+  .tcard .name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0}
+  .tcard .chev{color:var(--muted); font-size:16px; transition:transform .15s ease; flex-shrink:0}
+  .titem.open .tcard .chev{transform:rotate(90deg)}
+  .titem.open .tcard{border-color:var(--muted); border-bottom-left-radius:0; border-bottom-right-radius:0}
+  .tcard.done{color:var(--muted); background:var(--surface); border-color:transparent}
+  .tdetail{border:1px solid var(--line-strong); border-top:0; border-radius:0 0 10px 10px; padding:13px 14px; font-size:14px; background:var(--surface)}
+  .tdetail .dmeta{font-size:12px; color:var(--muted); margin-bottom:6px}
+  .tdetail .ddesc{color:var(--ink); white-space:pre-wrap; line-height:1.6}
+  .tdetail .dsubh{font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:10px 0 6px}
+  .tdetail .sub{display:flex; align-items:center; gap:8px; padding:3px 0}
+  .tdetail .sub .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+  .tdetail .sub .name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  .tdetail .sub .name.done{color:var(--muted); text-decoration:line-through}
+  .more{font-size:12px; color:var(--muted); padding:2px}
+  .empty{font-size:13px; color:var(--muted); padding:2px 0 6px}
+  /* hours */
+  .gauge{position:relative; width:100%; max-width:440px; margin:0 auto}
+  svg{display:block; width:100%; height:auto}
+  .arc-track{stroke:var(--track)}
+  .arc-value{stroke:var(--state); transition:stroke-dashoffset .9s cubic-bezier(.22,.61,.36,1), stroke .4s ease}
+  .readout{position:absolute; left:0; right:0; top:52%; text-align:center}
+  .big{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:52px; line-height:1; letter-spacing:-.04em; font-variant-numeric:tabular-nums}
+  .big .unit{font-size:21px; color:var(--muted); margin-left:2px}
+  .sub2{font-size:13.5px; color:#52525B; margin-top:6px}
+  .payg-hero{text-align:center; padding:8px 0 2px} .payg-hero .big{font-size:54px}
+  .compbar{display:flex; height:14px; border-radius:7px; overflow:hidden; margin:16px 0 2px; background:var(--track)}
+  .compbar .seg{height:100%}
+  .compbar .seg+.seg{box-shadow:-2px 0 0 var(--card)}
+  /* the last slice absorbs percentage rounding so the bar reads as exactly full */
+  .compbar .seg:last-child{flex:1 1 auto}
+  .pill-row{display:flex; gap:10px; margin:16px 0 4px}
+  .pill{flex:1; min-width:0; border:1px solid var(--line); border-radius:12px; padding:11px}
+  .pill .k{font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:#52525B; font-weight:600; margin-bottom:5px}
+  .pill .v{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:19px; line-height:1.1; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .pill .v.state{color:var(--state)}
+  .pill .s{font-size:12.5px; color:#52525B; margin-top:3px}
+  .pill .k,.pill .v,.pill .s{overflow-wrap:break-word}
+  /* month selector */
+  .hourshd{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px}
+  .hourshd .paneltitle{margin:0}
+  .mnav{display:flex; align-items:center; gap:2px; border:1px solid var(--line); border-radius:10px; padding:2px; flex-shrink:0; transition:opacity .15s}
+  .mnav.busy{opacity:.45}
+  .mnav button{font:inherit; font-size:15px; line-height:1; color:var(--muted); background:transparent; border:0; border-radius:8px; padding:6px 10px; cursor:pointer}
+  .mnav button:hover:not(:disabled){background:var(--surface); color:var(--ink)}
+  .mnav button:disabled{opacity:.28; cursor:default}
+  .mnav button:focus-visible{outline:2px solid var(--ink); outline-offset:1px}
+  .mnav .lbl{font-size:13px; font-weight:600; min-width:104px; text-align:center; font-variant-numeric:tabular-nums}
+  .pastnote{font-size:12.5px; line-height:1.5; color:var(--muted); margin-top:14px; padding-top:12px; border-top:1px solid var(--line)}
+  @media (max-width:560px){ .mnav .lbl{min-width:88px; font-size:12.5px} }
+  .byhours{margin-top:16px; border-top:1px solid var(--line); padding-top:14px}
+  .trow{display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:15px; padding:6px 0}
+  .trow .left{display:flex; align-items:center; gap:8px; min-width:0}
+  .trow .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+  .trow .name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  .trow .hrs{color:var(--muted); font-variant-numeric:tabular-nums; flex-shrink:0}
+  /* request form (right column) */
+  .reqbox input,.reqbox textarea{width:100%; font:inherit; font-size:14px; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:9px; resize:vertical}
+  .reqbox input:focus,.reqbox textarea:focus{outline:none; border-color:var(--muted)}
+  .reqbox textarea{min-height:64px}
+  .reqbtn{width:100%; font:inherit; font-size:14px; font-weight:600; letter-spacing:.02em; color:var(--cta-text); background:var(--cta); border:0; border-radius:10px; padding:12px 16px; cursor:pointer; transition:transform .2s, background .2s}
+  .reqbtn:hover{background:#27272A; transform:scale(1.01)}
+  .reqbtn:disabled{opacity:.5; cursor:default; transform:none}
+  .reqmsg{font-size:13px; margin-top:9px}
+  .reqmsg.ok{color:var(--good)} .reqmsg.err{color:var(--over)}
+  .foot{display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding:0 2px; font-size:12px; color:var(--muted)}
+  .foot button{font:inherit; font-size:12px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer}
+  .foot button:hover{border-color:var(--muted); color:var(--ink)}
+  .error{color:var(--over); font-size:14px; padding:8px 2px}
+  .picker{max-width:420px; margin:60px auto}
+  .picker a{display:block; padding:12px 14px; border:1px solid var(--line); background:var(--card); border-radius:12px; margin-bottom:10px; text-decoration:none; color:var(--ink); font-weight:500}
+  .picker a:hover{border-color:var(--muted)}
+  .gate{position:fixed; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; padding:24px; transition:opacity .45s ease}
+  .gate.hide{display:none}
+  .gate.done{opacity:0; pointer-events:none}
+  .gatecard{width:100%; max-width:400px; background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:var(--shadow); padding:28px 26px; text-align:center; transition:transform .45s ease}
+  .gate.done .gatecard{transform:scale(.94)}
+  #gateBtn.ok{background:var(--good)}
+  .gatesuccess{padding:6px 0}
+  .scheck{width:76px; height:76px; display:block; margin:0 auto}
+  .scircle{stroke:var(--good); stroke-width:3; fill:none; stroke-dasharray:226; stroke-dashoffset:226}
+  .spath{stroke:var(--good); stroke-width:3.5; fill:none; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:50; stroke-dashoffset:50}
+  .gatesuccess.play .scircle{animation:scircle .55s ease forwards}
+  .gatesuccess.play .spath{animation:spath .3s .5s ease forwards}
+  @keyframes scircle{to{stroke-dashoffset:0}}
+  @keyframes spath{to{stroke-dashoffset:0}}
+  .successlabel{margin-top:16px; font-size:15px; font-weight:600; color:var(--ink)}
+  .gatehint{font-size:14px; line-height:1.6; color:#52525B; margin:0 0 16px}
+  #gatePw{width:100%; font:inherit; font-size:15px; text-align:center; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:10px}
+  #gatePw:focus{outline:none; border-color:var(--muted)}
+  #gateBtn{width:100%; font:inherit; font-size:14px; font-weight:600; color:var(--cta-text); background:var(--cta); border:0; border-radius:10px; padding:12px; cursor:pointer}
+  #gateBtn:hover{background:#27272A}
+  .gatemsg{font-size:13px; margin-top:10px; min-height:16px}
+  .gatemsg.err{color:var(--over)}
+  /* ── cockpit: tabs ── */
+  .tabs{display:flex; gap:2px; border:1px solid var(--line); background:var(--card); border-radius:12px; padding:3px; margin-bottom:16px; width:max-content; max-width:100%; overflow-x:auto; box-shadow:var(--shadow)}
+  .tabs.hide{display:none}
+  .tabs button{font:inherit; font-size:14px; font-weight:600; color:var(--muted); background:transparent; border:0; border-radius:9px; padding:9px 16px; min-height:40px; cursor:pointer; white-space:nowrap}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button[aria-selected="true"]{background:var(--cta); color:var(--cta-text)}
+  .tabs button:focus-visible{outline:2px solid var(--ink); outline-offset:1px}
+  .view.hide{display:none}
+  /* ── cockpit: overview ── */
+  .ovhead{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 2px 14px}
+  .ovhead h1{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:26px; letter-spacing:-.02em; line-height:1.2; margin:0}
+  .ovhead .meta{font-size:13px; color:var(--muted)}
+  .kpis{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:16px}
+  .kpi{background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:16px; min-width:0; display:flex; flex-direction:column; gap:6px}
+  .kpi .l{font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:#52525B; font-weight:600}
+  .kpi .n{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:30px; line-height:1.05; letter-spacing:-.03em; font-variant-numeric:tabular-nums}
+  .kpi .s{font-size:12.5px; color:var(--muted)}
+  .deltas{display:flex; flex-wrap:wrap; gap:6px; margin-top:2px}
+  .delta{font-size:12.5px; font-weight:600; border-radius:20px; padding:2px 9px; background:var(--surface); color:#52525B; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .delta.up{background:#E7F6EF; color:#13704A} .delta.down{background:#FDECEB; color:#A8302B}
+  .note{display:block; background:var(--card); border:1px dashed var(--line-strong); border-radius:14px; padding:14px 16px; margin-bottom:16px; font-size:14px; line-height:1.55; color:#52525B}
+  .note b{color:var(--ink)}
+  .note.hide,.kpis.hide,.ovhead.hide,.health.hide,.roi.hide{display:none}
+  .ovtop{display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:16px; margin-bottom:28px; align-items:stretch}
+  .roi{background:#09090B; color:#FAFAFA; border-color:#09090B; display:flex; flex-direction:column; gap:14px}
+  .roi .paneltitle{color:#A1A1AA}
+  .roi .big{color:#FAFAFA; font-size:46px}
+  .roi .big .unit{color:#A1A1AA; font-size:18px}
+  .roi .sub{font-size:14px; color:#D4D4D8; line-height:1.55}
+  .roi .row{display:flex; flex-wrap:wrap; gap:10px}
+  .roi .stat{flex:1 1 140px; border:1px solid #27272A; border-radius:12px; padding:11px 12px}
+  .roi .stat .k{font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:#A1A1AA; font-weight:600}
+  .roi .stat .v{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:21px; letter-spacing:-.02em; margin-top:3px; font-variant-numeric:tabular-nums}
+  .roi .stat .v.good{color:#5EE29A}
+  .roi .wl{display:flex; flex-direction:column; gap:6px}
+  .roi .w{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; font-size:14px; padding:7px 0; border-top:1px solid #27272A}
+  .roi .w .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .roi .w .u{color:#5EE29A; font-weight:600; font-variant-numeric:tabular-nums}
+  .roi .w.off{color:#71717A} .roi .w.off .u{color:#71717A}
+  .roi .how{font-size:12.5px; color:#A1A1AA; line-height:1.5}
+  .roi .how summary{cursor:pointer; color:#D4D4D8; font-weight:600; min-height:32px; display:flex; align-items:center}
+  .roi .empty2{font-size:15px; color:#D4D4D8; line-height:1.6}
+  .minis2{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px}
+  .minis2 .pill .v{font-size:24px}
+  .health{margin-bottom:28px}
+  .health h2{font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; font-size:20px; letter-spacing:-.02em; margin:0}
+  .kpis.k5{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .funnelp{margin-top:16px}
+  .frow{display:grid; grid-template-columns:150px minmax(0,1fr) 92px 96px; gap:12px; align-items:center; font-size:14px; padding:6px 0}
+  .frow .bars{display:flex; flex-direction:column; gap:4px}
+  .frow .b{height:9px; background:var(--track); border-radius:5px; overflow:hidden}
+  .frow .b span{display:block; height:100%; border-radius:5px}
+  .frow .v{font-weight:600; font-variant-numeric:tabular-nums}
+  .fhead{display:grid; grid-template-columns:150px minmax(0,1fr) 92px 96px; gap:12px; font-size:12px; color:var(--muted); margin-bottom:4px}
+  .gtab{width:100%; border-collapse:collapse; font-size:14px; min-width:520px}
+  .gtab th,.gtab td{text-align:right; padding:9px 8px; border-top:1px solid var(--line); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .gtab thead th{border-top:0; font-size:12px; color:var(--muted); font-weight:600}
+  .gtab th[scope=row],.gtab thead th:first-child{text-align:left; font-weight:500}
+  .nowg{font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:#52525B; font-weight:600; margin:14px 0 4px}
+  .nowg:first-child{margin-top:0}
+  .nowi{display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:14px}
+  .nowi .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+  .nowi .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  @media (max-width:1100px){ .kpis.k5{grid-template-columns:repeat(3,minmax(0,1fr))} }
+  @media (max-width:860px){ .ovtop{grid-template-columns:minmax(0,1fr)} .kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  @media (max-width:560px){ .roi .big{font-size:38px} .frow,.fhead{grid-template-columns:96px minmax(0,1fr) 70px} .frow .ly,.fhead .ly{display:none} }
+  .ovgrid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start}
+  .stagebars{display:flex; flex-direction:column; gap:9px}
+  .sbar{display:grid; grid-template-columns:130px minmax(0,1fr) 36px; gap:10px; align-items:center; font-size:14px}
+  .sbar .track{height:10px; background:var(--track); border-radius:5px; overflow:hidden}
+  .sbar .fillb{height:100%; border-radius:5px}
+  .sbar .c{text-align:right; color:var(--muted); font-variant-numeric:tabular-nums}
+  .minis{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:16px}
+  .rel{display:grid; grid-template-columns:78px minmax(0,1fr) auto; gap:10px; align-items:center; padding:9px 0; border-top:1px solid var(--line); font-size:14px}
+  .rel:first-child{border-top:0}
+  .rel .d{color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums}
+  .rel .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  .chip{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; border-radius:6px; padding:2px 7px; background:var(--surface); color:#3F3F46; white-space:nowrap}
+  .chip .sw{width:8px; height:8px; border-radius:2px}
+  .chip.win{background:#E7F6EF; color:#13704A} .chip.lose{background:#FDECEB; color:#A8302B} .chip.run{background:#FFF2E5; color:#9A4A0B}
+  .linkbtn{font:inherit; font-size:13px; font-weight:600; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:9px; padding:8px 12px; cursor:pointer; min-height:36px}
+  .linkbtn:hover{border-color:var(--muted)}
+  .sechd{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px}
+  .sechd .paneltitle{margin:0}
+  /* ── cockpit: timeline ── */
+  .mseg{display:flex; flex-wrap:wrap; gap:6px}
+  .mseg button{font:inherit; font-size:13px; font-weight:600; color:#52525B; background:var(--card); border:1px solid var(--line); border-radius:9px; padding:7px 12px; min-height:36px; cursor:pointer}
+  .mseg button[aria-pressed="true"]{background:var(--cta); color:var(--cta-text); border-color:var(--cta)}
+  .chartwrap{overflow-x:auto; margin:4px -4px 0; padding:0 4px}
+  .chartwrap svg{min-width:720px}
+  .chart text{font-family:'Inter Tight',Inter,system-ui,sans-serif; fill:#71717A; font-size:11px}
+  .chart .lane-l{fill:#52525B; font-weight:600}
+  .legend{display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:#52525B; margin-top:10px}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .legend i{display:inline-block; width:18px; height:0; border-top:2.5px solid #0099FF}
+  .legend i.ly{border-top:2px dashed #A1A1AA} .legend i.dot{width:9px; height:9px; border:0; border-radius:50%; background:#3F3F46}
+  .legend i.bar{width:16px; height:8px; border:0; border-radius:3px; background:#22A06B}
+  .log{margin-top:4px}
+  .logm{font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:#52525B; font-weight:600; margin:16px 0 4px}
+  .filters{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px}
+  .filters button{font:inherit; font-size:12.5px; font-weight:600; color:#52525B; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:5px 11px; min-height:32px; cursor:pointer; display:inline-flex; align-items:center; gap:6px}
+  .filters button[aria-pressed="true"]{border-color:var(--ink); color:var(--ink)}
+  .filters .sw{width:8px; height:8px; border-radius:2px}
+  .rel4{display:grid; grid-template-columns:78px 128px minmax(0,1fr) auto; gap:10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); font-size:14px}
+  .rel4 .d{color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums}
+  .rel4 .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  .muted{color:var(--muted); font-size:13px}
+  .ovwarn{color:var(--over); font-size:14px; padding:12px 2px 0}
+  .ovwarn.hide{display:none}
+  @media (max-width:860px){ .kpis{grid-template-columns:repeat(2,minmax(0,1fr))} .ovgrid{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:560px){ .kpi .n{font-size:25px} .kpis{gap:10px} .minis{grid-template-columns:minmax(0,1fr)} .rel4{grid-template-columns:70px minmax(0,1fr)} .rel4 .st,.rel4 .vd{display:none} .sbar{grid-template-columns:104px minmax(0,1fr) 30px} .ovhead h1{font-size:22px} }
+  @media (prefers-reduced-motion:reduce){ .arc-value{transition:none} .tcard .chev{transition:none} }
+</style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <div id="gate" class="gate hide">
+    <div class="gatecard">
+      <img src="https://cxo.studio/framer/YhfPidMDBtIF430QppvXfExAM5w.png" alt="CXO Studio" style="height:26px;margin:0 auto 18px;display:block" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <div class="wordmark" style="font-size:22px;margin-bottom:16px;display:none">CXO Studio</div>
+      <div id="gateForm">
+        <p class="gatehint"><span id="gateHint"></span><br><span id="gateHint2" style="color:#A1A1AA"></span></p>
+        <input id="gatePw" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url">
+        <button id="gateBtn" type="button"></button>
+        <div id="gateMsg" class="gatemsg"></div>
+      </div>
+      <p id="gateInvalid" class="gatehint" style="display:none"></p>
+      <div id="gateSuccess" class="gatesuccess" style="display:none">
+        <svg class="scheck" viewBox="0 0 80 80" aria-hidden="true">
+          <circle class="scircle" cx="40" cy="40" r="36"></circle>
+          <path class="spath" d="M24 42 L35 53 L56 28"></path>
+        </svg>
+        <div class="successlabel" id="gateSuccessLabel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell" id="shell" style="display:none">
+    <div class="head">
+      <img class="logo-cxo" id="cxoLogo" alt="CXO Studio" style="display:none">
+      <span class="wordmark hide" id="cxoName">CXO Studio</span>
+      <img class="logo-sl" id="clientLogo" alt="" style="display:none">
+      <span class="wordmark hide" id="clientName"></span>
+    </div>
+
+    <nav class="tabs hide" id="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tabOverview" data-view="viewOverview" aria-selected="false"></button>
+      <button type="button" role="tab" id="tabTimeline" data-view="viewTimeline" aria-selected="false"></button>
+      <button type="button" role="tab" id="tabWork" data-view="viewWork" aria-selected="false"></button>
+    </nav>
+
+    <section class="view hide" id="viewOverview" role="tabpanel" aria-labelledby="tabOverview">
+      <div class="ovtop">
+        <section class="panel roi hide" id="roiPanel" aria-labelledby="roiTitle"></section>
+        <section class="panel" aria-labelledby="expTitle">
+          <div class="paneltitle" id="expTitle"></div>
+          <div class="minis2" id="minis"></div>
+        </section>
+      </div>
+      <section class="health hide" id="health" aria-labelledby="healthTitle">
+        <div class="ovhead"><div><h2 id="healthTitle"></h2><div class="meta" id="healthMeta"></div></div></div>
+        <div class="kpis" id="kpis"></div>
+        <div class="panel funnelp" id="funnelPanel"></div>
+      </section>
+      <div class="ovgrid">
+        <section class="panel" aria-labelledby="nowTitle">
+          <div class="paneltitle" id="nowTitle"></div>
+          <div id="nowList"></div>
+        </section>
+        <section class="panel" aria-labelledby="latestTitle">
+          <div class="sechd"><div class="paneltitle" id="latestTitle"></div><button class="linkbtn" type="button" id="toTimeline"></button></div>
+          <div id="latestList"></div>
+        </section>
+      </div>
+      <div class="ovwarn hide" id="ovError"></div>
+    </section>
+
+    <section class="view hide" id="viewTimeline" role="tabpanel" aria-labelledby="tabTimeline">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="sechd" style="flex-wrap:wrap">
+          <div class="paneltitle" id="tlTitle"></div>
+          <div class="mseg" id="metricSeg"></div>
+        </div>
+        <div class="chartwrap"><svg class="chart" id="chart" role="img"></svg></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="panel">
+        <div class="paneltitle" id="logTitle"></div>
+        <div class="filters" id="filters"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+
+    <div class="view" id="viewWork" role="tabpanel" aria-labelledby="tabWork">
+    <div class="scorecard hide" id="scorecard">
+      <div class="score b"><span class="l" id="scBackL"></span><span class="n" id="scBack">—</span></div>
+      <div class="score t"><span class="l" id="scTodoL"></span><span class="n" id="scTodo">—</span></div>
+      <div class="score p"><span class="l" id="scProgL"></span><span class="n" id="scProg">—</span></div>
+      <div class="score d"><span class="l" id="scDoneL"></span><span class="n" id="scDone">—</span></div>
+    </div>
+
+    <a class="perfcard hide" id="perfCard" target="_blank" rel="noopener">
+      <div style="min-width:0">
+        <div class="perftitle" id="perfHeading"></div>
+        <div class="perfdesc" id="perfDesc"></div>
+      </div>
+      <span class="perfbtn" id="perfBtn"></span>
+    </a>
+
+    <div class="grid hide" id="grid">
+      <div class="panel" id="tasksPanel">
+        <div class="paneltitle" id="tasksPanelTitle"></div>
+        <div class="group"><div class="grouphd"><span class="t" id="gBackT"></span><span class="c" id="gBackC">0</span></div><div id="gBack"></div></div>
+        <div class="group"><div class="grouphd"><span class="t" id="gTodoT"></span><span class="c" id="gTodoC">0</span></div><div id="gTodo"></div></div>
+        <div class="group"><div class="grouphd"><span class="t" id="gProgT"></span><span class="c" id="gProgC">0</span></div><div id="gProg"></div></div>
+        <div class="group"><div class="grouphd"><span class="t" id="gDoneT"></span><span class="c" id="gDoneC">0</span></div><div id="gDone"></div></div>
+      </div>
+
+      <div class="panel" id="hoursPanel">
+        <div class="hourshd">
+          <div class="paneltitle" id="hoursPanelTitle"></div>
+          <div class="mnav hide" id="monthNav">
+            <button id="mPrev" type="button">‹</button>
+            <span class="lbl" id="mLabel">—</span>
+            <button id="mNext" type="button">›</button>
+          </div>
+        </div>
+        <div id="retainerView" class="hide">
+          <div class="gauge">
+            <svg viewBox="0 0 320 180" role="img" aria-label="hours gauge">
+              <path class="arc-track" d="M 30 160 A 130 130 0 0 1 290 160" fill="none" stroke-width="18" stroke-linecap="round"></path>
+              <path id="arcValue" class="arc-value" d="M 30 160 A 130 130 0 0 1 290 160" fill="none" stroke-width="18" stroke-linecap="round" stroke-dasharray="408.4" stroke-dashoffset="408.4"></path>
+              <circle id="dot" cx="30" cy="160" r="6" fill="var(--state)" style="opacity:0"></circle>
+            </svg>
+            <div class="readout"><div class="big"><span id="rSpent">—</span><span class="unit">h</span></div><div class="sub2" id="rUsedLabel"></div></div>
+          </div>
+          <div class="pill-row">
+            <div class="pill"><div class="k" id="rkTotal"></div><div class="v" id="rTotal">—</div><div class="s" id="rsTotal"></div></div>
+            <div class="pill"><div class="k" id="rkRem"></div><div class="v state" id="rRemaining">—</div><div class="s" id="rRemainingSub"></div></div>
+            <div class="pill"><div class="k" id="rkReset"></div><div class="v" id="rReset">—</div><div class="s" id="rResetSub"></div></div>
+          </div>
+        </div>
+        <div id="paygView" class="hide">
+          <div class="payg-hero"><div class="big"><span id="pSpent">—</span><span class="unit">h</span></div><div class="sub2" id="pPeriod"></div></div>
+          <div class="compbar" id="compbar"></div>
+          <div class="pill-row">
+            <div class="pill"><div class="k" id="pkPeriod"></div><div class="v" id="pPeriodPill">—</div><div class="s" id="psPeriod"></div></div>
+            <div class="pill" id="basisPill"><div class="k" id="pkBasis"></div><div class="v" id="pBasis"></div><div class="s" id="psBasis"></div></div>
+            <div class="pill"><div class="k" id="pkReset"></div><div class="v" id="pReset">—</div><div class="s" id="pResetSub"></div></div>
+          </div>
+        </div>
+        <div class="byhours" id="byhoursBox" hidden>
+          <div class="paneltitle" id="byhoursTitle" style="margin-bottom:10px"></div>
+          <div id="byhoursList"></div>
+        </div>
+        <div class="pastnote hide" id="pastNote"></div>
+
+      </div>
+
+      <div class="panel reqbox">
+        <div class="paneltitle" id="reqTitle"></div>
+        <input id="reqName" type="text" maxlength="200">
+        <textarea id="reqDesc" maxlength="2000"></textarea>
+        <button class="reqbtn" id="reqSend" type="button"></button>
+        <div class="reqmsg" id="reqMsg"></div>
+      </div>
+    </div>
+    </div><!-- /viewWork -->
+
+    <div class="foot">
+      <span id="updated">…</span>
+      <span style="display:flex; gap:8px">
+        <button id="logout" type="button"></button>
+        <button id="refresh" type="button">Refresh</button>
+      </span>
+    </div>
+  </div>
+
+<script>
+const ARC_LEN=Math.PI*130, clamp=(n,a,b)=>Math.max(a,Math.min(b,n)), esc=s=>String(s).replace(/</g,'&lt;'),
+      escA=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+// Six categorical hues, validated for colour-blind separation on the white card
+// (worst adjacent pair ΔE 9.1 protan). Never extend this list to colour more
+// series — anything past the sixth folds into OTHER.
+const PALETTE=['#0099FF','#EB6834','#1BAF7A','#EDA100','#E87BA4','#4A3AA7'], OTHER='#A1A1AA';
+const LANE={backlog:'#A1A1AA',todo:'#FF6969',progress:'#FB923C',done:'#48D87D'};
+let accessKey=null, selMonth=null, monthsAvail=[];
+const STRINGS={
+  en:{ locale:'en-GB', tasks:'Tasks', hours:'Monthly hours', toDo:'To do', inProgress:'In progress', backlog:'Backlog', completed:'Completed',
+    noneTodo:'Nothing queued', noneProg:'Nothing in progress', noneBack:'Empty', more:n=>`+ ${n} more`,
+    due:'Due', subtasks:'Subtasks', byTask:'Time by task', other:'Other', usedThisMonth:'used this month', total:'Total', thisMonth:'this month',
+    remaining:'Remaining', left:'left', overBudget:'over budget', overRetainer:'over the retainer',
+    resets:'Resets', inDays:d=>`in ${d} days`, trackedIn:m=>`tracked in ${m}`, billingPeriod:'Billing period',
+    invoicedMonthly:'invoiced monthly', basis:'Basis', basisVal:'T&M', basisSub:'time & materials',
+    newPeriod:'New period', updated:'Last updated: ', refresh:'Refresh', logout:'Log out', error:"Couldn't load. Try again.", performance:'Performance', openLink:'Open',
+    newRequest:'Submit a task', reqName:'What do you need?', reqDesc:'Details (optional)',
+    send:'Send task', sending:'Sending…', sent:'Task added to your list ✓', sendErr:'Could not send. Try again.', tooShort:'Add a short title first.',
+    usedIn:m=>`used in ${m}`, inMonth:m=>`in ${m}`, over:'Over', delivered:'Delivered', tasksClosed:'tasks closed',
+    period:'Period', closedPeriod:'closed', prevMonth:'Previous month', nextMonth:'Next month',
+    pastNote:'Closed month. The task list always shows today’s status.' },
+  fr:{ locale:'fr-FR', tasks:'Tâches', hours:'Heures du mois', toDo:'À faire', inProgress:'En cours', backlog:'Backlog', completed:'Terminé',
+    noneTodo:'Rien en attente', noneProg:'Rien en cours', noneBack:'Vide', more:n=>`+ ${n} autres`,
+    due:'Échéance', subtasks:'Sous-tâches', byTask:'Temps par tâche', other:'Autres', usedThisMonth:'utilisées ce mois', total:'Total', thisMonth:'ce mois',
+    remaining:'Restant', left:'restant', overBudget:'dépassement', overRetainer:'dépassement du forfait',
+    resets:'Remise à zéro', inDays:d=>`dans ${d} j`, trackedIn:m=>`suivi en ${m}`, billingPeriod:'Période de facturation',
+    invoicedMonthly:'facturé mensuellement', basis:'Base', basisVal:'Régie', basisSub:'au temps passé',
+    newPeriod:'Nouvelle période', updated:'Dernière mise à jour : ', refresh:'Actualiser', logout:'Se déconnecter', error:'Impossible de charger. Réessayer.', performance:'Performance', openLink:'Ouvrir',
+    newRequest:'Soumettre une tâche', reqName:'De quoi as-tu besoin ?', reqDesc:'Détails (optionnel)',
+    send:'Envoyer la tâche', sending:'Envoi…', sent:'Tâche ajoutée à ta liste ✓', sendErr:"Échec de l'envoi. Réessayer.", tooShort:"Ajoute d'abord un titre court.",
+    usedIn:m=>`utilisées en ${m}`, inMonth:m=>`en ${m}`, over:'Dépassement', delivered:'Livré', tasksClosed:'tâches clôturées',
+    period:'Période', closedPeriod:'clôturée', prevMonth:'Mois précédent', nextMonth:'Mois suivant',
+    pastNote:'Mois clôturé. La liste de tâches affiche toujours le statut actuel.' }
+};
+let S=STRINGS.en, nf=new Intl.NumberFormat('en-GB',{maximumFractionDigits:1});
+const daysTo=iso=>Math.max(0,Math.ceil((new Date(iso)-Date.now())/86400000));
+const fmtDate=iso=>new Date(iso).toLocaleDateString(S.locale,{day:'numeric',month:'short',year:'numeric'});
+const cap1=s=>s.charAt(0).toUpperCase()+s.slice(1);
+const monthLong=iso=>cap1(new Date(iso).toLocaleDateString(S.locale,{month:'long',year:'numeric'}));
+const monthName=iso=>new Date(iso).toLocaleDateString(S.locale,{month:'long'});
+const monthShort=iso=>cap1(new Date(iso).toLocaleDateString(S.locale,{month:'short',year:'numeric'}));
+
+function applyLogo(img,textEl,url){
+  if(url){ img.onerror=()=>{img.style.display='none';textEl.style.display='inline';};
+    textEl.style.display='none'; img.style.display='block'; img.src=url; }
+  else { img.style.display='none'; textEl.style.display='inline'; }
+}
+function setLogos(d){
+  applyLogo(document.getElementById('cxoLogo'),document.getElementById('cxoName'),d.cxoLogo);
+  const cn=document.getElementById('clientName'); cn.textContent=d.name;
+  document.getElementById('clientLogo').alt=d.name;
+  applyLogo(document.getElementById('clientLogo'),cn,d.logo);
+}
+function taskHTML(t,done,laneColor){
+  const hasDetail=(t.desc&&t.desc.length)||t.due||(t.subs&&t.subs.length);
+  const chev=hasDetail?'<span class="chev">›</span>':'';
+  let detail='';
+  if(hasDetail){
+    let parts='';
+    if(t.due) parts+=`<div class="dmeta">${S.due}: ${fmtDate(t.due)}</div>`;
+    if(t.desc&&t.desc.length) parts+=`<div class="ddesc">${esc(t.desc)}</div>`;
+    if(t.subs&&t.subs.length){
+      parts+=`<div class="dsubh">${S.subtasks} (${t.subs.length})</div>`+
+        t.subs.map(s=>`<div class="sub"><span class="dot" style="background:${s.done?'#48D87D':laneColor}"></span><span class="name${s.done?' done':''}">${esc(s.name)}</span></div>`).join('');
+    }
+    detail=`<div class="tdetail hide">${parts}</div>`;
+  }
+  return `<div class="titem"><div class="tcard${done?' done':''}${hasDetail?' clk':''}"><span class="dot" style="background:${laneColor}"></span><span class="name">${esc(t.name)}</span>${chev}</div>${detail}</div>`;
+}
+function fill(el,countEl,items,emptyMsg,done,laneColor){
+  const cap=12;
+  if(items&&items.length){
+    let h=items.slice(0,cap).map(t=>taskHTML(t,done,laneColor)).join('');
+    if(items.length>cap) h+=`<div class="more">${S.more(items.length-cap)}</div>`;
+    el.innerHTML=h;
+  } else el.innerHTML=`<div class="empty">${emptyMsg}</div>`;
+  countEl.textContent=items?items.length:0;
+}
+function renderPerf(d){
+  const c=document.getElementById('perfCard');
+  if(!d.perfUrl){ c.classList.add('hide'); c.removeAttribute('href'); return; }
+  c.href=d.perfUrl;
+  document.getElementById('perfHeading').textContent=S.performance;
+  document.getElementById('perfDesc').textContent=d.perfLabel||S.performance;
+  document.getElementById('perfBtn').textContent=S.openLink+' ↗';
+  c.classList.remove('hide');
+}
+function renderBoard(d){
+  document.getElementById('tasksPanelTitle').textContent=S.tasks;
+  document.getElementById('gBackT').textContent=S.backlog;
+  document.getElementById('gTodoT').textContent=S.toDo;
+  document.getElementById('gProgT').textContent=S.inProgress;
+  document.getElementById('gDoneT').textContent=S.completed;
+  const b=d.board||{todo:[],progress:[],backlog:[],done:[]};
+  fill(document.getElementById('gBack'),document.getElementById('gBackC'),b.backlog,S.noneBack,false,LANE.backlog);
+  fill(document.getElementById('gTodo'),document.getElementById('gTodoC'),b.todo,S.noneTodo,false,LANE.todo);
+  fill(document.getElementById('gProg'),document.getElementById('gProgC'),b.progress,S.noneProg,false,LANE.progress);
+  fill(document.getElementById('gDone'),document.getElementById('gDoneC'),b.done,'—',true,LANE.done);
+  const c=d.statusCounts||{todo:0,progress:0,backlog:0,done:0};
+  document.getElementById('scBack').textContent=c.backlog;
+  document.getElementById('scTodo').textContent=c.todo;
+  document.getElementById('scProg').textContent=c.progress;
+  document.getElementById('scDone').textContent=c.done;
+  document.getElementById('scBackL').textContent=S.backlog;
+  document.getElementById('scTodoL').textContent=S.toDo;
+  document.getElementById('scProgL').textContent=S.inProgress;
+  document.getElementById('scDoneL').textContent=S.completed;
+  document.getElementById('reqTitle').textContent=S.newRequest;
+  document.getElementById('reqName').placeholder=S.reqName;
+  document.getElementById('reqDesc').placeholder=S.reqDesc;
+  document.getElementById('reqSend').textContent=S.send;
+  document.getElementById('scorecard').classList.remove('hide');
+  document.getElementById('grid').classList.remove('hide');
+}
+function renderByHours(tasks){
+  document.getElementById('byhoursTitle').textContent=S.byTask;
+  const box=document.getElementById('byhoursBox'), list=document.getElementById('byhoursList');
+  if(tasks&&tasks.length){
+    list.innerHTML=tasks.map((t,i)=>`<div class="trow"><span class="left"><span class="dot" style="background:${PALETTE[i]||OTHER}"></span><span class="name">${esc(t.name)}</span></span><span class="hrs">${nf.format(t.hours)} h</span></div>`).join('');
+    box.hidden=false;
+  } else box.hidden=true;
+}
+function renderRetainer(d){
+  document.getElementById('hoursPanelTitle').textContent=S.hours;
+  document.getElementById('paygView').classList.add('hide');
+  document.getElementById('retainerView').classList.remove('hide');
+  const cs=getComputedStyle(document.documentElement); const f=d.spent/d.cap;
+  const color=f>1?cs.getPropertyValue('--over'):f>=0.75?cs.getPropertyValue('--warn'):cs.getPropertyValue('--good');
+  document.documentElement.style.setProperty('--state',color.trim());
+  const past=d.isCurrent===false, mName=monthName(d.periodStartISO), over=d.remaining<0;
+  document.getElementById('rSpent').textContent=nf.format(d.spent);
+  document.getElementById('rUsedLabel').textContent=past?S.usedIn(mName):S.usedThisMonth;
+  document.getElementById('rkTotal').textContent=S.total;
+  document.getElementById('rTotal').textContent=nf.format(d.cap)+' h';
+  document.getElementById('rsTotal').textContent=past?S.inMonth(mName):S.thisMonth;
+  const rem=document.getElementById('rRemaining'),remSub=document.getElementById('rRemainingSub');
+  if(past){
+    // Closed month: an overrun is worth showing, unused hours are not.
+    document.getElementById('rkRem').textContent=over?S.over:S.delivered;
+    rem.textContent=over?('+'+nf.format(Math.abs(d.remaining))+' h'):String(d.delivered||0);
+    remSub.textContent=over?S.overRetainer:S.tasksClosed;
+    rem.classList.toggle('state',over);
+    if(over) document.getElementById('rUsedLabel').textContent=S.overRetainer;
+    document.getElementById('rkReset').textContent=S.period;
+    document.getElementById('rReset').textContent=monthShort(d.periodStartISO);
+    document.getElementById('rResetSub').textContent=S.closedPeriod;
+  } else {
+    document.getElementById('rkRem').textContent=S.remaining;
+    rem.classList.add('state');
+    if(over){ rem.textContent='−'+nf.format(Math.abs(d.remaining))+' h'; remSub.textContent=S.overBudget; document.getElementById('rUsedLabel').textContent=S.overRetainer; }
+    else { rem.textContent=nf.format(d.remaining)+' h'; remSub.textContent=S.left; }
+    document.getElementById('rkReset').textContent=S.resets;
+    document.getElementById('rReset').textContent=new Date(d.resetISO).toLocaleDateString(S.locale,{day:'numeric',month:'short'});
+    document.getElementById('rResetSub').textContent=S.inDays(daysTo(d.resetISO));
+  }
+  const frac=clamp(d.spent/d.cap,0,1);
+  requestAnimationFrame(()=>{document.getElementById('arcValue').style.strokeDashoffset=ARC_LEN*(1-frac);});
+  const ang=Math.PI*(1-frac),dot=document.getElementById('dot');
+  dot.setAttribute('cx',(160+130*Math.cos(ang)).toFixed(1)); dot.setAttribute('cy',(160-130*Math.sin(ang)).toFixed(1)); dot.style.opacity=1;
+}
+function renderPayg(d){
+  document.getElementById('hoursPanelTitle').textContent=S.hours;
+  document.getElementById('retainerView').classList.add('hide');
+  document.getElementById('paygView').classList.remove('hide');
+  const long=new Date(d.periodStartISO).toLocaleDateString(S.locale,{month:'long',year:'numeric'});
+  const short=new Date(d.periodStartISO).toLocaleDateString(S.locale,{month:'short',year:'numeric'});
+  document.getElementById('pSpent').textContent=nf.format(d.spent);
+  document.getElementById('pPeriod').textContent=S.trackedIn(long);
+  document.getElementById('pkPeriod').textContent=S.billingPeriod;
+  document.getElementById('pPeriodPill').textContent=short;
+  document.getElementById('psPeriod').textContent=S.invoicedMonthly;
+  document.getElementById('pkBasis').textContent=S.basis;
+  document.getElementById('pBasis').textContent=S.basisVal;
+  document.getElementById('psBasis').textContent=S.basisSub;
+  if(d.isCurrent===false){
+    document.getElementById('pkReset').textContent=S.delivered;
+    document.getElementById('pReset').textContent=String(d.delivered||0);
+    document.getElementById('pResetSub').textContent=S.tasksClosed;
+  } else {
+    document.getElementById('pkReset').textContent=S.newPeriod;
+    document.getElementById('pReset').textContent=new Date(d.resetISO).toLocaleDateString(S.locale,{day:'numeric',month:'short'});
+    document.getElementById('pResetSub').textContent=S.inDays(daysTo(d.resetISO));
+  }
+  const bar=document.getElementById('compbar');
+  if(d.spent>0&&d.tasksByHours.length){
+    // Everything past the palette folds into one grey segment, so the bar adds
+    // up to the whole month instead of trailing off into the empty track.
+    const top=d.tasksByHours.slice(0,PALETTE.length);
+    const rest=Math.round(d.tasksByHours.slice(PALETTE.length).reduce((s,t)=>s+t.hours,0)*100)/100;
+    const seg=(label,hours,color)=>`<div class="seg" style="width:${(hours/d.spent*100).toFixed(1)}%;background:${color}" title="${escA(label)} — ${nf.format(hours)} h"></div>`;
+    bar.style.display='';
+    bar.innerHTML=top.map((t,i)=>seg(t.name,t.hours,PALETTE[i])).join('')+(rest>0?seg(S.other,rest,OTHER):'');
+  } else { bar.innerHTML=''; bar.style.display='none'; }
+}
+function renderMonthNav(d){
+  monthsAvail=Array.isArray(d.months)?d.months:[]; selMonth=d.month||null;
+  const nav=document.getElementById('monthNav'), prev=document.getElementById('mPrev'), next=document.getElementById('mNext');
+  prev.title=S.prevMonth; prev.setAttribute('aria-label',S.prevMonth);
+  next.title=S.nextMonth; next.setAttribute('aria-label',S.nextMonth);
+  const note=document.getElementById('pastNote');
+  if(d.isCurrent===false){ note.textContent=S.pastNote; note.classList.remove('hide'); }
+  else note.classList.add('hide');
+  if(monthsAvail.length<2){ nav.classList.add('hide'); return; }
+  nav.classList.remove('hide');
+  document.getElementById('mLabel').textContent=monthLong(d.periodStartISO);
+  const i=monthsAvail.indexOf(selMonth);
+  prev.disabled=i<=0;
+  next.disabled=i<0||i>=monthsAvail.length-1;
+}
+// Wipe every client-specific trace from the DOM. Runs before each render and on logout,
+// so nothing from the previous account can survive into the next one.
+function resetView(){
+  const hide=id=>document.getElementById(id).classList.add('hide');
+  hide('perfCard'); hide('retainerView'); hide('paygView'); hide('monthNav'); hide('pastNote');
+  const perf=document.getElementById('perfCard');
+  perf.removeAttribute('href');
+  document.getElementById('perfDesc').textContent='';
+  document.getElementById('byhoursBox').hidden=true;
+  document.getElementById('byhoursList').innerHTML='';
+  const bar=document.getElementById('compbar'); bar.innerHTML=''; bar.style.display='';
+  document.documentElement.style.removeProperty('--state');
+  ['gBack','gTodo','gProg','gDone'].forEach(id=>document.getElementById(id).innerHTML='');
+  ['gBackC','gTodoC','gProgC','gDoneC'].forEach(id=>document.getElementById(id).textContent='0');
+  ['scBack','scTodo','scProg','scDone'].forEach(id=>document.getElementById(id).textContent='—');
+  ['rSpent','pSpent','rTotal','rRemaining','rReset','pPeriodPill','pReset','mLabel']
+    .forEach(id=>document.getElementById(id).textContent='—');
+  // park the gauge at empty without animating, so the next render sweeps up from zero
+  const arc=document.getElementById('arcValue');
+  arc.style.transition='none'; arc.style.strokeDashoffset=ARC_LEN;
+  void arc.getBoundingClientRect();
+  arc.style.transition='';
+  document.getElementById('dot').style.opacity=0;
+  const err=document.querySelector('.error'); if(err) err.remove();
+  const msg=document.getElementById('reqMsg'); msg.textContent=''; msg.className='reqmsg';
+  document.getElementById('reqName').value=''; document.getElementById('reqDesc').value='';
+}
+function applyData(d){
+  resetView();
+  S=STRINGS[d.lang]||STRINGS.en; nf=new Intl.NumberFormat(S.locale,{maximumFractionDigits:1});
+  document.getElementById('refresh').textContent=S.refresh;
+  document.getElementById('logout').textContent=S.logout;
+  setLogos(d); renderPerf(d); renderBoard(d);
+  if(d.mode==='retainer') renderRetainer(d); else renderPayg(d);
+  renderByHours(d.tasksByHours);
+  renderMonthNav(d);
+  renderTabs(d);
+  curBoard=d.board||null; if(perf||tl) renderOverview();
+  const upd=new Date(d.updatedISO);
+  document.getElementById('updated').textContent=S.updated+upd.toLocaleString(S.locale,{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+}
+async function loadWith(pw,month,force){
+  // Closed months are immutable → let them hit the CDN cache. Only bust the live month.
+  const live=!month||!monthsAvail.length||month===monthsAvail[monthsAvail.length-1];
+  let url='/api/hours?k='+encodeURIComponent(pw||'');
+  if(month) url+='&month='+encodeURIComponent(month);
+  const r=live?await fetch(url+'&t='+Date.now(),{cache:'no-store'}):await fetch(url);
+  if(r.status===403) return false;
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json(); if(d.error) throw new Error(d.error);
+  // The cockpit (store data + timeline) loads once per login or on Refresh, not on every month switch.
+  const fresh=force||pw!==cockpitFor;
+  if(fresh) resetCockpit();
+  accessKey=pw; applyData(d);
+  if(fresh) loadCockpit(pw,d);
+  return true;
+}
+function showError(){
+  document.getElementById('updated').textContent='';
+  let el=document.querySelector('.error');
+  if(!el){el=document.createElement('div');el.className='error';document.querySelector('.foot').before(el);}
+  el.textContent=(S&&S.error)||'Error';
+}
+async function refresh(){
+  const e=document.querySelector('.error'); if(e)e.remove();
+  document.getElementById('updated').textContent='…';
+  try{ await loadWith(accessKey,selMonth,true); } catch(err){ showError(); }
+}
+async function goMonth(step){
+  const i=monthsAvail.indexOf(selMonth); if(i<0) return;
+  const target=monthsAvail[i+step]; if(!target) return;
+  const e=document.querySelector('.error'); if(e)e.remove();
+  const nav=document.getElementById('monthNav'); nav.classList.add('busy');
+  try{ await loadWith(accessKey,target); } catch(err){ showError(); }
+  finally{ nav.classList.remove('busy'); }
+}
+async function submitReq(){
+  const nameEl=document.getElementById('reqName'), descEl=document.getElementById('reqDesc');
+  const btn=document.getElementById('reqSend'), msg=document.getElementById('reqMsg');
+  const name=nameEl.value.trim(); msg.className='reqmsg';
+  if(name.length<3){ msg.textContent=S.tooShort; msg.classList.add('err'); return; }
+  btn.disabled=true; msg.textContent=S.sending;
+  try{
+    const r=await fetch('/api/submit-task',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({k:accessKey,title:name,description:descEl.value})});
+    const j=await r.json();
+    if(!r.ok||j.error) throw new Error(j.error||'HTTP '+r.status);
+    nameEl.value=''; descEl.value='';
+    msg.textContent=S.sent; msg.classList.add('ok');
+    setTimeout(refresh,900);
+  }catch(e){ msg.textContent=S.sendErr; msg.classList.add('err'); }
+  finally{ btn.disabled=false; }
+}
+/* ───────────────────────── cockpit (Overview + Timeline) ───────────────────────── */
+const CSTR={
+  en:{ overview:'Overview', timeline:'Impact timeline', work:'Work & hours',
+    sales:'Net sales', orders:'Orders', aov:'Average order value', cr:'Conversion rate', rpv:'Revenue per visitor',
+    vsLY:'vs last year',
+    roiTitle:'Return on CXO', perMonth:'/ month', roiSub:'Extra revenue generated right now by the A/B test winners currently live, measured against the original version.',
+    toDate:'Earned to date', fee:'You invest', multiple:'Return', perMonthShort:'per month', feeUnset:'not set',
+    activeWinners:'Winners behind this number', expired:'counted 12 months, now part of the baseline',
+    how:'How this is calculated', howText:'Only A/B tests with a measured winner count. For each one: uplift on revenue per visitor (from VWO) × share of revenue going through the tested page × the store’s net sales since rollout. Each winner counts for 12 months, then drops out. Store-wide trends, ads and promotions are excluded on purpose.',
+    roiEmpty:'No measured winner yet. As soon as an A/B test closes with a winning variant, the extra revenue it brings shows up here.',
+    expTitle:'Experimentation', testsRun:'Tests run', winRate:'Win rate', avgUplift:'Avg. winner uplift', last90:'Tests, last 90 days', pending:n=>`${n} result${n>1?'s':''} to report`, running:n=>`${n} running`,
+    healthTitle:'Store health', healthMeta:(from,to)=>`Last 13 weeks (${from} – ${to}) vs the same weeks last year. Context: these move with traffic, ads and season too, not only with CRO.`,
+    last13:'last 13 weeks', qualified:'Conversion measured on qualified visits: your sales markets, with bot traffic excluded.',
+    funnel:'Where visitors drop off', now13:'Last 13 weeks', ly13:'Last year', atc:'Added to cart', ckr:'Reached checkout', conv:'Ordered',
+    newCust:'New customers', retCust:'Returning customers', growthTitle:'Where the growth came from', growthMeta:'Net sales by how the order arrived, last 13 weeks vs the same weeks last year.',
+    src:{'':'Direct & returning visitors',search:'Search (Google, Bing)',social:'Social',email:'Email',indirect:'Other referrals',unknown:'Unknown'}, chShop:'Shop app',
+    lyCol:'Last year', nowCol:'Last 13 weeks', chgCol:'Change', shareCol:'Share of growth', viaChannel:'Of which via the Shop app',
+    convHold:'Conversion rate and revenue per visitor are not shown: Shopify’s visit tracking on this store mixes in bot traffic, so a store-wide rate would be misleading.',
+    nowTitle:'Now & next', inProgress:'In progress', waiting:'Waiting on you', next:'Up next', nothingNow:'Nothing in progress right now.',
+    latest:'Latest releases', seeAll:'Open timeline', noItems:'Nothing released yet.',
+    tlTitle:'Store performance and what went live', ly:'Same weeks last year', rolling:'4-week average', live:'Change live', testBar:'A/B test (start → end)',
+    logTitle:'Release log', all:'All', ops:'Ops & setup', before:'Before CXO', day0:'Day 0',
+    stage:{home:'Home / Landing',plp:'Collection',pdp:'Product page',cart:'Cart',checkout:'Checkout',site:'Site-wide'},
+    type:{bp:'Best practice',test:'A/B test',fix:'Fix',build:'Build'}, verdict:{winner:'Winner',neutral:'Neutral',loser:'Loser',running:'Running',pending:'Verdict to add'}, showAll:n=>`Show all (${n})`,
+    perfErr:'Store data is not connected yet.', tlErr:'Could not load the timeline.' },
+  fr:{ overview:'Vue d’ensemble', timeline:'Timeline d’impact', work:'Travaux & heures',
+    sales:'Ventes nettes', orders:'Commandes', aov:'Panier moyen', cr:'Taux de conversion', rpv:'Revenu par visiteur',
+    vsLY:'vs an dernier',
+    roiTitle:'Retour sur CXO', perMonth:'/ mois', roiSub:'Revenu supplémentaire généré en ce moment par les variantes gagnantes des tests A/B en ligne, mesuré contre la version d’origine.',
+    toDate:'Gagné à ce jour', fee:'Votre investissement', multiple:'Retour', perMonthShort:'par mois', feeUnset:'non défini',
+    activeWinners:'Les tests derrière ce chiffre', expired:'compté 12 mois, intégré à la base',
+    how:'Comment c’est calculé', howText:'Seuls les tests A/B avec un gagnant mesuré comptent. Pour chacun : uplift sur le revenu par visiteur (VWO) × part du revenu qui passe par la page testée × ventes nettes de la boutique depuis la mise en ligne. Chaque gagnant compte 12 mois, puis sort du calcul. Les tendances globales, les ads et les promos sont exclues volontairement.',
+    roiEmpty:'Pas encore de gagnant mesuré. Dès qu’un test A/B se termine avec une variante gagnante, le revenu supplémentaire apparaît ici.',
+    expTitle:'Expérimentation', testsRun:'Tests lancés', winRate:'Taux de réussite', avgUplift:'Uplift moyen gagnants', last90:'Tests, 90 derniers jours', pending:n=>`${n} résultat${n>1?'s':''} à reporter`, running:n=>`${n} en cours`,
+    healthTitle:'Santé de la boutique', healthMeta:(from,to)=>`13 dernières semaines (${from} – ${to}) vs les mêmes semaines l’an dernier. Contexte : ces chiffres bougent aussi avec le trafic, les ads et la saison, pas seulement avec le CRO.`,
+    last13:'13 dernières semaines', qualified:'Conversion mesurée sur les visites qualifiées : vos marchés de vente, trafic de bots exclu.',
+    funnel:'Où les visiteurs décrochent', now13:'13 dernières semaines', ly13:'L’an dernier', atc:'Ajout au panier', ckr:'Checkout atteint', conv:'Commande',
+    newCust:'Nouveaux clients', retCust:'Clients récurrents', growthTitle:'D’où vient la croissance', growthMeta:'Ventes nettes selon la provenance de la commande, 13 dernières semaines vs les mêmes semaines l’an dernier.',
+    src:{'':'Direct & visiteurs récurrents',search:'Recherche (Google, Bing)',social:'Réseaux sociaux',email:'Email',indirect:'Autres sites',unknown:'Inconnu'}, chShop:'App Shop',
+    lyCol:'L’an dernier', nowCol:'13 dernières semaines', chgCol:'Évolution', shareCol:'Part de la croissance', viaChannel:'Dont via l’app Shop',
+    convHold:'Taux de conversion et revenu par visiteur non affichés : le suivi des visites Shopify de cette boutique inclut du trafic de bots, un taux global serait trompeur.',
+    nowTitle:'En cours & à venir', inProgress:'En cours', waiting:'En attente de vous', next:'À venir', nothingNow:'Rien en cours pour le moment.',
+    latest:'Dernières mises en ligne', seeAll:'Ouvrir la timeline', noItems:'Rien en ligne pour l’instant.',
+    tlTitle:'Performance de la boutique et mises en ligne', ly:'Mêmes semaines l’an dernier', rolling:'Moyenne 4 semaines', live:'Mise en ligne', testBar:'Test A/B (début → fin)',
+    logTitle:'Historique des mises en ligne', all:'Tout', ops:'Ops & setup', before:'Avant CXO', day0:'Jour 0',
+    stage:{home:'Home / Landing',plp:'Collection',pdp:'Page produit',cart:'Panier',checkout:'Checkout',site:'Global'},
+    type:{bp:'Best practice',test:'Test A/B',fix:'Correctif',build:'Build'}, verdict:{winner:'Gagnant',neutral:'Neutre',loser:'Perdant',running:'En cours',pending:'Verdict à ajouter'}, showAll:n=>`Tout afficher (${n})`,
+    perfErr:'Les données boutique ne sont pas encore connectées.', tlErr:'Impossible de charger la timeline.' }
+};
+const STAGES=['home','plp','pdp','cart','checkout','site'];
+const STAGE_COL={home:'#4A3AA7',plp:'#1BAF7A',pdp:'#0099FF',cart:'#EB6834',checkout:'#E87BA4',site:'#EDA100'};
+const VERDICT_COL={winner:'#22A06B',loser:'#E0453F',neutral:'#A1A1AA'};
+let C=CSTR.en, perf=null, tl=null, metric='rpv', stageFilter='all', cockpitFor=null, logAll=false;
+const DAYMS=86400000, WEEKMS=7*DAYMS;
+const pctTxt=v=>(v>0?'+':'')+(v*100).toLocaleString(S.locale,{maximumFractionDigits:1})+' %';
+const money=(v,compact)=>new Intl.NumberFormat(S.locale,{style:'currency',currency:(perf&&perf.currency)||'EUR',maximumFractionDigits:compact?1:(v<1000?2:0),notation:compact?'compact':'standard'}).format(v);
+const intf=v=>new Intl.NumberFormat(S.locale,{maximumFractionDigits:0}).format(v);
+const dShort=iso=>new Date(iso).toLocaleDateString(S.locale,{day:'numeric',month:'short'});
+const dLong=iso=>new Date(iso).toLocaleDateString(S.locale,{day:'numeric',month:'short',year:'numeric'});
+const sessionsOk=()=>!!(perf&&perf.trustSessions);
+let curBoard=null;
+
+function setView(id){
+  document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===id)));
+  ['viewOverview','viewTimeline','viewWork'].forEach(v=>document.getElementById(v).classList.toggle('hide',v!==id));
+  try{localStorage.setItem('cxoportal:tab',id);}catch(e){}
+  if(id==='viewTimeline') renderChart();
+}
+function renderTabs(d){
+  C=CSTR[d.lang]||CSTR.en;
+  document.getElementById('tabOverview').textContent=C.overview;
+  document.getElementById('tabTimeline').textContent=C.timeline;
+  document.getElementById('tabWork').textContent=C.work;
+  const avail={viewOverview:!!d.cockpit, viewTimeline:!!d.timeline, viewWork:true};
+  document.getElementById('tabOverview').hidden=!avail.viewOverview;
+  document.getElementById('tabTimeline').hidden=!avail.viewTimeline;
+  const tabs=document.getElementById('tabs');
+  if(!avail.viewOverview&&!avail.viewTimeline){ tabs.classList.add('hide'); setView('viewWork'); return; }
+  tabs.classList.remove('hide');
+  let saved=null; try{saved=localStorage.getItem('cxoportal:tab');}catch(e){}
+  const current=document.querySelector('#tabs button[aria-selected="true"]')?.dataset.view;
+  const pick=[current,saved,avail.viewOverview?'viewOverview':'viewWork'].find(v=>v&&avail[v]);
+  setView(pick);
+}
+async function loadCockpit(pw,d){
+  if(!d.cockpit&&!d.timeline) return;
+  cockpitFor=pw;
+  const get=async url=>{ const r=await fetch(url); const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j; };
+  const k=encodeURIComponent(pw);
+  await Promise.all([
+    d.cockpit ? get('/api/performance?k='+k).then(j=>{ if(cockpitFor!==pw) return; perf=j; }).catch(()=>{ if(cockpitFor===pw) showOvError(C.perfErr); }) : null,
+    d.timeline ? get('/api/timeline?k='+k).then(j=>{ if(cockpitFor!==pw) return; tl=j; }).catch(()=>{ if(cockpitFor===pw) showOvError(C.tlErr); }) : null,
+  ]);
+  if(cockpitFor!==pw) return;
+  renderOverview(); renderMetricSeg(); renderChart(); renderLog();
+}
+function showOvError(msg){ const e=document.getElementById('ovError'); e.textContent=msg; e.classList.remove('hide'); }
+
+function deltaChip(v,label){ if(v==null) return ''; const cls=v>0.005?'up':v<-0.005?'down':''; return `<span class="delta ${cls}">${pctTxt(v)} ${label}</span>`; }
+function renderOverview(){
+  // Return on CXO (passphrase logins only: comes with /api/performance)
+  const roi=document.getElementById('roiPanel');
+  if(perf&&perf.returnOnTests){
+    const R=perf.returnOnTests;
+    if(R.winners.length){
+      const fee=R.monthlyFee, mult=R.multiple;
+      const stat=(k,v,cls)=>`<div class="stat"><div class="k">${k}</div><div class="v ${cls||''}">${v}</div></div>`;
+      const wl=[...R.winners].sort((a,b)=>Number(b.active)-Number(a.active)||b.rollout.localeCompare(a.rollout)).slice(0,5).map(w=>
+        `<div class="w${w.active?'':' off'}"><span class="nm" title="${escA(w.name)}">${esc(w.name)}${w.active?'':` · ${C.expired}`}</span><span class="u">+${w.uplift.toLocaleString(S.locale,{maximumFractionDigits:1})} %</span></div>`).join('');
+      roi.innerHTML=`<div class="paneltitle" id="roiTitle">${C.roiTitle}</div>
+        <div><div class="big">${money(R.perMonth)}<span class="unit"> ${C.perMonth}</span></div><div class="sub">${C.roiSub}</div></div>
+        <div class="row">${stat(C.toDate,money(R.toDate))}${stat(C.fee,fee?money(fee)+' '+C.perMonth:C.feeUnset)}${mult!=null?stat(C.multiple,mult.toLocaleString(S.locale,{maximumFractionDigits:1})+'×','good'):''}</div>
+        <div class="wl"><div class="paneltitle" style="margin:6px 0 0">${C.activeWinners}</div>${wl}</div>
+        <details class="how"><summary>${C.how}</summary>${C.howText}</details>`;
+    } else {
+      roi.innerHTML=`<div class="paneltitle" id="roiTitle">${C.roiTitle}</div><div class="empty2">${C.roiEmpty}</div><details class="how"><summary>${C.how}</summary>${C.howText}</details>`;
+    }
+    roi.classList.remove('hide');
+  } else roi.classList.add('hide');
+
+  // Experimentation scorecard: from performance when present, otherwise from the timeline
+  document.getElementById('expTitle').textContent=C.expTitle;
+  const E=perf&&perf.experiments;
+  const mini=(n,l,sub)=>`<div class="pill"><div class="v">${n}</div><div class="s">${l}</div>${sub?`<div class="s" style="color:#9A4A0B">${sub}</div>`:''}</div>`;
+  if(E){
+    document.getElementById('minis').innerHTML=
+      mini(E.total,C.testsRun,E.running?C.running(E.running):'')+
+      mini(E.winRate!=null?Math.round(E.winRate*100)+' %':'–',C.winRate,E.pendingVerdict?C.pending(E.pendingVerdict):'')+
+      mini(E.avgWinnerUplift!=null?'+'+E.avgWinnerUplift.toLocaleString(S.locale,{maximumFractionDigits:1})+' %':'–',C.avgUplift)+
+      mini(E.last90,C.last90);
+  } else if(tl){
+    document.getElementById('minis').innerHTML=mini(tl.totals.tests,C.testsRun)+mini(tl.totals.winners,C.winRate);
+  }
+
+  // Store health: same weeks last year only
+  const hs=document.getElementById('health');
+  if(perf&&perf.health){
+    const H=perf.health, cur=H.current, vs=H.vsLastYear||{};
+    document.getElementById('healthTitle').textContent=C.healthTitle;
+    document.getElementById('healthMeta').textContent=C.healthMeta(dShort(cur.from),dShort(new Date(Date.parse(cur.to)+6*DAYMS)));
+    const p2=v=>(v*100).toLocaleString(S.locale,{maximumFractionDigits:2})+' %';
+    const card=(label,val,key)=>`<div class="kpi"><span class="l">${label}</span><span class="n">${val}</span><span class="s">${C.last13}</span><div class="deltas">${deltaChip(vs[key],C.vsLY)}</div></div>`;
+    const kp=document.getElementById('kpis'); kp.classList.add('k5');
+    const G=perf.growth, cu=G&&G.customers, pc=(a,b)=>a!=null&&b?a/b-1:null;
+    const card2=(label,val,v)=>`<div class="kpi"><span class="l">${label}</span><span class="n">${val}</span><span class="s">${C.last13}</span><div class="deltas">${deltaChip(v,C.vsLY)}</div></div>`;
+    kp.innerHTML=(perf.trustSessions?card(C.rpv,money(cur.rpv),'rpv')+card(C.cr,p2(cur.cr),'cr'):'')+
+      card(C.sales,money(cur.sales),'sales')+card(C.orders,intf(cur.orders),'orders')+card(C.aov,money(cur.aov),'aov')+
+      (!perf.trustSessions&&cu?card2(C.newCust,intf(cu.newCustomers),pc(cu.newCustomers,cu.newCustomersLY))+card2(C.retCust,intf(cu.returning),pc(cu.returning,cu.returningLY)):'');
+    if(!perf.trustSessions){ renderGrowth(G); hs.classList.remove('hide'); return renderOverviewRest(); }
+    const LY=H.lastYear;
+    const max=Math.max(cur.atcRate||0,(LY&&LY.atcRate)||0)||1;
+    const row=(label,a,b)=>`<div class="frow"><span>${label}</span><span class="bars"><span class="b"><span style="width:${(a/max*100).toFixed(1)}%;background:#0099FF"></span></span>${b!=null?`<span class="b"><span style="width:${(b/max*100).toFixed(1)}%;background:#A1A1AA"></span></span>`:''}</span><span class="v">${p2(a)}</span><span class="ly muted">${b!=null?p2(b):''}</span></div>`;
+    document.getElementById('funnelPanel').innerHTML=`<div class="paneltitle">${C.funnel}</div>
+      <div class="fhead"><span></span><span><span style="color:#0099FF">■</span> ${C.now13} &nbsp; <span style="color:#A1A1AA">■</span> ${C.ly13}</span><span>${C.now13}</span><span class="ly">${C.ly13}</span></div>
+      ${row(C.atc,cur.atcRate,LY&&LY.atcRate)}${row(C.ckr,cur.checkoutRate,LY&&LY.checkoutRate)}${row(C.conv,cur.cr,LY&&LY.cr)}
+      ${perf.qualifiedSessions?`<div class="muted" style="margin-top:10px">${C.qualified}</div>`:''}`;
+    hs.classList.remove('hide');
+  } else hs.classList.add('hide');
+  renderOverviewRest();
+}
+function renderGrowth(G){
+  const fp=document.getElementById('funnelPanel');
+  if(!G||!G.bySource||!G.bySource.length){ fp.innerHTML=''; return; }
+  const ch=x=>x==null?'–':pctTxt(x), cls=x=>x==null?'':x>0.005?'up':x<-0.005?'down':'';
+  const rows=G.bySource.filter(r=>r.sales>50||r.salesLY>50).map(r=>`<tr><th scope="row">${esc(C.src[r.key]||r.key)}</th><td>${money(r.salesLY)}</td><td>${money(r.sales)}</td><td><span class="delta ${cls(r.change)}">${ch(r.change)}</span></td><td class="sh">${r.shareOfGrowth==null?'–':Math.round(r.shareOfGrowth*100)+' %'}</td></tr>`).join('');
+  const shop=(G.byChannel||[]).find(x=>/^shop$/i.test(x.key));
+  fp.innerHTML=`<div class="paneltitle">${C.growthTitle}</div><div class="muted" style="margin:-8px 0 12px">${C.growthMeta}</div>
+    <div style="overflow-x:auto"><table class="gtab"><thead><tr><th></th><th>${C.lyCol}</th><th>${C.nowCol}</th><th>${C.chgCol}</th><th class="sh">${C.shareCol}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${shop?`<div class="muted" style="margin-top:10px">${C.viaChannel}: ${money(shop.salesLY)} → ${money(shop.sales)}</div>`:''}
+    <div class="muted" style="margin-top:6px">${C.convHold}</div>`;
+}
+function renderOverviewRest(){
+  // Now & next, from the live task board
+  document.getElementById('nowTitle').textContent=C.nowTitle;
+  const b=curBoard||{progress:[],todo:[]};
+  const li=(t,col)=>`<div class="nowi"><span class="dot" style="background:${col}"></span><span class="nm" title="${escA(t.name)}">${esc(t.name)}</span></div>`;
+  const waiting=[...(b.progress||[]),...(b.todo||[])].filter(t=>/waiting|attente/i.test(t.status||''));
+  const prog=(b.progress||[]).filter(t=>!waiting.includes(t));
+  const next=(b.todo||[]).filter(t=>!waiting.includes(t)).slice(0,3);
+  let nh='';
+  if(prog.length) nh+=`<div class="nowg">${C.inProgress}</div>`+prog.slice(0,5).map(t=>li(t,LANE.progress)).join('');
+  if(waiting.length) nh+=`<div class="nowg">${C.waiting}</div>`+waiting.map(t=>li(t,'#E08A2E')).join('');
+  if(next.length) nh+=`<div class="nowg">${C.next}</div>`+next.map(t=>li(t,LANE.todo)).join('');
+  document.getElementById('nowList').innerHTML=nh||`<div class="muted">${C.nothingNow}</div>`;
+
+  // Latest releases
+  document.getElementById('latestTitle').textContent=C.latest;
+  document.getElementById('toTimeline').textContent=C.seeAll+' →';
+  if(!tl) return;
+  const live=tl.items.filter(i=>i.goLive&&i.goLive>=(tl.day0||'0000'));
+  const latest=[...live].sort((a,b)=>b.goLive.localeCompare(a.goLive)).slice(0,6);
+  document.getElementById('latestList').innerHTML=latest.length?latest.map(i=>`<div class="rel"><span class="d">${dShort(i.goLive)}</span><span class="nm" title="${escA(i.name)}">${esc(i.name)}</span>${stageChip(i.stage)}</div>`).join(''):`<div class="muted">${C.noItems}</div>`;
+}
+function stageChip(s){ if(!s) return `<span class="chip st">${C.ops}</span>`; return `<span class="chip st"><span class="sw" style="background:${STAGE_COL[s]}"></span>${C.stage[s]}</span>`; }
+// A test with no verdict is 'running' until its end date, then 'pending' (finished, verdict not entered yet).
+const testState=i=>i.verdict||((i.end||i.goLive)&&(i.end||i.goLive)<new Date().toISOString().slice(0,10)?'pending':'running');
+function verdictChip(i){
+  if(i.type!=='test') return `<span class="chip vd">${C.type[i.type]||''}</span>`;
+  const v=testState(i), cls=v==='winner'?'win':v==='loser'?'lose':v==='running'?'run':'';
+  return `<span class="chip vd ${cls}">${C.type.test} · ${C.verdict[v]||v}</span>`;
+}
+
+// ── timeline chart ──
+const METRICS={ sales:{l:()=>C.sales,sum:true,f:w=>w.s}, orders:{l:()=>C.orders,sum:true,f:w=>w.o}, aov:{l:()=>C.aov,num:w=>w.s,den:w=>w.o},
+  rpv:{l:()=>C.rpv,needsSessions:true,calc:win=>{ const v=win.reduce((s,x)=>s+x.v,0), o=win.reduce((s,x)=>s+x.o,0); return v&&o?(win.reduce((s,x)=>s+x.x,0)/v)*(win.reduce((s,x)=>s+x.s,0)/o):null; }},
+  cr:{l:()=>C.cr,num:w=>w.x,den:w=>w.v,needsSessions:true,pct:true} };
+function renderMetricSeg(){
+  document.getElementById('tlTitle').textContent=C.tlTitle;
+  const keys=(sessionsOk()?['rpv','cr','aov','sales','orders']:['sales','orders','aov']).filter(k=>!METRICS[k].needsSessions||sessionsOk());
+  if(!perf){ document.getElementById('metricSeg').innerHTML=''; return; }
+  if(!keys.includes(metric)) metric=keys[0];
+  document.getElementById('metricSeg').innerHTML=keys.map(k=>`<button type="button" data-m="${k}" aria-pressed="${k===metric}">${METRICS[k].l()}</button>`).join('');
+}
+// 4-week rolling value: sums are averaged per week, ratios are recomputed on the 4-week totals.
+function rolling(weeks,m){
+  const M=METRICS[m];
+  return weeks.map((w,i)=>{ const win=weeks.slice(Math.max(0,i-3),i+1);
+    if(M.sum) return win.reduce((s,x)=>s+M.f(x),0)/win.length;
+    if(M.calc) return M.calc(win);
+    const n=win.reduce((s,x)=>s+M.num(x),0), d=win.reduce((s,x)=>s+M.den(x),0); return d?n/d:null; });
+}
+function niceMax(v){ if(!v) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))), r=v/p; return (r<=1.2?1.2:r<=1.5?1.5:r<=2?2:r<=2.5?2.5:r<=3?3:r<=4?4:r<=5?5:r<=6?6:r<=8?8:10)*p; }
+function renderChart(){
+  const svg=document.getElementById('chart');
+  if(document.getElementById('viewTimeline').classList.contains('hide')) return;
+  const W=1000, X0=104, X1=984, PT=14, PH=200, PY=PT+PH, LT=PY+26, LH=22, LB=LT+STAGES.length*LH, H=LB+28;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('aria-label',C.tlTitle);
+  const weeksAll=perf?perf.weeks:[];
+  const d0=perf?perf.day0:(tl&&tl.day0);
+  if(!d0){ svg.innerHTML=''; return; }
+  const d0t=Date.parse(d0);
+  const firstW=weeksAll.length?Date.parse(weeksAll[0].w):d0t-13*WEEKMS;
+  const tStart=Math.max(firstW,d0t-13*WEEKMS), tEnd=weeksAll.length?Date.parse(weeksAll[weeksAll.length-1].w)+WEEKMS:Date.now();
+  const x=t=>X0+(t-tStart)/(tEnd-tStart)*(X1-X0);
+  let g='';
+  // baseline shading + Day 0 rule
+  g+=`<rect x="${X0}" y="${PT}" width="${Math.max(0,x(d0t)-X0)}" height="${PH}" fill="#F4F4F5"></rect>`;
+  g+=`<text x="${X0+6}" y="${PT+14}">${esc(C.before)}</text>`;
+  // month ticks
+  const span=(tEnd-tStart)/(30*DAYMS), every=span>15?3:span>8?2:1;
+  const m=new Date(tStart); m.setUTCDate(1); m.setUTCHours(0,0,0,0); m.setUTCMonth(m.getUTCMonth()+1);
+  for(let i=0; m.getTime()<tEnd; i++, m.setUTCMonth(m.getUTCMonth()+1)){
+    const xx=x(m.getTime());
+    g+=`<line x1="${xx}" x2="${xx}" y1="${PT}" y2="${LB}" stroke="#EDEDF0"></line>`;
+    if(m.getUTCMonth()%every===0) g+=`<text x="${xx}" y="${LB+18}" text-anchor="middle">${new Date(m).toLocaleDateString(S.locale,{month:'short',year:'2-digit'})}</text>`;
+  }
+  if(perf&&weeksAll.length){
+    const M=METRICS[metric], roll=rolling(weeksAll,metric);
+    const idx=new Map(weeksAll.map((w,i)=>[w.w,i]));
+    const pts=[], ly=[];
+    weeksAll.forEach((w,i)=>{ const t=Date.parse(w.w); if(t<tStart) return;
+      pts.push([t+3.5*DAYMS,roll[i],w.w]);
+      const j=idx.get(new Date(t-364*DAYMS).toISOString().slice(0,10)); ly.push([t+3.5*DAYMS,j!=null?roll[j]:null]); });
+    const vmax=niceMax(Math.max(...pts.map(p=>p[1]||0),...ly.map(p=>p[1]||0)));
+    const y=v=>PY-v/vmax*PH;
+    const fmt=v=>M.pct?(v*100).toLocaleString(S.locale,{maximumFractionDigits:2})+' %':metric==='orders'?intf(v):money(v,true);
+    for(let k=0;k<=4;k++){ const v=vmax*k/4, yy=y(v); g+=`<line x1="${X0}" x2="${X1}" y1="${yy}" y2="${yy}" stroke="${k?'#EDEDF0':'#D4D4D8'}"></line><text x="${X0-8}" y="${yy+4}" text-anchor="end">${esc(fmt(v))}</text>`; }
+    const path=arr=>{ let d='',on=false; arr.forEach(p=>{ if(p[1]==null){on=false;return;} d+=(on?'L':'M')+x(p[0]).toFixed(1)+' '+y(p[1]).toFixed(1); on=true; }); return d; };
+    g+=`<path d="${path(ly)}" fill="none" stroke="#A1A1AA" stroke-width="1.6" stroke-dasharray="5 4"></path>`;
+    g+=`<path d="${path(pts)}" fill="none" stroke="#0099FF" stroke-width="2.6" stroke-linejoin="round"></path>`;
+    // hover targets: one per week, native tooltip
+    const bw=(X1-X0)/pts.length;
+    pts.forEach((p,i)=>{ const l=ly[i][1]; g+=`<rect x="${(x(p[0])-bw/2).toFixed(1)}" y="${PT}" width="${bw.toFixed(1)}" height="${PH}" fill="transparent"><title>${esc(dShort(p[2]))} · ${esc(M.l())}: ${esc(fmt(p[1]))}${l!=null?` · ${esc(C.ly)}: ${esc(fmt(l))}`:''}</title></rect>`; });
+  }
+  // Day 0 rule on top of everything in the plot
+  g+=`<line x1="${x(d0t)}" x2="${x(d0t)}" y1="${PT}" y2="${LB}" stroke="#09090B" stroke-width="1.2" stroke-dasharray="3 3"></line>`;
+  g+=`<text x="${x(d0t)+5}" y="${PT+14}" style="fill:#09090B;font-weight:600">${esc(C.day0)}</text>`;
+  // lanes
+  STAGES.forEach((s,i)=>{ const yy=LT+i*LH+LH/2;
+    g+=`<line x1="${X0}" x2="${X1}" y1="${yy}" y2="${yy}" stroke="#EDEDF0"></line><text class="lane-l" x="${X0-8}" y="${yy+4}" text-anchor="end">${esc(C.stage[s])}</text>`; });
+  if(tl) tl.items.forEach(it=>{
+    if(!it.stage) return; const yy=LT+STAGES.indexOf(it.stage)*LH+LH/2;
+    if(it.type==='test'&&it.start){
+      const a=Math.max(Date.parse(it.start),tStart), b=Math.min(Date.parse(it.end||it.goLive||it.start)+DAYMS,tEnd); if(b<tStart||a>tEnd) return;
+      const st=testState(it), col=VERDICT_COL[st], wd=Math.max(5,x(b)-x(a));
+      g+=`<rect x="${x(a).toFixed(1)}" y="${yy-5}" width="${wd.toFixed(1)}" height="10" rx="3" fill="${col||'#FFFFFF'}" stroke="${col||(st==='running'?'#FB923C':'#71717A')}" stroke-width="1.5"><title>${esc(it.name)} · ${esc(dShort(it.start))} → ${esc(dShort(it.end||it.goLive||it.start))} · ${esc(C.verdict[st]||'')}</title></rect>`;
+    } else if(it.goLive){
+      const t=Date.parse(it.goLive); if(t<tStart||t>tEnd) return;
+      g+=`<circle cx="${x(t).toFixed(1)}" cy="${yy}" r="4.5" fill="${STAGE_COL[it.stage]}" stroke="#FFFFFF" stroke-width="1.2"><title>${esc(dShort(it.goLive))} · ${esc(it.name)}</title></circle>`;
+    }
+  });
+  svg.innerHTML=g;
+  document.getElementById('legend').innerHTML=(perf?`<span><i></i>${esc(METRICS[metric].l())} · ${C.rolling}</span><span><i class="ly"></i>${C.ly}</span>`:'')+
+    `<span><i class="dot"></i>${C.live}</span><span><i class="bar"></i>${C.testBar}</span><span><i class="bar" style="background:#fff;border:1.5px solid #71717A"></i>${C.verdict.pending}</span>`;
+}
+function renderLog(){
+  document.getElementById('logTitle').textContent=C.logTitle;
+  if(!tl){ document.getElementById('filters').innerHTML=''; document.getElementById('log').innerHTML=''; return; }
+  const items=tl.items.filter(i=>i.goLive||i.start);
+  const present=[...STAGES.filter(s=>items.some(i=>i.stage===s)),...(items.some(i=>!i.stage)?['ops']:[])];
+  if(stageFilter!=='all'&&!present.includes(stageFilter)) stageFilter='all';
+  document.getElementById('filters').innerHTML=[`<button type="button" data-f="all" aria-pressed="${stageFilter==='all'}">${C.all}</button>`,
+    ...present.map(s=>`<button type="button" data-f="${s}" aria-pressed="${stageFilter===s}"><span class="sw" style="background:${STAGE_COL[s]||'#A1A1AA'}"></span>${s==='ops'?C.ops:C.stage[s]}</button>`)].join('');
+  const shown=items.filter(i=>stageFilter==='all'||(stageFilter==='ops'?!i.stage:i.stage===stageFilter))
+    .sort((a,b)=>(b.goLive||b.start).localeCompare(a.goLive||a.start));
+  let h='', month='';
+  const LOG_CAP=40;
+  (logAll?shown:shown.slice(0,LOG_CAP)).forEach(i=>{ const d=i.goLive||i.start, mk=d.slice(0,7);
+    if(mk!==month){ month=mk; h+=`<div class="logm">${cap1(new Date(d).toLocaleDateString(S.locale,{month:'long',year:'numeric'}))}</div>`; }
+    h+=`<div class="rel4"><span class="d">${dShort(d)}</span>${stageChip(i.stage)}<span class="nm" title="${escA(i.name)}">${esc(i.name)}</span>${verdictChip(i)}</div>`; });
+  if(!logAll&&shown.length>LOG_CAP) h+=`<div style="margin-top:12px"><button class="linkbtn" type="button" id="logMore">${C.showAll(shown.length)}</button></div>`;
+  document.getElementById('log').innerHTML=h||`<div class="muted">${C.noItems}</div>`;
+}
+function resetCockpit(){
+  perf=null; tl=null; cockpitFor=null; stageFilter='all'; logAll=false;
+  document.getElementById('tabs').classList.add('hide');
+  document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected','false'));
+  ['viewOverview','viewTimeline'].forEach(v=>document.getElementById(v).classList.add('hide'));
+  document.getElementById('viewWork').classList.remove('hide');
+  ['kpis','minis','latestList','nowList','metricSeg','legend','filters','log','roiPanel','funnelPanel','healthTitle','healthMeta'].forEach(id=>document.getElementById(id).innerHTML='');
+  document.getElementById('roiPanel').classList.add('hide'); document.getElementById('health').classList.add('hide'); curBoard=null;
+  document.getElementById('chart').innerHTML='';
+  const e=document.getElementById('ovError'); e.textContent=''; e.classList.add('hide');
+}
+document.getElementById('tabs').addEventListener('click',e=>{ const b=e.target.closest('button[data-view]'); if(b) setView(b.dataset.view); });
+document.getElementById('tabs').addEventListener('keydown',e=>{
+  if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft') return;
+  const bs=[...document.querySelectorAll('#tabs button')].filter(b=>!b.hidden), i=bs.indexOf(document.activeElement); if(i<0) return;
+  const n=bs[(i+(e.key==='ArrowRight'?1:-1)+bs.length)%bs.length]; n.focus(); setView(n.dataset.view);
+});
+document.getElementById('toTimeline').addEventListener('click',()=>setView('viewTimeline'));
+document.getElementById('metricSeg').addEventListener('click',e=>{ const b=e.target.closest('button[data-m]'); if(!b) return; metric=b.dataset.m; renderMetricSeg(); renderChart(); });
+document.getElementById('filters').addEventListener('click',e=>{ const b=e.target.closest('button[data-f]'); if(!b) return; stageFilter=b.dataset.f; logAll=false; renderLog(); });
+document.getElementById('log').addEventListener('click',e=>{ if(e.target.id==='logMore'){ logAll=true; renderLog(); } });
+
+// expand/collapse task detail (event delegation)
+document.addEventListener('click',ev=>{
+  const card=ev.target.closest('.tcard.clk'); if(!card) return;
+  const item=card.closest('.titem'); const det=item.querySelector('.tdetail');
+  if(det){ det.classList.toggle('hide'); item.classList.toggle('open'); }
+});
+const shellEl=document.getElementById('shell'), gateEl=document.getElementById('gate');
+const GATE={ hint:'Enter your website to open your dashboard.', hint2:'Entrez votre site pour ouvrir votre tableau de bord.', ph:'yourdomain.com', enter:'Enter', wrong:'Wrong domain — try again · Domaine incorrect', err:'Something went wrong · Une erreur est survenue', invalid:'Unknown portal link · Lien de portail inconnu' };
+const normDomain=v=>String(v||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/+$/,'');
+function showGate(){
+  shellEl.style.display='none'; gateEl.classList.remove('hide');
+  setTimeout(()=>{const i=document.getElementById('gatePw'); if(i)i.focus();},60);
+}
+function hideGate(){ gateEl.classList.add('hide'); shellEl.style.display=''; }
+async function tryPassword(){
+  const inp=document.getElementById('gatePw'), msg=document.getElementById('gateMsg'), btn=document.getElementById('gateBtn');
+  const pw=normDomain(inp.value); if(!pw) return;
+  btn.disabled=true; msg.textContent='…'; msg.className='gatemsg';
+  try{
+    if(await loadWith(pw)){
+      try{localStorage.setItem('cxoportal:pw',pw);}catch(e){}
+      msg.textContent='';
+      document.getElementById('gateForm').style.display='none';
+      const succ=document.getElementById('gateSuccess');
+      document.getElementById('gateSuccessLabel').textContent=(S&&S.locale==='fr-FR')?'Connexion réussie':"You're in";
+      succ.style.display='block';
+      requestAnimationFrame(()=>succ.classList.add('play'));
+      setTimeout(()=>{ shellEl.style.display=''; gateEl.classList.add('done'); }, 1050);
+      setTimeout(()=>{
+        gateEl.classList.add('hide'); gateEl.classList.remove('done');
+        succ.style.display='none'; succ.classList.remove('play');
+        document.getElementById('gateForm').style.display='';
+        btn.textContent=GATE.enter; btn.disabled=false;
+      }, 1500);
+      return;
+    }
+    msg.textContent=GATE.wrong; msg.className='gatemsg err';
+  }catch(e){ msg.textContent=GATE.err; msg.className='gatemsg err'; }
+  btn.disabled=false;
+}
+async function init(){
+  document.getElementById('gateHint').textContent=GATE.hint;
+  document.getElementById('gateHint2').textContent=GATE.hint2;
+  document.getElementById('gatePw').placeholder=GATE.ph;
+  document.getElementById('gateBtn').textContent=GATE.enter;
+  const urlKey=new URLSearchParams(location.search).get('k');
+  if(urlKey){ try{ if(await loadWith(urlKey)){ hideGate(); return; } }catch(e){} }
+  let saved=null; try{ saved=localStorage.getItem('cxoportal:pw'); }catch(e){}
+  if(saved){ try{ if(await loadWith(saved)){ hideGate(); return; } }catch(e){} try{localStorage.removeItem('cxoportal:pw');}catch(e){} }
+  showGate();
+}
+document.getElementById('refresh').addEventListener('click',refresh);
+document.getElementById('reqSend').addEventListener('click',submitReq);
+document.getElementById('mPrev').addEventListener('click',()=>goMonth(-1));
+document.getElementById('mNext').addEventListener('click',()=>goMonth(1));
+document.getElementById('logout').addEventListener('click',()=>{
+  try{localStorage.removeItem('cxoportal:pw');}catch(e){}
+  accessKey=null; selMonth=null; monthsAvail=[]; S=STRINGS.en;
+  resetView(); resetCockpit();
+  try{localStorage.removeItem('cxoportal:tab');}catch(e){}
+  document.getElementById('scorecard').classList.add('hide');
+  document.getElementById('grid').classList.add('hide');
+  document.getElementById('updated').textContent='';
+  if(location.search){ try{ history.replaceState(null,'',location.pathname); }catch(e){} }
+  const inp=document.getElementById('gatePw'); if(inp) inp.value='';
+  const m=document.getElementById('gateMsg'); if(m){ m.textContent=''; m.className='gatemsg'; }
+  showGate();
+});
+document.getElementById('gateBtn').addEventListener('click',tryPassword);
+document.getElementById('gatePw').addEventListener('keydown',e=>{ if(e.key==='Enter') tryPassword(); });
+init();
+</script>
+</body>
+</html>

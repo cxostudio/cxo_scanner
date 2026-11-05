@@ -6,14 +6,14 @@ import { Cog } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { z } from "zod";
 import { toast } from "react-toastify";
-import SelectButton from "./components/SelectButton";
 import emailjs from "@emailjs/browser";
+import { ScanDevices } from "../components/ScanDevices";
 import {
-  DualViewportLoader,
   type InstantPreviewHint,
-} from "./components/DualViewportLoader";
-import { detectPageTypeFromUrl } from "@/lib/conversionCheckpoints/pageType";
-import { QuadrantScanSequence } from "./components/QuadrantScanSequence";
+} from "../components/DualViewportLoader";
+import { api, asset, START_URL } from "@/lib/base";
+import { detectPageTypeFromUrl, isTestEmail } from "@/lib/conversionCheckpoints/pageType";
+import { QuadrantScanSequence } from "../components/QuadrantScanSequence";
 
 interface Rule {
   id: string;
@@ -69,6 +69,9 @@ function persistScanPreview(key: string, value: string) {
     /* ignore */
   }
 }
+/** Must match the server default in /api/scan (SCAN_ENGINE). */
+const SCAN_ENGINE = process.env.NEXT_PUBLIC_SCAN_ENGINE || "v2";
+
 const LOADER_MESSAGES = [
   "Capturing page screenshots",
   "Scanning sections",
@@ -196,7 +199,7 @@ export default function Home() {
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([]);
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set());
-  const analyzeTopRef = useRef<HTMLDivElement | null>(null);
+  const analyzeTopRef = useRef<HTMLElement | null>(null);
   const totalSteps = 3;
 
   // Step 1 buttons data
@@ -232,7 +235,7 @@ export default function Home() {
     "Analyzing user experience and interface",
     "Analyzing content and copy effectiveness",
     "Generating conversion recommendations",
-    "Finalizing your audit report",
+    "Finalizing your scan report",
   ] as const;
   const ANALYSIS_STEP_COUNT = analysisSteps.length;
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
@@ -292,7 +295,7 @@ export default function Home() {
   // Warm the /scanner route while the user sees the analyze UI so client navigation is faster after the scan.
   useEffect(() => {
     if (!showAnalyze) return;
-    router.prefetch("/scanner");
+    router.prefetch("/results");
   }, [showAnalyze, router]);
 
   // While analyze UI is hidden, reset step row removal state.
@@ -507,6 +510,8 @@ export default function Home() {
         ruleTitle: z.string(),
         passed: z.boolean(),
         reason: z.string(),
+        status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
+        coveredByShopify: z.boolean().optional(),
         checkpoint: z
           .object({
             requiredActions: z.string(),
@@ -519,6 +524,7 @@ export default function Home() {
               }),
             ),
           })
+          .passthrough()
           .optional(),
       }),
     );
@@ -569,7 +575,7 @@ export default function Home() {
             });
           }, pulseMs);
 
-          const response = await fetch("/api/scan", {
+          const response = await fetch(api("/scan"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -589,11 +595,20 @@ export default function Home() {
               response,
               `Failed to scan batch ${i + 1}`,
             );
+            // 422: the page can't be scanned (404, redirect, bot wall); 429: daily limit.
+            // Retrying won't help: stop and show the message with "Try again".
+            if (response.status === 422 || response.status === 429) {
+              throw Object.assign(new Error(message), { final: true });
+            }
             throw new Error(message);
           }
 
           const data = await response.json();
           const batchResults = ScanResultsSchema.parse(data.results);
+          // test scans are saved to the lab (app/lab): the results page links there
+          if (data.labId) {
+            try { localStorage.setItem("scanLabId", data.labId); } catch {}
+          }
 
           // Remove duplicates before adding (check by ruleId)
           const existingRuleIds = new Set(allResults.map((r) => r.ruleId));
@@ -635,6 +650,7 @@ export default function Home() {
           batchSucceeded = true;
           break;
         } catch (err) {
+          if ((err as { final?: boolean } | null)?.final) throw err;
           lastBatchError = err;
           console.error(
             `Error processing batch ${i + 1} (attempt ${attempt}/${BATCH_MAX_ATTEMPTS}):`,
@@ -656,10 +672,19 @@ export default function Home() {
         console.error(
           `Batch ${i + 1} failed after ${BATCH_MAX_ATTEMPTS} attempts`,
         );
-        // Fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
+        // Engine v2 judges the whole page at once: no per-rule fallback (it would rerun the
+        // full capture per rule). Show the error card with "Try again" instead.
+        if (SCAN_ENGINE !== "v1") {
+          console.error("Scan failed:", lastBatchError);
+          throw new Error("We couldn't finish the scan. This happens with some heavy pages, please try again.");
+        }
+        // Engine v1 fallback: split into single-rule scans so one heavy batch doesn't fail entirely.
         if (batch.rules.length > 1) {
           console.warn(`Attempting single-rule fallback for batch ${i + 1}...`);
-          for (const rule of batch.rules) {
+          // 6 at a time: one by one, 42 checks took ~19 minutes; in parallel it stays ~2-3
+          const FALLBACK_CONCURRENCY = 6;
+          const queue = [...batch.rules];
+          const checkOne = async (rule: (typeof batch.rules)[number]) => {
             let singleRuleSucceeded = false;
             let singleRuleError: unknown = null;
             for (
@@ -668,7 +693,7 @@ export default function Home() {
               singleAttempt++
             ) {
               try {
-                const singleRes = await fetch("/api/scan", {
+                const singleRes = await fetch(api("/scan"), {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
@@ -718,7 +743,12 @@ export default function Home() {
                 reason: `Error processing rule ${rule.id} in fallback: ${singleRuleError instanceof Error ? singleRuleError.message : "Unknown error"}`,
               });
             }
-          }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(FALLBACK_CONCURRENCY, queue.length) }, async () => {
+              while (queue.length) await checkOne(queue.shift()!);
+            }),
+          );
         } else {
           batch.rules.forEach((rule) => {
             allResults.push({
@@ -747,7 +777,7 @@ export default function Home() {
     }
 
     try {
-      const finalResponse = await fetch("/api/scan/combine", {
+      const finalResponse = await fetch(api("/scan/combine"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -766,6 +796,8 @@ export default function Home() {
               ruleTitle: z.string(),
               passed: z.boolean(),
               reason: z.string(),
+              status: z.enum(["pass", "fail", "na", "unknown"]).optional(),
+              coveredByShopify: z.boolean().optional(),
               checkpoint: z
                 .object({
                   requiredActions: z.string(),
@@ -778,6 +810,7 @@ export default function Home() {
                     }),
                   ),
                 })
+                .passthrough()
                 .optional(),
             }),
           )
@@ -849,7 +882,7 @@ export default function Home() {
       typeof s === "string" && s.length > 80;
 
     try {
-      const response = await fetch("/api/preview_website", {
+      const response = await fetch(api("/preview_website"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -971,7 +1004,51 @@ export default function Home() {
     }
   };
 
+  // Arriving from the cxo.studio onboarding (/start): the questions were already
+  // answered there, so prefill URL, email and revenue, jump to the last step and
+  // start the scan right away when `start=1`.
+  const [autoStart, setAutoStart] = useState(false);
+  const prefillDone = useRef(false);
+  useEffect(() => {
+    // runs once: the answers are removed from the address bar below, so a second run
+    // (React strict mode, fast refresh) must not mistake that for "no answers"
+    if (prefillDone.current) return;
+    prefillDone.current = true;
+    const q = new URLSearchParams(window.location.search);
+    const u = q.get("url");
+    const e = q.get("email");
+    // no answers: the questions live on cxo.studio/start
+    if (!u || !e) {
+      const fr = q.get("locale") === "fr" || navigator.language?.startsWith("fr");
+      window.location.replace(fr ? START_URL.replace("/start", "/fr/start") : START_URL);
+      return;
+    }
+    setWebsiteUrl(u);
+    setEmail(e);
+    setSelectedChallenge(q.get("challenge") || "Both");
+    const rev = q.get("revenue");
+    if (rev) setSelectedRevenue(rev);
+    // order value + conversion rate let the results page estimate visitors and revenue per visitor
+    try {
+      localStorage.setItem("scanAov", q.get("aov") || "");
+      localStorage.setItem("scanCr", q.get("cr") || "");
+      localStorage.setItem("scanLocale", q.get("locale") || "en");
+    } catch {}
+    setCurrentStep(3);
+    setAutoStart(true);
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+  useEffect(() => {
+    if (autoStart && websiteUrl && email) {
+      setAutoStart(false);
+      handleStartScan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, websiteUrl, email]);
+
   const handleStartScan = async () => {
+    // the results page picks its next step from the revenue band (components/YourPath)
+    try { localStorage.setItem("scanRevenue", selectedRevenue ?? ""); } catch {}
     setUrlError("");
     setEmailError("");
 
@@ -1004,7 +1081,7 @@ export default function Home() {
     // Daily per-email scan-limit gate. If blocked, stop before any scanning
     // (no AI spend). Fails open if the check itself errors.
     try {
-      const limitRes = await fetch("/api/scan/limit", {
+      const limitRes = await fetch(api("/scan/limit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: emailTrimmed, scanId }),
@@ -1035,7 +1112,11 @@ export default function Home() {
       //    (product / category / other) share ONE 3-day browser cache entry, not one per URL.
       const pageTypeKey = detectPageTypeFromUrl(validUrl);
       const cpRes = await fetch(
-        `/api/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}`,
+        api(
+          `/conversion-checkpoints?pageType=${encodeURIComponent(pageTypeKey)}` +
+            // test mode also lists Draft checkpoints; everyone else shares one cached list
+            (isTestEmail(emailTrimmed) ? `&email=${encodeURIComponent(emailTrimmed)}` : ""),
+        ),
       );
       const cpRaw = await cpRes.text();
       if (!cpRes.ok) {
@@ -1127,6 +1208,7 @@ export default function Home() {
       }
       try {
         localStorage.removeItem("scanPreviewMobile");
+        localStorage.removeItem("scanLabId");
         localStorage.removeItem("scanPreviewDesktop");
       } catch {
         /* ignore */
@@ -1181,7 +1263,7 @@ export default function Home() {
       await new Promise<void>((r) =>
         window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS),
       );
-      router.replace("/scanner");
+      router.replace("/results");
 
       setTimeout(() => {
         let passResult: string | number = "N/A";
@@ -1232,11 +1314,11 @@ export default function Home() {
           )
           .catch((err) => console.error("EmailJS failed:", err));
 
-        toast.success("Scan completed successfully!");
       }, 0);
     } catch (err) {
       console.error(err);
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      // back to the card with "Try again" instead of a dead loader
+      setUrlError(err instanceof Error && err.message ? err.message : "Something went wrong during the scan.");
       setShowAnalyze(false);
     } finally {
       // Only reset button loading. Do NOT setShowAnalyze(false) here on success —
@@ -1279,645 +1361,143 @@ export default function Home() {
     return () => window.clearInterval(id);
   }, [isLoading]);
 
+  const host = instantPreviewFromWebsiteUrl(websiteUrl)?.host ?? "";
+  const STEP_LABELS = stepLabels(rules.length);
+  // the label never runs ahead of the bar: both read the same clamped value, the label rounds down
+  const barPct = Math.min(100, Math.max(0, displayProgressPercent));
+  const pct = Math.floor(barPct);
+  const blocking = urlError || emailError;
+
   return (
-    <main className="flex items-start justify-center md:px-4 min-h-screen w-full overflow-x-hidden  bg-gray-100">
-      <div
-        className={`w-full mx-auto px-4 sm:px-6  ${showAnalyze ? "max-w-[1400px]" : "sm:h-screen md:h-auto max-w-[600px]"}`}
-      >
-        {/* Header with Logo and Progress */}
-        {!showAnalyze && (
-          <>
-            {/* Logo */}
+    <main className={`cxo-page ${showAnalyze ? "lg:!pb-8" : ""}`} ref={analyzeTopRef}>
+      <a className={`cxo-logo ${showAnalyze ? "lg:!mb-8" : ""}`} href="https://cxo.studio" aria-label="CXO studio">
+        <img src={asset("/cxo-logo.png")} alt="CXO studio" />
+      </a>
 
-            <motion.div
-              className="text-center mt-8 mb-9"
-              initial={{ opacity: 0, y: -12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: [0.25, 0.1, 0.25, 1] }}
-            >
-              <img
-                src="/cxo_studio_logo.png"
-                alt="logo"
-                className="mx-auto w-[117.54px] h-[20px] object-cover"
-              />
-            </motion.div>
+      <div className={`cxo-head ${showAnalyze ? "lg:!mb-10" : ""}`}>
+        <h1 className={`cxo-reveal break-words ${showAnalyze ? "lg:!mb-2 lg:!mt-0 lg:!text-[clamp(30px,3.4vw,44px)]" : ""}`}>
+          {blocking ? "We couldn’t start your scan" : showAnalyze ? (host ? `Scanning ${host}` : "Scanning your product page") : "Preparing your scan"}
+        </h1>
+        <p className="cxo-reveal cxo-reveal-1 !text-[14px] !leading-[1.5] !tracking-normal sm:!text-[15px]">
+          {blocking ? "Check the details below, then try again." : "About a minute. Keep this tab open."}
+        </p>
+      </div>
 
-            {/* Back Button and Progress Bar */}
-            <motion.div
-              className="flex items-center gap-3"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.5,
-                ease: [0.25, 0.1, 0.25, 1],
-                delay: 0.08,
-              }}
-            >
-              <motion.button
-                type="button"
-                onClick={handleBack}
-                className="w-[35px] h-[35px]  rounded-[10px] bg-white border border-[#E4E4E7] flex items-center justify-center hover:bg-gray-200 shrink-0 cursor-pointer"
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
-                transition={{
-                  type: "tween",
-                  duration: 0.25,
-                  ease: [0.25, 0.1, 0.25, 1],
-                }}
-              >
-                <span className="text-gray-700 text-xl mb-1">‹</span>
-              </motion.button>
-              {/* Progress Bar */}
-              <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
-                <motion.div
-                  className="bg-gray-600 h-2 rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progressPercentage}%` }}
-                  transition={{ duration: 0.65, ease: [0.4, 0, 0.2, 1] }}
-                />
-              </div>
-            </motion.div>
-          </>
-        )}
-        {/* Step Content - min-height keeps logo/progress bar fixed when step height changes */}
-        <div className="w-full mx-auto">
-          {!showAnalyze ? (
+      {!showAnalyze ? (
+        <div className="cxo-card cxo-reveal cxo-reveal-2 mx-auto max-w-[720px]">
+          {blocking ? (
             <>
-              <AnimatePresence mode="wait">
-                {currentStep === 1 && (
-                  <motion.div
-                    key="step1"
-                    className="min-h-[350px]"
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -24 }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-                  >
-                    <motion.h2
-                      className="text-2xl  tracking-[-0.03em] font-plus-jakarta   font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.45,
-                        ease: [0.25, 0.1, 0.25, 1],
-                        delay: 0.06,
-                      }}
-                    >
-                      What's your biggest challenge right now?
-                    </motion.h2>
-                    <div role="radiogroup" aria-label="Biggest challenge">
-                      {step1Buttons.map((button, i) => (
-                        <motion.div
-                          key={button.value}
-                          initial={{ opacity: 0, y: 14 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{
-                            duration: 0.4,
-                            ease: [0.25, 0.1, 0.25, 1],
-                            delay: 0.38 + i * 0.08,
-                          }}
-                        >
-                          <SelectButton
-                            label={button.label}
-                            value={button.value}
-                            selectedValue={selectedChallenge}
-                            onClick={setSelectedChallenge}
-                          />
-                        </motion.div>
-                      ))}
-                    </div>
-                  </motion.div>
+              <p className="cxo-q">{urlError || emailError}</p>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <a className="cxo-btn cxo-btn-primary sm:flex-1" href={START_URL}>Change my answers<Chevron /></a>
+                {!emailError.toLowerCase().includes("limit") && (
+                  <button type="button" className="cxo-btn cxo-btn-ghost sm:flex-1" onClick={() => void handleStartScan()}>Try again</button>
                 )}
-
-                {currentStep === 2 && (
-                  <motion.div
-                    key="step2"
-                    className="min-h-[350px]"
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -24 }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-                  >
-                    <motion.h2
-                      className="text-2xl tracking-[-0.03em] font-plus-jakarta  font-semibold text-[#09090b] text-center mt-[35px] mb-[28px]"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.45,
-                        ease: [0.25, 0.1, 0.25, 1],
-                        delay: 0.06,
-                      }}
-                    >
-                      What's your average online revenue?
-                    </motion.h2>
-                    <div
-                      className="mt-8"
-                      role="radiogroup"
-                      aria-label="Average online revenue"
-                    >
-                      {step2Buttons.map((button, i) => (
-                        <motion.div
-                          key={button.value}
-                          initial={{ opacity: 0, y: 14 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{
-                            duration: 0.4,
-                            ease: [0.25, 0.1, 0.25, 1],
-                            delay: 0.38 + i * 0.08,
-                          }}
-                        >
-                          <SelectButton
-                            label={button.label}
-                            value={button.value}
-                            selectedValue={selectedRevenue}
-                            onClick={setSelectedRevenue}
-                          />
-                        </motion.div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-
-                {currentStep === 3 && (
-                  <motion.div
-                    key="step3"
-                    className="min-h-[350px]"
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -24 }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-                  >
-                    <motion.h2
-                      className=" text-center text-2xl md:text-4xl font-semibold font-plus-jakarta leading-[48px] tracking-[-0.03em] me-[12px] mt-[35px]"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.45,
-                        ease: [0.25, 0.1, 0.25, 1],
-                        delay: 0.06,
-                      }}
-                    >
-                      <span className="text-[#757575]">
-                        <i>You're almost done!</i>
-                      </span>
-                      <br />
-                      <span className="text-[#09090b]">
-                        Let's finish your audit
-                      </span>
-                    </motion.h2>
-
-                    <motion.div
-                      className="mt-8"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{
-                        duration: 0.4,
-                        ease: [0.25, 0.1, 0.25, 1],
-                        delay: 0.18,
-                      }}
-                    >
-                      <label className="block text-sm font-semibold text-gray-900">
-                        Website URL: <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="url"
-                        value={websiteUrl}
-                        onChange={(e) => {
-                          setWebsiteUrl(e.target.value);
-                          if (urlError) setUrlError("");
-                        }}
-                        onKeyDown={handleAccessResultsEnter}
-                        placeholder="Enter the URL of your main product page"
-                        className={` w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${urlError ? "border-red-500" : "border-gray-300"}`}
-                        required
-                        aria-invalid={!!urlError}
-                        aria-describedby={urlError ? "url-error" : undefined}
-                      />
-                      {urlError && (
-                        <p
-                          id="url-error"
-                          className="mt-1.5 text-sm text-red-500"
-                        >
-                          {urlError}
-                        </p>
-                      )}
-                      <div className="relative mt-4">
-                        <label className="block text-sm font-semibold text-gray-900">
-                          Email address: <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="email"
-                          value={email}
-                          onChange={(e) => {
-                            setEmail(e.target.value);
-                            if (emailError) setEmailError("");
-                          }}
-                          onKeyDown={handleAccessResultsEnter}
-                          placeholder="Enter your best email address"
-                          className={`w-full mt-2 px-4 py-3 border rounded-lg bg-white text-base focus:outline-none ${emailError ? "border-red-500" : "border-gray-300"}`}
-                          required
-                          aria-invalid={!!emailError}
-                          aria-describedby={
-                            emailError ? "email-error" : undefined
-                          }
-                        />
-                        {emailError && (
-                          <p
-                            id="email-error"
-                            className="mt-1.5 text-sm text-red-500"
-                          >
-                            {emailError}
-                          </p>
-                        )}
-                      </div>
-                    </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Continue Button or Access Results Button */}
-              {currentStep < totalSteps ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{
-                    duration: 0.5,
-                    ease: [0.25, 0.1, 0.25, 1],
-                    delay: 0.28,
-                  }}
-                  className="flex"
-                >
-                  <motion.button
-                    type="button"
-                    onClick={handleNext}
-                    disabled={!isStepValid()}
-                    className={`w-full my-[18px] flex items-center justify-center gap-1 h-[50px] rounded-[10px] py-[9px] pr-[12px] pl-[16px] text-[16px] font-bold cursor-pointer flex-[1_0_0] items-center justify-center gap-1 transition-colors ${
-                      !isStepValid()
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-black text-white"
-                    }`}
-                    whileHover={isStepValid() ? { scale: 1.015 } : {}}
-                    whileTap={isStepValid() ? { scale: 0.985 } : {}}
-                    transition={{
-                      type: "tween",
-                      duration: 0.28,
-                      ease: [0.25, 0.1, 0.25, 1],
-                    }}
-                  >
-                    <span>Continue</span>
-                    <span>
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 256 256"
-                        className="w-4 h-4 fill-current"
-                      >
-                        <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
-                      </svg>
-                    </span>
-                  </motion.button>
-                </motion.div>
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{
-                    duration: 0.5,
-                    ease: [0.25, 0.1, 0.25, 1],
-                    delay: 0.28,
-                  }}
-                  className="flex"
-                >
-                  {isStartingScan ? (
-                    <div className="w-full h-[50px] py-[12px] flex items-center justify-center rounded-[10px] font-bold text-lg text-center bg-gray-300 text-gray-600 cursor-not-allowed">
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <span
-                          className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
-                          aria-hidden="true"
-                        />
-                        Loading results...
-                      </span>
-                    </div>
-                  ) : (
-                    <motion.button
-                      type="button"
-                      onClick={handleStartScan}
-                      disabled={!websiteUrl || !email}
-                      className={`w-full my-[18px] flex items-center justify-center gap-2 h-[50px] flex-[1_0_0] rounded-[10px] py-[9px] pr-[12px] pl-[16px] text-[16px] font-bold cursor-pointer flex items-center justify-center gap-1 transition-colors ${
-                        !websiteUrl || !email
-                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                          : "bg-black text-white shadow-2xl"
-                      }`}
-                      whileHover={websiteUrl && email ? { scale: 1.015 } : {}}
-                      whileTap={websiteUrl && email ? { scale: 0.985 } : {}}
-                      transition={{
-                        type: "tween",
-                        duration: 0.28,
-                        ease: [0.25, 0.1, 0.25, 1],
-                      }}
-                    >
-                      <span>Access my results</span>
-                      <span>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 256 256"
-                          className="w-4 h-4 fill-current"
-                        >
-                          <path d="M184.49,136.49l-80,80a12,12,0,0,1-17-17L159,128,87.51,56.49a12,12,0,1,1,17-17l80,80A12,12,0,0,1,184.49,136.49Z" />
-                        </svg>
-                      </span>
-                    </motion.button>
-                  )}
-                </motion.div>
-              )}
+              </div>
             </>
           ) : (
-            <>
-              {/* BYTEEX-style dark analyze screen */}
-              <div className="pt-8 pb-12">
-                <div ref={analyzeTopRef} className="text-center mb-4">
-                  <img
-                    src="/cxo_studio_logo.png"
-                    alt="logo"
-                    className="mx-auto w-[117.54px] h-[20px] object-cover"
-                  />
-                </div>
-
-                {/* Preview + right-side progress panel (stacked on small screens). */}
-                {websiteUrl && (
-                  <div className="mb-8 w-full">
-                    {error && (
-                      <div className="mx-auto mb-4 max-w-2xl rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-sm text-red-800 shadow-sm">
-                        <strong>Error:</strong> {error}
-                      </div>
-                    )}
-
-                    <div className="mx-auto mt-[30px] grid w-full min-w-0 max-w-[1400px] gap-5 px-0 max-sm:px-3 sm:px-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start lg:gap-x-6 lg:gap-y-5">
-                      <div className="flex min-h-0 min-w-0 flex-col">
-                        {/* Keep the logo loading screen on desktop + mobile whenever no
-                            preview screenshot has appeared (not yet, or the capture was
-                            blocked/errored) — even after quadrants arrive and regardless
-                            of isLoading — so the panels never go blank until redirect. */}
-                        {(quadrants.length === 0 || !previewDesktop) && (
-                          <DualViewportLoader
-                            align="start"
-                            previewDesktop={previewDesktop}
-                            // Keep mobile consistent with desktop: if there's no desktop
-                            // screenshot (blocked/not loaded), don't show a mobile one
-                            // either — both stay on the logo loading screen.
-                            previewMobile={previewDesktop ? previewMobile : null}
-                            instantPreview={analyzeInstantPreview}
-                            scanning
-                            statusText={`${LOADER_MESSAGES[loaderMsgIndex]}…`}
-                          />
-                        )}
-                        {quadrants.length > 0 && (
-                          <div className="w-full min-w-0 max-w-none">
-                            {previewDesktop && (
-                              <div className="mb-8">
-                                <DualViewportLoader
-                                  align="start"
-                                  previewDesktop={previewDesktop}
-                                  previewMobile={previewMobile}
-                                  scanning={false}
-                                />
-                              </div>
-                            )}
-                            {redirectWarning && (
-                              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                                <strong>Redirect / geo-block:</strong>{" "}
-                                {redirectWarning}
-                              </div>
-                            )}
-                            {/* Bottom section thumbnails only make sense with a real
-                                screenshot — hide them entirely when none appeared. */}
-                            {previewDesktop && (
-                              <QuadrantScanSequence
-                                quadrants={quadrants}
-                                quadrantLabels={quadrantLabels}
-                                previewDesktop={previewDesktop}
-                                previewMobile={previewMobile}
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      <aside className="flex min-h-[462px] w-full max-w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur-sm lg:h-[462px] lg:min-h-[462px]">
-                        <div
-                          className="w-full shrink-0"
-                          role="progressbar"
-                          aria-valuenow={Math.round(displayProgressPercent)}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                        >
-                          <div className="mb-1.5 flex items-center justify-between gap-3">
-                            <span className="text-xs font-medium text-zinc-600">
-                              Progress
-                            </span>
-                            <span className="text-xs font-medium tabular-nums text-zinc-800">
-                              {Math.round(displayProgressPercent)}%
-                            </span>
-                          </div>
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
-                            <div
-                              className="h-full rounded-full bg-gray-600"
-                              style={{ width: `${displayProgressPercent}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain">
-                          <AnimatePresence mode="sync" initial={false}>
-                            {analysisSteps
-                              .map((title, index) => ({
-                                title,
-                                index,
-                                id: `step-${index}-${title}`,
-                              }))
-                              .filter(({ index }) => !removedSteps.has(index))
-                              .map(({ title, index, id }) => {
-                                const isCompleted = index < displayedMounted;
-                                const isActive = index === displayedMounted;
-                                const isPending = index > displayedMounted;
-
-                                return (
-                                  <motion.div
-                                    key={id}
-                                    layout
-                                    initial={{ opacity: 0, y: 18, scale: 0.98 }}
-                                    animate={{
-                                      opacity: isPending ? 0.45 : 1,
-                                      y: 0,
-                                      scale: 1,
-                                    }}
-                                    exit={{
-                                      x: 32,
-                                      opacity: [1, 0.7, 0],
-                                      y: 0,
-                                      scale: [1, 0.99, 0.985],
-                                      transition: {
-                                        duration: 0.9,
-                                        ease: [0.22, 1, 0.36, 1],
-                                      },
-                                    }}
-                                    transition={{
-                                      duration: 0.45,
-                                      ease: [0.22, 1, 0.36, 1],
-                                    }}
-                                    className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:gap-4 sm:p-4"
-                                  >
-                                    {isCompleted ? (
-                                      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
-                                        <img
-                                          src="/check.png"
-                                          alt=""
-                                          className="h-3.5 w-3.5 object-cover"
-                                        />
-                                      </div>
-                                    ) : (
-                                      <Cog
-                                        className={`h-5 w-5 shrink-0 text-gray-400 ${isActive ? "animate-spin" : ""}`}
-                                        aria-hidden
-                                      />
-                                    )}
-                                    <span
-                                      className={`min-w-0 flex-1 text-sm font-medium ${
-                                        isCompleted
-                                          ? "text-gray-500 line-through"
-                                          : isPending
-                                            ? "text-gray-400"
-                                            : "text-gray-900"
-                                      }`}
-                                    >
-                                      {title}
-                                    </span>
-                                    {isCompleted && (
-                                      <span className="shrink-0 text-xs font-medium text-gray-600 sm:text-sm">
-                                        Finished
-                                      </span>
-                                    )}
-                                  </motion.div>
-                                );
-                              })}
-                          </AnimatePresence>
-                        </div>
-                      </aside>
-                    </div>
-                  </div>
-                )}
-
-                {/* Debug: View full screenshot the AI is receiving */}
-                {/* {websiteScreenshot && (
-                  <div className="mb-4 flex justify-center">
-                    <button
-                      onClick={() => {
-                        const win = window.open()
-                        if (win) {
-                          win.document.write(`<html><body style="margin:0;background:#000"><img src="${websiteScreenshot}" style="max-width:100%;display:block" /></body></html>`)
-                        }
-                      }}
-                      className="text-xs text-purple-400 underline hover:text-purple-300"
-                    >
-                      🔍 View full screenshot AI is seeing
-                    </button>
-                  </div>
-                )} */}
+            <div className="cxo-rows">
+              <div className="cxo-row is-active">
+                <span className="cxo-icon"><Spinner /></span>
+                <span className="cxo-row-text">
+                  <span className="cxo-row-label">Loading the checkpoints for your page</span>
+                  <span className="cxo-row-hint">{host || "Your product page"}</span>
+                </span>
               </div>
-
-              {!websiteUrl && (
-                <div className="py-12 text-center text-zinc-500">
-                  Loading...
-                </div>
-              )}
-            </>
+            </div>
           )}
         </div>
-
-        {/* Social Proof Footer - Only show when not analyzing */}
-        {!showAnalyze && (
-          <motion.div
-            className="my-[18px]"
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.6,
-              ease: [0.25, 0.1, 0.25, 1],
-              delay: 0.35,
-            }}
-          >
-            <div className="flex justify-center gap-3 items-center">
-              {/* Start: Profile Images */}
-              <div className="flex -space-x-2">
-                {[
-                  "/client_first.png",
-                  "/client_second.png",
-                  "/client_third.png",
-                ].map((src, i) => (
-                  <motion.div
-                    key={src}
-                    className="w-10 h-10 rounded-full border-2 border-white overflow-hidden bg-gray-200 shadow-[0_1px_5px_#00000026]"
-                    initial={{ opacity: 0, scale: 0.85 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{
-                      duration: 0.5,
-                      ease: [0.25, 0.1, 0.25, 1],
-                      delay: 0.45 + i * 0.09,
-                    }}
-                  >
-                    <img
-                      src={src}
-                      alt="user"
-                      className="w-[40px] h-[40px] object-cover"
-                    />
-                  </motion.div>
-                ))}
+      ) : (
+        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center lg:gap-14">
+          {/* live preview of the page being scanned; on phones it comes first, with a compact
+              progress line on top so the visitor still sees the scan moving */}
+          <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
+            {error && (
+              <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-critical-bg)] px-3 py-2 text-sm text-[var(--status-critical-fg)]">{error}</div>
+            )}
+            {/* same frames and size as the results hero: the loading screen turns into the results */}
+            <ScanDevices
+              desktop={previewDesktop}
+              mobile={previewMobile && previewMobile !== previewDesktop ? previewMobile : null}
+              instant={analyzeInstantPreview}
+              scanning
+              status={pct < 25 ? "Capturing your page…" : pct < 75 ? "Scanning every section…" : "Almost there…"}
+            />
+            {quadrants.length > 0 && previewDesktop && (
+              <div className="mt-6 hidden w-full min-w-0 lg:block">
+                {redirectWarning && (
+                  <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-finding-bg)] p-3 text-sm text-[var(--status-finding-fg)]">{redirectWarning}</div>
+                )}
+                <QuadrantScanSequence quadrants={quadrants} quadrantLabels={quadrantLabels} previewDesktop={previewDesktop} previewMobile={previewMobile} />
               </div>
+            )}
+          </section>
 
-              {/* End: Stars and Text */}
-              <motion.div
-                className="flex flex-col"
-                initial={{ opacity: 0, x: 6 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{
-                  duration: 0.5,
-                  ease: [0.25, 0.1, 0.25, 1],
-                  delay: 0.55,
-                }}
-              >
-                <div className=" gap-1">
-                  {[...Array(5)].map((_, i) => (
-                    <motion.span
-                      key={i}
-                      className="text-[#FFB66E] text-lg w-[16px] h-[16px]"
-                      initial={{ opacity: 0, scale: 0.3 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{
-                        duration: 0.4,
-                        ease: [0.25, 0.1, 0.25, 1],
-                        delay: 0.65 + i * 0.06,
-                      }}
-                    >
-                      ★
-                    </motion.span>
-                  ))}
-                </div>
-                <motion.p
-                  className="text-xs font-semibold text-[#71717A] mt-[2px]"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{
-                    duration: 0.45,
-                    ease: [0.25, 0.1, 0.25, 1],
-                    delay: 0.92,
-                  }}
-                >
-                  Trusted by e-commerce founders
-                </motion.p>
-              </motion.div>
+          {/* progress: the same bar and rows as the questions on /start */}
+          <aside className="cxo-card cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-8" aria-label="Scan progress">
+            <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
+              <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ width: `${barPct}%`, transition: 'none' }} />
+              </div>
+              <span className="w-10 text-right text-sm font-semibold tabular-nums text-[var(--text)]">{pct}%</span>
             </div>
-          </motion.div>
-        )}
-      </div>
+            <p className="cxo-q">What we’re checking</p>
+            <div className="cxo-rows">
+              {analysisSteps.map((title, index) => {
+                const done = index < displayedMounted;
+                const active = index === displayedMounted;
+                return (
+                  <div key={title} className={`cxo-row ${active ? "is-active" : ""} ${!done && !active ? "is-pending" : ""}`}>
+                    <span className="cxo-icon">{STEP_ICONS[index]}</span>
+                    <span className="cxo-row-text"><span className="cxo-row-label text-[15px]">{STEP_LABELS[index] ?? title}</span></span>
+                    <span className="grid h-6 w-6 shrink-0 place-items-center">
+                      {done ? <span className="cxo-ok"><CheckMark /></span> : active ? <Spinner /> : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
+  );
+}
+
+// ── small inline icons, same stroke style as the answers on /start ──
+const Line = ({ d }: { d: string }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: d }} />
+);
+// what happens under the hood, in five short lines; step 3 carries the real checkpoint count
+const stepLabels = (rules: number) => [
+  "Loading your page",
+  "Scanning every element",
+  `Benchmarking ${rules || 42} conversion rules`,
+  "Calculating lost revenue",
+  "Building your action plan",
+];
+const STEP_ICONS = [
+  <Line key="0" d='<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>' />,
+  <Line key="1" d='<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M4 12h16"/>' />,
+  <Line key="2" d='<path d="M9 12.5 11 14.5 15.5 10"/><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6z"/>' />,
+  <Line key="3" d='<circle cx="12" cy="12" r="9"/><path d="M15.5 8.6a4.2 4.2 0 1 0 0 6.8M7.5 10.8h6M7.5 13.2h6"/>' />,
+  <Line key="4" d='<path d="m4 6.5 1.5 1.5L8.5 5M4 12.5 5.5 14 8.5 11M4 18.5 5.5 20l3-3"/><path d="M12 7h8M12 13h8M12 19h8"/>' />,
+];
+function Spinner() {
+  return (
+    <svg className="cxo-spin text-[var(--text)]" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.5" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CheckMark() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+  );
+}
+function Chevron() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
   );
 }

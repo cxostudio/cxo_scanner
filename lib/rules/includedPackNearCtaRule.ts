@@ -5,30 +5,18 @@
 
 import type { ScanRule, ScanResult } from '@/lib/scanner/types'
 
+/**
+ * Which checkpoints this deterministic rule answers. Decided on the TITLE only: matching the
+ * description (as before) hijacked unrelated checks whose required actions happen to say
+ * "display … visually" or "near the CTA" (free shipping, key benefits, quantity discounts,
+ * cross-sell…), which then all got this rule's verdict and reason.
+ */
 export function isIncludedPackNearCtaRule(rule: ScanRule): boolean {
   const t = rule.title.toLowerCase()
-  const d = rule.description.toLowerCase()
-  const hay = `${t} ${d}`
-  const mentionsPackBundleOrAddon =
-    /\b(pack|bundle|kit|starter kit|additional items?|included products?|what'?s included|items included|all included)\b/i.test(
-      hay,
-    ) ||
-    (hay.includes('included') && (hay.includes('pack') || hay.includes('bundle') || hay.includes('kit'))) ||
-    (hay.includes('complementary') && (hay.includes('add-on') || hay.includes('addon') || hay.includes('upsell'))) ||
-    (hay.includes('quick') && hay.includes('upsell')) ||
-    ((hay.includes('add-on') || hay.includes('addon')) && hay.includes('cta')) ||
-    (hay.includes('upsell') && hay.includes('cta')) ||
-    (hay.includes('visually') && hay.includes('display')) ||
-    (hay.includes('included') && hay.includes('products') && hay.includes('visually')) ||
-    (hay.includes('additional') && hay.includes('items') && hay.includes('pack')) ||
-    (d.includes('included') && d.includes('cta'))
-  const mentionsCtaOrNear =
-    /\b(cta|add\s+to\s+(cart|bag)|buy\s+now|purchase|near\s+(the\s+)?cta|call to action)\b/i.test(hay) ||
-    (hay.includes('near') && (hay.includes('cart') || hay.includes('button'))) ||
-    (hay.includes('main cta') || hay.includes('main call-to-action') || hay.includes('main call to action')) ||
-    (hay.includes('visually') && hay.includes('display')) ||
-    (hay.includes('product') && hay.includes('includes'))
-  return mentionsPackBundleOrAddon && mentionsCtaOrNear
+  const packIncluded =
+    (/\b(pack|bundle|kit)\b/.test(t) && /\b(includ|item|product)/.test(t)) || /what'?s included|items included/.test(t)
+  const addonNearCta = /\b(add-on|addon|upsell)\b/.test(t) && /\b(cta|button|add to cart|near)\b/.test(t)
+  return packIncluded || addonNearCta
 }
 
 export function evaluateIncludedPackNearCtaRule(rule: ScanRule, keyElementsString: string): ScanResult | null {

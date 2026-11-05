@@ -45,12 +45,15 @@ import {
 } from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
-import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { getConversionCheckpointRules, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { filterCheckpointsByUrl, isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import {
   buildCheckpointPresentationMap,
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { runScanV2, PageCheckError } from '@/lib/scanV2'
+import { saveTestScan } from '@/lib/lab/store'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -191,11 +194,12 @@ const ScanRequestSchema = z.object({
     }, 'URL must be a valid HTTP or HTTPS URL'),
   rules: z.array(RuleSchema)
     .min(1, 'At least one rule is required')
-    .max(100, 'Maximum 100 rules allowed per scan'),
+    .max(300, 'Maximum 300 rules allowed per scan'),
   captureScreenshot: z.boolean().optional().default(true), // Only capture screenshot when needed (first batch)
   iframeSelector: z.string().optional(), // e.g. 'iframe#content-frame' — when set, OCR runs on images inside this iframe
   email: z.string().optional(), // for the per-email daily scan limit
   scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
+  engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2 (default); SCAN_ENGINE=v1 switches back
 })
 
 // Helper function to sleep/delay
@@ -1051,7 +1055,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine } = validationResult.data
 
     // Per-email daily scan limit — CHECK ONLY here (block if already at the
     // limit) so we don't do expensive work for a user who's out of scans.
@@ -1071,8 +1075,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const activeRules = incomingRules
-      .filter(isActiveConversionRule)
+    const useV2 = (engine || process.env.SCAN_ENGINE || 'v2') === 'v2'
+    // Engine v2 takes its checkpoints from Airtable (below); the keyword filter is engine v1 only.
+    const activeRules = useV2 ? incomingRules : incomingRules.filter(isActiveConversionRule)
     const rules = activeRules
 
     if (rules.length === 0) {
@@ -1140,10 +1145,24 @@ export async function POST(request: NextRequest) {
     })
 
     let checkpointByRuleId = new Map<string, CheckpointPresentation>()
+    // Engine v2: Airtable decides which checkpoints run (page type, Live, Draft in test mode),
+    // with their definitions. The list the browser sent is only a fallback.
+    let v2Rules: ScanRule[] = rules
     try {
       const cpRes = await getConversionCheckpointRules()
       if (cpRes.ok) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
+        const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {
+          includeDrafts: isTestEmail(email),
+        })
+        if (selected.rules.length) v2Rules = selected.rules
+        // Chunked scans (NEXT_PUBLIC_SCAN_BATCH_RULES): each request judges only its own slice.
+        if (parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10) > 0) {
+          const sent = new Set(rules.map((r) => r.id))
+          const slice = v2Rules.filter((r) => sent.has(r.id))
+          if (slice.length) v2Rules = slice
+        }
+        console.log(`[scan] ${selected.rules.length} checkpoints for ${selected.pageType} page${isTestEmail(email) ? ' (test mode: Live + Draft)' : ''}`)
       }
     } catch (e) {
       console.warn('[scan] conversion checkpoint metadata not loaded:', e)
@@ -1154,6 +1173,37 @@ export async function POST(request: NextRequest) {
     ): R & { checkpoint?: CheckpointPresentation } {
       const c = checkpointByRuleId.get(row.ruleId)
       return c ? { ...row, checkpoint: c } : row
+    }
+
+    // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
+    if (useV2) {
+      try {
+        const v2 = await runScanV2(validUrl, v2Rules, apiKey)
+        if (email && scanId) await registerScan(email, scanId).catch(() => {})
+        // test scans are kept for blind labelling (lib/lab); customer scans never are
+        let labId: string | undefined
+        if (email && isTestEmail(email)) {
+          labId = await saveTestScan({
+            id: scanId || `scan-${Date.now()}`,
+            url: validUrl,
+            email,
+            niche: v2.niche,
+            model: v2.model,
+            rules: v2Rules,
+            results: v2.results,
+            evidence: v2.evidence,
+          }).catch((e) => {
+            console.warn('[scan] test scan not saved to the lab:', e)
+            return undefined
+          })
+        }
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId })
+      } catch (e) {
+        if (e instanceof PageCheckError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })
+        }
+        throw e
+      }
     }
 
     // Fetch website content with Puppeteer to detect JavaScript-loaded content

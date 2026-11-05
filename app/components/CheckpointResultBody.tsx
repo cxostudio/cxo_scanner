@@ -21,7 +21,7 @@ export type CheckpointPresentation = {
 }
 
 const mdClass =
-  'flex flex-col gap-2 text-sm text-gray-700 leading-relaxed [&_a]:font-medium [&_a]:text-violet-600 [&_a]:underline [&_strong]:font-semibold custom-list'
+  'flex flex-col gap-2 text-sm text-[var(--text)] leading-relaxed [&_a]:font-medium [&_a]:text-[var(--link)] [&_a]:underline [&_strong]:font-semibold custom-list'
 
 export function CheckpointResultBody({
   checkpoint,
@@ -51,9 +51,9 @@ export function CheckpointResultBody({
   return (
     <div className="space-y-5">
       {checkpoint.requiredActions?.trim() ? (
-        <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200/80 bg-white/80 p-5 shadow-sm">
-          <p className="text-sm  uppercase tracking-wide text-black font-bold ">
-            Required actions
+        <div className="flex flex-col gap-1.5">
+          <p className="font-[family-name:var(--font-display)] text-[17px] font-bold tracking-[-0.01em] text-[var(--result-fg)]">
+            Required actions:
           </p>
           <div className={mdClass}>
             <ReactMarkdown components={markdownOpenLinksInNewTab}>
@@ -64,9 +64,9 @@ export function CheckpointResultBody({
       ) : null}
 
       {checkpoint.justificationsBenefits.trim() ? (
-        <div className="flex flex-col gap-2.5 rounded-lg border border-zinc-200/80 bg-white/80 p-5 shadow-sm">
-          <p className="text-sm  uppercase tracking-wide text-black font-bold ">
-            Justifications &amp; benefits
+        <div className="flex flex-col gap-1.5">
+          <p className="font-[family-name:var(--font-display)] text-[17px] font-bold tracking-[-0.01em] text-[var(--result-fg)]">
+            Justifications:
           </p>
           <div className={mdClass}>
             <ReactMarkdown components={markdownOpenLinksInNewTab}>
@@ -78,8 +78,8 @@ export function CheckpointResultBody({
 
       {checkpoint.examples.length > 0 ? (
         <div className="flex flex-col gap-2.5">
-          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-600">
-            Examples
+          <p className="font-[family-name:var(--font-display)] text-[17px] font-bold tracking-[-0.01em] text-[var(--result-fg)]">
+            Examples:
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {checkpoint.examples.map((ex) => (
@@ -90,7 +90,7 @@ export function CheckpointResultBody({
                   e.stopPropagation()
                   setExamplePreview(ex)
                 }}
-                className="group w-full cursor-pointer overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-left shadow-sm transition hover:border-violet-300 hover:shadow-md"
+                className="group w-full cursor-pointer overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)]"
               >
                 <div className="relative aspect-auto sm:aspect-video w-full overflow-hidden bg-zinc-100">
                   <img

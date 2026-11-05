@@ -1,0 +1,1258 @@
+[
+ {
+  "ruleId": "recSs12TogM60Mf6w",
+  "ruleTitle": "Do you use pure black for text or backgrounds?",
+  "passed": false,
+  "reason": "Pure black (#000000) is used on 14 text elements. A soft dark tone like #222 reads easier.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Avoid using pure black (#000000) for text or backgrounds. Opt for softer dark tones like charcoal (#333333) for text and off-black colors for backgrounds.\n\nUse high contrast between text and background, but ensure the tone isn't too harsh on the eyes, improving readability and visual comfort.\n\n**Detailed Actions:**\n- **Text:** Use colors with slightly lighter shades (e.g., #333333 or #444444) for body text instead of pure black. These tones reduce the starkness that pure black creates, making reading less fatiguing, especially for longer sessions.\n- **Backgrounds:** Avoid using pure black (#000000) as a background color. Instead, choose a dark gray like #212121 or #121212. This ensures that text and images stand out while reducing visual strain.\n- **Contrast:** Ensure there\u2019s sufficient contrast between text and background, especially for accessibility. Use tools like  [Contrast Checker](https://webaim.org/resources/contrastchecker/) to verify that your combinations meet accessibility standards.",
+   "justificationsBenefits": "Pure black creates too much contrast, causing eye strain over time. Softer colors improve the reading experience and make the website feel more professional and easier to engage with.\n\nThis small tweak can significantly improve user experience by enhancing readability and comfort, keeping users on your site longer and increasing the likelihood of conversions.\n\n**Additional Resources:**\n- [Color Contrast And Why You Should Rethink It](https://www.smashingmagazine.com/2014/10/color-contrast-tips-and-tools-for-accessibility/)\n- [Contrast Checker](https://webaim.org/resources/contrastchecker/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recSs12TogM60Mf6w&i=0&s=full",
+     "filename": "Pure Black Background vs. Dark Gray Background",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recSs12TogM60Mf6w&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recSs12TogM60Mf6w&i=1&s=full",
+     "filename": "Pure Black vs. Dark Gray Text",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recSs12TogM60Mf6w&i=1&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Accessibility Score"
+   ]
+  }
+ },
+ {
+  "ruleId": "recEcmUYxWGuOz3vK",
+  "ruleTitle": "Do button and link labels start with a verb and convey urgency (e.g., \"Shop Now\")?",
+  "passed": false,
+  "reason": "The main call to action button is labeled 'ADD TO CART', which is an action verb but does not convey urgency.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Make sure all button and link labels start with action verbs and convey a sense of urgency. Labels like \u201cShop Now\u201d or \u201cGet Yours Today\u201d are clear and actionable, guiding users toward making a purchase.\n\n**Detailed Actions:**\n- **Start with a Strong Verb:** Every button label should start with a verb that describes the action users will take, such as \"Buy,\" \"Explore,\" or \"Save.\" Use language that directly signals what will happen when the button is clicked.\n- **Convey Urgency:** Add a sense of immediacy by using words like \u201cNow,\u201d \u201cToday,\u201d or \u201cLimited Time\u201d where relevant. This creates a subtle pressure, nudging users to act promptly.\n- **Customize Language for Context:** Ensure buttons align with the specific goal of the page. For example, on a product page, \"Add to Cart\" or \"Buy Now\" works well, while on a homepage, \u201cExplore Collection\u201d might fit better.\n\n**WooCommerce and Shopify Tips:**\n- For WooCommerce, go to **Appearance > Customize** and adjust button text in your theme settings if available. Some themes support custom labels for product and checkout pages without additional plugins.\n- On Shopify, use the **Theme Editor** under **Online Store > Themes > Customize** to modify button labels. Most Shopify themes allow easy button text customization on product and homepage sections directly from the editor.",
+   "justificationsBenefits": "Action-focused, urgent labels guide users directly toward completing key actions, reducing hesitation and helping users understand the purpose of each button. Urgency motivates quicker action, which can significantly improve conversion rates.\n\n**Additional Resources:**\n- [Baymard Institute\u2019s guidelines on Button UX](https://baymard.com/learn/button-design) \u2013 Details on effective button labeling.\n- [Smashing Magazine: Call to Action Button Best Practices](https://www.smashingmagazine.com/2009/10/call-to-action-buttons-examples-and-best-practices/) \u2013 Insights into how action-oriented language impacts user behavior.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=0&s=full",
+     "filename": "AG1 CTA.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=1&s=full",
+     "filename": "coldculture CTA.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=2&s=full",
+     "filename": "Decathlon CTA.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recEcmUYxWGuOz3vK&i=2&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "CTR"
+   ]
+  }
+ },
+ {
+  "ruleId": "recXqQmYLbyuIil2a",
+  "ruleTitle": "Does the footer display social media links?",
+  "passed": true,
+  "reason": "The footer links to Instagram, Pinterest, Facebook, Twitter, Tiktok, Youtube.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Include social media icons linked to your business profiles on platforms like Facebook, Instagram, Twitter, and LinkedIn.",
+   "justificationsBenefits": "Social media links provide additional ways for users to connect with your brand, fostering engagement and brand loyalty. Customers before purchasing sometimes also want to check if the social media accounts are trustworthy.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=0&s=full",
+     "filename": "Footer with Social Media Links 3.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=1&s=full",
+     "filename": "Footer with Social Media Links 1.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=2&s=full",
+     "filename": "Footer with Social Media Links 2.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=3&s=full",
+     "filename": "Footer with Social Media Links 4.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXqQmYLbyuIil2a&i=3&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Conversion Rate (CVR)"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec1iBTNslYj4y05d",
+  "ruleTitle": "Is the most common size/color preselected?",
+  "passed": false,
+  "reason": "No size or color is preselected; the shopper must choose a size before adding to cart.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Preselect the most common size/color to streamline the purchasing process.\n\nWe suggest test this point against **\"Is there a reminder to select size/color if users forget before adding to the cart?\"**\n\n**Pros**: Can streamline the purchasing process, reducing friction for users who prefer default choices, and speeding up the path to checkout.\n\n**Cons**: Increases the risk of users accidentally adding the wrong size/variant, potentially increasing returns and customer dissatisfaction, especially in categories like clothing where fit is crucial.\n\nBalancing ease of use with ensuring informed decisions is key. Testing will help identify the optimal approach, allowing for data-driven decisions tailored to the specific product category.",
+   "justificationsBenefits": "Streamlines the purchasing process, reducing friction for users who prefer default choices, and speeding up the path to checkout.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=0&s=full",
+     "filename": "Product Page - Quantity Pre-selected - Inshape Nutrition Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=1&s=full",
+     "filename": "Product Page - Quantity Pre-selected - Spacegoods Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=2&s=full",
+     "filename": "Product Page - Quantity Pre-selected - Lucent Globe Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec1iBTNslYj4y05d&i=2&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec3kmxGigBELSAlu",
+  "ruleTitle": "Is lazy loading enabled for images and videos?",
+  "passed": true,
+  "reason": "23 of 25 images load only when needed (lazy loading).",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure that lazy loading is enabled for all images and videos on your site to improve load time and user experience.\n\n**Detailed Actions**:\n- Lazy loading means images and videos only load when they come into view, which reduces initial page load time. If your theme doesn't support it by default, implementing a plugin or editing your theme\u2019s code may be necessary.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Most modern Shopify themes have lazy loading built-in. Check your theme settings or install an app like **[Tiny SEO Speed Image Optimizer](https://apps.shopify.com/smart-image-optimizer)** to enable it for non-video content.\n- **WooCommerce**\n    - If your theme doesn't support lazy loading, you can enable it through settings or use a plugin like **[WP Rocket](https://wp-rocket.me/)** or **[Smush](https://wordpress.org/plugins/wp-smushit/)** that adds lazy loading functionality.\n\n\u26a0\ufe0f Please avoid lazy loading images above the fold. They need to load first and fast.",
+   "justificationsBenefits": "Lazy loading reduces initial page load time and bandwidth usage by loading media only when it comes into view. Fast-loading pages are crucial for higher conversions, as users are less likely to abandon slow sites.\n\n**Additional Resources:**\n- [Browser-level image lazy loading for the web](https://web.dev/articles/browser-level-image-lazy-loading)\n- [Improving your online store performance](https://help.shopify.com/en/manual/online-store/web-performance/improving-web-performance)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec3kmxGigBELSAlu&i=0&s=full",
+     "filename": "lazy-loading.gif",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec3kmxGigBELSAlu&i=0&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Page Load Speed",
+    "Mobile Usability Score"
+   ]
+  }
+ },
+ {
+  "ruleId": "recZ158fy5ndWroli",
+  "ruleTitle": "Are product titles and descriptions concise, informative, and consistent?",
+  "passed": true,
+  "reason": "The product title 'Women's Wool Cruiser Slip On' is concise and informative. The description highlights key benefits and materials.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Make sure your product titles are clear, concise, and descriptive, focusing on key attributes (e.g., brand, model, color, size). Descriptions should briefly outline product benefits and specifications.\n\n**Detailed Actions:**\n- **Product Titles**\n    - Keep titles under 50 characters.\n    - Include essential details like the product type, brand, and key features (e.g., \u201cNike Air Zoom Sneakers\u201d).\n    - Avoid unnecessary keywords or jargon that clutter the title.\n- **Consistency**\n    - Ensure that all product titles follow a similar format across your category pages for a uniform experience.\n    - Avoid using different terminology for the same products or product types (e.g., don\u2019t alternate between \u201cT-shirt\u201d and \u201cTee\u201d in titles or descriptions).",
+   "justificationsBenefits": "Clear, concise, and consistent product titles and descriptions enhance the shopping experience by making it easy for customers to find the products they want and understand their value quickly. It reduces cognitive load, leading to higher conversion rates.\n\n**Additional Resources:**\n- [How To Write a Product Description (Examples + Template)](https://www.shopify.com/blog/8211159-9-simple-ways-to-write-product-descriptions-that-sell)\n- [14 Best Tactics To Optimize Ecommerce Product Titles for Conversions](https://textcortex.com/post/product-title-optimization-best-ecommerce-tactics)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recZ158fy5ndWroli&i=0&s=full",
+     "filename": "Category Page Description Horace",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recZ158fy5ndWroli&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recZ158fy5ndWroli&i=1&s=full",
+     "filename": "Category Page Description Amazon",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recZ158fy5ndWroli&i=1&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "CTR",
+    "Accessibility Score"
+   ]
+  }
+ },
+ {
+  "ruleId": "rectyUC9T4WUfFYvc",
+  "ruleTitle": "Are product ratings displayed near the product title?",
+  "passed": false,
+  "reason": "Product ratings are not displayed near the product title.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Display product ratings directly on the product page near the product title to provide social proof and increase trust.\n\nWhen showing a rating, two things must be included:\n1. The review score (ex: \"4.3/5\")\n2. The total people who have rated the product (ex: \"203 reviews\")\n\nSome external product rating apps:\n- [Loox](https://apps.shopify.com/loox) (Shopify only)\n- [Judge.me](https://judge.me/)\n- [Yotpo](https://www.yotpo.com/)\n- [YITH WooCommerce Reviews](https://yithemes.com/themes/plugins/yith-woocommerce-advanced-reviews/) (WooCommerce only)\n\nWhen you click on the reviews, the website should take you to the reviews section (anchor link).",
+   "justificationsBenefits": "Ratings near the title provide immediate social proof, enhancing trust and influencing purchase decisions. Customers are more likely to convert when they see that others have positively reviewed the product.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=0&s=full",
+     "filename": "Product Page - Reviews near Title - MyVariations Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=1&s=full",
+     "filename": "Product Page - Reviews near Title - Airmoto Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=2&s=full",
+     "filename": "Product Page - Reviews near Title - Skims Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectyUC9T4WUfFYvc&i=2&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rectt6VIDYK1SbaBH",
+  "ruleTitle": "Is there a short list of key benefits highlighted near the product title?",
+  "passed": false,
+  "reason": "There is no short list of key benefits highlighted near the product title. Benefits are listed further down the page.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Ensure that key product benefits (e.g., \"Free Shipping\", \"Easy Returns\", \"Limited Stock\", \"Eco-friendly\") are clearly displayed near the product title, so customers quickly understand the value of purchasing this item.\n\n**Detailed Actions:**\n- Place a concise list (2-3 benefits) below or beside the product title to capture immediate attention.\n- Use bold or contrasting fonts to ensure these benefits stand out visually from the rest of the product description.\n- Make sure the benefits are specific, impactful, and aligned with the key selling points of the product (e.g., if it's a luxury item, focus on exclusivity; if it's a daily-use item, highlight convenience).\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - If your theme doesn't support it, consider specialized app such as [Iconic: Product Features](https://apps.shopify.com/modern-product-descriptions) for easier configuration.\n- **WooCommerce**\n    - If your theme doesn't support it, consider using a plugin like [WooCommerce Custom Product Tabs](https://wordpress.org/plugins/yikes-inc-easy-custom-woocommerce-product-tabs/) to customize the layout.",
+   "justificationsBenefits": "Highlighting benefits succinctly helps users quickly understand why the product is valuable.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=0&s=full",
+     "filename": "Product Page - Key Benefits near Title - Spacegoods Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=1&s=full",
+     "filename": "Product Page - Key Benefits near Title - Hismile Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=2&s=full",
+     "filename": "Product Page - Key Benefits near Title - Dr. Squatch Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=3&s=full",
+     "filename": "Product Page - Key Benefits near Title - Lucent Globe Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=4&s=full",
+     "filename": "Product Page - Key Benefits near Title - Airmoto Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rectt6VIDYK1SbaBH&i=4&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec59tWeW27UFwDuX",
+  "ruleTitle": "Is the product\u2019s material or composition information clearly provided?",
+  "passed": true,
+  "reason": "The 'MATERIALS FROM THE EARTH' section clearly describes the product's composition using wool, tree fiber, and sugarcane.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "When applicable, include material or composition details, ideally near the product title or within the product description. Use a straightforward label like \"Material,\" \"Composition,\" or \"Fabric\" to make it easy for customers to find.\n\n**Detailed Actions**\n- Display material or composition information in a prominent location on the product page, next to key attributes.\n- Consider creating a separate tab or section specifically for product details (e.g., \"Product Information\" or \"Details\").\n- Use bullet points for clarity and consistency, making sure the details are easy to read.\n- If the product comes in multiple variations (e.g., different fabrics or materials), make sure the content is updated accordingly or display a dropdown or selectable option so users can see the material composition for each variant.\n- Make sure this information is easily accessible and visible on both desktop and mobile devices.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Add material information in the product description or use apps like [Metafields Guru](https://apps.shopify.com/metafields-editor-2) for additional fields.\n- **WooCommerce**\n    - Use custom fields or product attributes to display material information.",
+   "justificationsBenefits": "Customers increasingly look for detailed information about a product's material or composition to make informed purchasing decisions. This is especially important for items like clothing, furniture, or eco-friendly products, where material details influence both value perception and trust.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec59tWeW27UFwDuX&i=0&s=full",
+     "filename": "Screenshot 2026-04-16 at 10.53.22.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec59tWeW27UFwDuX&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec59tWeW27UFwDuX&i=1&s=full",
+     "filename": "Screenshot 2026-04-16 at 10.55.19.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec59tWeW27UFwDuX&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recoRfbr8slQLFqTB",
+  "ruleTitle": "Are before-and-after images included to demonstrate the product\u2019s effectiveness?",
+  "passed": true,
+  "reason": "Before-and-after images are not applicable for this product category (shoes).",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Ensure that before-and-after images are included for products where applicable to show their effectiveness and results. This can greatly influence purchase decisions, especially for products where transformation or improvement is a key selling point.\n\n**Detailed Actions:**\n- Include clear, high-quality before-and-after images on the product page where the product\u2019s effectiveness can be visually demonstrated.\n- Place the images near the product description or as part of the product gallery.\n- Use a clear, side-by-side comparison or a slider format that allows customers to easily see the transformation.\n- Ensure the images are consistent in lighting, angle, and background to maintain a professional look.",
+   "justificationsBenefits": "Before-and-after images create a strong emotional connection and help customers visualize the product\u2019s effectiveness, which increases trust and motivates purchases, especially for products like beauty, fitness, or home improvement.\n\n**Additional Resources:**\n- [What Are Before and After Photos?](https://wisernotify.com/marketing-term/before-and-after-photos/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=0&s=full",
+     "filename": "Product Page - Before/After - Gisou Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=1&s=full",
+     "filename": "Product Page - Before/After - Horace Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=2&s=full",
+     "filename": "Product Page - Before/After - Hismile Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recoRfbr8slQLFqTB&i=2&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recBIykwniSTLYVjI",
+  "ruleTitle": "Are video testimonials available on the product page?",
+  "passed": false,
+  "reason": "There are no video testimonials available on the product page.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Add video testimonials from real customers that showcase their experience with the product.\n\n**Detailed Actions**:\n- Select happy, engaged customers willing to share their experiences in a video format.\n- Integrate video testimonials directly on the product page near the product description or below the main product image.\n- Use high-quality videos that are short (30 seconds to 1 minute) and focus on key product benefits, customer satisfaction, and the product in action.\n\n**For Shopify Users:**\n- You can maybe give a try to the app [Tolstoy](https://www.gotolstoy.com/).",
+   "justificationsBenefits": "Video testimonials increase trust and engagement, showing real-world usage and boosting conversion rates. Customers are more likely to buy when they see relatable, authentic experiences from people like them.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=0&s=full",
+     "filename": "Product Page - Video Testimonials - MyKitsch Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=1&s=full",
+     "filename": "Product Page - Video Testimonials - The Ordinary Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=2&s=full",
+     "filename": "Product Page - Video Testimonials - Smily Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=3&s=full",
+     "filename": "Screenshot 2024-09-24 at 16.51.21.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recBIykwniSTLYVjI&i=3&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Difficult",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recDkT1jqcBJworBQ",
+  "ruleTitle": "Is the free shipping threshold (if applicable) highlighted near the main CTA?",
+  "passed": true,
+  "reason": "The free shipping threshold is displayed directly below the add to cart button.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Make the free shipping threshold visible near the \"Add to Cart\" or \"Buy Now\" button to encourage customers to increase their order size. Display it in a clear, prominent, and visually appealing way.\n\n**Detailed Actions:**\n- **Placement**: Ensure the free shipping threshold message is placed near key CTAs like \"Add to Cart,\" \"Buy Now,\" or \"Proceed to Checkout.\" The closer to the decision-making process, the better.\n- **Messaging**: Use clear, direct language such as \"Add $X more to get free shipping!\" or \"You\u2019re just $X away from free shipping!\"\n- **Visuals**: Make the message stand out with a contrasting color or design that draws attention but doesn\u2019t overpower the CTA.\n- **Consistency**: If the site offers free shipping based on different conditions (e.g., specific product categories), make sure the messaging is dynamic and adapts based on the customer\u2019s cart.\n- **User-Friendly**: Ensure the message is mobile-responsive and easy to spot on all devices, especially mobile, where users are less likely to notice subtle design elements.",
+   "justificationsBenefits": "Highlighting free shipping thresholds encourages customers to add more items to their cart to qualify, increasing average order value (AOV).",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recDkT1jqcBJworBQ&i=0&s=full",
+     "filename": "Screenshot 2026-04-16 at 10.57.24.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recDkT1jqcBJworBQ&i=0&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate",
+    "Average Order Value (AOV)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recihw16WgNwYG09z",
+  "ruleTitle": "Are trust signals like secure checkout badges positioned near the CTA?",
+  "passed": false,
+  "reason": "There are no trust signals like secure checkout badges near the add to cart button.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Position trust signals like secure checkout badges, SSL certificates, and payment security logos (e.g., Visa, MasterCard, PayPal) near the \"Add to Cart\" and \"Checkout\" buttons.\n\n**Detailed Actions**:\n- Add recognizable trust badges to key areas near the main Call to Action (CTA) buttons, such as on the product page next to the \"Add to Cart\" button or on the checkout page.\n- Ensure these badges are visible, clearly conveying secure payment options and protecting customer data.\n- For best results, make sure these badges match the design and are not overly intrusive. They should blend into the page without distracting the user from the main CTA.",
+   "justificationsBenefits": "Trust signals near the CTA build consumer confidence by reassuring visitors that their payment information and personal details are secure.\n\n**Additional Resources:**\n- [4 Types of Trust Badges To Help Boost Conversion](https://www.shopify.com/blog/trust-badges)\n- [Checkout Optimization: How Do Trust Seals Affect Security Perception?](https://cxl.com/research-study/checkout-optimization/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recihw16WgNwYG09z&i=0&s=full",
+     "filename": "Product Page - Payment Icons - Bulk Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recihw16WgNwYG09z&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recihw16WgNwYG09z&i=1&s=full",
+     "filename": "Product Page - Payment Icons - Airmoto Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recihw16WgNwYG09z&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec74RD9IgZgfDUwl",
+  "ruleTitle": "Are product prices and any discounts clearly displayed?",
+  "passed": true,
+  "reason": "The product price is clearly displayed near the product name and above the size selection.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Show prices prominently along with any discounts or offers, using striking visuals to highlight deals. Use bold or contrasting colors to make prices stand out.\n\n**Detailed Actions:**\n1. **Visibility**: Position prices near the product image and description for easy visibility. Use larger font sizes and a contrasting color to draw attention.\n2. **Discounts**: Clearly display any discounts alongside the original price, using strikethroughs for the original price and bold text for the discounted price.\n3. **Consistency**: Ensure that the formatting for prices and discounts is consistent across all product listings to provide a seamless shopping experience.",
+   "justificationsBenefits": "Clear pricing and discount displays directly impact purchasing decisions. Customers need to quickly understand the cost and savings to feel confident in their choices.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=0&s=full",
+     "filename": "Category Page Discounted Prices - My Variations",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=1&s=full",
+     "filename": "Category Page Discounted Prices - Dr. Squatch",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=2&s=full",
+     "filename": "Category Page Discounted Prices - Bulk",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec74RD9IgZgfDUwl&i=2&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "CTR",
+    "Page Views Per Session"
+   ]
+  }
+ },
+ {
+  "ruleId": "recVqogizZUTrTN4p",
+  "ruleTitle": "Is the product gallery easy to navigate with arrows or swipe functionality on mobile devices?",
+  "passed": true,
+  "reason": "The product gallery on mobile has dots for navigation, indicating swipe functionality.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure that your product gallery can be easily navigated on mobile devices with swipe gestures or clearly visible arrows to move between images.\n\n**Detailed Actions:**\n- Implement touch-enabled swipe functionality for image galleries, ensuring users can swipe left or right to view different product images.\n- Add intuitive arrows on both sides of the product gallery for desktop and mobile users. These arrows should be easy to spot and large enough for easy clicking or tapping.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - If not supported natively by your theme, use apps like [Product Image Gallery & Zoom](https://apps.shopify.com/galaxio) to enable this feature.\n- **WooCommerce**\n    - If not supported natively by your theme, use plugins like [WooCommerce Product Gallery Slider](https://wordpress.org/plugins/woo-product-gallery-slider/) or [WP Image Zoom](https://wordpress.org/plugins/wp-image-zoooom/) to add swipe functionality and better navigation to product images.",
+   "justificationsBenefits": "Easy navigation through the product gallery increases engagement and helps potential customers make informed purchase decisions. In an era where mobile commerce is dominant, ensuring smooth image viewing is crucial.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recVqogizZUTrTN4p&i=0&s=full",
+     "filename": "Product Page - Arrows Image Gallery - Skims Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recVqogizZUTrTN4p&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recVqogizZUTrTN4p&i=1&s=full",
+     "filename": "Product Page - Arrows Image Gallery - MyVariations Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recVqogizZUTrTN4p&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recXmTTGKCp0rqOH8",
+  "ruleTitle": "Is the breadcrumb navigation clearly visible?",
+  "passed": true,
+  "reason": "Breadcrumb navigation is clearly visible at the top left of the page, showing 'Home / Womens'.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Implement breadcrumb navigation at the top of the page to show users their current location within the site hierarchy.\n\n**Detailed Actions**:\n- **Check Visibility**: Ensure that the breadcrumb is placed at the top of the category page, above the product listings.\n- **Use Clear Labels**: Ensure each crumb is labeled with relevant keywords that describe the path (e.g., Home > Category > Sub-category).\n- **Style for Clarity**: Use contrasting colors and adequate spacing to differentiate breadcrumbs from other text on the page. Ensure the font is legible and the size is appropriate for both desktop and mobile views.\n- **Responsive Design**: Test the breadcrumb navigation on various screen sizes to ensure it remains visible and functional on mobile devices.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Make sure your theme includes breadcrumb navigation or utilize apps like [PH Breadcrumbs](https://apps.shopify.com/breadcrumbs).\n- **WooCommerce**\n    - Ensure your theme supports breadcrumbs; if not, consider plugins like [Yoast SEO](https://yoast.com/wordpress/plugins/seo/) for breadcrumbs functionality.",
+   "justificationsBenefits": "Breadcrumb navigation enhances user experience by providing a clear path back to previous pages, making it easier for customers to navigate and reducing the likelihood of them feeling lost, which can lead to increased conversions.\n\n**Additional Resources:**\n- [Breadcrumb Navigation Increasingly Useful](https://www.nngroup.com/articles/breadcrumb-navigation-useful/)\n- [Designing Effective Breadcrumbs Navigation](https://www.smashingmagazine.com/2022/04/breadcrumbs-ux-design/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recXmTTGKCp0rqOH8&i=0&s=full",
+     "filename": "Category Page Breadcrumb Asos.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXmTTGKCp0rqOH8&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recXmTTGKCp0rqOH8&i=1&s=full",
+     "filename": "Category Page Breadcrumb Costco.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recXmTTGKCp0rqOH8&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "SEO Rankings",
+    "Page Views Per Session"
+   ]
+  }
+ },
+ {
+  "ruleId": "recjK9IQ0T4rpu4iu",
+  "ruleTitle": "Is there a visible newsletter subscription form in the footer?",
+  "passed": true,
+  "reason": "The footer has an email field to join the newsletter.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Add a simple and prominently placed email subscription form in the footer to encourage users to join your mailing list.\n\n**Detailed Actions:**\n- **Placement:** Add the newsletter subscription form in the footer of all key pages (e.g., homepage, product pages, and checkout) to maximize visibility.\n- **Design:** Use contrasting colors and clear typography to make the form stand out. Include a brief, enticing call-to-action (CTA) such as \"Sign up for exclusive offers!\".\n- **Fields:** Keep the form simple, asking for only the essential information (usually just an email address).\n- **Integration:** Ensure the form is integrated with your email marketing service (like Mailchimp or Klaviyo). \n- **Incentives:** Consider offering a discount code or free shipping for signing up to further entice users.",
+   "justificationsBenefits": "A visible newsletter subscription form in the footer allows users to engage with your brand even after they leave your site. It helps capture leads, enabling you to communicate promotions and updates directly to interested customers, ultimately boosting conversion rates.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=0&s=full",
+     "filename": "footer-UO.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=1&s=full",
+     "filename": "footer-lucent-globe.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=2&s=full",
+     "filename": "footer-drsquatch2.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recjK9IQ0T4rpu4iu&i=2&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Form Submission Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rechuFEvuIW0ULmFW",
+  "ruleTitle": "Does the footer include links to customer support options (e.g., live chat, help center)?",
+  "passed": true,
+  "reason": "The footer includes links to customer support options like 'FAQ/Contact Us' and 'Returns/Exchanges'.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Make sure the footer of your e-commerce site includes easy-to-find links to customer support options like live chat, help centers, FAQs, or contact forms.\n\n**Detailed Actions:**\n- **Positioning**: Add a dedicated \"Customer Support\" section in your footer with clear links to your support channels (e.g., live chat, FAQ, help center, or email support).\n- **Live Chat Integration**: If you don't already have it, integrate a live chat tool into your site. Popular options include **Tidio**, **LiveChat**, or **Zendesk Chat** for WooCommerce and Shopify.\n- **Help Center/FAQs**: Provide a link to a well-organized FAQ or Help Center. Organize this section by common issues like orders, payments, shipping, and returns.\n- **Contact Form**: Make sure there\u2019s a simple, easy-to-fill-out contact form for customer inquiries. Ensure this is easily accessible in the footer, or consider placing it in a \"Contact Us\" section.",
+   "justificationsBenefits": "Easy access to support improves customer satisfaction and can help resolve pre-purchase hesitations, increasing conversions.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rechuFEvuIW0ULmFW&i=0&s=full",
+     "filename": "Polaroid Footer.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rechuFEvuIW0ULmFW&i=0&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Conversion Rate (CVR)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recKjEZrP38rjqCoY",
+  "ruleTitle": "Does the footer have a \"Back to Top\" button for easy navigation?",
+  "passed": false,
+  "reason": "There is no back to top button, so long pages need a lot of scrolling back up.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Add a \"Back to Top\" button that allows users to quickly scroll back to the top of the page with a single click.\n\n**Detailed Actions:**\n- **Design and Placement:**\n    - Add a clearly labeled \"Back to Top\" button in the footer area of your website. Ensure it's visually distinct and accessible.\n    - Use a recognizable icon (e.g., an upward arrow) alongside the text for better visibility.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - You can add custom code to your theme\u2019s footer section or use an app like [Scrolly](https://apps.shopify.com/custom-scroll-to-top) for quick integration.\n- **WooCommerce**\n    - If your theme does not support this feature, consider using a plugin like [Back To Top Pro](https://wordpress.org/plugins/back-to-top-pro/) to easily add this functionality.",
+   "justificationsBenefits": "A \"Back to Top\" button improves site navigation, especially on long pages, enhancing overall user experience.\n\n**Additional Resources:**\n- [Back-to-Top Button Design Guidelines](https://www.nngroup.com/articles/back-to-top/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=0&s=full",
+     "filename": "Zalando -Back To Top button.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=1&s=full",
+     "filename": "Lucent Globe -Back To Top button.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=2&s=full",
+     "filename": "Blue Print Bryan Johnson -Back To Top button.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recKjEZrP38rjqCoY&i=2&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Conversion Rate (CVR)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recdkYxD8QVU9j14p",
+  "ruleTitle": "Does the cart icon display the number of items currently in the cart?",
+  "passed": true,
+  "reason": "After adding a product, the cart icon shows \"1\".",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Add a small counter or badge to the cart icon that dynamically updates to show the number of items added to the cart. \n\nThis provides users with immediate feedback on their selections and encourages them to proceed to checkout.\n\nReview your e-commerce theme settings to see if the cart icon number display is enabled. Many themes come with this feature built-in.",
+   "justificationsBenefits": "Displaying the number of items gives users a clear visual cue of their cart status, encouraging them to review and complete their purchase.\n\n**Additional Resources:**\n- [Shopping Carts: Basics and Best Practices](https://app.uxcel.com/courses/common-patterns/shopping-cart-best-practices-071)\n- [Adding an Item to a Shopping Cart: Provide Clear, Persistent Feedback](https://www.nngroup.com/articles/cart-feedback/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recdkYxD8QVU9j14p&i=0&s=full",
+     "filename": "Cart Items Count.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recdkYxD8QVU9j14p&i=0&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Checkout Completion Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec7DA1trGfVmAUET",
+  "ruleTitle": "Is there a quick access link to the cart?",
+  "passed": true,
+  "reason": "A cart icon with a count is visible in the header, and it updates to '1' after adding an item.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure that your e-commerce website features a prominent, easily accessible cart icon or link. This should be visible on every page, allowing users to quickly view their selected items without navigating away from their current browsing experience.\n\n**Detailed Actions:**\n1. **Positioning:** Place the cart icon/link in the top right corner of the header, where it is conventionally expected. Ensure it remains fixed while users scroll down the page for consistent access.\n2. **Visibility:** Use a contrasting color for the cart icon to ensure it stands out against the header background. Consider incorporating a small badge displaying the number of items in the cart.\n3. **Mobile Optimization:** Make sure the cart link is easy to tap on mobile devices. Test the touch target size to ensure it meets best practices (minimum 44px by 44px).",
+   "justificationsBenefits": "Providing quick access to the cart reduces friction during the shopping process. Customers can review their selections at any time, which helps decrease cart abandonment rates and encourages impulse purchases.\n\n**Additional Resources:**\n- [Shopping Carts: Basics and Best Practices](https://app.uxcel.com/courses/common-patterns/shopping-cart-best-practices-071)\n- [Adding an Item to a Shopping Cart: Provide Clear, Persistent Feedback](https://www.nngroup.com/articles/cart-feedback/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7DA1trGfVmAUET&i=0&s=full",
+     "filename": "cart icon rhode.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7DA1trGfVmAUET&i=0&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Checkout Completion Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recTUunKnIj3laNCO",
+  "ruleTitle": "Does the footer include store location or contact information?",
+  "passed": true,
+  "reason": "The footer includes an email address for help: help@allbirds.com.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Place your business\u2019s contact number, email address, and physical store location (if applicable) in the footer for easy accessibility.",
+   "justificationsBenefits": "Including store contact information in the footer improves customer trust and accessibility. It reassures customers that they can easily reach your business if needed.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recTUunKnIj3laNCO&i=0&s=full",
+     "filename": "WIJCK - Footer 2.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recTUunKnIj3laNCO&i=0&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Conversion Rate (CVR)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recjEVPpCRkdi17EE",
+  "ruleTitle": "Is there a clear and accessible \"Search\" button or icon?",
+  "passed": true,
+  "reason": "The header has a search icon or field.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Include a clear \"Search\" button or magnifying glass icon that is intuitive and easily clickable, with appropriate touch targets for mobile users.\n\nUse a contrasting color for the search button to make it stand out against the background.\n\nConsider implementing a placeholder text in the search bar (e.g., \"Search products...\") to guide users.",
+   "justificationsBenefits": "A clear search action button encourages users to engage with the search bar, improving accessibility and usability across devices.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recjEVPpCRkdi17EE&i=0&s=full",
+     "filename": "Search Button Icon Adidas.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recjEVPpCRkdi17EE&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recjEVPpCRkdi17EE&i=1&s=full",
+     "filename": "Search Button Icon Amazon.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recjEVPpCRkdi17EE&i=1&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Page Views Per Session"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec5qkI2EcLQ5jQ9D",
+  "ruleTitle": "Are all important pages linked in the main navigation?",
+  "passed": true,
+  "reason": "The main navigation includes links to NEW ARRIVALS, SHOP ALL, MEN, and WOMEN, which are key shopping categories.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure that your main navigation menu includes links to all essential pages. Prioritize the links bringing money. A common mistake is to add too many links, causing distraction.\n\nThe pages like Contact, About Us, and Customer Service can be down in the footer.",
+   "justificationsBenefits": "Including essential pages helps users quickly access critical pages, enhancing usability and guiding them through the buying process.\n\n**Additional Resources:**\n- [5 Top Ecommerce Navigation Best Practices + Examples](https://uxdworld.com/5-top-ecommerce-navigation-best-practices-examples/)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec5qkI2EcLQ5jQ9D&i=0&s=full",
+     "filename": "Navbar Plantsome.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec5qkI2EcLQ5jQ9D&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec5qkI2EcLQ5jQ9D&i=1&s=full",
+     "filename": "Navbar SHEIN.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec5qkI2EcLQ5jQ9D&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Page Views Per Session"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec33A6aJXon8YXfR",
+  "ruleTitle": "Do some images include annotations?",
+  "passed": true,
+  "reason": "Image annotations are not applicable for fashion products like shoes.",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Display annotations directly within product images or as badges.\n\nEnsure that these annotations are visible and easy to understand, emphasizing the product\u2019s unique qualities.",
+   "justificationsBenefits": "Visual elements often communicate more effectively than text alone, quickly conveying value propositions that encourage purchases. Your product gallery can be more influential in driving sales than the product description.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=0&s=full",
+     "filename": "Spacegoods Imagery Annotations.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=1&s=full",
+     "filename": "Huel Photo Gallery Benefits.webp",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=2&s=full",
+     "filename": "Huel Photo Gallery Ingredients.webp",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=3&s=full",
+     "filename": "Huel Photo Gallery USPs.webp",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec33A6aJXon8YXfR&i=3&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recLehZKzun1Rxv0Z",
+  "ruleTitle": "Are dropdown menus easy to use on both desktop and mobile?",
+  "passed": true,
+  "reason": "The page does not use dropdown menus for navigation or product options.",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Implement touch-friendly dropdowns with clear labels and avoid multiple levels that can be difficult to navigate on touch screens.\n\n**Detailed Actions:**\n- **Design for Touch:** For mobile, ensure that dropdown menus are appropriately sized for touch interaction. The touch targets should be at least 44x44 pixels to accommodate finger taps comfortably.\n- **Limit Menu Items:** Keep the number of items in dropdown menus manageable (ideally between 5-10 items) to prevent overwhelming users. Use submenus sparingly and ensure they are easy to access.\n- **Visual Feedback:** Implement hover states on desktop and tap states on mobile to provide visual feedback when users interact with the dropdowns.",
+   "justificationsBenefits": "Easy-to-use dropdown menus significantly enhance user experience by facilitating quick access to products and categories, which can lead to higher conversion rates. If users find navigation frustrating, they are more likely to abandon their shopping journey.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recLehZKzun1Rxv0Z&i=0&s=full",
+     "filename": "Dropdown Navbar Weekday.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recLehZKzun1Rxv0Z&i=0&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Page Views Per Session"
+   ]
+  }
+ },
+ {
+  "ruleId": "recYUxusypKnfViyM",
+  "ruleTitle": "Is the logo clickable and linked to the homepage?",
+  "passed": true,
+  "reason": "The Allbirds logo in the header is clickable and links to the homepage.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure the logo in the header is clickable and links back to the homepage, providing users with an easy way to start over.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Go to **Online Store > Themes**, then click on **Customize**. In the header section, ensure the logo is set to link back to the homepage.\n- **WooCommerce**\n    - Navigate to **Appearance > Customize > Site Identity**. Ensure that your logo is uploaded and linked correctly.",
+   "justificationsBenefits": "Having a clickable logo linked to the homepage is a standard practice that enhances user navigation and reinforces branding. It allows users to easily return to the starting point, improving overall site usability and encouraging longer browsing sessions.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recYUxusypKnfViyM&i=0&s=full",
+     "filename": "Is the logo clickable and linked to the homepage.gif",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYUxusypKnfViyM&i=0&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Accessibility Score"
+   ]
+  }
+ },
+ {
+  "ruleId": "recnbgJzDarhgi4RH",
+  "ruleTitle": "Have you tested \"color swatches\" vs. \"small images\" of variants for the best user experience, especially in fashion?",
+  "passed": true,
+  "reason": "The page uses color swatches for color selection and numerical buttons for size selection.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Do you know what works best for you? If you can do it, test the use of \"color swatches\" and \"small images\" for product variants to determine which provides the most intuitive, engaging, and conversion-boosting experience, especially for fashion products.\n\n**Detailed Actions:**\n- **Evaluate Product Variants:** Display product variants (e.g., color, size, material) using both \"color swatches\" and \"small images\" to understand which format your users prefer.\n- **Run A/B Testing:** Implement A/B tests to track user engagement and conversion metrics for each variant display style. For fashion, color swatches tend to perform well for quick color selection, while small images might be preferred for products where the visual details (e.g., patterns, textures) are important.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use Shopify\u2019s built-in variant options\n- **WooCommerce**\n    - Use [Variation Swatches for WooCommerce](https://wordpress.org/plugins/woo-variation-swatches/)",
+   "justificationsBenefits": "Different styles of variant selectors can impact user preference and engagement. Testing helps identify which approach improves the shopping experience and conversion rates.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recnbgJzDarhgi4RH&i=0&s=full",
+     "filename": "Color swatches.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recnbgJzDarhgi4RH&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recnbgJzDarhgi4RH&i=1&s=full",
+     "filename": "Small images color swatches.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recnbgJzDarhgi4RH&i=1&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recNxnjMNyufvGsDX",
+  "ruleTitle": "If the product includes additional items as a pack, are all included products visually displayed?",
+  "passed": true,
+  "reason": "The product is a single item and does not include additional items as a pack.",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Clearly list all included items near the CTA. Frame it as an extra value.\n\n**Detailed Actions:**\n- Add a \u201cWhat\u2019s Included\u201d section directly below or next to the Add to Cart button.\n- Ensure the list is concise yet complete, using bullet points or icons for clarity.\n\n**Example Phrasing:**\n- \u2705 \"**You\u2019re getting:** Wireless Earbuds + \ud83c\udf81 Free Carrying Case + \ud83d\udd0b Charging Cable\"\n- \u2705 \"**Exclusive Bonus!** Free Travel Pouch ($15 value)\"\n- \u2705 \"**Get more for your money** \u2013 All accessories included, at no extra cost!\"",
+   "justificationsBenefits": "Highlighting bundled extras or savings can justify the price, making the deal more attractive.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recNxnjMNyufvGsDX&i=0&s=full",
+     "filename": "Screenshot 2025-03-04 at 16.51.18.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recNxnjMNyufvGsDX&i=0&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec9Bd8mIKecasTPF",
+  "ruleTitle": "Is the main product title visually prominent?",
+  "passed": true,
+  "reason": "The main product title 'Women's Wool Cruiser Slip On' is prominently displayed with a large font size.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Make sure\u00a0main product title is clearly visible, prominent, and easily readable. It should be the first thing users see when they land on the product page.\n\n**Detailed Actions**:\n- Use a large, bold font size that stands out from other page elements.\n- Position the title at the top of the product section, ideally just above the product image or close to the \"Add to Cart\" button.\n- Ensure the color of the text contrasts well with the background, making it easy to read on all devices.\n- Avoid clutter around the title\u2014ensure there is enough white space to make it stand out.\n- Test different font styles and sizes to find the most effective presentation.",
+   "justificationsBenefits": "Prominent titles capture attention immediately, guiding the user\u2019s focus on the key information.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec9Bd8mIKecasTPF&i=0&s=full",
+     "filename": "Product Page - Prominent Title - Typology Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec9Bd8mIKecasTPF&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec9Bd8mIKecasTPF&i=1&s=full",
+     "filename": "Product Page - Prominent Title - Boldking Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec9Bd8mIKecasTPF&i=1&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rechQdZcW7EkLpi5J",
+  "ruleTitle": "Does the product page have clickable tabs for easy access to more product details?",
+  "passed": false,
+  "reason": "The product page does not have clickable tabs or accordions for additional product details.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Implement clickable tabs (e.g., \u201cDescription,\u201d \u201cReviews,\u201d \u201cSpecifications\u201d) for easy navigation to detailed information.\n\n**Detailed Actions:**\n- Implement tabs or accordion-style dropdowns that allow customers to quickly jump between sections of the product page without long scrolling.\n- Keep the tab labels clear and concise (e.g., \"Description,\" \"Details,\" \"Reviews,\" \"Shipping\").\n- Ensure tabs are easy to interact with and responsive, especially on mobile devices. Make sure the active tab is highlighted for clarity.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Some themes might not support tabs by default. \u00a0Use apps like** **[Tabs by Station](https://apps.shopify.com/tabs-by-station) to add tab functionality.\n- **WooCommerce**\n    - Most themes come with tab functionality. If not, you can use [YIKES Custom Product Tabs](https://wordpress.org/plugins/yikes-inc-easy-custom-woocommerce-product-tabs/) to add tabs.",
+   "justificationsBenefits": "Tabs help reduce page clutter, making it easier for users to find the information they need without excessive scrolling. This improves user experience, increases engagement, and reduces bounce rates.\n\n**Additional Resources:**\n- [Tabs, Used Right](https://www.nngroup.com/articles/tabs-used-right/)\n- [Designing Perfect Tabs](https://uxplanet.org/designing-perfect-tabs-2c0aaf835bfc)\n- [Best Practices for Designing Tab Navigation](https://app.uxcel.com/courses/ui-components-best-practices/navigation-best-practices-771)",
+   "examples": [],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recH6IBXpHPI1KIxY",
+  "ruleTitle": "Are some images displayed with products key selling points and/or badges (e.g. vegan, cruelty-free, etc.)?",
+  "passed": true,
+  "reason": "The product is fashion apparel, so selling point badges on images are not applicable.",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Display key product selling points (e.g., vegan, cruelty-free, organic, etc.) directly within product images or as badges.\n\nEnsure that these badges are visible and easy to understand, emphasizing the product\u2019s unique qualities.\n\n**Detailed Actions:**\n- Use high-quality, clear badges/icons that are easy to spot without cluttering the product image.\n- Position badges strategically within the image, ideally near the product or in a corner where they are not distracting but still visible.",
+   "justificationsBenefits": "Visual elements often communicate more effectively than text alone, quickly conveying value propositions that encourage purchases. Your product gallery can be more influential in driving sales than the product description.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=0&s=full",
+     "filename": "Product Page - Key Selling Points in Images - Loop Earplugs",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=1&s=full",
+     "filename": "Product Page - Key Selling Points in Images - My Variations Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=2&s=full",
+     "filename": "Product Page - Key Selling Points in Images - Spacegoods Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=3&s=full",
+     "filename": "Product Page - Key Selling Points in Images - Inshape Nutrition Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=4&s=full",
+     "filename": "Product Page - Key Selling Points in Images - Gisou Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=4&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=5&s=full",
+     "filename": "Product Page - Key Selling Points in Images - Gisou Desktop 2",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recH6IBXpHPI1KIxY&i=5&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "receK3gEjM9yV2vi2",
+  "ruleTitle": "Does the product page display thumbnails for quick navigation through the image gallery?",
+  "passed": false,
+  "reason": "The product page does not display thumbnails for quick navigation through the image gallery; it uses dots instead.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Ensure that multiple product images are displayed as thumbnails below or beside the main image for easy viewing.\n\nIf your theme doesn't provide this feature:\n- **Shopify**: Use apps like[ Product Image Gallery & Zoom](https://apps.shopify.com/galaxio) to manage thumbnails efficiently.\n- **WooCommerce**: Use the [WooThumbs](https://iconicwp.com/products/woothumbs/) plugin to create thumbnail image galleries.",
+   "justificationsBenefits": "Thumbnails improve user navigation and browsing, enabling users to easily view all available images without leaving the page or excessive scrolling. This improves engagement and interaction with product images.\n\n**Additional Resources:**\n- [The Benefits of Consistent Visual Content and Product Images](https://claid.ai/blog/article/benefits-of-consistent-product-images/)\n- [A Guide To Ecommerce Product Images (+ 10 Tactics To Improve Yours)](https://thegood.com/insights/product-image-conversions/)",
+   "examples": [],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recxEGfZMHhvNPCUa",
+  "ruleTitle": "Does the product gallery include videos to demonstrate the product?",
+  "passed": false,
+  "reason": "The product gallery does not include any videos to demonstrate the product.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Integrate product demonstration videos in the gallery. Videos should show the product in use, highlighting key features.\n\n**Detailed Actions:**\n- Ensure the product videos are placed prominently in the product gallery, ideally as a main feature or within easy reach of the primary image.\n- The video should showcase the product in use, highlighting key features, benefits, and any unique selling points.\n- Consider adding customer reviews or tutorials in the video for added trust and engagement.",
+   "justificationsBenefits": "Videos provide dynamic insights into the product\u2019s functionality, increasing user understanding and driving conversions.\n\n**Additional Resources:**\n- [Importance of Product Video on Ecommerce (w/ 9+ Statistics)](https://www.businessdasher.com/importance-of-product-video)\n- [Why Is It Important to Use Video Content in E-Commerce?](https://cinema8.com/blog/why-is-it-important-to-use-video-content-in-e-commerce)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recxEGfZMHhvNPCUa&i=0&s=full",
+     "filename": "Product Page - Video in Gallery - Horace Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxEGfZMHhvNPCUa&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recxEGfZMHhvNPCUa&i=1&s=full",
+     "filename": "Product Page - Video in Gallery - Asos Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxEGfZMHhvNPCUa&i=1&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Difficult",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recKQWJU3qEuKGFA3",
+  "ruleTitle": "Are product images shown from multiple angles and perspectives to give a complete view?",
+  "passed": true,
+  "reason": "The product images show the shoes from multiple angles, including top, side, and bottom views.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Ensure product images are displayed from various angles and perspectives, such as front, side, back, and close-up views, to provide a complete picture. Additionally, include context to demonstrate scale, such as showing the product alongside a reference object, to help customers visualize its actual size.\n\nUse zoom or 360-degree functionality if possible and necessary, for furniture products particularly.\n\n**Detailed Actions:**\n- Upload high-quality images of the product from different angles and ensure they are clearly visible in the product gallery.\n- Include close-ups of important product details (e.g., stitching, texture, or special features).\n- Include images where the product is placed next to common items (e.g., a coffee cup, a coin, or a hand) to provide a reference for scale.\n- If the product is wearable or has variable dimensions, add a model or mannequin wearing or holding the product to highlight its fit or size.\n- For digital products (e.g., software or online services), use screenshots that show the product in use with a clear indication of its size in relation to other elements on the screen.",
+   "justificationsBenefits": "Giving users a full view of the product builds trust and confidence in their purchase, especially for visually-driven products like apparel or furniture. Displaying scale and dimensions in product images helps eliminate confusion about size, making it easier for customers to gauge whether the product meets their expectations.",
+   "examples": [],
+   "priority": "High",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recxoLHExiwXLdy75",
+  "ruleTitle": "Do product images include lifestyle shots that show the product in use?",
+  "passed": true,
+  "reason": "The page includes lifestyle shots showing the shoes being worn by a model in a natural setting.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Incorporate lifestyle images that showcase the product being used in real-world scenarios to help users visualize its benefits.\n\nDetailed Actions:\n- Include at least 1-2 lifestyle images on each product page. These should complement product photos, showing the item in use in realistic settings.\n- Focus on images where the product is being worn, used, or displayed in context. For example, if selling clothing, show people wearing it; if selling kitchen tools, show them in use in a kitchen environment.\n- Choose settings and models that reflect your target audience. Make sure the shots are professionally taken to avoid pixelation or low-quality visuals.\n- Use images that enhance the emotional appeal of the product and convey how it solves the customer\u2019s problem or enhances their life.",
+   "justificationsBenefits": "Lifestyle shots create a stronger emotional connection, helping customers visualize how the product fits into their lives. It enhances user experience, builds trust, and leads to higher conversion rates as shoppers can better imagine themselves using the product.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=0&s=full",
+     "filename": "Product Page - Lifestyle Image Gallery - Spacegoods Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=1&s=full",
+     "filename": "Product Page - Lifestyle Image Gallery - Lumin Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=2&s=full",
+     "filename": "Product Page - Lifestyle Image Gallery - Naduvi Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=3&s=full",
+     "filename": "Product Page - Lifestyle Image Gallery - My Jolie Candle Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=4&s=full",
+     "filename": "Product Page - Lifestyle Image Gallery - Decathlon Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recxoLHExiwXLdy75&i=4&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec7WWY98CVhOtAXo",
+  "ruleTitle": "Is there a section explaining how to use the product in simple steps?",
+  "passed": true,
+  "reason": "The product is shoes, which do not require a 'how to use' section.",
+  "status": "na",
+  "checkpoint": {
+   "requiredActions": "Include a clear, concise section on the product page that outlines how to use the product in simple, easy-to-understand steps. This could be a step-by-step guide, instructional video, or visual tutorial.\n\n**Detailed Actions**\n- Create a dedicated \"How to Use\" section on the product page that explains the product's usage in 3-5 simple steps.\n- Use clear language and break down the process in bite-sized pieces, ideally with visuals (e.g., icons, images, or videos) accompanying each step.\n- Include common scenarios or FAQs that potential buyers may have about the product's usage.\n- For complex products, consider adding a \"How-to\" video demonstrating the product in action.\n- Integrate these explanations close to the product description or in a tab section for easy accessibility.",
+   "justificationsBenefits": "Including a clear \"how to use\" section reduces confusion and increases customer confidence, directly impacting conversions.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=0&s=full",
+     "filename": "Product Page - How it Works - Spacegoods Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=1&s=full",
+     "filename": "Product Page - How it Works - Holy Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=2&s=full",
+     "filename": "Product Page - How it Works - Smily Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=3&s=full",
+     "filename": "Product Page - How it Works - Autobrush Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=4&s=full",
+     "filename": "Product Page - How it Works - Typolgy Mobile",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7WWY98CVhOtAXo&i=4&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "rec7hmBdP9rqP4gVw",
+  "ruleTitle": "Are relevant cross-sell or up-sell products displayed on the product page?",
+  "passed": false,
+  "reason": "There are no cross-sell or up-sell products displayed on the product page.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Make sure relevant cross-sell (related items) or up-sell (higher-value items) products are prominently displayed on the product page to encourage additional purchases.\n\n**Detailed Actions:**\n- **Positioning:** Display cross-sell and up-sell products below or next to the main product description or image.\n- **Relevance:** Use product data (e.g., related categories, purchase history, or customer behavior) to recommend items most likely to be bought together.\n- **Design:** Keep the design clean and visually distinct, making sure the recommendations are easy to browse but not distracting from the primary product.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use product recommendations that are powered by Shopify\u2019s native algorithm, or apps like [Bold Upsell](https://apps.shopify.com/product-upsell?locale=fr) or [Frequently Bought Together](https://apps.shopify.com/frequently-bought-together) for advanced features.\n- **WooCommerce**\n    - Use the built-in \"Related Products\" feature. To enhance cross-sells or up-sells, consider plugins like [WooCommerce Product Recommendations](https://woocommerce.com/products/product-recommendations/).",
+   "justificationsBenefits": "Cross-sells and up-sells significantly boost average order value (AOV) by showing customers complementary or higher-value options they may be interested in, improving their shopping experience and increasing your revenue.\n\n**Additional Resources:**\n- [Upselling vs. Cross-Selling: The Ultimate Guide](https://www.shopify.com/blog/upselling-and-cross-selling)\n- [How to use upsells and cross-sells on your Shopify product pages](https://instant.so/blog/how-to-use-upsells-and-cross-sells-on-your-shopify-product-pages)",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=0&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - MyVariations Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=1&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - Amazon Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=2&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - Plantsome Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=3&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - Horace Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=4&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - Skims Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=4&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=5&s=full",
+     "filename": "Product Page - Up-sell/Cross-sell - MyKitsch Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=rec7hmBdP9rqP4gVw&i=5&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Easy",
+   "metrics": [
+    "Average Order Value (AOV)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recP2gybr9r0x8LYz",
+  "ruleTitle": "Do all product images have consistent backgrounds to maintain a professional appearance?",
+  "passed": true,
+  "reason": "The product images have consistent light-colored backgrounds for the product-only shots.",
+  "status": "pass",
+  "checkpoint": {
+   "requiredActions": "Standardize image backgrounds across the product catalog. A clean, neutral background (e.g., white or light gray) helps maintain a professional, polished look across your product listings\n\n**Detailed Actions:**\n- Choose one background color or style for all product images and apply it to each product photo.\n- Use image editing tools to remove any distractions and create a consistent look.\n- Ensure that product photos are well-lit, clear, and focused, with no clutter or background elements competing for attention.\n- If your product images are shot in different settings (e.g., some with white backgrounds, others in a lifestyle setting), consider removing the lifestyle images or editing them to match the consistent background theme.\n\nUse this tool for free: <https://www.remove.bg/>",
+   "justificationsBenefits": "Consistency in product imagery builds trust and improves the perceived professionalism of your site. A cluttered or inconsistent visual presentation can distract or confuse customers, negatively affecting their shopping experience.",
+   "examples": [],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Add-to-Cart Rate"
+   ]
+  }
+ },
+ {
+  "ruleId": "recf9TVdWozjE1laI",
+  "ruleTitle": "Are there images showing the product alongside complementary items?",
+  "passed": false,
+  "reason": "The product images show the shoes alone or on a model, but not with other items like bags or apparel that could be cross-sold.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Display images showing the product with complementary or related items, such as accessories, to encourage cross-selling and increase average order value.\n\n**Detailed Actions:**\n- On your product pages, ensure that images show the product in context, paired with complementary items like matching accessories or alternative styles.\n- If selling clothing, showcase items like shoes, bags, or jewelry alongside the main product. For electronics, include related products such as chargers, cases, or stands.\n- Use lifestyle images that show the product in use with complementary items in the frame, enhancing the customer's vision of how they can use the product in real life.\n- Create a dedicated section or carousel in your product image gallery to highlight complementary items.",
+   "justificationsBenefits": "Displaying complementary products helps customers envision the full experience of the product, increasing the likelihood of impulse purchases and boosting your average order value",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=0&s=full",
+     "filename": "Product Page - Complementary Items in Image Gallery - Skims Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=1&s=full",
+     "filename": "Product Page - Complementary Items in Image Gallery - My Variations Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=2&s=full",
+     "filename": "Product Page - Complementary Items in Image Gallery - Naduvi Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recf9TVdWozjE1laI&i=2&s=thumb"
+    }
+   ],
+   "priority": "Medium",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Average Order Value (AOV)"
+   ]
+  }
+ },
+ {
+  "ruleId": "recYvb2wC1safMjpN",
+  "ruleTitle": "Do you offer quantity discounts?",
+  "passed": false,
+  "reason": "There is no mention of quantity discounts or price breaks for buying multiple items.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Provide discounts for purchasing multiple items or in bulk quantities.\n\n**For WooCommerce and Shopify Users:**\n- **Shopify**\n    - Use [Xboost Bundle Quantity Breaks](https://apps.shopify.com/xboost-upsell)\n    - Use [P: Quantity & Volume Discounts](https://apps.shopify.com/quantity-price-breaks-limit-purchase)\n    - Use [Kaching Bundle Quantity Breaks](https://apps.shopify.com/bundle-deals)\n- **WooCommerce**\n    - Use [Discount Rules and Dynamic Pricing](https://wordpress.org/plugins/easy-woocommerce-discounts/)",
+   "justificationsBenefits": "Offering quantity discounts drives higher average order value while providing customers clear cost savings motivation. Transparent bulk pricing reduces cart abandonment by eliminating pricing uncertainty and leverages loss aversion psychology.",
+   "examples": [
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=0&s=full",
+     "filename": "Is the quantity selector designed to boost AOV with prominent options showing discounts per unit for multiple purchases?.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=0&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=1&s=full",
+     "filename": "Product Page - Quantity AOV Booster - Inshape Nutrition Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=1&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=2&s=full",
+     "filename": "Product Page - Quantity AOV Booster - Spacegoods Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=2&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=3&s=full",
+     "filename": "Product Page - Quantity AOV Booster - Lucent Globe Desktop",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=3&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=4&s=full",
+     "filename": "Skin Lovers Quantity Breaks Images.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=4&s=thumb"
+    },
+    {
+     "url": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=5&s=full",
+     "filename": "Skin Lovers Quantity Breaks Text.png",
+     "thumbnailUrl": "/scan/api/checkpoint-image?r=recYvb2wC1safMjpN&i=5&s=thumb"
+    }
+   ],
+   "priority": "High",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Average Order Value (AOV)"
+   ]
+  }
+ },
+ {
+  "ruleId": "rechWSGCANIZS39ja",
+  "ruleTitle": "Do you offer a quick complementary add-on upsell near the main CTA?",
+  "passed": false,
+  "reason": "There is no quick complementary add-on upsell presented near the 'Add to Cart' button.",
+  "status": "fail",
+  "checkpoint": {
+   "requiredActions": "Identify complementary products, design compelling upsell offers, integrate them into the CTA area of your product page.\n\n**Detailed Actions:**\n1. **Identify Upsell Opportunities:**\n    - Analyze the product catalog to identify complementary products or services that can be offered as upsells.\n    - Consider customer purchase history and behavior to determine the most relevant upsell items.\n2. **Design Upsell Offers:**\n    - Create compelling upsell offers that provide additional value to the customer.\n    - Ensure the offers are clearly communicated and easy to understand.\n3. **Integrate Upsell into Main CTA:**\n    - Modify the main Call-To-Action (CTA) on the product page to include the upsell offer.\n    - Use persuasive language and visual cues to highlight the upsell without distracting from the primary CTA.",
+   "justificationsBenefits": "By implementing this checkpoint, you can significantly increase your average order value and drive revenue growth while enhancing overall shopping experience.",
+   "examples": [],
+   "priority": "High",
+   "difficulty": "Moderate",
+   "metrics": [
+    "Average Order Value (AOV)"
+   ]
+  }
+ }
+]

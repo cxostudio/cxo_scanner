@@ -1,12 +1,44 @@
 {
   "crons": [
     {
-      "path": "/api/checkpoints/refresh",
+      "path": "/scan/api/checkpoints/refresh",
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/keep-alive",
+      "path": "/scan/api/keep-alive",
       "schedule": "0 3 * * *"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "portal.cxo.studio"
+        }
+      ],
+      "destination": "/scan/api/:path*"
+    },
+    {
+      "source": "/scan/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "portal.cxo.studio"
+        }
+      ],
+      "destination": "/scan/:path*"
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "portal.cxo.studio"
+        }
+      ],
+      "destination": "/scan/portal/index.html"
     }
   ]
 }

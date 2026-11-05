@@ -11,7 +11,7 @@ const checkpointSchema = z.object({
       thumbnailUrl: z.string(),
     }),
   ),
-})
+}).passthrough()
 
 const CombineRequestSchema = z.object({
   results: z.array(
@@ -20,6 +20,8 @@ const CombineRequestSchema = z.object({
       ruleTitle: z.string(),
       passed: z.boolean(),
       reason: z.string(),
+      status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
+      coveredByShopify: z.boolean().optional(),
       checkpoint: checkpointSchema.optional(),
     }),
   ),
