@@ -3,6 +3,7 @@
 // judge until a checkpoint reaches 90%, without new scans or new labels.
 import { NextRequest, NextResponse } from 'next/server'
 import { refreshCheckpointRulesCache, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { filterCheckpointsByUrl } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import { judgeEvidence } from '@/lib/scanV2'
 import { V2_MODEL } from '@/lib/scanV2/judge'
 import { getLabels, getTestScan, labAllowed, listTestScans, loadEvidence, saveRejudge, type LabLabel, type LabScan } from '@/lib/lab/store'
@@ -24,7 +25,9 @@ function agreement(answers: LabScan['answers'], labels: Record<string, LabLabel>
   return n ? { agree, labelled: n } : null
 }
 
-async function rejudgeOne(id: string, current: Map<string, ScanRule>, apiKey: string) {
+type Fresh = { records: { id: string; fields?: Record<string, unknown> }[]; rules: ScanRule[] }
+
+async function rejudgeOne(id: string, current: Map<string, ScanRule>, fresh: Fresh, apiKey: string) {
   const scan = await getTestScan(id)
   if (!scan) return { id, ok: false, error: 'not found' }
   const ev = await loadEvidence(scan)
@@ -32,11 +35,15 @@ async function rejudgeOne(id: string, current: Map<string, ScanRule>, apiKey: st
   // same checkpoints as the original scan, with today's definitions (stored copy if gone from Airtable)
   const stored = new Map((scan.rules || []).map((r) => [r.id, r]))
   const rules = scan.checkpoints.map((c) => current.get(c.id) || stored.get(c.id)).filter(Boolean) as ScanRule[]
+  // checkpoints added in Airtable since the scan (same page type, Live or Draft) join it unlabelled
+  const have = new Set(rules.map((r) => r.id))
+  const added = filterCheckpointsByUrl(fresh.records, fresh.rules, scan.url, { includeDrafts: true }).rules.filter((r) => !have.has(r.id))
+  rules.push(...added)
   const labels = await getLabels(scan.id)
   const before = agreement(scan.answers, labels)
   const { results, niche } = await judgeEvidence(ev, rules, apiKey)
   const next = await saveRejudge(scan, { rules, results, niche, model: V2_MODEL() })
-  return { id, ok: true, url: scan.url, before, after: agreement(next.answers, labels) }
+  return { id, ok: true, url: scan.url, before, after: agreement(next.answers, labels), added: added.length }
 }
 
 export async function POST(req: NextRequest) {
@@ -54,7 +61,7 @@ export async function POST(req: NextRequest) {
     const out: Awaited<ReturnType<typeof rejudgeOne>>[] = []
     // a few at a time: each re-judge sends ~20 screenshots per checkpoint group
     for (let i = 0; i < ids.length; i += 3) {
-      const batch = await Promise.all(ids.slice(i, i + 3).map((id) => rejudgeOne(id, current, apiKey).catch((e) => ({ id, ok: false, error: (e as Error)?.message || JSON.stringify(e) }))))
+      const batch = await Promise.all(ids.slice(i, i + 3).map((id) => rejudgeOne(id, current, fresh.data, apiKey).catch((e) => ({ id, ok: false, error: (e as Error)?.message || JSON.stringify(e) }))))
       out.push(...batch)
     }
     return NextResponse.json({ model: V2_MODEL(), scans: out })
