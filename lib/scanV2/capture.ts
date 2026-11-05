@@ -760,6 +760,28 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
     })
     .catch(() => null)
   if (process.env.SCANV2_DEBUG) console.log('[cart view]', device, JSON.stringify(point), await page.evaluate((p) => { if (!p) return null; const e = document.elementFromPoint(p.x, p.y); return e ? `${e.tagName} ${e.getAttribute('aria-label') || ''} ${(e.getAttribute('class') || '').slice(0, 50)}` : null }, point).catch(String))
+  // some themes open the drawer by themselves after add-to-cart: clicking the icon would close it again
+  const alreadyOpen = await page
+    .evaluate(() => {
+      const CART = /cart|bag|basket|panier|winkel|warenkorb|carrito|carrello|koszyk/i
+      const CHECKOUT = /subtotal|check ?out|checkout|afrekenen|zur kasse/i
+      for (const y of [0.3, 0.5, 0.8]) {
+        let el = document.elementFromPoint(window.innerWidth - 160, window.innerHeight * y) as HTMLElement | null
+        for (let k = 0; el && k < 8; k++, el = el.parentElement) {
+          if (getComputedStyle(el).position === 'fixed' || /DIALOG|DRAWER|MODAL|CART/.test(el.tagName) || el.getAttribute('role') === 'dialog') {
+            const t = (el.innerText || '').slice(0, 1500)
+            if (CART.test(t) && CHECKOUT.test(t) && el.getBoundingClientRect().width < window.innerWidth * 0.8) return true
+            break
+          }
+        }
+      }
+      return false
+    })
+    .catch(() => false)
+  if (alreadyOpen) {
+    const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
+    if (b64) return { label: `${device} cart view after one item was added (the cart drawer)`, dataUrl: `data:image/jpeg;base64,${b64}` }
+  }
   if (!point) return undefined
   const startUrl = page.url()
   // remember the floating panels already on screen, so a drawer that appears can be told apart
