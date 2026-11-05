@@ -96,7 +96,7 @@ export default function LabHome() {
             <section className="flex flex-col gap-3">
               <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Test scans ({data.scans.length})</h2>
               {data.scans.length === 0 && <p className="text-sm text-[var(--text-muted)]">No test scans yet.</p>}
-              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+              <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
                 {data.scans.map((s) => {
                   const done = s.labelled >= s.checkpoints
                   return (
@@ -121,7 +121,7 @@ export default function LabHome() {
                 </p>
               </div>
               {data.accuracy.length === 0 && <p className="text-sm text-[var(--text-muted)]">Label a scan to see accuracy.</p>}
-              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+              <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
                 {data.accuracy.map((a) => {
                   const rate = a.agree / a.labelled
                   const enough = a.labelled >= MIN_LABELS
