@@ -1,6 +1,6 @@
 // One test scan for labelling. The scanner's answers stay hidden until ?reveal=1, so labels are blind.
 import { NextRequest, NextResponse } from 'next/server'
-import { getLabels, getTestScan, imageUrls, labAllowed, lastReadError } from '@/lib/lab/store'
+import { deleteTestScan, getLabels, getTestScan, imageUrls, labAllowed, lastReadError } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -22,6 +22,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       images: scan.images.map((img, i) => ({ label: img.label, url: urls[i] })),
       labels,
     })
+  } catch (e) {
+    return NextResponse.json({ error: String((e as Error)?.message || e) }, { status: 500 })
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  try {
+    return NextResponse.json({ ok: true, removed: await deleteTestScan(params.id) })
   } catch (e) {
     return NextResponse.json({ error: String((e as Error)?.message || e) }, { status: 500 })
   }

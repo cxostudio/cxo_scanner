@@ -159,6 +159,17 @@ export default function LabScan({ params }: { params: { id: string } }) {
           {scan.cartKind ? ` · cart: ${scan.cartKind}` : ''}
         </span>
         <span className="text-sm font-semibold">{done}/{scan.checkpoints.length} labelled</span>
+        <button
+          type="button"
+          className="text-sm text-[var(--text-muted)] hover:underline"
+          onClick={async () => {
+            if (!window.confirm(`Delete this test scan of ${host} and its labels?`)) return
+            const r = await fetch(api(`/lab/scans/${params.id}${q}`), { method: 'DELETE' })
+            if (r.ok) window.location.href = `${window.location.pathname.replace(/\/lab\/[^/]+$/, '/lab')}${q}`
+          }}
+        >
+          Delete
+        </button>
         <span className="w-16 text-xs text-[var(--text-muted)]">{saved === 'saving' ? 'Saving…' : saved === 'saved' ? 'Saved' : saved === 'error' ? 'Not saved' : ''}</span>
         {compare ? (
           <button type="button" className="cxo-btn cxo-btn-ghost" onClick={() => setCompare(false)}>Back to labelling</button>

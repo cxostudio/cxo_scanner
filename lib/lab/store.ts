@@ -273,3 +273,17 @@ export function labAllowed(key: string | null | undefined) {
   if (expected) return key === expected
   return process.env.VERCEL_ENV === 'preview' || process.env.NODE_ENV === 'development'
 }
+
+/** Remove a test scan: its screenshots, evidence, answers and labels. */
+export async function deleteTestScan(id: string) {
+  const store = await bucket()
+  const safe = safeId(id)
+  const files: string[] = []
+  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`]) {
+    const { data } = await store.list(folder, { limit: 1000 })
+    for (const f of data || []) if (f.id) files.push(`${folder}/${f.name}`)
+  }
+  files.push(`labels/${safe}.json`)
+  for (let i = 0; i < files.length; i += 100) await store.remove(files.slice(i, i + 100))
+  return files.length
+}
