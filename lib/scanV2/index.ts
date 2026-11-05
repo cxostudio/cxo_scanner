@@ -40,6 +40,8 @@ const UNMEASURED = 'This is measured in the page code, and the scanner could not
  * Judge captured evidence: Shopify defaults and code measurements first, the model for the rest,
  * then the hard niche rules. Used by live scans and by the lab to re-judge saved test scans.
  */
+/** Checkpoints about buying online, by their question. */
+const PURCHASE = /add-to-cart|add to cart|\bcart\b|checkout|shipping|deliver|arrive|return|refund|in stock|stock|quantity discount|discount|payment|trust signals|upsell|add-on|subscribe|buy button|main button|\bCTA\b/i
 const STORE_ONLY = /find in (a )?store|where to buy|store locator|find a (store|retailer)|buy in store|vind een winkel|trouver un magasin|händler finden/i
 const ADD_TO_CART = /add to (cart|bag|basket)|ajouter au panier|in (de )?winkel(wagen|mand)|in den warenkorb|añadir al carrito|aggiungi al carrello|subscribe & save|pre-?order/i
 
@@ -74,6 +76,9 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
   const { niche, verdicts } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
   const byId = new Map<string, Answer & { coveredByShopify?: boolean }>(verdicts.map((v) => [v.id, v]))
   for (const [id, m] of Array.from(settled)) byId.set(id, m)
+  // a page that does not sell online: buying checkpoints are not relevant, whatever the model said
+  if (ev.sellsOnline === false)
+    for (const r of rules) if (r.area === 'Cart drawer' || PURCHASE.test(r.title)) byId.set(r.id, { answer: 'na', evidence: 'This page does not sell online (the main button sends shoppers to stores), so this does not apply.' })
   // niche rules are facts in Airtable, not the model's call: they override any answer
   for (const r of rules) {
     const n = nicheVerdict(r, niche)
