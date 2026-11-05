@@ -1029,9 +1029,22 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       await desktop.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
       await cleanPage(desktop)
     }
-    const cart = await cartTest(desktop)
+    let cart = await cartTest(desktop)
+    // the page can still be settling after the empty-cart visit: one more try before giving up on the cart
+    if (!cart.note.startsWith('one item') && !/refused|not a Shopify/.test(cart.note)) {
+      await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
+      cart = await cartTest(desktop)
+    }
     const itemInCart = cart.note.startsWith('one item')
-    const desktopCartView = itemInCart && opts.extended ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
+    if (process.env.SCANV2_DEBUG) console.log('[cart test]', cart.note, desktop.url())
+    let desktopCartView = itemInCart && opts.extended ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
+    if (itemInCart && opts.extended && !desktopCartView) {
+      // a drawer that did not open (slow theme script, a click that landed while the page was busy): reload, try once more
+      await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+      await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
+      await cleanPage(desktop)
+      desktopCartView = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
+    }
     const cartKind = itemInCart && opts.extended ? kindOf(desktopCartView) : undefined
     // the icon opened a drawer (or nothing): capture the cart page too
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
