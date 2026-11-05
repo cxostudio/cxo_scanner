@@ -284,6 +284,7 @@ export async function saveLabels(id: string, labels: Record<string, LabLabel>) {
 
 /** Short-lived links to a scan's screenshots (the bucket is private). */
 export async function imageUrls(scan: LabScan): Promise<string[]> {
+  if (!scan.images?.length) return []
   const store = await bucket()
   const { data, error } = await store.createSignedUrls(scan.images.map((i) => i.file), 60 * 60 * 6)
   if (error) throw error
