@@ -94,7 +94,7 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
     if (r.status === 'Draft' && r.method === 'Measured') settled.set(r.id, { answer: 'unknown', evidence: UNMEASURED })
   }
   const measured = settled.size
-  const { niche, verdicts } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
+  const { niche, verdicts, usage } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
   const byId = new Map<string, Answer & { coveredByShopify?: boolean }>(verdicts.map((v) => [v.id, v]))
   for (const [id, m] of Array.from(settled)) byId.set(id, m)
   // a page that does not sell online: buying checkpoints are not relevant, whatever the model said
@@ -126,7 +126,7 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
       ...(v?.coveredByShopify ? { coveredByShopify: true } : {}),
     }
   })
-  return { results, niche, measured }
+  return { results, niche, measured, usage }
 }
 
 export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
@@ -134,7 +134,7 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
   // the extra capture steps run when a checkpoint needs them: always in test mode
   const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
   const t1 = Date.now()
-  const { results, niche, measured } = await judgeEvidence(ev, rules, apiKey)
+  const { results, niche, measured, usage } = await judgeEvidence(ev, rules, apiKey)
   const screenshot = ev.desktopTiles[0]?.dataUrl ?? null
   console.log(`[scanV2] ${url} ${rules.length} checkpoints, niche ${niche}, capture ${t1 - t0}ms judge ${Date.now() - t1}ms model ${V2_MODEL()} tiles ${ev.desktopTiles.length}+${ev.mobileTiles.length}`)
   const diag = {
@@ -151,6 +151,8 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
     hiddenChars: ev.hiddenText.length,
     measured,
     checkpoints: rules.length,
+    usage,
+    images: evidenceImages(ev).length,
   }
   return { results, screenshot, niche, evidence: ev, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
 }

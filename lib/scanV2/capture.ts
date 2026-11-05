@@ -239,7 +239,8 @@ function readFacts(page: Page) {
       images: {
         total: imgs.length,
         lazyLoaded: imgs.filter((i) => i.loading === 'lazy' || !!(i as HTMLImageElement).dataset.src || /lazy/i.test(i.className)).length,
-        missingAlt: imgs.filter((i) => !i.hasAttribute('alt')).length,
+        // like Lighthouse: only images a person could see (tracking pixels and hidden images do not need alt text)
+        missingAlt: imgs.filter((i) => !i.hasAttribute('alt') && (i as HTMLImageElement).width > 2 && (i as HTMLImageElement).height > 2 && !i.closest('[aria-hidden="true"]')).length,
         modernFormat: imgs.filter((i) => /\.(webp|avif)|format=(webp|avif)|fm=(webp|avif)/i.test(i.currentSrc || i.src)).length,
       },
       videos: Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"], iframe[data-src*="youtube"], iframe[data-src*="vimeo"]')).map((v) => ({
@@ -735,7 +736,7 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
  * a cart drawer, or the cart page when the icon links there. Undefined when no cart control is found.
  */
 async function cartView(page: Page, device: 'desktop' | 'mobile', width: number, height: number): Promise<Tile | undefined> {
-  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  await topWithHeader(page)
   // undo cleanPage's popup hiding: it also hides the (closed) cart drawer
   await liftPopupHiding(page)
   await clearOverlays(page)
@@ -871,8 +872,20 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
  * Mobile: tap the menu button in the header and capture the navigation that opens.
  * Kept only if a new panel with several links appeared (no screenshot of a closed menu).
  */
-async function mobileMenu(page: Page, width: number, height: number): Promise<Tile | undefined> {
+/**
+ * Back to the top with the header showing. Headers that hide while scrolling down only come back on a
+ * real scroll UP (wheel events), not on a jump to the top, so scroll down a little and wheel back up.
+ */
+async function topWithHeader(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 300)).catch(() => {})
+  await new Promise((r) => setTimeout(r, 150))
+  for (let k = 0; k < 3; k++) await page.mouse.wheel({ deltaY: -400 }).catch(() => {})
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  await new Promise((r) => setTimeout(r, 500))
+}
+
+async function mobileMenu(page: Page, width: number, height: number): Promise<Tile | undefined> {
+  await topWithHeader(page)
   // the menu is a modal panel: cleanPage would keep it hidden
   await liftPopupHiding(page)
   await clearOverlays(page)

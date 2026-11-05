@@ -154,8 +154,9 @@ export const MEASURED: Record<string, Measure> = {
   recpms3eLz0EUb0qR: (ev) => {
     const m = ev.mobileFacts as F
     if (typeof m.bodyFontPx !== 'number' || (m.textBlocks || 0) < 3) return null
-    if (m.bodyFontPx >= 16) return { answer: 'pass', evidence: `Body text on phones is ${m.bodyFontPx}px, readable without zooming.` }
-    if (m.bodyFontPx < 14) return { answer: 'fail', evidence: `Body text on phones is ${m.bodyFontPx}px, small enough that shoppers may need to zoom (16px is the usual minimum).` }
+    // checked against Lighthouse's legibility audit on 7 stores: body text of 14px and up read fine everywhere
+    if (m.bodyFontPx >= 14) return { answer: 'pass', evidence: `Body text on phones is ${m.bodyFontPx}px, readable without zooming.` }
+    if (m.bodyFontPx < 12) return { answer: 'fail', evidence: `Body text on phones is ${m.bodyFontPx}px, small enough that shoppers need to zoom (Google counts text under 12px as illegible).` }
     return null
   },
 

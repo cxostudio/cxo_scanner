@@ -6,6 +6,7 @@
 // "Measured" checkpoints (code) and checkpoints outside the store's niche (rule).
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ExampleCrop } from './ExampleCrop'
 import { api } from '@/lib/base'
 
 type Label = 'pass' | 'fail' | 'na' | 'skip'
@@ -315,11 +316,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
             )}
             <div className="flex flex-col gap-3">
               {images.map((img) => (
-                <figure key={img.url} className={`overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] ${/^mobile/i.test(img.label) ? 'max-w-[420px]' : ''}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt={img.label} className="block h-auto w-full" loading="lazy" />
-                  <figcaption className="border-t border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)]">{img.label}</figcaption>
-                </figure>
+                <ExampleCrop key={img.url} img={img} checkpointId={cp.id} checkpointTitle={cp.title} store={host} labKey={key} mobile={/^mobile/i.test(img.label)} />
               ))}
             </div>
           </section>
