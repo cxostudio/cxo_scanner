@@ -233,6 +233,17 @@ export const MEASURED: Record<string, Measure> = {
     return null
   },
 
+  // Is the footer designed to be responsive and mobile-friendly? Measured on a 390px phone screen:
+  // no sideways scroll, and at least 75% of footer links comfortable to tap (40px+ from the next one, or 44px+ tall).
+  recgYs2tKWTQRQV7i: (ev) => {
+    const t = (ev.mobileFacts as F)?.footerTargets
+    if (!t) return null
+    const share = t.comfortable / t.targets
+    if (t.overflow) return { answer: 'fail', evidence: 'On a phone the page scrolls sideways at the footer: it is wider than the screen.' }
+    if (share >= 0.75) return { answer: 'pass', evidence: `On a phone, ${t.comfortable} of ${t.targets} footer links are easy to tap: big enough and spaced apart.` }
+    return { answer: 'fail', evidence: `On a phone, only ${t.comfortable} of ${t.targets} footer links are easy to tap: they sit about ${t.typicalGap}px apart, under the 40px a thumb needs.` }
+  },
+
   // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
   recEgJJ3Ja7iD3B63: (ev, f) => {
     if (!ev.isShopify || !f.footer) return null

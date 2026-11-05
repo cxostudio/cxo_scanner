@@ -589,6 +589,44 @@ async function prepare(page: Page) {
 }
 
 /** Open the page; a slow page that has in fact rendered is good enough. */
+/**
+ * Footer tap targets on a phone: for every visible footer link or button, the size of its tappable box
+ * and the distance to the nearest other target (centre to centre). A small link is still easy to tap
+ * when its neighbours are far enough away, so a target counts as comfortable when nothing else sits
+ * within 40px of its centre, or its own box is 44px tall (Apple's minimum).
+ */
+async function measureFooterTargets(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {})
+  await new Promise((r) => setTimeout(r, 600))
+  return page.evaluate(() => {
+    // the footer with the most links (themes also use "footer" in class names for small blocks inside cards)
+    const footer = Array.from(document.querySelectorAll('footer, [role="contentinfo"], #shopify-section-footer, [class*="footer" i]')).sort((a, b) => b.querySelectorAll('a[href]').length - a.querySelectorAll('a[href]').length)[0]
+    if (!footer) return null
+    const boxes = Array.from(footer.querySelectorAll('a[href], button, summary'))
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0)
+      .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height, w: r.width }))
+    if (boxes.length < 4) return null
+    let comfortable = 0
+    const gaps: number[] = []
+    for (const b of boxes) {
+      let nearest = Infinity
+      for (const o of boxes) if (o !== b) nearest = Math.min(nearest, Math.hypot(o.x - b.x, o.y - b.y))
+      gaps.push(nearest)
+      if (nearest >= 40 || b.h >= 44) comfortable++
+    }
+    gaps.sort((a, b) => a - b)
+    const heights = boxes.map((b) => b.h).sort((a, b) => a - b)
+    return {
+      targets: boxes.length,
+      comfortable,
+      medianHeight: Math.round(heights[Math.floor(heights.length / 2)]),
+      typicalGap: Math.round(gaps[Math.floor(gaps.length / 2)]),
+      overflow: document.documentElement.scrollWidth > window.innerWidth + 2,
+    }
+  })
+}
+
 /** The page shows a bot check (Cloudflare and the like) instead of the store. */
 async function walled(page: Page) {
   const title = await page.title().catch(() => '')
@@ -1016,6 +1054,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
+      mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
       if (opts.extended) {
         menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
         // back to a clean page before the cart (the open menu would sit over the cart icon)
