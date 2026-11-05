@@ -49,6 +49,9 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
 - Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
+- Empty-cart checkpoints are judged ONLY on the "EMPTY cart" image. Without it they are "unknown"; never judge them from a cart that holds an item.
+- Pass only for something you can point to in the screenshots, the page text or the measured facts. Do not infer a feature from a nearby word (a shipping badge is not a coupon field).
+- Hover, focus, keyboard type, animation and load speed cannot be seen in screenshots: unless the measured facts settle it, answer "unknown".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
@@ -71,7 +74,7 @@ function evidenceText(ev: Evidence) {
 }
 
 function images(ev: Evidence) {
-  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.cartPage || []), ...(ev.mobileCartView ? [ev.mobileCartView] : []), ...(ev.mobileCartPage || [])]
+  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.emptyCart ? [ev.emptyCart] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.cartPage || []), ...(ev.mobileCartView ? [ev.mobileCartView] : []), ...(ev.mobileCartPage || [])]
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },

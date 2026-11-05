@@ -11,8 +11,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!scan) return NextResponse.json({ error: 'Scan not found' }, { status: 404 })
     const [labels, urls] = await Promise.all([getLabels(scan.id), imageUrls(scan)])
     const reveal = req.nextUrl.searchParams.get('reveal') === '1'
+    // history holds earlier answers: never sent, or labelling would not be blind
+    const { history, rules: _rules, ...rest } = scan
     return NextResponse.json({
-      ...scan,
+      ...rest,
+      runs: (history?.length || 0) + 1,
+      judgedAt: scan.judgedAt,
       answers: reveal ? scan.answers : undefined,
       images: scan.images.map((img, i) => ({ label: img.label, url: urls[i] })),
       labels,

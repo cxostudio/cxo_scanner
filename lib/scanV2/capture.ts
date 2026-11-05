@@ -26,6 +26,8 @@ export type Evidence = {
   /** The /cart page as well, when the icon opened a drawer (both are judged, the drawer first). */
   cartPage?: Tile[]
   mobileCartPage?: Tile[]
+  /** The cart opened BEFORE anything is added (empty-cart checkpoints). */
+  emptyCart?: Tile
   /** 'drawer' when the icon opens a drawer, 'page' when it goes to /cart, 'none' when nothing opened. */
   cartKind?: 'drawer' | 'page' | 'none'
   isShopify?: boolean
@@ -251,10 +253,144 @@ function readFacts(page: Page) {
         (e) => /back to top|scroll to top|naar boven|terug naar boven|haut de page|retour en haut|volver arriba|nach oben/i.test(`${(e as HTMLElement).innerText} ${e.getAttribute('aria-label') || ''} ${e.getAttribute('class') || ''}`) || /^#(top|page-top|pagetop|back-to-top|scroll-top)$/i.test(e.getAttribute('href') || ''),
       ),
       socialLinks: Array.from(new Set(Array.from(document.querySelectorAll('a[href]')).map((a) => (a as HTMLAnchorElement).hostname).filter((h) => /instagram|facebook|tiktok|youtube|pinterest|linkedin|twitter|x\.com/.test(h)))),
+      // preloading of next pages (instant.page, quicklink, speculation rules)
+      preloading: {
+        speculationRules: !!document.querySelector('script[type="speculationrules"]'),
+        scripts: Array.from(document.scripts).map((s) => s.src).filter((src) => /instant\.page|instantclick|quicklink|instant-page|flying-pages/i.test(src)).map((src) => src.slice(0, 80)),
+        prefetchLinks: document.querySelectorAll('link[rel="prefetch"], link[rel="prerender"]').length,
+      },
+      imageHosts: Array.from(new Set(imgs.map((i) => { try { return new URL(i.currentSrc || i.src).hostname } catch { return '' } }).filter(Boolean))).slice(0, 10),
       thirdPartyScripts: Array.from(new Set(Array.from(document.scripts).map((s) => s.src).filter(Boolean).map((s) => { try { return new URL(s).hostname } catch { return '' } }).filter((h) => h && h !== location.hostname))).slice(0, 40),
       pageHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
     }
   })
+}
+
+/**
+ * Hide whatever sits on top of the page and catches the mouse: invisible full-screen iframes
+ * (marketing pop-up layers) or leftover overlays. Sampled with elementFromPoint, so closed drawers
+ * (pointer-events: none, hidden) are never touched.
+ */
+async function clearOverlays(page: Page) {
+  await page
+    .evaluate(() => {
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const points = [[vw / 2, vh / 2], [vw * 0.25, vh * 0.3], [vw * 0.75, vh * 0.3], [vw * 0.9, 60], [vw * 0.5, 60]]
+      for (let round = 0; round < 3; round++) {
+        let hid = false
+        for (const [x, y] of points) {
+          const el = document.elementFromPoint(x, y) as HTMLElement | null
+          if (!el) continue
+          const r = el.getBoundingClientRect()
+          const pos = getComputedStyle(el).position
+          const big = r.width * r.height > vw * vh * 0.4
+          if ((el.tagName === 'IFRAME' && big) || (big && (pos === 'fixed' || pos === 'absolute') && !el.closest('main, [role="main"]') && !(el.innerText || '').trim())) {
+            el.style.setProperty('display', 'none', 'important')
+            hid = true
+          }
+        }
+        if (!hid) break
+      }
+    })
+    .catch(() => {})
+}
+
+/**
+ * Desktop hover: the add-to-cart button and a few header links, styles before and after a real
+ * mouse hover, plus the cursor. Screenshots cannot show this, so it is measured.
+ */
+async function measureHover(page: Page) {
+  await clearOverlays(page)
+  const STYLE = ['backgroundColor', 'color', 'borderColor', 'boxShadow', 'opacity', 'transform', 'textDecorationLine', 'filter', 'outlineStyle'] as const
+  const targets = await page
+    .evaluate(() => {
+      const vis = (el: Element) => {
+        const r = el.getBoundingClientRect()
+        return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight
+      }
+      const ATC = /add to (cart|bag|basket)|in (de )?winkel(wagen|mand)|ajouter au panier|in den warenkorb|añadir al carrito|aggiungi al carrello|buy now|^add$/i
+      const form = document.querySelector('form[action*="/cart/add"]')
+      const atc = ((form?.querySelector('button[type="submit"], button[name="add"], input[type="submit"]') as HTMLElement | null) ||
+        (Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]')).find((b) => {
+          const r = b.getBoundingClientRect()
+          return r.width > 80 && r.height > 25 && ATC.test(((b as HTMLElement).innerText || (b as HTMLInputElement).value || b.getAttribute('aria-label') || '').trim())
+        }) as HTMLElement | undefined) ||
+        null)
+      if (atc) atc.setAttribute('data-cxo-atc', '')
+      const header = document.querySelector('header, [role="banner"], #shopify-section-header')
+      const links = header ? (Array.from(header.querySelectorAll('nav a, a')).filter((a) => vis(a) && ((a as HTMLElement).innerText || '').trim().length > 1).slice(0, 3) as HTMLElement[]) : []
+      const out: { kind: string; label: string; x: number; y: number; disabled: boolean }[] = []
+      const add = (kind: string, el: HTMLElement) => {
+        el.scrollIntoView({ block: 'center' })
+        const r = el.getBoundingClientRect()
+        out.push({ kind, label: (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 40), x: r.left + r.width / 2, y: r.top + r.height / 2, disabled: (el as HTMLButtonElement).disabled === true })
+      }
+      if (atc && atc.getBoundingClientRect().width > 0) add('addToCart', atc)
+      window.scrollTo(0, 0)
+      links.forEach((l) => {
+        l.setAttribute('data-cxo-link', '')
+        add('headerLink', l)
+      })
+      return out
+    })
+    .catch(() => [])
+  const results: { kind: string; label: string; disabled: boolean; changes: string[]; cursor: string }[] = []
+  for (const t of targets) {
+    if (t.kind === 'addToCart') {
+      await page.evaluate(() => {
+        document.querySelector('[data-cxo-atc]')?.scrollIntoView({ block: 'center' })
+      }).catch(() => {})
+    } else await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+    await page.mouse.move(5, 5).catch(() => {})
+    await new Promise((r) => setTimeout(r, 150))
+    const read = (x: number, y: number) =>
+      page.evaluate(
+        (x, y, keys) => {
+          const el = document.elementFromPoint(x, y)
+          const host = (el?.closest('a, button, input, [role="button"]') || el) as HTMLElement | null
+          if (!host) return null
+          // the link or button itself, its ::before / ::after (animated underlines) and its first child
+          const parts: [string, CSSStyleDeclaration][] = [['', getComputedStyle(host)], ['::before', getComputedStyle(host, '::before')], ['::after', getComputedStyle(host, '::after')]]
+          if (host.firstElementChild) parts.push([' > *', getComputedStyle(host.firstElementChild)])
+          const style: Record<string, string> = {}
+          for (const [suffix, cs] of parts) for (const k of [...(keys as string[]), 'width']) style[`${k}${suffix}`] = (cs as any)[k]
+          delete style.width // the element's own width does not change on hover; pseudo-element widths do
+          return { style, cursor: getComputedStyle(host).cursor, hit: `${host.tagName} ${(host.getAttribute('class') || '').slice(0, 40)} "${((host as HTMLElement).innerText || '').trim().slice(0, 30)}"`, isTarget: host.hasAttribute('data-cxo-atc') || host.hasAttribute('data-cxo-link') }
+        },
+        x,
+        y,
+        STYLE as unknown as string[],
+      )
+    // recompute the centre after scrolling
+    const pos = await page
+      .evaluate((kind, label) => {
+        const els = kind === 'addToCart'
+          ? [document.querySelector('[data-cxo-atc]')]
+          : Array.from(document.querySelectorAll('header a, [role="banner"] a, #shopify-section-header a')).filter((a) => ((a as HTMLElement).innerText || '').trim().slice(0, 40) === label)
+        const el = els[0] as HTMLElement | null | undefined
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+      }, t.kind, t.label)
+      .catch(() => null)
+    if (!pos) continue
+    const before = await read(pos.x, pos.y).catch(() => null)
+    await page.mouse.move(pos.x, pos.y, { steps: 3 }).catch(() => {})
+    await new Promise((r) => setTimeout(r, 450)) // let transitions finish
+    const after = await read(pos.x, pos.y).catch(() => null)
+    await page.mouse.move(5, 5).catch(() => {})
+    if (!before || !after) continue
+    // something else is under the mouse (an invisible overlay): the hover never reached the target
+    if (!before.isTarget || !after.isTarget) {
+      if (process.env.SCANV2_DEBUG) console.log('[hover] not on target', t.kind, t.label, '->', after.hit)
+      continue
+    }
+    const changes = Object.keys(before.style).filter((k) => before.style[k] !== after.style[k])
+    results.push({ kind: t.kind, label: t.label, disabled: t.disabled, changes, cursor: after.cursor })
+  }
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  return results
 }
 
 /** Text inside closed tabs / accordions, which innerText leaves out. */
@@ -277,9 +413,35 @@ function readHiddenText(page: Page) {
 // Trackers, chat widgets and video streams: heavy, and never needed to judge the page.
 const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadservices|facebook\.net|connect\.facebook|hotjar|clarity\.ms|tiktok|snapchat|pinterest\.com\/ct|bing\.com|criteo|taboola|outbrain|gorgias|intercom|zendesk|tidio|crisp\.chat|trustpilot\.com\/tracking|segment\.(com|io)|mixpanel|amplitude|fullstory|heap|newrelic|sentry|datadog|optimizely|vwo|abtasty|convert\.com|klaviyo\.com\/onsite|privy|justuno|attentive|postscript)/i
 
+/** What the page actually downloaded: image formats (by content type, since Shopify serves WebP
+ *  without saying so in the URL) and whether images come through a CDN (response headers). */
+type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number }
+const NET = new WeakMap<Page, NetStats>()
+const CDN_HEADERS = /^(cf-ray|cf-cache-status|x-amz-cf-id|x-served-by|x-cache|x-fastly-request-id|akamai-cache-status|x-akamai|server-timing|x-cdn|cdn-cache|x-shopid|x-shardid)$/i
+
+export function netStats(page: Page): NetStats | null {
+  return NET.get(page) || null
+}
+
 async function prepare(page: Page) {
+  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0 }
+  NET.set(page, stats)
+  page.on('response', (res) => {
+    try {
+      if (res.request().resourceType() !== 'image') return
+      const headers = res.headers()
+      const type = (headers['content-type'] || '').split(';')[0].replace('image/', '').trim() || 'unknown'
+      stats.images[type] = (stats.images[type] || 0) + 1
+      stats.imageResponses++
+      if (Object.keys(headers).some((h) => CDN_HEADERS.test(h)) || /cloudflare|cloudfront|akamai|fastly|varnish/i.test(headers['server'] || '') || /HIT|MISS/i.test(headers['x-cache'] || '')) stats.cdnImages++
+    } catch {}
+  })
   // some bundlers wrap named functions in __name(); make it exist inside the page too
   await page.evaluateOnNewDocument('window.__name = function (f) { return f }').catch(() => {})
+  // layout shift from the first paint, read before the scanner touches the page (cleanPage hides popups)
+  await page
+    .evaluateOnNewDocument(`(() => { window.__cxoCls = 0; try { new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cxoCls += e.value }).observe({ type: 'layout-shift', buffered: true }) } catch (e) { window.__cxoCls = null } })()`)
+    .catch(() => {})
   if (process.env.SCANV2_NOBLOCK) return
   await page.setRequestInterception(true).catch(() => {})
   page.on('request', (req) => {
@@ -402,6 +564,7 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
       })
     })
     .catch(() => {})
+  await clearOverlays(page)
   // find the cart control in the header, then click it with a real mouse click (themes ignore synthetic clicks)
   const point = await page
     .evaluate(() => {
@@ -421,25 +584,43 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
           if (CART.test(aria)) score += 2
           if (/cart|bag|basket|minicart/i.test(meta)) score += 1
           if (text.length < 20 && CART.test(text)) score += 1
-          return score ? { score, x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+          return score ? { score, x: r.left + r.width / 2, y: r.top + r.height / 2, toCartPage: /\/cart\/?($|\?|#)/.test(href) } : null
         })
-        .filter(Boolean) as { score: number; x: number; y: number }[]
+        .filter(Boolean) as { score: number; x: number; y: number; toCartPage: boolean }[]
       scored.sort((a, b) => b.score - a.score || b.x - a.x)
       return scored[0] || null
     })
     .catch(() => null)
   if (process.env.SCANV2_DEBUG) console.log('[cart view]', device, JSON.stringify(point), await page.evaluate((p) => { if (!p) return null; const e = document.elementFromPoint(p.x, p.y); return e ? `${e.tagName} ${e.getAttribute('aria-label') || ''} ${(e.getAttribute('class') || '').slice(0, 50)}` : null }, point).catch(String))
   if (!point) return undefined
+  const startUrl = page.url()
+  // a link to /cart may still open a drawer (themes intercept it): watch for a navigation, but not forever
+  const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: point.toCartPage ? 10000 : 4000 }).catch(() => null)
   await page.mouse.click(point.x, point.y).catch(() => {})
-  const clicked = true
-  if (!clicked) return undefined
-  // a drawer animates in; a cart page loads
-  await Promise.race([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 6000 }).catch(() => {}), new Promise((r) => setTimeout(r, 2500))])
+  await Promise.race([nav, new Promise((r) => setTimeout(r, point.toCartPage ? 10000 : 2500))])
   await page.waitForNetworkIdle({ idleTime: 500, timeout: 4000 }).catch(() => {})
   await new Promise((r) => setTimeout(r, 800))
+  // only keep the screenshot if a cart actually opened: the cart page, or a visible drawer / dialog
+  const opened = await page
+    .evaluate((before) => {
+      if (/\/cart\/?($|\?)/.test(location.pathname) && location.href !== before) return 'page'
+      const CART = /cart|bag|basket|panier|winkel|warenkorb|carrito|carrello|koszyk/i
+      const overlays = Array.from(document.querySelectorAll('[role="dialog"], dialog[open], [aria-modal="true"], aside, [class*="drawer" i], [id*="drawer" i], [class*="cart" i], [id*="cart" i]'))
+      const drawer = overlays.find((el) => {
+        const s = getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        const onScreen = r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.5
+        const floating = s.position === 'fixed' || s.position === 'absolute' || el.tagName === 'DIALOG'
+        return onScreen && floating && CART.test(`${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('aria-label') || ''} ${((el as HTMLElement).innerText || '').slice(0, 300)}`)
+      })
+      return drawer ? 'drawer' : null
+    }, startUrl)
+    .catch(() => null)
+  if (process.env.SCANV2_DEBUG) console.log('[cart view] opened:', opened, page.url())
+  if (!opened) return undefined
   const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
   if (!b64) return undefined
-  const where = /\/cart\/?($|\?)/.test(new URL(page.url()).pathname) ? 'the cart page' : 'the cart drawer'
+  const where = opened === 'page' ? 'the cart page' : 'the cart drawer'
   return { label: `${device} cart view after one item was added (${where})`, dataUrl: `data:image/jpeg;base64,${b64}` }
 }
 
@@ -514,6 +695,17 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     const hiddenText = await readHiddenText(desktop)
     const desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles)
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
+    ;(facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
+    ;(facts as Record<string, unknown>).network = netStats(desktop)
+    // the empty cart first (fresh browser, nothing added yet), then back to the product
+    let emptyCart: Tile | undefined
+    if (isShopify) {
+      const t = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
+      if (t) emptyCart = { ...t, label: `desktop EMPTY cart, before anything was added (${/cart page\)$/.test(t.label) ? 'the cart page' : 'the cart drawer'})` }
+      await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+      await desktop.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
+      await cleanPage(desktop)
+    }
     const cart = await cartTest(desktop)
     const itemInCart = cart.note.startsWith('one item')
     const desktopCartView = itemInCart ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
@@ -532,12 +724,32 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       await mobile.setUserAgent(MOBILE_UA)
       await prepare(mobile)
       await open(mobile, rawUrl)
+      await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
+      const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
       await cleanPage(mobile)
       await scrollForLazyContent(mobile)
       await cleanPage(mobile)
       mobileFacts = await mobile
-        .evaluate(() => ({ viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null, horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5 }))
+        .evaluate(async () => {
+          // body text size: median font size of visible paragraphs and list items
+          const sizes = Array.from(document.querySelectorAll('p, li, td, dd, span'))
+            .filter((el) => !el.closest('footer, header, nav, [role="contentinfo"], [role="banner"], [class*="footer" i], [class*="announcement" i]'))
+            .filter((el) => {
+              const r = el.getBoundingClientRect()
+              return r.width > 0 && r.height > 0 && Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent || '').trim().length > 20)
+            })
+            .map((el) => parseFloat(getComputedStyle(el).fontSize))
+            .filter((n) => n > 0)
+            .sort((a, b) => a - b)
+          return {
+            viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null,
+            horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5,
+            bodyFontPx: sizes.length ? sizes[Math.floor(sizes.length / 2)] : null,
+            textBlocks: sizes.length,
+          }
+        })
         .catch(() => ({}))
+      mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       // same browser, same cart cookie: the item added on desktop is in the cart here too
       if (itemInCart) {
@@ -561,6 +773,7 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       cartView: desktopCartView,
       mobileCartView,
       cartPage: desktopCartPage,
+      emptyCart,
       mobileCartPage,
       cartKind,
       isShopify,
