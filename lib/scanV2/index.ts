@@ -29,9 +29,10 @@ function nicheVerdict(r: Rule, niche: Niche): Answer | null {
   return null
 }
 
-export async function runScanV2(url: string, rules: Rule[], apiKey: string) {
+export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
   const t0 = Date.now()
-  const ev = await captureEvidence(url)
+  // the extra capture steps run when a checkpoint needs them: always in test mode
+  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
   const t1 = Date.now()
   // measured checkpoints first; the model only judges what code cannot settle
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()

@@ -474,7 +474,11 @@ function sweepStaleProfiles() {
   } catch {}
 }
 
-export async function captureEvidence(rawUrl: string): Promise<Evidence> {
+/**
+ * `extended`: the extra steps only Draft checkpoints use so far (the cart views after add-to-cart),
+ * 10 to 20 seconds. On for test scans; the free scan turns them on once such a checkpoint is Live.
+ */
+export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
   const t0 = Date.now()
   sweepStaleProfiles()
   const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
@@ -516,10 +520,10 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     const cart = await cartTest(desktop)
     const itemInCart = cart.note.startsWith('one item')
-    const desktopCartView = itemInCart ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
-    const cartKind = itemInCart ? kindOf(desktopCartView) : undefined
+    const desktopCartView = itemInCart && opts.extended ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
+    const cartKind = itemInCart && opts.extended ? kindOf(desktopCartView) : undefined
     // the icon opened a drawer (or nothing): capture the cart page too
-    const desktopCartPage = itemInCart && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
+    const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
     await desktop.close().catch(() => {})
 
     let mobileTiles: Tile[] = []
@@ -540,7 +544,7 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
         .catch(() => ({}))
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       // same browser, same cart cookie: the item added on desktop is in the cart here too
-      if (itemInCart) {
+      if (itemInCart && opts.extended) {
         mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
         if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
       }
