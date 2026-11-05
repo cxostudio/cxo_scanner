@@ -667,7 +667,11 @@ function sweepStaleProfiles() {
   } catch {}
 }
 
-export async function captureEvidence(rawUrl: string): Promise<Evidence> {
+/**
+ * `extended`: the extra steps only Draft checkpoints use so far (empty cart, hover measurement),
+ * about 15 to 30 seconds. On for test scans; the free scan turns them on once such a checkpoint is Live.
+ */
+export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
   const t0 = Date.now()
   sweepStaleProfiles()
   const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
@@ -707,11 +711,11 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     const hiddenText = await readHiddenText(desktop)
     const desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles)
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
-    ;(facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
+    if (opts.extended) (facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
     ;(facts as Record<string, unknown>).network = netStats(desktop)
     // the empty cart first (fresh browser, nothing added yet), then back to the product
     let emptyCart: Tile | undefined
-    if (isShopify) {
+    if (isShopify && opts.extended) {
       const t = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
       if (t) emptyCart = { ...t, label: `desktop EMPTY cart, before anything was added (${/cart page\)$/.test(t.label) ? 'the cart page' : 'the cart drawer'})` }
       await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})

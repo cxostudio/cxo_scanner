@@ -81,9 +81,10 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
   return { results, niche, measured }
 }
 
-export async function runScanV2(url: string, rules: Rule[], apiKey: string) {
+export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
   const t0 = Date.now()
-  const ev = await captureEvidence(url)
+  // the extra capture steps run when a checkpoint needs them: always in test mode
+  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
   const t1 = Date.now()
   const { results, niche, measured } = await judgeEvidence(ev, rules, apiKey)
   const screenshot = ev.desktopTiles[0]?.dataUrl ?? null
