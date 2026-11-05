@@ -471,7 +471,14 @@ async function measureVariants(page: Page) {
       const name = el.getAttribute('name') || ''
       if (PICKER.test(name) && !/quantity|qty|subscri|frequency|plan|selling/i.test(name)) groups.add(name)
     }
-    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size }
+    // stores that sell each colour as its own product (Colourpop shades) show "Color: Me Again" and a row
+    // of swatches linking to sibling products: one Shopify variant, but the shopper still picks a shade
+    const h1 = document.querySelector('h1')
+    let box: Element | null = h1
+    for (let k = 0; box && k < 5 && ((box as HTMLElement).innerText || '').length < 400; k++) box = box.parentElement
+    const boxText = box ? ((box as HTMLElement).innerText || '').slice(0, 6000) : ''
+    const optionLabel = /(^|\n)\s*(colou?r|shade|size|style|scent|flavou?r|finish)\s*:/im.test(boxText)
+    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size + (optionLabel ? 1 : 0) }
   })
 }
 

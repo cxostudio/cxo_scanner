@@ -7,6 +7,7 @@ type Verdict = { answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; c
 
 const CART_SHIPPING_COST = 'recBVdoZfPXnwY7Ys'
 const HEADER_CATEGORIES = 'reclt5mHrGdpwf2lU'
+const CART_ADDON = 'recaOn94y8pUSo5JK'
 
 /** Header entries that do not say what the store sells. */
 const GENERIC_NAV =
@@ -45,6 +46,12 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
         byId.set(r.id, { answer: 'fail', evidence: `The header shows only general entries (${labels.join(', ')}): shoppers must open a menu to see what the store sells.` })
         continue
       }
+    }
+
+    // a low-priced add-on must cost less than what is in the cart: the model sometimes says so and passes anyway
+    if (r.id === CART_ADDON && /more expensive|pricier|costs? more|higher.priced|not cheaper|not lower/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'fail', evidence: 'The cart suggests products, but they cost more than what is already in the cart, so they are not a low-priced add-on.' })
+      continue
     }
 
     if (r.area === 'Buy box' && NEAR_BUTTON.test(r.title) && ELSEWHERE.test(v.evidence) && !ON_PAGE.test(v.evidence)) {
