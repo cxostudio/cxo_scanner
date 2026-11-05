@@ -31,6 +31,8 @@ export type Evidence = {
   emptyCart?: Tile
   /** The mobile navigation after tapping the menu button. */
   mobileMenu?: Tile
+  /** False when the page does not sell online (only "Find in store" / "Where to buy"). */
+  sellsOnline?: boolean
   /** Homepage, category, product or other: decides the judge's instructions. */
   pageType?: UrlPageType
   /** 'drawer' when the icon opens a drawer, 'page' when it goes to /cart, 'none' when nothing opened. */

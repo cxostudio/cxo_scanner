@@ -91,6 +91,7 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - Footer checkpoints: the measured footer links are the list of what the footer contains. Never name a footer link that is not in that list.
 - Variant options drawn crossed out, struck through, greyed out or with a diagonal line are sold out or unavailable, and that marking counts as clearly showing it.
 - Cart line checkpoints (product lines, discounts, quantities) are about the items IN the cart only. Products recommended inside the cart ("You may also like", "Optimize your routine") are not cart items.
+- When ONLINE PURCHASE is NOT OFFERED, every checkpoint about buying online is "na": the add-to-cart button, shipping, delivery dates, returns, stock status, quantity discounts, payment and cart checkpoints.
 - The answer must match the evidence: when your evidence says the checkpoint does not apply (product in stock, no bundle, single option), the answer is "na", never "fail".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
@@ -108,6 +109,7 @@ function evidenceText(ev: Evidence) {
     `MEASURED FACTS (desktop): ${JSON.stringify(ev.facts)}`,
     `MEASURED FACTS (mobile): ${JSON.stringify(ev.mobileFacts)}`,
     `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
+    ev.sellsOnline === false ? 'ONLINE PURCHASE: NOT OFFERED on this page. The main button sends shoppers to a store locator ("Find in store" / "Where to buy"); there is no add-to-cart.' : '',
     `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
     `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
     `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}`,

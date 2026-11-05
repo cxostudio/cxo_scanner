@@ -222,9 +222,10 @@ export const MEASURED: Record<string, Measure> = {
   recEgJJ3Ja7iD3B63: (ev, f) => {
     if (!ev.isShopify || !f.footer) return null
     const links: string[] = f.footer.links || []
-    const collections = links.filter((l) => /\/collections\//.test(l))
-    if (collections.length >= 2) return { answer: 'pass', evidence: `The footer links to collections such as ${collections.slice(0, 3).map((l) => `"${l.split(' -> ')[0]}"`).join(', ')}.` }
-    if (collections.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories or popular collections, only company and help pages.' }
+    // collections, or the products themselves on stores with a small range
+    const shop = links.filter((l) => /\/(collections|products)\//.test(l))
+    if (shop.length >= 2) return { answer: 'pass', evidence: `The footer links to products or collections such as ${shop.slice(0, 3).map((l) => `"${l.split(' -> ')[0]}"`).join(', ')}.` }
+    if (shop.length === 0 && links.length >= 5) return { answer: 'fail', evidence: 'The footer has no links to product categories, popular collections or products, only company and help pages.' }
     return null
   },
 

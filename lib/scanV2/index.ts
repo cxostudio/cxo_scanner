@@ -40,7 +40,21 @@ const UNMEASURED = 'This is measured in the page code, and the scanner could not
  * Judge captured evidence: Shopify defaults and code measurements first, the model for the rest,
  * then the hard niche rules. Used by live scans and by the lab to re-judge saved test scans.
  */
+const STORE_ONLY = /find in (a )?store|where to buy|store locator|find a (store|retailer)|buy in store|vind een winkel|trouver un magasin|händler finden/i
+const ADD_TO_CART = /add to (cart|bag|basket)|ajouter au panier|in (de )?winkel(wagen|mand)|in den warenkorb|añadir al carrito|aggiungi al carrello|subscribe & save|pre-?order/i
+
+/** A product page that sends shoppers to stores instead of selling: a store-locator button and no add-to-cart. */
+function sellsOnline(ev: Evidence): boolean {
+  if (typeof ev.sellsOnline === 'boolean') return ev.sellsOnline
+  const f = ev.facts as Record<string, any>
+  const buttons: string[] = f.buttons || []
+  const text = `${buttons.join(' | ')} ${f.buyBox || ''}`
+  if (f.variants?.atc?.ready) return true
+  return !(STORE_ONLY.test(text) && !ADD_TO_CART.test(text))
+}
+
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
+  ev.sellsOnline = sellsOnline(ev)
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
