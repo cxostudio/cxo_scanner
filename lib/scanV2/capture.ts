@@ -662,11 +662,18 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   const note = await page
     .evaluate(async () => {
       try {
-        const r = await fetch(location.pathname.replace(/\/$/, '') + '.js')
-        if (!r.ok) return 'not a Shopify product endpoint'
-        const prod = await r.json()
-        const v = prod.variants.find((x: any) => x.available) || prod.variants[0]
-        const a = await fetch('/cart/add.js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id: v.id, quantity: 1 }] }) })
+        // the variant: from the product JSON, or from the theme's own add-to-cart form when that JSON is
+        // blocked (bot protection sometimes refuses /products/x.js after a few page loads)
+        let id: string | number | null = null
+        const r = await fetch(location.pathname.replace(/\/$/, '') + '.js').catch(() => null)
+        if (r && r.ok) {
+          const prod = await r.json()
+          const v = prod.variants.find((x: any) => x.available) || prod.variants[0]
+          id = v?.id ?? null
+        }
+        if (!id) id = (document.querySelector('form[action*="/cart/add"] [name="id"]') as HTMLInputElement | null)?.value || null
+        if (!id) return `not a Shopify product endpoint (${r ? r.status : 'no answer'}, page: ${document.title.slice(0, 40)})`
+        const a = await fetch('/cart/add.js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id: Number(id), quantity: 1 }] }) })
         const c = await (await fetch('/cart.js')).json()
         return a.ok ? `one item added, cart now holds ${c.item_count}` : `add to cart refused (${a.status})`
       } catch (e) {
@@ -1031,7 +1038,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     }
     let cart = await cartTest(desktop)
     // the page can still be settling after the empty-cart visit: one more try before giving up on the cart
-    if (!cart.note.startsWith('one item') && !/refused|not a Shopify/.test(cart.note)) {
+    if (!cart.note.startsWith('one item')) {
       await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
       cart = await cartTest(desktop)
     }
