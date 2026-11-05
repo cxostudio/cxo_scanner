@@ -9,6 +9,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 
 export type Tile = { label: string; dataUrl: string }
 export type Evidence = {
@@ -28,6 +29,10 @@ export type Evidence = {
   mobileCartPage?: Tile[]
   /** The cart opened BEFORE anything is added (empty-cart checkpoints). */
   emptyCart?: Tile
+  /** The mobile navigation after tapping the menu button. */
+  mobileMenu?: Tile
+  /** Homepage, category, product or other: decides the judge's instructions. */
+  pageType?: UrlPageType
   /** 'drawer' when the icon opens a drawer, 'page' when it goes to /cart, 'none' when nothing opened. */
   cartKind?: 'drawer' | 'page' | 'none'
   isShopify?: boolean
@@ -72,13 +77,14 @@ export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
     })
     .catch(() => {})
   await page.keyboard.press('Escape').catch(() => {})
+  // two tags: pop-ups (lifted before opening a cart drawer or a mobile menu, which are modal panels
+  // too) and cookie banners (always hidden)
   await page
-    .addStyleTag({
-      content:
-        'body [aria-modal="true"],body dialog[open],body div[class*="klaviyo" i],body div[id*="klaviyo" i],body [class*="popup-overlay" i],body [class*="modal-backdrop" i],#onetrust-consent-sdk,#didomi-host,#usercentrics-root,#CybotCookiebotDialog,[id*="cookie-banner" i],[class*="cookie-banner" i]{display:none!important}',
-    })
-    // marked so cartView() can lift it: cart drawers are modal dialogs too
+    .addStyleTag({ content: 'body [aria-modal="true"],body dialog[open],body div[class*="klaviyo" i],body div[id*="klaviyo" i],body [class*="popup-overlay" i],body [class*="modal-backdrop" i]{display:none!important}' })
     .then((h) => h.evaluate((el) => el.setAttribute('id', 'cxo-clean')))
+    .catch(() => {})
+  await page
+    .addStyleTag({ content: '#onetrust-consent-sdk,#didomi-host,#usercentrics-root,#CybotCookiebotDialog,[id*="cookie-banner" i],[class*="cookie-banner" i],[class*="shopify-pc__banner" i]{display:none!important}' })
     .catch(() => {})
   await page
     .evaluate((doUnroll: boolean) => {
@@ -90,7 +96,10 @@ export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
         if (s.position !== 'fixed') continue
         const r = el.getBoundingClientRect()
         const isTopBar = r.top <= 5 && r.height < 220
-        if (!isTopBar && r.width * r.height > vw * vh * 0.3) {
+        // only overlays that actually cover the page: closed drawers and menus sit off screen,
+        // transparent or click-through, and must stay openable
+        const covering = r.left < vw && r.right > 0 && r.top < vh && r.bottom > 0 && s.visibility !== 'hidden' && Number(s.opacity) > 0.1 && s.pointerEvents !== 'none'
+        if (!isTopBar && covering && r.width * r.height > vw * vh * 0.3) {
           ;(el as HTMLElement).style.setProperty('display', 'none', 'important')
           el.setAttribute('data-cxo-hidden', '')
         }
@@ -264,6 +273,12 @@ function readFacts(page: Page) {
       pageHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
     }
   })
+}
+
+/** Undo cleanPage's pop-up hiding (cookie banners stay hidden): cart drawers and mobile menus are modal panels too. */
+async function liftPopupHiding(page: Page) {
+  // the overlays cleanPage hid one by one stay hidden: they were covering the page at load (pop-ups)
+  await page.evaluate(() => document.querySelectorAll('#cxo-clean').forEach((el) => el.remove())).catch(() => {})
 }
 
 /**
@@ -555,15 +570,7 @@ async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
 async function cartView(page: Page, device: 'desktop' | 'mobile', width: number, height: number): Promise<Tile | undefined> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
   // undo cleanPage's popup hiding: it also hides the (closed) cart drawer
-  await page
-    .evaluate(() => {
-      document.querySelectorAll('#cxo-clean').forEach((el) => el.remove())
-      document.querySelectorAll('[data-cxo-hidden]').forEach((el) => {
-        ;(el as HTMLElement).style.removeProperty('display')
-        el.removeAttribute('data-cxo-hidden')
-      })
-    })
-    .catch(() => {})
+  await liftPopupHiding(page)
   await clearOverlays(page)
   // find the cart control in the header, then click it with a real mouse click (themes ignore synthetic clicks)
   const point = await page
@@ -636,6 +643,85 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
   return { label: `${device} cart view after one item was added (${where})`, dataUrl: `data:image/jpeg;base64,${b64}` }
 }
 
+/**
+ * Mobile: tap the menu button in the header and capture the navigation that opens.
+ * Kept only if a new panel with several links appeared (no screenshot of a closed menu).
+ */
+async function mobileMenu(page: Page, width: number, height: number): Promise<Tile | undefined> {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  // the menu is a modal panel: cleanPage would keep it hidden
+  await liftPopupHiding(page)
+  await clearOverlays(page)
+  const point = await page
+    .evaluate(() => {
+      const MENU = /\b(menu|menü|navigation|nav|hamburger|burger|open menu|ouvrir le menu|menu openen|menú)\b/i
+      const scored = Array.from(document.querySelectorAll('button, a, [role="button"], summary, label'))
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          if (r.top > 200 || r.bottom <= 0 || r.width === 0 || r.height === 0 || r.width > 120 || r.left >= window.innerWidth) return null
+          const aria = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('aria-controls') || ''}`
+          const meta = `${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('for') || ''} ${el.getAttribute('data-action') || ''}`
+          const text = ((el as HTMLElement).innerText || '').trim()
+          if (/cart|bag|basket|search|account|login|close/i.test(`${aria} ${meta}`)) return null
+          let score = 0
+          if (MENU.test(aria)) score += 3
+          if (/menu|burger|hamburger|nav-toggle|drawer-toggle|header__icon--menu|mobile-nav/i.test(meta)) score += 2
+          if (text.length < 12 && MENU.test(text)) score += 1
+          return score ? { score, x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+        })
+        .filter(Boolean) as { score: number; x: number; y: number }[]
+      scored.sort((a, b) => b.score - a.score || a.x - b.x)
+      // mark what is on screen now, to tell the opened menu apart
+      return scored[0] || null
+    })
+    .catch(() => null)
+  if (!point) return undefined
+  // labels a shopper can see and tap right now: on screen and on top (elementFromPoint). Some themes
+  // keep the menu in the page all the time and only make it tappable when open; an open menu also
+  // covers page links, so we compare WHICH labels are tappable, not how many.
+  const tappable = () =>
+    page
+      .evaluate(() =>
+        Array.from(new Set(
+          Array.from(document.querySelectorAll('a[href], button, summary, [role="menuitem"]'))
+            .filter((el) => {
+              const r = el.getBoundingClientRect()
+              if (r.width < 20 || r.height < 12 || r.top < 0 || r.bottom > window.innerHeight || r.left < 0 || r.right > window.innerWidth) return false
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+              return !!hit && (hit === el || el.contains(hit))
+            })
+            .map((el) => ((el as HTMLElement).innerText || el.getAttribute('aria-label') || '').trim().toLowerCase().slice(0, 40))
+            .filter((t) => t.length > 1),
+        )),
+      )
+      .catch(() => [] as string[])
+  const before = await tappable()
+  const newLabels = (now: string[]) => now.filter((t) => !before.includes(t)).length
+  // a phone: touch first (some menus only listen to touch). Menus slide in, so poll for up to 3 s.
+  const settle = async () => {
+    let now = before
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 500))
+      now = await tappable()
+      if (newLabels(now) >= 4) break
+    }
+    return now
+  }
+  await page.touchscreen.tap(point.x, point.y).catch(() => {})
+  let after = await settle()
+  // a click only if the tap changed nothing at all: a second toggle would close a menu that did open
+  if (after.join('|') === before.join('|')) {
+    await page.mouse.click(point.x, point.y).catch(() => {})
+    after = await settle()
+  }
+  // the menu opened when several new entries became tappable
+  const opened = newLabels(after) >= 4
+  if (process.env.SCANV2_DEBUG) console.log('[mobile menu]', JSON.stringify(point), 'new tappable labels:', newLabels(after), after.filter((t) => !before.includes(t)).slice(0, 8).join(' | '))
+  if (!opened) return undefined
+  const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
+  return b64 ? { label: 'mobile MENU opened (after tapping the menu button)', dataUrl: `data:image/jpeg;base64,${b64}` } : undefined
+}
+
 /** The cart page itself (Shopify always serves /cart), top of the page in up to `max` viewport tiles. */
 async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<Tile[]> {
   const origin = new URL(page.url()).origin
@@ -669,7 +755,7 @@ function sweepStaleProfiles() {
 
 /**
  * `extended`: the extra steps only Draft checkpoints use so far (empty cart, cart views after
- * add-to-cart, hover measurement), about 20 to 40 seconds. On for test scans; the free scan turns
+ * add-to-cart, hover measurement, mobile menu), about 20 to 45 seconds. On for test scans; the free scan turns
  * them on once such a checkpoint is Live.
  */
 export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
@@ -716,7 +802,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     ;(facts as Record<string, unknown>).network = netStats(desktop)
     // the empty cart first (fresh browser, nothing added yet), then back to the product
     let emptyCart: Tile | undefined
-    if (isShopify && opts.extended) {
+    // cart checkpoints run on product scans only (they add the item there too)
+    if (isShopify && opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') {
       const t = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
       if (t) emptyCart = { ...t, label: `desktop EMPTY cart, before anything was added (${/cart page\)$/.test(t.label) ? 'the cart page' : 'the cart drawer'})` }
       await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
@@ -735,6 +822,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     let mobileFacts: Record<string, unknown> = {}
     let mobileCartView: Tile | undefined
     let mobileCartPage: Tile[] = []
+    let menuTile: Tile | undefined
     try {
       const mobile = await browser.newPage()
       await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
@@ -768,6 +856,15 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         .catch(() => ({}))
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
+      if (opts.extended) {
+        menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
+        // back to a clean page before the cart (the open menu would sit over the cart icon)
+        if (menuTile && itemInCart) {
+          await mobile.goto(rawUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+          await mobile.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
+          await cleanPage(mobile)
+        }
+      }
       // same browser, same cart cookie: the item added on desktop is in the cart here too
       if (itemInCart && opts.extended) {
         mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
@@ -780,6 +877,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
 
     return {
       url: rawUrl,
+      pageType: detectPageTypeFromUrl(finalUrl),
+      mobileMenu: menuTile,
       finalUrl,
       status,
       title,

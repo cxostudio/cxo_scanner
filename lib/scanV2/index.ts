@@ -31,7 +31,7 @@ function nicheVerdict(r: Rule, niche: Niche): Answer | null {
 
 /** Every image the judge sees, in order. Test scans store them in this order (lib/lab). */
 export function evidenceImages(ev: Evidence): Tile[] {
-  return [...ev.desktopTiles, ...ev.mobileTiles, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  return [...ev.desktopTiles, ...ev.mobileTiles, ev.mobileMenu, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
 }
 
 const UNMEASURED = 'This is measured in the page code, and the scanner could not measure it on this page.'
