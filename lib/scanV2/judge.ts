@@ -27,6 +27,7 @@ export type Niche = (typeof NICHES)[number]
 
 export const V2_MODEL = () => process.env.SCAN_V2_MODEL || 'google/gemini-2.5-flash'
 const GROUP_SIZE = 8
+const MISSING = '__missing__'
 
 type PageKind = UrlPageType
 
@@ -89,6 +90,8 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - An FAQ means questions with answers. Product detail tabs or accordions (Details, Dimensions, Care, Shipping) are not an FAQ.
 - Footer checkpoints: the measured footer links are the list of what the footer contains. Never name a footer link that is not in that list.
 - Variant options drawn crossed out, struck through, greyed out or with a diagonal line are sold out or unavailable, and that marking counts as clearly showing it.
+- Cart line checkpoints (product lines, discounts, quantities) are about the items IN the cart only. Products recommended inside the cart ("You may also like", "Optimize your routine") are not cart items.
+- The answer must match the evidence: when your evidence says the checkpoint does not apply (product in stock, no bundle, single option), the answer is "na", never "fail".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
@@ -185,7 +188,8 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
       const verdicts = group.map((r) => {
         const v = byId.get(r.id)
         const answer = v && ['pass', 'fail', 'na', 'unknown'].includes(String(v.answer).toLowerCase()) ? (String(v.answer).toLowerCase() as Verdict['answer']) : 'unknown'
-        return { id: r.id, answer, evidence: (v?.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') }
+        // MISSING: the model skipped this checkpoint; judge() asks again for those
+        return { id: r.id, answer: v ? answer : 'unknown', evidence: v ? (v.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') : MISSING }
       })
       return { niche: parsed.niche, verdicts }
     } catch (e) {
@@ -215,5 +219,13 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
   const groups: Rule[][] = []
   for (let i = 0; i < rules.length; i += GROUP_SIZE) groups.push(rules.slice(i, i + GROUP_SIZE))
   const out = await Promise.all(groups.map((g) => judgeGroup(client, ev, g, shared)))
-  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts: out.flatMap((o) => o.verdicts) }
+  const verdicts = out.flatMap((o) => o.verdicts)
+  // checkpoints the model skipped get one more try, together
+  const skipped = rules.filter((r) => verdicts.find((v) => v.id === r.id)?.evidence === MISSING)
+  if (skipped.length) {
+    const retry = new Map((await judgeGroup(client, ev, skipped, shared)).verdicts.map((v) => [v.id, v]))
+    for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
+  }
+  for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
+  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts }
 }
