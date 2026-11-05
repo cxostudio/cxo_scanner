@@ -462,7 +462,16 @@ async function measureVariants(page: Page) {
       (Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"]')).find((b) => visible(b) && (ATC.test(text(b)) || /select (a )?size|choose (a )?(size|option)|kies (een )?maat|sold out|uitverkocht/i.test(text(b)))) as HTMLButtonElement | undefined) ||
       null)
     const atc = btn ? { label: text(btn).slice(0, 40), disabled: btn.disabled === true || btn.getAttribute('aria-disabled') === 'true', ready: ATC.test(text(btn)) } : null
-    return { total, soldOut, discounted, options: options.length, marked, atc }
+    // option pickers anywhere on the page (kits and bundles carry one per item, outside the theme's form):
+    // radio groups and selects named after a colour, size, style or option
+    const PICKER = /colou?r|size|style|option|variant|flavou?r|scent|shade/i
+    const groups = new Set<string>()
+    for (const el of Array.from(document.querySelectorAll('input[type="radio"][name], select[name]'))) {
+      if (el.closest('header, footer, aside, dialog, [role="dialog"], [class*="drawer" i], [id*="drawer" i]')) continue
+      const name = el.getAttribute('name') || ''
+      if (PICKER.test(name) && !/quantity|qty|subscri|frequency|plan|selling/i.test(name)) groups.add(name)
+    }
+    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size }
   })
 }
 
@@ -683,6 +692,11 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
           const r = el.getBoundingClientRect()
           if (r.top > 260 || r.bottom <= 0 || r.width === 0 || r.height === 0 || r.width > 300) return null
           if (r.left >= window.innerWidth || r.right <= 0) return null // off-screen (a closed drawer's own buttons)
+          // something a shopper can actually tap: its centre is on screen and not covered by another element
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          const hit = cy > 0 && cy < window.innerHeight ? document.elementFromPoint(cx, cy) : null
+          const tappable = !!hit && (el === hit || el.contains(hit) || hit.contains(el))
           const href = el.getAttribute('href') || ''
           const aria = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`
           const meta = `${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('data-action') || ''}`
@@ -693,7 +707,7 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
           if (CART.test(aria)) score += 2
           if (/cart|bag|basket|minicart/i.test(meta)) score += 1
           if (text.length < 20 && CART.test(text)) score += 1
-          return score ? { score, x: r.left + r.width / 2, y: r.top + r.height / 2, toCartPage: /\/cart\/?($|\?|#)/.test(href) } : null
+          return score ? { score: score + (tappable ? 10 : 0), x: cx, y: cy, toCartPage: /\/cart\/?($|\?|#)/.test(href) } : null
         })
         .filter(Boolean) as { score: number; x: number; y: number; toCartPage: boolean }[]
       scored.sort((a, b) => b.score - a.score || b.x - a.x)
@@ -712,6 +726,17 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
         const r = el.getBoundingClientRect()
         if (r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && s.visibility !== 'hidden' && s.display !== 'none') el.setAttribute('data-cxo-before', '')
       }
+      const parts: string[] = []
+      for (const y of [0.3, 0.5, 0.8]) {
+        let el = document.elementFromPoint(window.innerWidth - 160, window.innerHeight * y) as HTMLElement | null
+        for (let k = 0; el && k < 8; k++, el = el.parentElement) {
+          if (getComputedStyle(el).position === 'fixed' || /DIALOG|DRAWER|MODAL|CART/.test(el.tagName) || el.getAttribute('role') === 'dialog') {
+            parts.push((el.innerText || '').slice(0, 1500))
+            break
+          }
+        }
+      }
+      ;(window as any).__cxoSideBefore = parts.join(' ')
     })
     .catch(() => {})
   // a link to /cart may still open a drawer (themes intercept it): watch for a navigation, but not forever
@@ -734,10 +759,29 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
         const onScreen = r.width > 240 && r.height > 200 && r.left < window.innerWidth - 100 && r.right > 100 && r.top < window.innerHeight - 100 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.5
         return onScreen && CART.test(`${el.id} ${el.getAttribute('class') || ''} ${el.getAttribute('aria-label') || ''} ${((el as HTMLElement).innerText || '').slice(0, 400)}`)
       })
-      return drawer ? 'drawer' : null
+      if (drawer) return 'drawer'
+      // fallback for drawers the panel scan misses (custom elements, panels nested in an existing
+      // fixed layer): what sits on the right side of the screen now reads like a cart, and did not before
+      const CHECKOUT = /subtotal|check ?out|checkout|afrekenen|paiement|zur kasse|total/i
+      const sideText = () => {
+        const parts: string[] = []
+        for (const y of [0.3, 0.5, 0.8]) {
+          let el = document.elementFromPoint(window.innerWidth - 160, window.innerHeight * y) as HTMLElement | null
+          for (let k = 0; el && k < 8; k++, el = el.parentElement) {
+            const s = getComputedStyle(el)
+            if (s.position === 'fixed' || /DIALOG|DRAWER|MODAL|CART/.test(el.tagName) || el.getAttribute('role') === 'dialog') {
+              parts.push((el.innerText || '').slice(0, 1500))
+              break
+            }
+          }
+        }
+        return parts.join(' ')
+      }
+      const now = sideText()
+      return CHECKOUT.test(now) && CART.test(now) && !CHECKOUT.test((window as any).__cxoSideBefore || '') ? 'drawer' : null
     }, startUrl)
     .catch(() => null)
-  if (process.env.SCANV2_DEBUG) console.log('[cart view] opened:', opened, page.url())
+  if (process.env.SCANV2_DEBUG) console.log('[cart view] opened:', opened, page.url(), await page.evaluate(() => { const out: string[] = []; let el = document.elementFromPoint(window.innerWidth - 160, window.innerHeight * 0.5) as HTMLElement | null; for (let k = 0; el && k < 10; k++, el = el.parentElement) out.push(`${el.tagName}.${(el.getAttribute('class') || '').slice(0, 30)} pos=${getComputedStyle(el).position} shadow=${!!el.shadowRoot} txt=${(el.innerText || '').length}`); return out.join(' > ') + ' | before=' + String((window as any).__cxoSideBefore).slice(0, 80) }).catch(String))
   if (!opened) return undefined
   const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
   if (!b64) return undefined

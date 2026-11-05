@@ -10,6 +10,12 @@ type Measure = (ev: Evidence, f: F) => Omit<Verdict, 'id'> | null
 const SOCIAL = /instagram|facebook|tiktok|youtube|pinterest|linkedin|twitter|x\.com|threads/i
 const SEARCH = /search|zoek|recherch|buscar|busca|suche|cerca|szukaj|sök|søg/i
 
+/** One Shopify variant and no option pickers on the page. Kits and bundles (one variant in Shopify,
+ * with a colour or size picker per item, e.g. Wild One's harness kit) still let the shopper choose. */
+function singleVersion(v: any) {
+  return !!v && v.total === 1 && !(v.pickers > 0)
+}
+
 export const MEASURED: Record<string, Measure> = {
   // Do you use pure black for text or backgrounds? (pass = no pure black)
   recSs12TogM60Mf6w: (_ev, f) => {
@@ -213,7 +219,7 @@ export const MEASURED: Record<string, Measure> = {
   rec1iBTNslYj4y05d: (_ev, f) => {
     const v = f.variants
     if (!v || !v.total) return null
-    if (v.total === 1) return { answer: 'na', evidence: 'This product has a single version, so there is nothing to preselect.' }
+    if (singleVersion(v)) return { answer: 'na', evidence: 'This product has a single version, so there is nothing to preselect.' }
     if (v.atc && v.atc.ready && !v.atc.disabled) return { answer: 'pass', evidence: `A version is already selected when the page opens: the button reads "${v.atc.label}" and works right away.` }
     return null // the button asks for a choice: fine for sizes in fashion, a fail elsewhere; the judge decides with the niche
   },
@@ -249,8 +255,8 @@ export const MEASURED: Record<string, Measure> = {
   },
 
   // Are product variant options easily accessible and touch-friendly on mobile? A single version: nothing to choose.
-  recEyoHMH2oyA0Hk3: (_ev, f) => (f.variants?.total === 1 ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
+  recEyoHMH2oyA0Hk3: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
 
   // Do colour variants show as image thumbnails or clear swatches? A single version has no colour choice.
-  recnbgJzDarhgi4RH: (_ev, f) => (f.variants?.total === 1 ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
+  recnbgJzDarhgi4RH: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
 }
