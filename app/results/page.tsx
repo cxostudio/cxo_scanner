@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
@@ -20,6 +21,8 @@ const ResultSchema = z.array(
     ruleTitle: z.string(),
     passed: z.boolean(),
     reason: z.string(),
+    status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
+    coveredByShopify: z.boolean().optional(),
     checkpoint: z
       .object({
         requiredActions: z.string(),
@@ -73,6 +76,7 @@ export default function ResultsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
+  const [labId, setLabId] = useState<string | null>(null)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -81,6 +85,7 @@ export default function ResultsPage() {
       setRevenueBand(rev)
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
+      setLabId(localStorage.getItem('scanLabId'))
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -142,13 +147,17 @@ export default function ResultsPage() {
     const unknown = results.filter((r) => r.status === 'unknown').length
     const scored = results.filter((r) => r.status !== 'unknown')
     const failed = scored.filter((r) => !r.passed)
+    // shown apart from real passes: "not relevant for your store" and "covered by Shopify"
+    const notRelevant = scored.filter((r) => r.status === 'na').length
+    const byShopify = scored.filter((r) => r.coveredByShopify).length
+    const listed = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
     const areas = LEVERS.map((l) => {
       const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: scored, failed, passed: scored.length - failed.length, total: scored.length + unknown, unknown, score: scoreOf(scored), areas, num, easyHigh }
+    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh }
   }, [results])
 
   const host = hostOf(url)
@@ -219,6 +228,15 @@ export default function ResultsPage() {
 
   return (
     <main className="min-h-screen">
+      {/* test scans only (CXO Studio and +test emails): label this scan blind in the lab */}
+      {labId && (
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[var(--surface-muted)] px-[var(--gutter)] py-2.5 text-sm text-[var(--text)]">
+          <span>Test scan: Live and Draft checkpoints, saved to the lab.</span>
+          <Link href={`/lab/${labId}`} className="font-semibold underline">
+            Label it blind
+          </Link>
+        </div>
+      )}
       {/* ── top: on the brand wash ───────────────────────────────────────── */}
       <div className="flex flex-col px-[var(--gutter)] pt-[34px] max-[560px]:pt-[26px] lg:min-h-[min(90vh,860px)]">
         <a className="cxo-logo !mb-10" href="https://cxo.studio" aria-label="CXO studio">
@@ -305,6 +323,8 @@ export default function ResultsPage() {
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
                     {report.passed} passed
                   </span>
+                  {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
+                  {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
                   {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
                 </p>

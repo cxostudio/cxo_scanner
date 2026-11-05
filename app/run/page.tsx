@@ -510,6 +510,8 @@ export default function Home() {
         ruleTitle: z.string(),
         passed: z.boolean(),
         reason: z.string(),
+        status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
+        coveredByShopify: z.boolean().optional(),
         checkpoint: z
           .object({
             requiredActions: z.string(),
@@ -603,6 +605,10 @@ export default function Home() {
 
           const data = await response.json();
           const batchResults = ScanResultsSchema.parse(data.results);
+          // test scans are saved to the lab (app/lab): the results page links there
+          if (data.labId) {
+            try { localStorage.setItem("scanLabId", data.labId); } catch {}
+          }
 
           // Remove duplicates before adding (check by ruleId)
           const existingRuleIds = new Set(allResults.map((r) => r.ruleId));
@@ -790,6 +796,8 @@ export default function Home() {
               ruleTitle: z.string(),
               passed: z.boolean(),
               reason: z.string(),
+              status: z.enum(["pass", "fail", "na", "unknown"]).optional(),
+              coveredByShopify: z.boolean().optional(),
               checkpoint: z
                 .object({
                   requiredActions: z.string(),
@@ -1200,6 +1208,7 @@ export default function Home() {
       }
       try {
         localStorage.removeItem("scanPreviewMobile");
+        localStorage.removeItem("scanLabId");
         localStorage.removeItem("scanPreviewDesktop");
       } catch {
         /* ignore */

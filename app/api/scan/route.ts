@@ -53,6 +53,7 @@ import {
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
+import { saveTestScan } from '@/lib/lab/store'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -1179,7 +1180,25 @@ export async function POST(request: NextRequest) {
       try {
         const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
-        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag })
+        // test scans are kept for blind labelling (lib/lab); customer scans never are
+        let labId: string | undefined
+        if (email && isTestEmail(email)) {
+          labId = await saveTestScan({
+            id: scanId || `scan-${Date.now()}`,
+            url: validUrl,
+            email,
+            niche: v2.niche,
+            cartKind: v2.cartKind,
+            shopify: v2.shopify,
+            rules: v2Rules,
+            results: v2.results,
+            tiles: v2.evidenceTiles,
+          }).catch((e) => {
+            console.warn('[scan] test scan not saved to the lab:', e)
+            return undefined
+          })
+        }
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId })
       } catch (e) {
         if (e instanceof PageCheckError) {
           return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })

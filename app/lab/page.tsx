@@ -1,0 +1,130 @@
+'use client'
+
+// Test lab, home: saved test scans and the scanner's accuracy per checkpoint against Louis's labels.
+// A checkpoint is ready to go Live at 90%+ agreement on at least MIN_LABELS labelled stores.
+import Link from 'next/link'
+import { useEffect, useState } from 'react'
+import { api } from '@/lib/base'
+
+const MIN_LABELS = 5
+const TARGET = 0.9
+
+type ScanRow = { id: string; url: string; createdAt: string; niche: string; checkpoints: number; labelled: number }
+type AccRow = { id: string; title: string; status?: string; labelled: number; agree: number; unknown: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
+
+const host = (u: string) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, '')
+  } catch {
+    return u
+  }
+}
+const pct = (n: number) => `${Math.round(n * 100)}%`
+const WORD: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'Not relevant', unknown: "Couldn't check" }
+
+export default function LabHome() {
+  const [key, setKey] = useState('')
+  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[] } | null>(null)
+  const [error, setError] = useState('')
+  const [open, setOpen] = useState<string | null>(null)
+
+  useEffect(() => {
+    const k = new URLSearchParams(window.location.search).get('key') || ''
+    setKey(k)
+    fetch(api(`/lab/scans${k ? `?key=${encodeURIComponent(k)}` : ''}`))
+      .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({})))?.error || String(r.status)))))
+      .then(setData)
+      .catch((e) => setError(String(e.message || e)))
+  }, [])
+
+  const q = key ? `?key=${encodeURIComponent(key)}` : ''
+  const ready = data?.accuracy.filter((a) => a.labelled >= MIN_LABELS && a.agree / a.labelled >= TARGET) ?? []
+
+  return (
+    <main className="min-h-screen bg-[var(--bg)] px-[var(--gutter)] py-10 font-[family-name:var(--font-body)] text-[var(--text)]">
+      <div className="mx-auto flex max-w-[1100px] flex-col gap-10">
+        <header className="flex flex-col gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Scanner test lab</p>
+          <h1 className="font-[family-name:var(--font-display)] text-[32px] font-bold tracking-[-0.03em]">Label blind, then measure</h1>
+          <p className="max-w-[680px] text-sm leading-relaxed text-[var(--text-muted)]">
+            Run a scan with a @cxo.studio or +test email: it runs Live and Draft checkpoints and lands here. Label each checkpoint without seeing the scanner's answer, then compare. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-3">
+            <Link href="/run" className="cxo-btn cxo-btn-primary">Run a test scan</Link>
+          </div>
+        </header>
+
+        {error && <p className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--result-fail-fg)]">Could not load the lab: {error}</p>}
+        {!data && !error && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
+
+        {data && (
+          <>
+            <section className="flex flex-col gap-3">
+              <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Test scans ({data.scans.length})</h2>
+              {data.scans.length === 0 && <p className="text-sm text-[var(--text-muted)]">No test scans yet.</p>}
+              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+                {data.scans.map((s) => {
+                  const done = s.labelled >= s.checkpoints
+                  return (
+                    <Link key={s.id} href={`/lab/${s.id}${q}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-[var(--bg-subtle)]">
+                      <span className="min-w-0 flex-1 truncate font-semibold">{host(s.url)}</span>
+                      <span className="text-sm text-[var(--text-muted)]">{s.niche}</span>
+                      <span className="text-sm text-[var(--text-muted)]">{new Date(s.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="rounded-[var(--radius-pill)] px-2.5 py-0.5 text-xs font-semibold" style={{ background: done ? 'var(--result-pass-bg)' : 'var(--surface-muted)', color: done ? 'var(--result-pass-fg)' : 'var(--text-muted)' }}>
+                        {done ? 'Labelled' : `${s.labelled}/${s.checkpoints} labelled`}
+                      </span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Accuracy per checkpoint</h2>
+                <p className="text-sm text-[var(--text-muted)]">
+                  {data.accuracy.length} checkpoints labelled · <span className="font-semibold text-[var(--result-pass-fg)]">{ready.length} ready for Live</span>
+                </p>
+              </div>
+              {data.accuracy.length === 0 && <p className="text-sm text-[var(--text-muted)]">Label a scan to see accuracy.</p>}
+              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+                {data.accuracy.map((a) => {
+                  const rate = a.agree / a.labelled
+                  const enough = a.labelled >= MIN_LABELS
+                  const fg = !enough ? 'var(--text-muted)' : rate >= TARGET ? 'var(--result-pass-fg)' : 'var(--result-fail-fg)'
+                  return (
+                    <div key={a.id}>
+                      <button type="button" onClick={() => setOpen(open === a.id ? null : a.id)} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-[var(--bg-subtle)]">
+                        <span className="min-w-0 flex-1 text-sm font-semibold">{a.title}</span>
+                        <span className="text-xs text-[var(--text-muted)]">{a.status}</span>
+                        <span className="w-24 text-right text-sm text-[var(--text-muted)]">
+                          {a.agree}/{a.labelled}
+                          {a.unknown ? ` · ${a.unknown}?` : ''}
+                        </span>
+                        <span className="w-14 text-right font-[family-name:var(--font-display)] font-bold" style={{ color: fg }}>
+                          {pct(rate)}
+                        </span>
+                      </button>
+                      {open === a.id && a.mismatches.length > 0 && (
+                        <div className="flex flex-col gap-1 border-t border-[var(--border)] bg-[var(--bg-subtle)] px-4 py-3 text-sm">
+                          {a.mismatches.map((m, i) => (
+                            <Link key={i} href={`/lab/${m.scan}${q ? `${q}&` : '?'}compare=1#${a.id}`} className="flex gap-3 hover:underline">
+                              <span className="min-w-0 flex-1 truncate">{host(m.url)}</span>
+                              <span className="text-[var(--text-muted)]">
+                                you: {WORD[m.louis] || m.louis} · scanner: {WORD[m.ai] || m.ai}
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </main>
+  )
+}

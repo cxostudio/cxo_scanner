@@ -20,9 +20,14 @@ export type Evidence = {
   mobileTiles: Tile[]
   cartHeader?: Tile
   cartTest?: string
-  /** What a shopper sees after opening the cart with one item in it (drawer or cart page). */
+  /** What opens from the header cart icon with one item in the cart: a drawer, or the cart page. */
   cartView?: Tile
   mobileCartView?: Tile
+  /** The /cart page as well, when the icon opened a drawer (both are judged, the drawer first). */
+  cartPage?: Tile[]
+  mobileCartPage?: Tile[]
+  /** 'drawer' when the icon opens a drawer, 'page' when it goes to /cart, 'none' when nothing opened. */
+  cartKind?: 'drawer' | 'page' | 'none'
   isShopify?: boolean
   text: string
   hiddenText: string
@@ -438,6 +443,22 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
   return { label: `${device} cart view after one item was added (${where})`, dataUrl: `data:image/jpeg;base64,${b64}` }
 }
 
+/** The cart page itself (Shopify always serves /cart), top of the page in up to `max` viewport tiles. */
+async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<Tile[]> {
+  const origin = new URL(page.url()).origin
+  const res = await page.goto(`${origin}/cart`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null)
+  if (!res || res.status() >= 400) return []
+  await page.waitForNetworkIdle({ idleTime: 600, timeout: 5000 }).catch(() => {})
+  // some stores (headless, drawer-only) redirect /cart elsewhere: then there is no cart page
+  if (!/\/cart\/?$/.test(new URL(page.url()).pathname)) return []
+  await cleanPage(page)
+  const all = await tiles(page, `${device} cart page`, width, height, max)
+  // the footer is already in the product page tiles
+  return all.filter((t) => !/footer/i.test(t.label)).map((t) => ({ ...t, label: t.label.replace(`${device} cart page screenshot`, `${device} CART PAGE (/cart) screenshot`) }))
+}
+
+const kindOf = (t?: Tile): 'drawer' | 'page' | 'none' => (!t ? 'none' : /cart page\)$/.test(t.label) ? 'page' : 'drawer')
+
 /** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */
 function sweepStaleProfiles() {
   try {
@@ -496,11 +517,15 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
     const cart = await cartTest(desktop)
     const itemInCart = cart.note.startsWith('one item')
     const desktopCartView = itemInCart ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
+    const cartKind = itemInCart ? kindOf(desktopCartView) : undefined
+    // the icon opened a drawer (or nothing): capture the cart page too
+    const desktopCartPage = itemInCart && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
     await desktop.close().catch(() => {})
 
     let mobileTiles: Tile[] = []
     let mobileFacts: Record<string, unknown> = {}
     let mobileCartView: Tile | undefined
+    let mobileCartPage: Tile[] = []
     try {
       const mobile = await browser.newPage()
       await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
@@ -515,7 +540,10 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
         .catch(() => ({}))
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       // same browser, same cart cookie: the item added on desktop is in the cart here too
-      if (itemInCart) mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
+      if (itemInCart) {
+        mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
+        if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
+      }
       await mobile.close().catch(() => {})
     } catch (e) {
       console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
@@ -532,6 +560,9 @@ export async function captureEvidence(rawUrl: string): Promise<Evidence> {
       cartTest: cart.note,
       cartView: desktopCartView,
       mobileCartView,
+      cartPage: desktopCartPage,
+      mobileCartPage,
+      cartKind,
       isShopify,
       text: text.slice(0, 14000),
       hiddenText,

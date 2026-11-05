@@ -1,7 +1,7 @@
 // Scan engine v2: capture evidence once, judge every checkpoint with it.
 // Returns rows in the same shape as engine v1, so the run and results pages are unchanged.
 // Extra field `status` separates "not relevant" and "couldn't check" from real passes and fails.
-import { captureEvidence, PageCheckError } from './capture'
+import { captureEvidence, PageCheckError, type Tile } from './capture'
 import { judge, V2_MODEL, type Niche, type Rule, type Verdict } from './judge'
 import { MEASURED } from './measured'
 
@@ -72,7 +72,8 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string) {
     tiles: `${ev.desktopTiles.length}+${ev.mobileTiles.length}`,
     cart: ev.cartTest,
     cartTile: !!ev.cartHeader,
-    cartView: `${ev.cartView ? 'desktop' : '-'}+${ev.mobileCartView ? 'mobile' : '-'}`,
+    cartKind: ev.cartKind,
+    cartImages: [ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean).length,
     shopify: !!ev.isShopify,
     niche,
     textChars: ev.text.length,
@@ -80,5 +81,7 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string) {
     measured: measuredCount,
     checkpoints: rules.length,
   }
-  return { results, screenshot, niche, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
+  // every image the judge saw, in the same order (kept for test scans only, see lib/lab)
+  const evidenceTiles = [...ev.desktopTiles, ...ev.mobileTiles, ev.cartHeader, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  return { results, screenshot, niche, evidenceTiles, cartKind: ev.cartKind, shopify: !!ev.isShopify, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
 }

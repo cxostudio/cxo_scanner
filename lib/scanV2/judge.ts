@@ -48,7 +48,7 @@ First decide the store's niche, from the product on this page. Use exactly one o
 Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
 - "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
-- The cart view image (when present) shows what a shopper sees after adding one item: a cart drawer or the cart page. Use it for cart checkpoints; if it is missing, cart checkpoints are "unknown".
+- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
@@ -62,6 +62,7 @@ function evidenceText(ev: Evidence) {
     `MEASURED FACTS (mobile): ${JSON.stringify(ev.mobileFacts)}`,
     `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
     `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
+    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
     `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}`,
     ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
   ]
@@ -70,7 +71,7 @@ function evidenceText(ev: Evidence) {
 }
 
 function images(ev: Evidence) {
-  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.mobileCartView ? [ev.mobileCartView] : [])]
+  const tiles = [...ev.desktopTiles, ...ev.mobileTiles, ...(ev.cartHeader ? [ev.cartHeader] : []), ...(ev.cartView ? [ev.cartView] : []), ...(ev.cartPage || []), ...(ev.mobileCartView ? [ev.mobileCartView] : []), ...(ev.mobileCartPage || [])]
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },
