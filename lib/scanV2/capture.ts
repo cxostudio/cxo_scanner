@@ -418,6 +418,7 @@ async function measureVariants(page: Page) {
   return page.evaluate(async () => {
     let total = 0
     let soldOut = 0
+    let discounted = 0
     try {
       if (/\/products\//.test(location.pathname)) {
         const r = await fetch(location.pathname.replace(/\/$/, '') + '.js')
@@ -425,6 +426,7 @@ async function measureVariants(page: Page) {
           const p = await r.json()
           total = p.variants.length
           soldOut = p.variants.filter((v: any) => !v.available).length
+          discounted = p.variants.filter((v: any) => v.compare_at_price && v.compare_at_price > v.price).length
         }
       }
     } catch {}
@@ -460,7 +462,7 @@ async function measureVariants(page: Page) {
       (Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"]')).find((b) => visible(b) && (ATC.test(text(b)) || /select (a )?size|choose (a )?(size|option)|kies (een )?maat|sold out|uitverkocht/i.test(text(b)))) as HTMLButtonElement | undefined) ||
       null)
     const atc = btn ? { label: text(btn).slice(0, 40), disabled: btn.disabled === true || btn.getAttribute('aria-disabled') === 'true', ready: ATC.test(text(btn)) } : null
-    return { total, soldOut, options: options.length, marked, atc }
+    return { total, soldOut, discounted, options: options.length, marked, atc }
   })
 }
 

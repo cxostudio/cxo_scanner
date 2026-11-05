@@ -218,6 +218,15 @@ export const MEASURED: Record<string, Measure> = {
     return null // the button asks for a choice: fine for sizes in fashion, a fail elsewhere; the judge decides with the niche
   },
 
+  // Do discounted items in the cart show the old price struck through, or the saving?
+  // No version of the product has a compare-at price: the item added to the cart is not discounted.
+  recbEhE51TXFkDDnC: (_ev, f) => {
+    const v = f.variants
+    if (!v || !v.total || typeof v.discounted !== 'number') return null
+    if (v.discounted === 0) return { answer: 'na', evidence: 'The product added to the cart is not on sale, so there is no old price to show.' }
+    return null
+  },
+
   // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
   recEgJJ3Ja7iD3B63: (ev, f) => {
     if (!ev.isShopify || !f.footer) return null

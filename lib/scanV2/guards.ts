@@ -27,7 +27,7 @@ function quotedLabels(evidence: string) {
 /** "Near the button" checkpoints: found only in the cart drawer or the footer does not count. */
 const NEAR_BUTTON = /near (the )?(main )?(buy|add-to-cart|cta|button|price)|near the main cta|near the buy button/i
 const ELSEWHERE = /cart drawer|in the cart|the cart (shows|states|says)|footer/i
-const ON_PAGE = /buy box|below the (button|price)|under the (button|price)|next to the (button|price)|above the (button|price)|near the (button|price)/i
+const ON_PAGE = /buy box|product page|announcement|button|price|title|next to|below|above|beside|under/i
 
 export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
   for (const r of rules) {

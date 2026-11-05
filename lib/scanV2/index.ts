@@ -59,8 +59,23 @@ function sellsOnline(ev: Evidence): boolean {
   return !(STORE_ONLY.test(text) && !ADD_TO_CART.test(text))
 }
 
+/** Scans saved before discounts were measured: read the product's compare-at prices now (Shopify product .js). */
+async function backfillDiscounts(ev: Evidence) {
+  const v = (ev.facts as Record<string, any>)?.variants
+  if (!ev.isShopify || !v || typeof v.discounted === 'number') return
+  try {
+    const u = new URL(ev.url)
+    if (!/\/products\//.test(u.pathname)) return
+    const r = await fetch(`${u.origin}${u.pathname.replace(/\/$/, '')}.js`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    if (!r.ok) return
+    const p = await r.json()
+    v.discounted = (p.variants || []).filter((x: any) => x.compare_at_price && x.compare_at_price > x.price).length
+  } catch {}
+}
+
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
   ev.sellsOnline = sellsOnline(ev)
+  await backfillDiscounts(ev)
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
