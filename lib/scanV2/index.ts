@@ -1,7 +1,7 @@
 // Scan engine v2: capture evidence once, judge every checkpoint with it.
 // Returns rows in the same shape as engine v1, so the run and results pages are unchanged.
 // Extra field `status` separates "not relevant" and "couldn't check" from real passes and fails.
-import { captureEvidence, PageCheckError, type Tile } from './capture'
+import { captureEvidence, PageCheckError, type Evidence, type Tile } from './capture'
 import { judge, V2_MODEL, type Niche, type Rule, type Verdict } from './judge'
 import { MEASURED } from './measured'
 
@@ -29,12 +29,18 @@ function nicheVerdict(r: Rule, niche: Niche): Answer | null {
   return null
 }
 
-export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
-  const t0 = Date.now()
-  // the extra capture steps run when a checkpoint needs them: always in test mode
-  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
-  const t1 = Date.now()
-  // measured checkpoints first; the model only judges what code cannot settle
+/** Every image the judge sees, in order. Test scans store them in this order (lib/lab). */
+export function evidenceImages(ev: Evidence): Tile[] {
+  return [...ev.desktopTiles, ...ev.mobileTiles, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+}
+
+const UNMEASURED = 'This is measured in the page code, and the scanner could not measure it on this page.'
+
+/**
+ * Judge captured evidence: Shopify defaults and code measurements first, the model for the rest,
+ * then the hard niche rules. Used by live scans and by the lab to re-judge saved test scans.
+ */
+export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
@@ -42,9 +48,15 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
       continue
     }
     const m = MEASURED[r.id]?.(ev, ev.facts as Record<string, any>)
-    if (m) settled.set(r.id, m)
+    if (m) {
+      settled.set(r.id, m)
+      continue
+    }
+    // a Draft checkpoint defined as "Measured" with no conclusive measurement: the model would
+    // only guess from screenshots (hover, keyboards, load times), so we say we could not check it
+    if (r.status === 'Draft' && r.method === 'Measured') settled.set(r.id, { answer: 'unknown', evidence: UNMEASURED })
   }
-  const measuredCount = settled.size
+  const measured = settled.size
   const { niche, verdicts } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
   const byId = new Map<string, Answer & { coveredByShopify?: boolean }>(verdicts.map((v) => [v.id, v]))
   for (const [id, m] of Array.from(settled)) byId.set(id, m)
@@ -66,6 +78,15 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
       ...(v?.coveredByShopify ? { coveredByShopify: true } : {}),
     }
   })
+  return { results, niche, measured }
+}
+
+export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
+  const t0 = Date.now()
+  // the extra capture steps run when a checkpoint needs them: always in test mode
+  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
+  const t1 = Date.now()
+  const { results, niche, measured } = await judgeEvidence(ev, rules, apiKey)
   const screenshot = ev.desktopTiles[0]?.dataUrl ?? null
   console.log(`[scanV2] ${url} ${rules.length} checkpoints, niche ${niche}, capture ${t1 - t0}ms judge ${Date.now() - t1}ms model ${V2_MODEL()} tiles ${ev.desktopTiles.length}+${ev.mobileTiles.length}`)
   const diag = {
@@ -74,15 +95,14 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
     cart: ev.cartTest,
     cartTile: !!ev.cartHeader,
     cartKind: ev.cartKind,
+    emptyCart: !!ev.emptyCart,
     cartImages: [ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean).length,
     shopify: !!ev.isShopify,
     niche,
     textChars: ev.text.length,
     hiddenChars: ev.hiddenText.length,
-    measured: measuredCount,
+    measured,
     checkpoints: rules.length,
   }
-  // every image the judge saw, in the same order (kept for test scans only, see lib/lab)
-  const evidenceTiles = [...ev.desktopTiles, ...ev.mobileTiles, ev.cartHeader, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
-  return { results, screenshot, niche, evidenceTiles, cartKind: ev.cartKind, shopify: !!ev.isShopify, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
+  return { results, screenshot, niche, evidence: ev, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
 }

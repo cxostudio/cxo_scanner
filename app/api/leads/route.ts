@@ -1,3 +1,4 @@
+import { noStoreFetch } from '@/lib/supabaseFetch'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (url && key) {
     try {
-      const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+      const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: noStoreFetch } })
       let { error } = await sb.from('leads').insert(row)
       // conversion_band / aov_band arrived later (supabase/leads.sql): still store the lead
       // if those columns have not been added yet

@@ -27,15 +27,45 @@ export default function LabHome() {
   const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[] } | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  const [rejudge, setRejudge] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
 
-  useEffect(() => {
-    const k = new URLSearchParams(window.location.search).get('key') || ''
-    setKey(k)
+  const load = (k: string) =>
     fetch(api(`/lab/scans${k ? `?key=${encodeURIComponent(k)}` : ''}`))
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({})))?.error || String(r.status)))))
       .then(setData)
       .catch((e) => setError(String(e.message || e)))
+
+  useEffect(() => {
+    const k = new URLSearchParams(window.location.search).get('key') || ''
+    setKey(k)
+    load(k)
   }, [])
+
+  /** Judge every saved scan again with today's Airtable definitions, then reload the accuracy. */
+  const runRejudge = async () => {
+    setRejudge({ busy: true, note: 'Judging every test scan again with the current Airtable definitions…' })
+    try {
+      const r = await fetch(api(`/lab/rejudge${key ? `?key=${encodeURIComponent(key)}` : ''}`), { method: 'POST' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || String(r.status))
+      type Res = { ok: boolean; error?: string; before?: { agree: number; labelled: number } | null; after?: { agree: number; labelled: number } | null }
+      const res = d.scans as Res[]
+      const sum = (k: 'before' | 'after') => res.reduce((a, x) => ({ agree: a.agree + (x[k]?.agree || 0), labelled: a.labelled + (x[k]?.labelled || 0) }), { agree: 0, labelled: 0 })
+      const b = sum('before')
+      const a = sum('after')
+      const failed = res.filter((x) => !x.ok)
+      setRejudge({
+        busy: false,
+        note:
+          `${res.length - failed.length} scans judged again.` +
+          (a.labelled ? ` Agreement on labelled checkpoints: ${pct(b.agree / (b.labelled || 1))} → ${pct(a.agree / a.labelled)}.` : '') +
+          (failed.length ? ` ${failed.length} skipped (${failed[0].error}).` : ''),
+      })
+      await load(key)
+    } catch (e) {
+      setRejudge({ busy: false, note: `Re-judge failed: ${String((e as Error).message || e)}` })
+    }
+  }
 
   const q = key ? `?key=${encodeURIComponent(key)}` : ''
   const ready = data?.accuracy.filter((a) => a.labelled >= MIN_LABELS && a.agree / a.labelled >= TARGET) ?? []
@@ -51,7 +81,11 @@ export default function LabHome() {
           </p>
           <div className="mt-2 flex flex-wrap gap-3">
             <Link href="/run" className="cxo-btn cxo-btn-primary">Run a test scan</Link>
+            <button type="button" className="cxo-btn cxo-btn-ghost" disabled={rejudge.busy || !data?.scans.length} onClick={runRejudge}>
+              {rejudge.busy ? 'Re-judging…' : 'Re-judge all with current definitions'}
+            </button>
           </div>
+          {rejudge.note && <p className="text-sm text-[var(--text-muted)]">{rejudge.note}</p>}
         </header>
 
         {error && <p className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--result-fail-fg)]">Could not load the lab: {error}</p>}
@@ -62,7 +96,7 @@ export default function LabHome() {
             <section className="flex flex-col gap-3">
               <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">Test scans ({data.scans.length})</h2>
               {data.scans.length === 0 && <p className="text-sm text-[var(--text-muted)]">No test scans yet.</p>}
-              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+              <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
                 {data.scans.map((s) => {
                   const done = s.labelled >= s.checkpoints
                   return (
@@ -87,7 +121,7 @@ export default function LabHome() {
                 </p>
               </div>
               {data.accuracy.length === 0 && <p className="text-sm text-[var(--text-muted)]">Label a scan to see accuracy.</p>}
-              <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+              <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
                 {data.accuracy.map((a) => {
                   const rate = a.agree / a.labelled
                   const enough = a.labelled >= MIN_LABELS

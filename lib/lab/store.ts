@@ -1,14 +1,23 @@
 // Test lab: scans from test emails (CXO Studio, +test) are kept so Louis can label them blind
 // and we can measure the scanner's accuracy per checkpoint before a checkpoint goes Live.
 // Everything lives in one private Supabase Storage bucket, no database table needed:
-//   scans/{id}/meta.json   url, niche, checkpoints with their definitions, the scanner's answers
+//   scans/{id}/meta/{t}.json  url, niche, checkpoints with their definitions, the scanner's answers
 //   scans/{id}/{n}.jpg     the screenshots the scanner judged from
-//   labels/{id}.json       Louis's answers, per checkpoint
+//   scans/{id}/evidence.json  page text, measured facts, cart test: with the screenshots, all the
+//                          judge needs to answer again (re-judge after a definition or prompt change)
+//   labels/{id}/{t}.json   Louis's answers, per checkpoint
+// Files that change are never overwritten: each save is a new timestamped file and reads take the
+// newest from the folder listing. Supabase's CDN served stale copies of overwritten files for minutes.
 // Customer scans are never stored here.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { Tile } from '@/lib/scanV2/capture'
+import { noStoreFetch } from '@/lib/supabaseFetch'
+import type { Evidence, Tile } from '@/lib/scanV2/capture'
 import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+
+/** Which part of the evidence each saved image is, so it can be rebuilt for a re-judge. */
+type ImageRole = 'desktop' | 'mobile' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
+type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
 
 const BUCKET = 'test-scans'
 
@@ -37,7 +46,30 @@ export type LabScan = {
   shopify: boolean
   checkpoints: LabCheckpoint[]
   answers: { id: string; answer: LabAnswer; reason: string; coveredByShopify?: boolean }[]
-  images: { label: string; file: string }[]
+  images: { label: string; file: string; role?: ImageRole }[]
+  /** The checkpoints as judged (full definitions), for re-judging when Airtable is unreachable. */
+  rules?: ScanRule[]
+  /** When the answers were last produced, and by which model. */
+  judgedAt?: string
+  model?: string
+  /** Earlier runs on the same evidence, newest last. */
+  history?: { judgedAt: string; model?: string; answers: LabScan['answers'] }[]
+}
+
+const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
+
+function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
+  const out: { role: ImageRole; tile: Tile }[] = []
+  const add = (role: ImageRole, t?: Tile | Tile[]) => (Array.isArray(t) ? t : t ? [t] : []).forEach((tile) => out.push({ role, tile }))
+  add('desktop', ev.desktopTiles)
+  add('mobile', ev.mobileTiles)
+  add('cartHeader', ev.cartHeader)
+  add('emptyCart', ev.emptyCart)
+  add('cartView', ev.cartView)
+  add('cartPage', ev.cartPage)
+  add('mobileCartView', ev.mobileCartView)
+  add('mobileCartPage', ev.mobileCartPage)
+  return out
 }
 
 let client: SupabaseClient | null = null
@@ -47,7 +79,7 @@ function supabase(): SupabaseClient {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Supabase is not configured (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).')
-  if (!client) client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+  if (!client) client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: noStoreFetch } })
   return client
 }
 
@@ -63,84 +95,166 @@ async function bucket() {
 
 const safeId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
 
-/** Keep one test scan: screenshots, checkpoints with their definitions, the scanner's answers. */
-export async function saveTestScan(input: {
-  id: string
-  url: string
-  email: string
-  niche: string
-  cartKind?: string
-  shopify: boolean
-  rules: ScanRule[]
-  results: V2Row[]
-  tiles: Tile[]
-}) {
+/** Keep one test scan: screenshots, the rest of the evidence, checkpoints with their definitions, the answers. */
+export async function saveTestScan(input: { id: string; url: string; email: string; niche: string; model?: string; rules: ScanRule[]; results: V2Row[]; evidence: Evidence }) {
   const store = await bucket()
   const id = safeId(input.id) || `scan-${Date.now()}`
+  const ev = input.evidence
   const images = await Promise.all(
-    input.tiles.map(async (t, i) => {
+    roleTiles(ev).map(async ({ role, tile }, i) => {
       const file = `scans/${id}/${String(i).padStart(2, '0')}.jpg`
-      const bytes = Buffer.from(t.dataUrl.split(',')[1] || '', 'base64')
+      const bytes = Buffer.from(tile.dataUrl.split(',')[1] || '', 'base64')
       const { error } = await store.upload(file, bytes, { contentType: 'image/jpeg', upsert: true })
       if (error) throw error
-      return { label: t.label, file }
+      return { label: tile.label, file, role }
     }),
   )
+  // everything but the images (saved above as files)
+  const stored: Record<string, unknown> = { ...ev }
+  for (const k of IMAGE_KEYS) delete stored[k]
+  await upload(store, `scans/${id}/evidence.json`, stored as StoredEvidence)
   const meta: LabScan = {
     id,
     url: input.url,
     email: input.email,
     createdAt: new Date().toISOString(),
     niche: input.niche,
-    cartKind: input.cartKind,
-    shopify: input.shopify,
-    checkpoints: input.rules.map((r) => ({
-      id: r.id,
-      title: r.title,
-      status: r.status,
-      device: r.device,
-      pass: r.pass,
-      fail: r.fail,
-      na: r.na,
-      nicheNotes: r.nicheNotes,
-      pageTypeIds: r.pageTypeIds,
-    })),
-    answers: input.results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify })),
+    cartKind: ev.cartKind,
+    shopify: !!ev.isShopify,
+    checkpoints: input.rules.map(toCheckpoint),
+    answers: toAnswers(input.results),
     images,
+    rules: input.rules,
+    judgedAt: new Date().toISOString(),
+    model: input.model,
   }
-  const { error } = await store.upload(`scans/${id}/meta.json`, JSON.stringify(meta), { contentType: 'application/json', upsert: true })
-  if (error) throw error
+  await writeVersion(store, `scans/${id}/meta`, meta)
   return id
 }
+
+const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
+  id: r.id,
+  title: r.title,
+  status: r.status,
+  device: r.device,
+  pass: r.pass,
+  fail: r.fail,
+  na: r.na,
+  nicheNotes: r.nicheNotes,
+  pageTypeIds: r.pageTypeIds,
+})
+const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
+
+async function upload(store: Awaited<ReturnType<typeof bucket>>, path: string, data: unknown) {
+  const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true, cacheControl: '0' })
+  if (error) throw error
+}
+
+const KEEP_VERSIONS = 5
+
+/** Save a new version under `folder` (never overwrite), keep the last few. */
+async function writeVersion(store: Awaited<ReturnType<typeof bucket>>, folder: string, data: unknown) {
+  await upload(store, `${folder}/${String(Date.now()).padStart(15, '0')}.json`, data)
+  const { data: files } = await store.list(folder, { limit: 100 })
+  const old = (files || []).map((f) => f.name).filter((n) => n.endsWith('.json')).sort().reverse().slice(KEEP_VERSIONS)
+  if (old.length) await store.remove(old.map((n) => `${folder}/${n}`)).catch(() => {})
+}
+
+/** The newest version under `folder`, or the legacy single file. */
+async function readLatest<T>(folder: string, legacy?: string): Promise<T | null> {
+  const store = await bucket()
+  const { data: files, error } = await store.list(folder, { limit: 100 })
+  if (error) lastReadError = `${folder}: list failed ${error.message}`
+  const newest = (files || []).map((f) => f.name).filter((n) => n.endsWith('.json')).sort().pop()
+  if (newest) return readJson<T>(`${folder}/${newest}`)
+  return legacy ? readJson<T>(legacy) : null
+}
+
+/** Rebuild the judge's evidence from a saved test scan. Null for scans saved before evidence was kept. */
+export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
+  const stored = await readJson<StoredEvidence>(`scans/${scan.id}/evidence.json`)
+  if (!stored || scan.images.some((i) => !i.role)) return null
+  const store = await bucket()
+  // a few at a time, with one retry: storage drops downloads when many run at once
+  const download = async (file: string) => {
+    for (let attempt = 0; ; attempt++) {
+      const { data, error } = await store.download(file)
+      if (data) return Buffer.from(await data.arrayBuffer()).toString('base64')
+      if (attempt >= 2) throw new Error(`could not download ${file}: ${error?.message || JSON.stringify(error)}`)
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+    }
+  }
+  const tiles: { role: ImageRole; tile: Tile }[] = []
+  for (let i = 0; i < scan.images.length; i += 6) {
+    const chunk = await Promise.all(
+      scan.images.slice(i, i + 6).map(async (img) => ({ role: img.role as ImageRole, tile: { label: img.label, dataUrl: `data:image/jpeg;base64,${await download(img.file)}` } })),
+    )
+    tiles.push(...chunk)
+  }
+  const of = (role: ImageRole) => tiles.filter((t) => t.role === role).map((t) => t.tile)
+  return {
+    ...stored,
+    desktopTiles: of('desktop'),
+    mobileTiles: of('mobile'),
+    cartHeader: of('cartHeader')[0],
+    emptyCart: of('emptyCart')[0],
+    cartView: of('cartView')[0],
+    cartPage: of('cartPage'),
+    mobileCartView: of('mobileCartView')[0],
+    mobileCartPage: of('mobileCartPage'),
+  }
+}
+
+/** Replace a scan's answers after a re-judge; the previous answers move to history. */
+export async function saveRejudge(scan: LabScan, input: { rules: ScanRule[]; results: V2Row[]; niche: string; model?: string }) {
+  const store = await bucket()
+  const next: LabScan = {
+    ...scan,
+    niche: input.niche,
+    checkpoints: input.rules.map(toCheckpoint),
+    answers: toAnswers(input.results),
+    rules: input.rules,
+    history: [...(scan.history || []), { judgedAt: scan.judgedAt || scan.createdAt, model: scan.model, answers: scan.answers }].slice(-10),
+    judgedAt: new Date().toISOString(),
+    model: input.model,
+  }
+  await writeVersion(store, `scans/${scan.id}/meta`, next)
+  return next
+}
+
+/** Last read problem, reported by the lab APIs (storage errors are otherwise silent). */
+export let lastReadError = ''
 
 async function readJson<T>(path: string): Promise<T | null> {
   const store = await bucket()
   const { data, error } = await store.download(path)
-  if (error || !data) return null
+  if (error || !data) {
+    lastReadError = `${path}: ${error?.message || 'no data'}`
+    return null
+  }
   try {
     return JSON.parse(await data.text()) as T
-  } catch {
+  } catch (e) {
+    lastReadError = `${path}: parse ${String(e).slice(0, 120)}`
     return null
   }
 }
 
 export async function listTestScans(): Promise<{ id: string; createdAt: string }[]> {
   const store = await bucket()
-  const { data, error } = await store.list('scans', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } })
+  const { data, error } = await store.list('scans', { limit: 1000 })
   if (error) throw error
   return (data || []).filter((d) => d.name).map((d) => ({ id: d.name, createdAt: d.created_at || '' }))
 }
 
-export const getTestScan = (id: string) => readJson<LabScan>(`scans/${safeId(id)}/meta.json`)
+export const getTestScan = (id: string) => readLatest<LabScan>(`scans/${safeId(id)}/meta`, `scans/${safeId(id)}/meta.json`)
 
 export async function getLabels(id: string): Promise<Record<string, LabLabel>> {
-  return (await readJson<Record<string, LabLabel>>(`labels/${safeId(id)}.json`)) || {}
+  return (await readLatest<Record<string, LabLabel>>(`labels/${safeId(id)}`, `labels/${safeId(id)}.json`)) || {}
 }
 
 export async function saveLabels(id: string, labels: Record<string, LabLabel>) {
-  const store = await bucket()
-  const { error } = await store.upload(`labels/${safeId(id)}.json`, JSON.stringify(labels), { contentType: 'application/json', upsert: true })
-  if (error) throw error
+  await writeVersion(await bucket(), `labels/${safeId(id)}`, labels)
 }
 
 /** Short-lived links to a scan's screenshots (the bucket is private). */

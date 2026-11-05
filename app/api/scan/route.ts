@@ -1188,11 +1188,10 @@ export async function POST(request: NextRequest) {
             url: validUrl,
             email,
             niche: v2.niche,
-            cartKind: v2.cartKind,
-            shopify: v2.shopify,
+            model: v2.model,
             rules: v2Rules,
             results: v2.results,
-            tiles: v2.evidenceTiles,
+            evidence: v2.evidence,
           }).catch((e) => {
             console.warn('[scan] test scan not saved to the lab:', e)
             return undefined
