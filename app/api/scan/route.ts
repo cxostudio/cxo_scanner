@@ -54,6 +54,7 @@ import {
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
 import { saveTestScan } from '@/lib/lab/store'
+import { saveLeadScan } from '@/lib/leads/store'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -1180,6 +1181,8 @@ export async function POST(request: NextRequest) {
       try {
         const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
+        // lead dashboard (/admin/leads): score, counts and answers only, no screenshots or page text
+        if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
         // test scans are kept for blind labelling (lib/lab); customer scans never are
         let labId: string | undefined
         if (email && isTestEmail(email)) {

@@ -134,7 +134,12 @@ export default function LabHome() {
     <main className="min-h-screen bg-[var(--bg)] px-[var(--gutter)] py-10 font-[family-name:var(--font-body)] text-[var(--text)]">
       <div className="mx-auto flex max-w-[1100px] flex-col gap-10">
         <header className="flex flex-col gap-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Scanner test lab</p>
+          <p className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+            Scanner test lab
+            <Link href={`/admin/leads${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
+              Leads →
+            </Link>
+          </p>
           <h1 className="font-[family-name:var(--font-display)] text-[32px] font-bold tracking-[-0.03em]">Label blind, then measure</h1>
           <p className="max-w-[680px] text-sm leading-relaxed text-[var(--text-muted)]">
             Paste a product, collection or homepage URL below to scan it: it runs Live and Draft checkpoints and lands here. Label each checkpoint without seeing the scanner's answer, then compare. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
