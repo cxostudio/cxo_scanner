@@ -303,7 +303,7 @@ export async function deleteTestScan(id: string) {
   const store = await bucket()
   const safe = safeId(id)
   const files: string[] = []
-  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`]) {
+  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`, `modes/${safe}`]) {
     const { data } = await store.list(folder, { limit: 1000 })
     for (const f of data || []) if (f.id) files.push(`${folder}/${f.name}`)
   }
@@ -361,6 +361,26 @@ export async function saveExample(checkpointId: string, jpeg: Buffer): Promise<s
 export async function logPromotion(entry: Record<string, unknown>) {
   const store = await bucket()
   await upload(store, `promotions/${Date.now().toString(36)}.json`, { ...entry, at: new Date().toISOString() })
+}
+
+/**
+ * How each label was made: 'review' = the scanner's answer was on screen, 'blind' = it was hidden.
+ * Labels without an entry predate review mode and were all blind. Lets the lab check that seeing
+ * the answer does not inflate agreement.
+ */
+export type LabelMode = 'blind' | 'review'
+export async function getModes(id: string): Promise<Record<string, LabelMode>> {
+  return (await readLatest<Record<string, LabelMode>>(`modes/${safeId(id)}`)) || {}
+}
+export async function saveModes(id: string, modes: Record<string, LabelMode>) {
+  await writeVersion(await bucket(), `modes/${safeId(id)}`, modes)
+}
+
+/** Review mode hides the scanner's answer on about 1 checkpoint in 5, the same ones every time. */
+export function isBlindCheck(scanId: string, checkpointId: string) {
+  let h = 2166136261
+  for (const c of `${scanId}:${checkpointId}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619)
+  return (h >>> 0) % 5 === 0
 }
 
 export async function saveNotes(id: string, notes: Record<string, string>) {

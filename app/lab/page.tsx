@@ -31,7 +31,7 @@ const VERDICT_COLOR: Record<Verdict, { bg: string; fg: string }> = {
 
 export default function LabHome() {
   const [key, setKey] = useState('')
-  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[]; notes?: NoteRow[] } | null>(null)
+  const [data, setData] = useState<{ scans: ScanRow[]; accuracy: AccRow[]; notes?: NoteRow[]; bias?: { blind: { labelled: number; agree: number }; review: { labelled: number; agree: number } } } | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [rejudge, setRejudge] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
@@ -142,7 +142,7 @@ export default function LabHome() {
           </p>
           <h1 className="font-[family-name:var(--font-display)] text-[32px] font-bold tracking-[-0.03em]">Label blind, then measure</h1>
           <p className="max-w-[680px] text-sm leading-relaxed text-[var(--text-muted)]">
-            Paste a product, collection or homepage URL below to scan it: it runs Live and Draft checkpoints and lands here. Label each checkpoint without seeing the scanner's answer, then compare. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
+            Paste a product, collection or homepage URL below to scan it: it runs Live and Draft checkpoints and lands here. Review each checkpoint against the scanner's answer (Agree or Disagree); about 1 in 5 stays blind to keep the score honest. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
           </p>
           <div className="mt-2 flex flex-wrap gap-3">
             <button type="button" className="cxo-btn cxo-btn-ghost" disabled={rejudge.busy || !data?.scans.length} onClick={runRejudge}>
@@ -199,6 +199,12 @@ export default function LabHome() {
                   {data.accuracy.length} checkpoints labelled · <span className="font-semibold text-[var(--result-pass-fg)]">{ready.length} ready for Live</span>
                 </p>
               </div>
+              {data.bias && data.bias.review.labelled > 0 && (
+                <p className="max-w-[760px] text-sm leading-relaxed text-[var(--text-muted)]">
+                  Review mode check: agreement is <b className="text-[var(--text)]">{pct(data.bias.blind.agree / (data.bias.blind.labelled || 1))}</b> on blind labels ({data.bias.blind.labelled}) and <b className="text-[var(--text)]">{pct(data.bias.review.agree / data.bias.review.labelled)}</b> when you saw the scanner's answer ({data.bias.review.labelled}).
+                  {data.bias.blind.labelled >= 30 && data.bias.review.agree / data.bias.review.labelled - data.bias.blind.agree / data.bias.blind.labelled > 0.05 ? ' The gap is over 5 points: seeing the answer is pulling labels toward it. Label more in Blind mode before promoting.' : ' Within 5 points: review mode is not inflating the score.'}
+                </p>
+              )}
               <p className="max-w-[760px] text-sm leading-relaxed text-[var(--text-muted)]">
                 Ready for Live: {pct(TARGET)}+ agreement on {MIN_LABELS}+ labelled stores and the same answer on every recent run. Unstable means the answer changed when the same screenshots were judged again. Promoting writes the status to Airtable; the free scan uses it within minutes.
               </p>
