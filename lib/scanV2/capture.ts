@@ -1027,13 +1027,32 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     await cleanPage(desktop)
     await scrollForLazyContent(desktop)
     await cleanPage(desktop)
-    const facts = await readFacts(desktop).catch((e) => {
-      console.warn('[scanV2] facts failed', String(e).slice(0, 200))
-      return {}
-    })
-    const text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
-    const hiddenText = await readHiddenText(desktop)
-    const desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles)
+    let facts: Record<string, unknown> = {}
+    let text = ''
+    let hiddenText = ''
+    let desktopTiles: Tile[] = []
+    // a page that navigates again after loading (geo or locale redirect, consent wall, app reload) destroys the
+    // context we read from: nothing comes back. Settle and read once more; a page we still cannot read is
+    // reported as "could not open", never judged on empty evidence.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await desktop.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 }).catch(() => {})
+        if (!(await desktop.evaluate(() => (document.body?.innerText || '').length).catch(() => 0))) await open(desktop, rawUrl).catch(() => {})
+        await cleanPage(desktop)
+        await scrollForLazyContent(desktop)
+        await cleanPage(desktop)
+      }
+      facts = await readFacts(desktop).catch((e) => {
+        console.warn('[scanV2] facts failed', String(e).slice(0, 200))
+        return {}
+      })
+      text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
+      hiddenText = await readHiddenText(desktop)
+      desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
+      if (text.trim().length > 200 && desktopTiles.length) break
+    }
+    if (text.trim().length <= 200 || !desktopTiles.length)
+      throw new PageCheckError('unreachable', "We couldn't read this page: it kept reloading or blocked our visit. Try again, or try another product URL.")
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     if (opts.extended) (facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
     ;(facts as Record<string, unknown>).network = netStats(desktop)
