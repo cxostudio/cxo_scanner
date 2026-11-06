@@ -16,6 +16,13 @@ function singleVersion(v: any) {
   return !!v && v.total === 1 && !(v.pickers > 0)
 }
 
+/** The store sells fewer products than `under`: search checkpoints do not apply. Count from Shopify's products.json. */
+function smallCatalog(f: F, under: number) {
+  const n = f.catalogSize
+  if (typeof n !== 'number' || n >= under) return null
+  return { answer: 'na' as const, evidence: `The store sells ${n} product${n === 1 ? '' : 's'}: shoppers can see the whole range from the menu, so search matters little here.` }
+}
+
 export const MEASURED: Record<string, Measure> = {
   // Do you use pure black for text or backgrounds? (pass = no pure black)
   recSs12TogM60Mf6w: (_ev, f) => {
@@ -154,8 +161,9 @@ export const MEASURED: Record<string, Measure> = {
   recpms3eLz0EUb0qR: (ev) => {
     const m = ev.mobileFacts as F
     if (typeof m.bodyFontPx !== 'number' || (m.textBlocks || 0) < 3) return null
-    // checked against Lighthouse's legibility audit on 7 stores: body text of 14px and up read fine everywhere
-    if (m.bodyFontPx >= 14) return { answer: 'pass', evidence: `Body text on phones is ${m.bodyFontPx}px, readable without zooming.` }
+    // 16px+ passes for every audience; 14 to 16px passes too unless the store sells to older shoppers,
+    // which the model judges from the products and the people shown (it gets bodyFontPx in the mobile facts)
+    if (m.bodyFontPx >= 16) return { answer: 'pass', evidence: `Body text on phones is ${m.bodyFontPx}px, readable without zooming.` }
     if (m.bodyFontPx < 12) return { answer: 'fail', evidence: `Body text on phones is ${m.bodyFontPx}px, small enough that shoppers need to zoom (Google counts text under 12px as illegible).` }
     return null
   },
@@ -248,6 +256,15 @@ export const MEASURED: Record<string, Measure> = {
     if (share >= 0.75) return { answer: 'pass', evidence: `On a phone, ${t.comfortable} of ${t.targets} footer links are easy to tap: big enough and spaced apart.` }
     return { answer: 'fail', evidence: `On a phone, only ${t.comfortable} of ${t.targets} footer links are easy to tap: they sit about ${t.typicalGap}px apart, under the 36px a thumb needs.` }
   },
+
+  // Search checkpoints on small stores: with under 20 products the whole range fits in the menu
+  ...Object.fromEntries(
+    ['recjEVPpCRkdi17EE', 'recHkGvsYH1vmYzwt', 'recPKeMkL99ewxiFu', 'rec9YqyUjHjIYlVIH', 'recWctdeyEyTRSFcU', 'recEwhpkC7Fpe6drp', 'recabn64gTwNLfVr6', 'recgzCeCt88qIsOG2'].map((id) => [
+      id,
+      (_ev: Evidence, f: F) => smallCatalog(f, 20),
+    ]),
+  ),
+  recUUD0aehm1xJOs6: (_ev: Evidence, f: F) => smallCatalog(f, 30),
 
   // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
   recEgJJ3Ja7iD3B63: (ev, f) => {

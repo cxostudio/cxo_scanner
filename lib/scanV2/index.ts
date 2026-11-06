@@ -61,6 +61,19 @@ function sellsOnline(ev: Evidence): boolean {
   return !(STORE_ONLY.test(text) && !ADD_TO_CART.test(text))
 }
 
+/** How many products the store sells (Shopify products.json, up to 250), for checkpoints that only matter on bigger catalogues. */
+async function countCatalog(ev: Evidence) {
+  const f = ev.facts as Record<string, any>
+  if (!ev.isShopify || !f || typeof f.catalogSize === 'number') return
+  try {
+    const u = new URL(ev.url)
+    const r = await fetch(`${u.origin}/products.json?limit=250&fields=id`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    if (!r.ok) return
+    const p = await r.json()
+    if (Array.isArray(p?.products)) f.catalogSize = p.products.length
+  } catch {}
+}
+
 /** Scans saved before discounts were measured: read the product's compare-at prices now (Shopify product .js). */
 async function backfillDiscounts(ev: Evidence) {
   const v = (ev.facts as Record<string, any>)?.variants
@@ -78,6 +91,7 @@ async function backfillDiscounts(ev: Evidence) {
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
+  await countCatalog(ev)
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
