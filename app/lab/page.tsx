@@ -36,6 +36,37 @@ export default function LabHome() {
   const [open, setOpen] = useState<string | null>(null)
   const [rejudge, setRejudge] = useState<{ busy: boolean; note: string }>({ busy: false, note: '' })
   const [filter, setFilter] = useState<Verdict | 'all'>('all')
+  const [newUrl, setNewUrl] = useState('')
+  const [scanning, setScanning] = useState('')
+
+  /** Test scan of any URL from the lab: Live and Draft checkpoints, saved here for labelling (2 to 3 minutes). */
+  const startScan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    let url: URL
+    try {
+      url = new URL(/^https?:\/\//.test(newUrl) ? newUrl : `https://${newUrl}`)
+    } catch {
+      setScanning('That is not a valid URL.')
+      return
+    }
+    const slug = `${url.hostname.replace(/^www\./, '').split('.')[0]}${url.pathname.replace(/\/+$/, '').split('/').slice(-1)[0] ? `-${url.pathname.replace(/\/+$/, '').split('/').slice(-1)[0]}` : '-home'}`
+    const scanId = `test-${slug}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 60)
+    setScanning(`Scanning ${url.hostname}… this takes 2 to 3 minutes. You can keep labelling in another tab.`)
+    try {
+      const r = await fetch(api('/scan'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.toString(), rules: [{ id: 'x', title: 'p', description: 'p' }], email: 'info+test@cxo.studio', scanId }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.labId) throw new Error(d.error || `scan failed (${r.status})`)
+      setScanning(`Done: ${url.hostname} is in the list below.`)
+      setNewUrl('')
+      await load(key)
+    } catch (err) {
+      setScanning(`Scan failed: ${String((err as Error).message || err)}`)
+    }
+  }
   const [acting, setActing] = useState<Record<string, string>>({})
 
   /** Change the checkpoint's status in Airtable (Live, Draft, audit only), then reload. */
@@ -106,15 +137,29 @@ export default function LabHome() {
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Scanner test lab</p>
           <h1 className="font-[family-name:var(--font-display)] text-[32px] font-bold tracking-[-0.03em]">Label blind, then measure</h1>
           <p className="max-w-[680px] text-sm leading-relaxed text-[var(--text-muted)]">
-            Run a scan with a @cxo.studio or +test email: it runs Live and Draft checkpoints and lands here. Label each checkpoint without seeing the scanner's answer, then compare. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
+            Paste a product, collection or homepage URL below to scan it: it runs Live and Draft checkpoints and lands here. Label each checkpoint without seeing the scanner's answer, then compare. A checkpoint is ready for Live at {pct(TARGET)} agreement on {MIN_LABELS}+ stores.
           </p>
           <div className="mt-2 flex flex-wrap gap-3">
-            <Link href="/run" className="cxo-btn cxo-btn-primary">Run a test scan</Link>
             <button type="button" className="cxo-btn cxo-btn-ghost" disabled={rejudge.busy || !data?.scans.length} onClick={runRejudge}>
               {rejudge.busy ? 'Re-judging…' : 'Re-judge all with current definitions'}
             </button>
           </div>
           {rejudge.note && <p className="text-sm text-[var(--text-muted)]">{rejudge.note}</p>}
+          <form onSubmit={startScan} className="mt-2 flex flex-wrap gap-2">
+            <input
+              type="url"
+              inputMode="url"
+              required
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder="https://store.com/products/…  (product, collection or homepage)"
+              className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+            <button type="submit" className="cxo-btn cxo-btn-primary" disabled={scanning.startsWith('Scanning')}>
+              {scanning.startsWith('Scanning') ? 'Scanning…' : 'Scan this page'}
+            </button>
+          </form>
+          {scanning && <p className="text-sm text-[var(--text-muted)]">{scanning}</p>}
         </header>
 
         {error && <p className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--result-fail-fg)]">Could not load the lab: {error}</p>}
