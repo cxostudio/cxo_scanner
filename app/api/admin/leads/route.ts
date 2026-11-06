@@ -1,10 +1,15 @@
 // Lead dashboard API: every /start lead with its free scans, plus status and notes updates.
 // Behind LAB_KEY, like the lab.
 import { NextRequest, NextResponse } from 'next/server'
-import { labAllowed } from '@/lib/lab/store'
 import { listLeads, updateLead, type Lead, type LeadScan, type LeadStatus } from '@/lib/leads/store'
 import { estimate } from '@/lib/estimate'
 import { isQualified } from '@/lib/report'
+
+/** Leads hold real emails: unlike the lab, never open without the key, previews included. */
+function allowed(key: string | null) {
+  const expected = process.env.LAB_KEY?.trim()
+  return !!expected && expected.length >= 24 && key === expected
+}
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -46,7 +51,7 @@ function mergeScans(rows: LeadScan[]): LeadScan[] {
 }
 
 export async function GET(req: NextRequest) {
-  if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  if (!allowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
   try {
     const { leads, scans, scansError } = await listLeads()
     const scansByEmail = new Map<string, LeadScan[]>()
@@ -97,7 +102,7 @@ function build(l: Lead, scans: LeadScan[]) {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  if (!allowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
   const body = (await req.json().catch(() => ({}))) as { id?: string; status?: LeadStatus; notes?: string }
   if (!body.id || body.id.startsWith('scan:')) return NextResponse.json({ error: 'This lead has no /start answers to update.' }, { status: 400 })
   try {
