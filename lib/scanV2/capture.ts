@@ -19,6 +19,8 @@ export type Evidence = {
   title: string
   desktopTiles: Tile[]
   mobileTiles: Tile[]
+  /** Product tabs the scanner opened (Description, Ingredients, Results...), one screenshot each. */
+  tabTiles?: Tile[]
   cartHeader?: Tile
   cartTest?: string
   /** What opens from the header cart icon with one item in the cart: a drawer, or the cart page. */
@@ -536,6 +538,61 @@ async function measureStickyAtc(page: Page) {
 }
 
 /** Text inside closed tabs / accordions, which innerText leaves out. */
+/**
+ * Product pages hide a lot in tabs (Description / Ingrédients / Résultats): before/after sliders,
+ * how-to steps, ingredient lists. Click each tab of the product content, read what it shows and
+ * screenshot it. Desktop only, at most 5 tabs, never in the header, footer or menus.
+ */
+const TAB_WORDS = /^(description|details?|détails|ingr[ée]dients?|composition|r[ée]sultats?|results?|how to use|utilisation|mode d'emploi|conseils?( d'utilisation)?|application|usage|care|entretien|dimensions|specifications?|caractéristiques|materials?|matières|shipping|livraison|faq|questions|benefits|bienfaits|nutrition|ingrediënten|gebruik)$/i
+async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
+  const found = await page
+    .evaluate((src: string) => {
+      const words = new RegExp(src, 'i')
+      const out: { i: number; name: string }[] = []
+      const els = Array.from(document.querySelectorAll('[role="tab"], button, a, li, summary, [class*="tab" i]'))
+      for (const el of els) {
+        if (out.length >= 5) break
+        if (el.closest('header, footer, nav, dialog, [role="dialog"], [class*="drawer" i], [class*="menu" i]')) continue
+        const name = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim()
+        if (!name || name.length > 40 || !words.test(name)) continue
+        const r = el.getBoundingClientRect()
+        if (r.width < 20 || r.height < 12 || el.querySelector('[role="tab"], button')) continue
+        // a link to another page is navigation, not a tab
+        const href = el.tagName === 'A' ? el.getAttribute('href') || '' : ''
+        if (href && !href.startsWith('#') && !href.startsWith('javascript')) continue
+        if (out.some((o) => o.name.toLowerCase() === name.toLowerCase())) continue
+        el.setAttribute('data-cxo-tab', String(out.length))
+        out.push({ i: out.length, name })
+      }
+      return out
+    }, TAB_WORDS.source)
+    .catch(() => [] as { i: number; name: string }[])
+  const tiles: Tile[] = []
+  const texts: string[] = []
+  for (const t of found) {
+    const sel = `[data-cxo-tab="${t.i}"]`
+    try {
+      await page.evaluate((s: string) => document.querySelector(s)?.scrollIntoView({ block: 'start' }), sel)
+      await page.click(sel).catch(() => page.evaluate((s: string) => (document.querySelector(s) as HTMLElement | null)?.click(), sel))
+      await new Promise((r) => setTimeout(r, 500))
+      const box = await page.evaluate((s: string) => {
+        const el = document.querySelector(s)
+        if (!el) return null
+        // the block that holds the tabs and their panel: the first ancestor tall enough to hold content
+        let p: Element | null = el
+        for (let k = 0; k < 5 && p && p.getBoundingClientRect().height < 250; k++) p = p.parentElement
+        const r = el.getBoundingClientRect()
+        return { y: Math.max(0, r.top + window.scrollY - 20), text: ((p as HTMLElement | null)?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 1500) }
+      }, sel)
+      if (!box) continue
+      if (box.text) texts.push(`[${t.name}] ${box.text}`)
+      const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: box.y, width: DESKTOP.width, height: DESKTOP.height }, captureBeyondViewport: true }).catch(() => null)
+      if (b64) tiles.push({ label: `desktop product tab "${t.name}" opened`, dataUrl: `data:image/jpeg;base64,${b64}` })
+    } catch {}
+  }
+  return { tiles, text: texts.join('\n---\n').slice(0, 6000) }
+}
+
 function readHiddenText(page: Page) {
   return page
     .evaluate(() => {
@@ -1160,6 +1217,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     let hiddenText = ''
     // share of the page the desktop tiles cover: phones get as far down the page (it is longer there)
     let desktopShare = 1
+    let tabTiles: Tile[] = []
     let desktopTiles: Tile[] = []
     // a page that navigates again after loading (geo or locale redirect, consent wall, app reload) destroys the
     // context we read from: nothing comes back. Settle and read once more; a page we still cannot read is
@@ -1181,6 +1239,13 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
       desktopShare = await pageHeight(desktop).then((h) => Math.min(1, (DESKTOP.height * DESKTOP.tiles) / Math.max(h, 1))).catch(() => 1)
       if (text.trim().length > 200 && desktopTiles.length) break
+    }
+    // product tabs: opened after the page screenshots, so those show the page as a shopper lands on it
+    if (detectPageTypeFromUrl(finalUrl) === 'product') {
+      const tabs = await openTabs(desktop).catch(() => ({ tiles: [] as Tile[], text: '' }))
+      tabTiles = tabs.tiles
+      await desktop.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+      if (tabs.text) hiddenText = [hiddenText, `OPENED PRODUCT TABS:\n${tabs.text}`].filter(Boolean).join('\n---\n')
     }
     if (text.trim().length <= 200 || !desktopTiles.length)
       throw new PageCheckError('unreachable', "We couldn't read this page: it kept reloading or blocked our visit. Try again, or try another product URL.")
@@ -1309,6 +1374,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       title,
       desktopTiles,
       mobileTiles,
+      tabTiles,
       cartHeader: cart.tile,
       cartTest: cart.note,
       cartView: desktopCartView,
