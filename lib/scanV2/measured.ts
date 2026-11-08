@@ -237,6 +237,15 @@ export const MEASURED: Record<string, Measure> = {
   // No version of the product has a compare-at price: the item added to the cart is not discounted.
   // gallery images share one shape: read from Shopify's media list. Mixed shapes are left to the
   // model, since many themes crop them into one frame and the gallery does not jump.
+  // cookie banner: screenshots never show it (it is accepted and hidden first), so only the
+  // measurement can judge it. Not seen → couldn't check (often geo-targeted to EU visitors).
+  recqdZbBbXoGLLZYV: (ev) => {
+    const c = (ev.mobileFacts as Record<string, any>)?.cookieBanner
+    if (!c?.found) return { answer: 'unknown', evidence: 'No cookie banner was shown to our visit (stores often show it only to EU visitors), so we could not check it.' }
+    if (c.coversPct >= 60) return { answer: 'fail', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen.` }
+    if (!c.reject) return { answer: 'fail', evidence: 'The cookie banner has no one-tap reject option next to accept.' }
+    return { answer: 'pass', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen and can be accepted or rejected in one tap.` }
+  },
   recYRJzuWC8lHXc40: (_ev, f) => {
     const r: number[] = f?.variants?.ratios || []
     if (r.length === 1) return { answer: 'na', evidence: 'The product has a single image.' }

@@ -618,6 +618,38 @@ async function prepare(page: Page) {
  * within 36px of its centre, or its own box is 44px tall (Apple's minimum).
  */
 /**
+ * The cookie banner as a phone visitor first sees it: how much of the screen it covers and whether
+ * rejecting is one tap, like accepting. Our servers sit outside the EU, so many stores show no banner
+ * at all to the scanner: `found: false` then means "not seen", never "the store has none".
+ */
+async function readCookieBanner(page: Page) {
+  return page.evaluate(() => {
+    const KNOWN = '#onetrust-banner-sdk,#onetrust-consent-sdk,#didomi-host,#usercentrics-root,#CybotCookiebotDialog,[id*="cookie" i],[class*="cookie" i],[class*="consent" i],[id*="consent" i],[class*="shopify-pc__banner" i]'
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const boxes = Array.from(document.querySelectorAll(KNOWN)).filter((el) => {
+      const cs = getComputedStyle(el)
+      const r = el.getBoundingClientRect()
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > vw * 0.5 && r.height > 40 && r.bottom > 0 && r.top < vh && /cookie|consent|traceur|privacy|confidentialit/i.test((el as HTMLElement).innerText || '')
+    })
+    if (!boxes.length) return { found: false }
+    const el = boxes.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0]
+    const r = el.getBoundingClientRect()
+    const covered = (Math.min(r.bottom, vh) - Math.max(r.top, 0)) / vh
+    const buttons = Array.from(el.querySelectorAll('button, a, [role="button"]')).map((b) => ((b as HTMLElement).innerText || '').trim().toLowerCase()).filter(Boolean)
+    const ACCEPT = /accept|allow|agree|ok|got it|accepter|j'accepte|akkoord|akzeptieren|aceptar|accetta/
+    const REJECT = /reject|decline|refuse|deny|refuser|continuer sans|necessary only|only necessary|nécessaires|weigeren|ablehnen|rechazar|rifiuta/
+    return {
+      found: true,
+      coversPct: Math.round(covered * 100),
+      accept: buttons.some((t) => ACCEPT.test(t)),
+      reject: buttons.some((t) => REJECT.test(t)),
+      buttons: buttons.slice(0, 6),
+    }
+  })
+}
+
+/**
  * Videos on the page and the section each sits in (its nearest heading), read after the page was
  * scrolled to the bottom so lazy sections are loaded. Screenshots only show a video's first frame:
  * without this the judge misses UGC video carousels ("Les Martin.e les ont testé").
@@ -1180,6 +1212,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       }
       await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
       const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
+      // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
+      const cookieBanner = await readCookieBanner(mobile).catch(() => null)
       await cleanPage(mobile)
       await scrollForLazyContent(mobile)
       await cleanPage(mobile)
@@ -1206,6 +1240,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
+      mobileFacts.cookieBanner = cookieBanner
       mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
       mobileFacts.videos = await readVideos(mobile).catch(() => null)
       if (opts.extended) {
