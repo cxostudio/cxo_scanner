@@ -235,6 +235,15 @@ export const MEASURED: Record<string, Measure> = {
 
   // Do discounted items in the cart show the old price struck through, or the saving?
   // No version of the product has a compare-at price: the item added to the cart is not discounted.
+  // gallery images share one shape: read from Shopify's media list. Mixed shapes are left to the
+  // model, since many themes crop them into one frame and the gallery does not jump.
+  recYRJzuWC8lHXc40: (_ev, f) => {
+    const r: number[] = f?.variants?.ratios || []
+    if (r.length === 1) return { answer: 'na', evidence: 'The product has a single image.' }
+    if (r.length >= 2 && Math.max(...r) / Math.min(...r) <= 1.03)
+      return { answer: 'pass', evidence: `All ${r.length} product images have the same shape (${r[0].toFixed(2)} width to height), so the gallery keeps its height.` }
+    return null
+  },
   recbEhE51TXFkDDnC: (_ev, f) => {
     const v = f.variants
     if (!v || !v.total || typeof v.discounted !== 'number') return null

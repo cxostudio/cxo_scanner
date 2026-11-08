@@ -77,14 +77,16 @@ async function countCatalog(ev: Evidence) {
 /** Scans saved before discounts were measured: read the product's compare-at prices now (Shopify product .js). */
 async function backfillDiscounts(ev: Evidence) {
   const v = (ev.facts as Record<string, any>)?.variants
-  if (!ev.isShopify || !v || typeof v.discounted === 'number') return
+  if (!ev.isShopify || !v || (typeof v.discounted === 'number' && Array.isArray(v.ratios))) return
   try {
     const u = new URL(ev.url)
     if (!/\/products\//.test(u.pathname)) return
     const r = await fetch(`${u.origin}${u.pathname.replace(/\/$/, '')}.js`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     if (!r.ok) return
     const p = await r.json()
-    v.discounted = (p.variants || []).filter((x: any) => x.compare_at_price && x.compare_at_price > x.price).length
+    if (typeof v.discounted !== 'number') v.discounted = (p.variants || []).filter((x: any) => x.compare_at_price && x.compare_at_price > x.price).length
+    // the shape of each gallery image, for "do all gallery images share the same shape"
+    v.ratios = (p.media || []).filter((m: any) => m.media_type === 'image' && m.aspect_ratio).map((m: any) => Number(m.aspect_ratio))
   } catch {}
 }
 

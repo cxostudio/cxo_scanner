@@ -479,7 +479,21 @@ async function measureVariants(page: Page) {
     for (let k = 0; box && k < 5 && ((box as HTMLElement).innerText || '').length < 400; k++) box = box.parentElement
     const boxText = box ? ((box as HTMLElement).innerText || '').slice(0, 6000) : ''
     const optionLabel = /(^|\n)\s*(colou?r|shade|size|style|scent|flavou?r|finish)\s*:/im.test(boxText)
-    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size + (optionLabel ? 1 : 0) }
+    // ...or no label at all, only a row of small swatches linking to the sibling products (Martine:
+    // 36px shade thumbnails, one per /products/ handle, on one line in the top of the page)
+    const rows = new Map<number, Set<string>>()
+    for (const a of Array.from(document.querySelectorAll('a[href*="/products/"]'))) {
+      if (a.closest('header, footer, nav, dialog, [role="dialog"], [class*="drawer" i], [class*="recommend" i], [class*="related" i]')) continue
+      const r = a.getBoundingClientRect()
+      const y = r.top + window.scrollY
+      if (r.width < 12 || r.width > 90 || r.height > 90 || y > 2200) continue
+      const handle = (a.getAttribute('href') || '').split('/products/')[1]?.split(/[?#/]/)[0]
+      if (!handle) continue
+      const key = Math.round(y / 10)
+      rows.set(key, (rows.get(key) || new Set()).add(handle))
+    }
+    const swatchRow = Array.from(rows.values()).some((s) => s.size >= 3)
+    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size + (optionLabel || swatchRow ? 1 : 0) }
   })
 }
 
@@ -603,6 +617,32 @@ async function prepare(page: Page) {
  * when its neighbours are far enough away, so a target counts as comfortable when nothing else sits
  * within 36px of its centre, or its own box is 44px tall (Apple's minimum).
  */
+/**
+ * Videos on the page and the section each sits in (its nearest heading), read after the page was
+ * scrolled to the bottom so lazy sections are loaded. Screenshots only show a video's first frame:
+ * without this the judge misses UGC video carousels ("Les Martin.e les ont testé").
+ */
+async function readVideos(page: Page) {
+  return page.evaluate(() => {
+    const heading = (el: Element) => {
+      for (let p: Element | null = el; p && p !== document.body; p = p.parentElement) {
+        const h = p.querySelector('h1, h2, h3, h4, [class*="heading" i], [class*="title" i]')
+        const t = ((h as HTMLElement | null)?.innerText || '').trim()
+        if (t) return t.slice(0, 80)
+      }
+      return ''
+    }
+    const vids = Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"], iframe[src*="tiktok"], iframe[data-src*="youtube"]'))
+    const sections = new Map<string, number>()
+    for (const v of vids) {
+      if (v.closest('header, footer')) continue
+      const k = heading(v) || '(no heading)'
+      sections.set(k, (sections.get(k) || 0) + 1)
+    }
+    return { count: vids.length, sections: Array.from(sections.entries()).map(([section, n]) => ({ section, videos: n })).slice(0, 8) }
+  })
+}
+
 async function measureFooterTargets(page: Page) {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {})
   await new Promise((r) => setTimeout(r, 600))
@@ -610,9 +650,36 @@ async function measureFooterTargets(page: Page) {
     // the footer with the most links (themes also use "footer" in class names for small blocks inside cards)
     const footer = Array.from(document.querySelectorAll('footer, [role="contentinfo"], #shopify-section-footer, [class*="footer" i]')).sort((a, b) => b.querySelectorAll('a[href]').length - a.querySelectorAll('a[href]').length)[0]
     if (!footer) return null
-    const boxes = Array.from(footer.querySelectorAll('a[href], button, summary'))
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0)
+    // links inside a closed accordion keep a layout box but are clipped away (max-height: 0, overflow
+    // hidden): a shopper can't tap them, so they don't count. Accordion toggles do.
+    const clipped = (el: Element, r: DOMRect) => {
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        const cs = getComputedStyle(p)
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return true
+        if (/hidden|clip|auto|scroll/.test(cs.overflow + cs.overflowY)) {
+          const pr = p.getBoundingClientRect()
+          if (cy < pr.top || cy > pr.bottom || cx < pr.left || cx > pr.right) return true
+        }
+      }
+      return !!el.closest('details:not([open])') && el.tagName !== 'SUMMARY' && !el.closest('summary')
+    }
+    // themes that build accordion headers from plain divs only give them a pointer cursor; social icons
+    // are left out: small and close together on most stores, rarely tapped, not part of the shop links
+    const SEL = 'a[href], button, summary, [role="button"], [aria-expanded]'
+    const SOCIAL = /instagram|tiktok|facebook|youtube|pinterest|twitter|x\.com|linkedin|snapchat|threads\.net/i
+    const direct = Array.from(footer.querySelectorAll(SEL)).filter((el) => !SOCIAL.test(el.getAttribute('href') || ''))
+    const pointer = Array.from(footer.querySelectorAll('div, span, li, h2, h3, h4, p')).filter((e) => {
+      const t = ((e as HTMLElement).innerText || '').trim()
+      return t.length >= 2 && t.length <= 40 && !e.querySelector(SEL) && !e.closest(SEL) && getComputedStyle(e).cursor === 'pointer'
+    })
+    const all = [...direct, ...pointer]
+    const targets = all.filter((e) => !all.some((o) => o !== e && e.contains(o)))
+    const boxes = targets
+      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      .filter(({ el, r }) => r.width > 0 && r.height > 0 && !clipped(el, r))
+      .map(({ r }) => r)
       .map((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height, w: r.width }))
     if (boxes.length < 4) return null
     let comfortable = 0
@@ -1140,6 +1207,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
+      mobileFacts.videos = await readVideos(mobile).catch(() => null)
       if (opts.extended) {
         menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
         // back to a clean page before the cart (the open menu would sit over the cart icon)
