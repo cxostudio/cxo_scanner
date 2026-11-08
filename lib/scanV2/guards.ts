@@ -5,7 +5,7 @@
 // They only ever turn a "pass" into a "fail"; everything else is left as the model answered.
 import type { ScanRule as Rule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
-type Verdict = { answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; coveredByShopify?: boolean }
+type Verdict = { answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; coveredByShopify?: boolean; seen?: string[]; by?: 'Code check' | 'Seen in' | 'Measured' }
 
 const CART_SHIPPING_COST = 'recBVdoZfPXnwY7Ys'
 const HEADER_CATEGORIES = 'reclt5mHrGdpwf2lU'
@@ -44,46 +44,46 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
     if (!v || v.answer !== 'pass' || v.coveredByShopify) continue
 
     if (r.id === CART_SHIPPING_COST && thresholdOnly(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: 'The cart only shows how far you are from free shipping; it does not say what shipping costs below that amount.' })
+      byId.set(r.id, { answer: 'fail', evidence: 'The cart only shows how far you are from free shipping; it does not say what shipping costs below that amount.', seen: v.seen, by: 'Code check' })
       continue
     }
 
     if (r.id === HEADER_CATEGORIES) {
       const labels = quotedLabels(v.evidence)
       if (labels.length >= 2 && labels.every((l) => GENERIC_NAV.test(l))) {
-        byId.set(r.id, { answer: 'fail', evidence: `The header shows only general entries (${labels.join(', ')}): shoppers must open a menu to see what the store sells.` })
+        byId.set(r.id, { answer: 'fail', evidence: `The header shows only general entries (${labels.join(', ')}): shoppers must open a menu to see what the store sells.`, seen: v.seen, by: 'Code check' })
         continue
       }
     }
 
     // a low-priced add-on must cost less than what is in the cart: the model sometimes says so and passes anyway
     if (r.id === CART_ADDON && /more expensive|pricier|costs? more|higher.priced|not cheaper|not lower/i.test(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: 'The cart suggests products, but they cost more than what is already in the cart, so they are not a low-priced add-on.' })
+      byId.set(r.id, { answer: 'fail', evidence: 'The cart suggests products, but they cost more than what is already in the cart, so they are not a low-priced add-on.', seen: v.seen, by: 'Code check' })
       continue
     }
 
     // category or collection tiles are not products with prices
     if (r.id === HOME_PRODUCTS && /categor|collection/i.test(v.evidence) && !/[€$£]\s?\d|\d\s?[€$£]|price|prix|priced/i.test(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: 'The homepage shows category or collection tiles, not products with prices that link to product pages.' })
+      byId.set(r.id, { answer: 'fail', evidence: 'The homepage shows category or collection tiles, not products with prices that link to product pages.', seen: v.seen, by: 'Code check' })
       continue
     }
 
     if (r.id === FOOTER_CATEGORIES) {
       const labels = quotedLabels(v.evidence)
       if (labels.length >= 1 && labels.every((l) => GENERIC_NAV.test(l))) {
-        byId.set(r.id, { answer: 'fail', evidence: `The footer links only to service pages (${Array.from(new Set(labels)).join(', ')}), not to the main categories or best-sellers.` })
+        byId.set(r.id, { answer: 'fail', evidence: `The footer links only to service pages (${Array.from(new Set(labels)).join(', ')}), not to the main categories or best-sellers.`, seen: v.seen, by: 'Code check' })
         continue
       }
     }
 
     // written testimonials are not customer photos or videos, however positive or named
     if (CUSTOMER_MEDIA.has(r.id) && (!MEDIA_WORDS.test(v.evidence) || (TEXT_PROOF.test(v.evidence) && !/photos? (of|from|by) (customers?|clients?|real)|customer (photos?|videos?|pictures?)|(user|creator).generated (photos?|videos?)|ugc|tiktok|instagram/i.test(v.evidence)))) {
-      byId.set(r.id, { answer: 'fail', evidence: 'There are written reviews or testimonials, but no photos or videos from customers. Written testimonials are not user-generated photos or videos.' })
+      byId.set(r.id, { answer: 'fail', evidence: 'There are written reviews or testimonials, but no photos or videos from customers. Written testimonials are not user-generated photos or videos.', seen: v.seen, by: 'Code check' })
       continue
     }
 
     if (r.id === TRUST_NEAR_BUTTON && BNPL.test(v.evidence) && !TRUST.test(v.evidence.replace(BNPL, ''))) {
-      byId.set(r.id, { answer: 'fail', evidence: 'Only a pay-later offer sits near the button; it is a payment option, not a trust signal (secure checkout, guarantee, rating).' })
+      byId.set(r.id, { answer: 'fail', evidence: 'Only a pay-later offer sits near the button; it is a payment option, not a trust signal (secure checkout, guarantee, rating).', seen: v.seen, by: 'Code check' })
       continue
     }
 

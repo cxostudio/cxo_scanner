@@ -13,7 +13,7 @@ import { api } from '@/lib/base'
 
 type Label = 'pass' | 'fail' | 'na' | 'skip'
 type Checkpoint = { id: string; title: string; blindCheck?: boolean; status?: string; device?: string; pass?: string; fail?: string; na?: string; nicheNotes?: string; pageTypeIds?: string[]; area?: string; method?: string; skip?: 'measured' | 'niche' }
-type Answer = { id: string; answer: string; reason: string; coveredByShopify?: boolean }
+type Answer = { id: string; answer: string; reason: string; coveredByShopify?: boolean; rule?: string; seen?: string[]; by?: string }
 type Scan = {
   id: string
   url: string
@@ -304,6 +304,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
                   {ai.coveredByShopify ? <span className="text-[var(--text-muted)]"> (Shopify default)</span> : null}
                 </p>
                 {ai.reason && <p className="text-sm leading-relaxed text-[var(--text-muted)]">{ai.reason}</p>}
+                <Trace a={ai} />
               </div>
             )}
             {mode === 'review' && !shown && (
@@ -417,7 +418,7 @@ function Compare({ scan, labels, notes }: { scan: Scan; labels: Record<string, L
     const a = answers.get(cp.id)
     const you = labels[cp.id]
     const ai = a?.answer || 'unknown'
-    const state = !you || you === 'skip' ? 'open' : ai === you ? 'agree' : 'disagree'
+    const state = !you || you === 'skip' || ai === 'unknown' ? 'open' : ai === you ? 'agree' : 'disagree'
     return { cp, a, you, ai, state }
   })
   const order = { disagree: 0, open: 1, agree: 2 } as const
@@ -433,7 +434,7 @@ function Compare({ scan, labels, notes }: { scan: Scan; labels: Record<string, L
   return (
     <section className="flex flex-col gap-3">
       <p className="text-sm text-[var(--text-muted)]">
-        Agreement on this store: <span className="font-semibold text-[var(--text)]">{judged.length ? Math.round((agree / judged.length) * 100) : 0}%</span> ({agree}/{judged.length}), {rows.length - judged.length} not labelled or can't tell.
+        Agreement on this store: <span className="font-semibold text-[var(--text)]">{judged.length ? Math.round((agree / judged.length) * 100) : 0}%</span> ({agree}/{judged.length}), {rows.length - judged.length} not labelled, can't tell or not checked by the scanner.
       </p>
       <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
         {rows.map(({ cp, a, you, ai, state }) => (
@@ -447,11 +448,25 @@ function Compare({ scan, labels, notes }: { scan: Scan; labels: Record<string, L
               </span>
             </div>
             {a?.reason && <p className="text-sm leading-relaxed text-[var(--text-muted)]">{a.reason}</p>}
+            <Trace a={a} />
             {notes[cp.id] && <p className="text-sm leading-relaxed text-[var(--text)]">Your note: {notes[cp.id]}</p>}
           </div>
         ))}
       </div>
     </section>
+  )
+}
+
+/** How the scanner got there: the rule line the AI used, where it looked, what overruled it. */
+function Trace({ a }: { a?: Answer }) {
+  if (!a || (!a.rule && !a.seen?.length && !a.by)) return null
+  const BY: Record<string, string> = { 'Seen in': 'changed to fail by "Seen in"', 'Code check': 'changed to fail by a code check', Measured: 'measured in the page code' }
+  return (
+    <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+      {a.rule ? <>Rule: <span className="text-[var(--text)]">{a.rule}</span></> : null}
+      {a.seen?.length ? <>{a.rule ? ' · ' : ''}Seen in: <span className="text-[var(--text)]">{a.seen.join(', ')}</span></> : null}
+      {a.by ? <>{a.rule || a.seen?.length ? ' · ' : ''}<span className="font-semibold">{BY[a.by] || a.by}</span></> : null}
+    </p>
   )
 }
 

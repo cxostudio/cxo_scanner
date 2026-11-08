@@ -49,7 +49,7 @@ export type LabScan = {
   cartKind?: string
   shopify: boolean
   checkpoints: LabCheckpoint[]
-  answers: { id: string; answer: LabAnswer; reason: string; coveredByShopify?: boolean }[]
+  answers: { id: string; answer: LabAnswer; reason: string; coveredByShopify?: boolean; rule?: string; seen?: string[]; by?: string }[]
   images: { label: string; file: string; role?: ImageRole }[]
   /** The checkpoints as judged (full definitions), for re-judging when Airtable is unreachable. */
   rules?: ScanRule[]
@@ -167,7 +167,7 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
   area: r.area,
   method: r.method,
 })
-const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
+const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify, rule: r.rule, seen: r.seen, by: r.by }))
 
 async function upload(store: Awaited<ReturnType<typeof bucket>>, path: string, data: unknown) {
   const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true, cacheControl: '0' })

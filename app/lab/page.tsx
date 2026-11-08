@@ -230,9 +230,9 @@ export default function LabHome() {
                           {VERDICT_LABEL[a.verdict]}
                         </span>
                         {a.flips > 0 && <span className="text-xs text-[var(--result-fail-fg)]">{a.flips} unstable</span>}
-                        <span className="w-24 text-right text-sm text-[var(--text-muted)]">
+                        <span className="w-36 text-right text-sm text-[var(--text-muted)]" title="Stores where the scanner could not check this one are left out of the score">
                           {a.agree}/{a.labelled}
-                          {a.unknown ? ` · ${a.unknown}?` : ''}
+                          {a.unknown ? ` · ${a.unknown} not checked` : ''}
                         </span>
                         <span className="w-14 text-right font-[family-name:var(--font-display)] font-bold" style={{ color: fg }}>
                           {pct(rate)}

@@ -18,6 +18,10 @@ export type V2Row = {
   status: 'pass' | 'fail' | 'na' | 'unknown'
   /** Shopify does this by default: counted as passed, grouped as one line in the report. */
   coveredByShopify?: boolean
+  /** For the lab: the definition line the AI used, where it saw the evidence, and what overruled it. */
+  rule?: string
+  seen?: string[]
+  by?: 'Seen in' | 'Code check' | 'Measured'
 }
 
 type Answer = Omit<Verdict, 'id'>
@@ -142,6 +146,9 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
       reason: v?.evidence || 'We could not check this one.',
       status,
       ...(v?.coveredByShopify ? { coveredByShopify: true } : {}),
+      ...(v?.rule ? { rule: v.rule } : {}),
+      ...(v?.seen?.length ? { seen: v.seen } : {}),
+      ...(v?.by ? { by: v.by } : settled.has(r.id) && !v?.coveredByShopify ? { by: 'Measured' as const } : {}),
     }
   })
   return { results, niche, measured, usage }
@@ -190,6 +197,6 @@ function applySeenIn(rules: Rule[], byId: Map<string, { answer: string; evidence
     // the header is part of the first screen
     const ok = (p: string) => allowed.includes(p) || (p === 'Header' && allowed.includes('First screen'))
     if (seen.some(ok)) continue
-    byId.set(r.id, { answer: 'fail', evidence: `This is only on the ${seen.join(' and ').toLowerCase()}, not where it counts (${allowed.join(', ').toLowerCase()}).` })
+    byId.set(r.id, { answer: 'fail', evidence: `This is only on the ${seen.join(' and ').toLowerCase()}, not where it counts (${allowed.join(', ').toLowerCase()}).`, seen, by: 'Seen in' } as any)
   }
 }

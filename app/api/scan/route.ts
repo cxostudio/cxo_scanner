@@ -45,7 +45,7 @@ import {
 } from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
-import { getConversionCheckpointRules, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { getConversionCheckpointRules, refreshCheckpointRulesCache, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { filterCheckpointsByUrl, isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import {
   buildCheckpointPresentationMap,
@@ -1150,7 +1150,9 @@ export async function POST(request: NextRequest) {
     // with their definitions. The list the browser sent is only a fallback.
     let v2Rules: ScanRule[] = rules
     try {
-      const cpRes = await getConversionCheckpointRules()
+      // lab scans (test emails) always use today's definitions: Louis edits and re-scans in one go
+      const fresh = isTestEmail(email) ? await refreshCheckpointRulesCache().catch(() => null) : null
+      const cpRes = fresh?.ok ? fresh.data : await getConversionCheckpointRules()
       if (cpRes.ok) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
         const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {

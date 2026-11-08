@@ -33,14 +33,17 @@ export async function GET(req: NextRequest) {
         row.runs = Math.min(row.runs, seen.length)
         row.title = cp.title
         row.status = cp.status
-        row.labelled++
-        if (ai !== 'unknown') {
-          const b = bias[modes[cp.id] === 'review' ? 'review' : 'blind']
-          b.labelled++
-          if (ai === louis) b.agree++
+        // "couldn't check" is not a disagreement: it counts toward coverage, not toward agreement
+        if (ai === 'unknown') {
+          row.unknown++
+          acc.set(cp.id, row)
+          continue
         }
-        if (ai === 'unknown') row.unknown++
-        else if (ai === louis) row.agree++
+        row.labelled++
+        const b = bias[modes[cp.id] === 'review' ? 'review' : 'blind']
+        b.labelled++
+        if (ai === louis) b.agree++
+        if (ai === louis) row.agree++
         else row.mismatches.push({ scan: scan.id, url: scan.url, ai, louis })
         acc.set(cp.id, row)
       }
@@ -64,6 +67,7 @@ export async function GET(req: NextRequest) {
       ),
       bias,
       accuracy: Array.from(acc.values())
+        .filter((a) => a.labelled > 0)
         .map((a) => ({ ...a, runs: a.runs === 99 ? 1 : a.runs, verdict: verdictOf(a) }))
         .sort((a, b) => a.agree / a.labelled - b.agree / b.labelled),
     })

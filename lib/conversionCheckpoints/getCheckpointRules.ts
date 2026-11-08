@@ -251,9 +251,10 @@ let refreshInFlight: Promise<CheckpointRulesOk | null> | null = null
 
 /**
  * How long the in-memory Airtable cache is treated as fresh before a re-pull.
- * Default 1 day; override with CHECKPOINTS_CACHE_TTL_MS (ms).
+ * Default 1 hour, so a definition edited in Airtable reaches scans the same hour (the lab's
+ * Promote and re-judge refresh at once); override with CHECKPOINTS_CACHE_TTL_MS (ms).
  */
-const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60_000 // 1 day
+const DEFAULT_CACHE_TTL_MS = 60 * 60_000 // 1 hour
 
 function cacheTtlMs(): number {
   const n = parseInt(process.env.CHECKPOINTS_CACHE_TTL_MS ?? '', 10)

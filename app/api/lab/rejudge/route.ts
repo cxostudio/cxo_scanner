@@ -18,7 +18,7 @@ function agreement(answers: LabScan['answers'], labels: Record<string, LabLabel>
   let agree = 0
   for (const a of answers) {
     const l = labels[a.id]
-    if (!l || l === 'skip') continue
+    if (!l || l === 'skip' || a.answer === 'unknown') continue
     n++
     if (a.answer === l) agree++
   }

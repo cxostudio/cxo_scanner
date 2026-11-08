@@ -40,5 +40,8 @@
       ],
       "destination": "/scan/portal/index.html"
     }
+  ],
+  "regions": [
+    "fra1"
   ]
 }

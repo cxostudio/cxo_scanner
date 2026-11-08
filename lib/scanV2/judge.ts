@@ -8,7 +8,7 @@ import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpo
 
 // A checkpoint with CXO Studio's definitions, straight from Airtable (getCheckpointRules.ts).
 export type Rule = ScanRule
-export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; seen?: string[]; rule?: string }
+export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; seen?: string[]; rule?: string; by?: 'Seen in' | 'Code check' | 'Measured' }
 
 /** Places on the page, as in Airtable "Seen in". The model says where its evidence sits. */
 export const PLACES = ['First screen', 'Header', 'Menu', 'Buy box', 'Gallery', 'Page sections', 'Cart', 'Footer', 'Pop-up or banner', 'Page code'] as const
