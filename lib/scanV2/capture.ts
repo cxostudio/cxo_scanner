@@ -650,6 +650,34 @@ async function readCookieBanner(page: Page) {
 }
 
 /**
+ * A pop-up on landing (newsletter, discount, age gate) as a phone visitor first sees it, read before
+ * cleanPage hides it: how much of the screen it covers and whether it has a visible close button.
+ */
+async function readPopup(page: Page) {
+  return page.evaluate(() => {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const cands = Array.from(document.querySelectorAll('[aria-modal="true"], dialog[open], [role="dialog"], div[class*="klaviyo" i], div[id*="klaviyo" i], [class*="popup" i], [class*="modal" i], [id*="popup" i]')).filter((el) => {
+      const cs = getComputedStyle(el)
+      const r = el.getBoundingClientRect()
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.1) return false
+      if (r.width < vw * 0.6 || r.height < vh * 0.2 || r.bottom <= 0 || r.top >= vh) return false
+      const t = ((el as HTMLElement).innerText || '').toLowerCase()
+      // cookie banners, cart drawers and menus are judged elsewhere
+      return t.length > 10 && !/cookie|consent|traceur/.test(t) && !/(cart|panier|winkelwagen|warenkorb)\b/.test(t.slice(0, 60))
+    })
+    if (!cands.length) return { found: false }
+    const el = cands.sort((a, b) => b.getBoundingClientRect().height * b.getBoundingClientRect().width - a.getBoundingClientRect().height * a.getBoundingClientRect().width)[0]
+    const r = el.getBoundingClientRect()
+    const covers = Math.round(((Math.min(r.bottom, vh) - Math.max(r.top, 0)) * (Math.min(r.right, vw) - Math.max(r.left, 0))) / (vw * vh) * 100)
+    const close = Array.from(el.querySelectorAll('button, [role="button"], a')).map((b) => ({ b, r: b.getBoundingClientRect(), t: (((b as HTMLElement).innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase() }))
+      .filter((x) => x.r.width > 0 && /close|fermer|sluiten|schließen|×|✕|no thanks|non merci|nee bedankt/.test(x.t))
+    const biggest = close.reduce((m, x) => Math.max(m, Math.min(x.r.width, x.r.height)), 0)
+    return { found: true, coversPct: covers, close: close.length > 0, closeSize: Math.round(biggest), text: ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').slice(0, 120) }
+  })
+}
+
+/**
  * Videos on the page and the section each sits in (its nearest heading), read after the page was
  * scrolled to the bottom so lazy sections are loaded. Screenshots only show a video's first frame:
  * without this the judge misses UGC video carousels ("Les Martin.e les ont testé").
@@ -1214,6 +1242,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
       // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
       const cookieBanner = await readCookieBanner(mobile).catch(() => null)
+      const popup = await readPopup(mobile).catch(() => null)
       await cleanPage(mobile)
       await scrollForLazyContent(mobile)
       await cleanPage(mobile)
@@ -1241,6 +1270,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.cookieBanner = cookieBanner
+      mobileFacts.popup = popup
       mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
       mobileFacts.videos = await readVideos(mobile).catch(() => null)
       if (opts.extended) {

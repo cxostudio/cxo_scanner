@@ -246,6 +246,16 @@ export const MEASURED: Record<string, Measure> = {
     if (!c.reject) return { answer: 'fail', evidence: 'The cookie banner has no one-tap reject option next to accept.' }
     return { answer: 'pass', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen and can be accepted or rejected in one tap.` }
   },
+  // pop-ups on landing: screenshots never show them (they are closed first), so the reading decides
+  recYZBCXc8EmCPzXq: (ev) => {
+    const p = (ev.mobileFacts as Record<string, any>)?.popup
+    if (!p) return null
+    if (!p.found) return { answer: 'na', evidence: 'No pop-up appeared in the first seconds of the visit on mobile.' }
+    if (p.coversPct >= 60) return { answer: 'fail', evidence: `A pop-up covers about ${p.coversPct}% of the phone screen as soon as the page opens.` }
+    if (!p.close || p.closeSize < 24) return { answer: 'fail', evidence: 'A pop-up appears on landing without a clear close button.' }
+    if (p.coversPct > 33) return { answer: 'fail', evidence: `A pop-up appears on landing and covers about ${p.coversPct}% of the phone screen (more than a third).` }
+    return { answer: 'pass', evidence: `The pop-up on landing covers about ${p.coversPct}% of the phone screen and has a clear close button.` }
+  },
   recYRJzuWC8lHXc40: (_ev, f) => {
     const r: number[] = f?.variants?.ratios || []
     if (r.length === 1) return { answer: 'na', evidence: 'The product has a single image.' }
