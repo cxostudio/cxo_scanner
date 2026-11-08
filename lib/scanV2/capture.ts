@@ -55,6 +55,7 @@ export class PageCheckError extends Error {
 
 const DESKTOP = { width: 1440, height: 900, tiles: 4 }
 const MOBILE = { width: 390, height: 844, tiles: 5 }
+const MOBILE_MAX = 9
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 const DESKTOP_UA =
@@ -1157,6 +1158,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     let facts: Record<string, unknown> = {}
     let text = ''
     let hiddenText = ''
+    // share of the page the desktop tiles cover: phones get as far down the page (it is longer there)
+    let desktopShare = 1
     let desktopTiles: Tile[] = []
     // a page that navigates again after loading (geo or locale redirect, consent wall, app reload) destroys the
     // context we read from: nothing comes back. Settle and read once more; a page we still cannot read is
@@ -1176,6 +1179,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
       hiddenText = await readHiddenText(desktop)
       desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
+      desktopShare = await pageHeight(desktop).then((h) => Math.min(1, (DESKTOP.height * DESKTOP.tiles) / Math.max(h, 1))).catch(() => 1)
       if (text.trim().length > 200 && desktopTiles.length) break
     }
     if (text.trim().length <= 200 || !desktopTiles.length)
@@ -1267,7 +1271,11 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         })
         .catch(() => ({}))
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
-      mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, MOBILE.tiles)
+      // phone pages run 1.5 to 2 times longer than desktop: take as many tiles as it takes to reach the
+      // same point of the page as the desktop tiles (at most MOBILE_MAX), so both devices can be compared
+      const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
+      const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * desktopShare) / MOBILE.height)))
+      mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.cookieBanner = cookieBanner
       mobileFacts.popup = popup
