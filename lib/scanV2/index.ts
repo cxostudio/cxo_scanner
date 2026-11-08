@@ -90,7 +90,7 @@ async function backfillDiscounts(ev: Evidence) {
   } catch {}
 }
 
-export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string) {
+export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean } = {}) {
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
   await countCatalog(ev)
@@ -117,7 +117,9 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string)
   if (ev.sellsOnline === false)
     for (const r of rules) if (r.area === 'Buy box' && PURCHASE.test(r.title)) byId.set(r.id, { answer: 'na', evidence: 'This page does not sell online (the main button sends shoppers to stores), so this does not apply.' })
   // definitions the model keeps breaking (threshold read as a shipping cost, generic header entries, cart read as the buy box)
-  applyGuards(rules, byId)
+  // where the evidence sits must match Airtable "Seen in": the same rule for every checkpoint
+  applySeenIn(rules, byId, verdicts)
+  if (opts.guards !== false) applyGuards(rules, byId)
   // no picture of a filled cart: cart checkpoints cannot be judged (the model otherwise borrows the product page)
   const filledCart = !!(ev.cartView || ev.cartPage?.length || ev.mobileCartView || ev.mobileCartPage?.length)
   if (!filledCart)
@@ -171,4 +173,23 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
     images: evidenceImages(ev).length,
   }
   return { results, screenshot, niche, evidence: ev, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
+}
+
+/**
+ * A pass whose evidence sits only in places the checkpoint does not allow (Airtable "Seen in")
+ * becomes a fail. Generic: no checkpoint is named here. Measured and Shopify answers are left alone.
+ */
+function applySeenIn(rules: Rule[], byId: Map<string, { answer: string; evidence: string; coveredByShopify?: boolean }>, verdicts: Verdict[]) {
+  const seenOf = new Map(verdicts.map((v) => [v.id, v.seen]))
+  for (const r of rules) {
+    const allowed = (r.seenIn || []).filter(Boolean)
+    if (!allowed.length || allowed.includes('Anywhere')) continue
+    const v = byId.get(r.id)
+    const seen = seenOf.get(r.id)
+    if (!v || v.answer !== 'pass' || v.coveredByShopify || !seen?.length) continue
+    // the header is part of the first screen
+    const ok = (p: string) => allowed.includes(p) || (p === 'Header' && allowed.includes('First screen'))
+    if (seen.some(ok)) continue
+    byId.set(r.id, { answer: 'fail', evidence: `This is only on the ${seen.join(' and ').toLowerCase()}, not where it counts (${allowed.join(', ').toLowerCase()}).` })
+  }
 }

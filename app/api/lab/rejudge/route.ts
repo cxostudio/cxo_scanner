@@ -27,7 +27,7 @@ function agreement(answers: LabScan['answers'], labels: Record<string, LabLabel>
 
 type Fresh = { records: { id: string; fields?: Record<string, unknown> }[]; rules: ScanRule[] }
 
-async function rejudgeOne(id: string, current: Map<string, ScanRule>, fresh: Fresh, apiKey: string) {
+async function rejudgeOne(id: string, current: Map<string, ScanRule>, fresh: Fresh, apiKey: string, guards = true) {
   const scan = await getTestScan(id)
   if (!scan) return { id, ok: false, error: 'not found' }
   const ev = await loadEvidence(scan)
@@ -41,7 +41,7 @@ async function rejudgeOne(id: string, current: Map<string, ScanRule>, fresh: Fre
   rules.push(...added)
   const labels = await getLabels(scan.id)
   const before = agreement(scan.answers, labels)
-  const { results, niche } = await judgeEvidence(ev, rules, apiKey)
+  const { results, niche } = await judgeEvidence(ev, rules, apiKey, { guards })
   const next = await saveRejudge(scan, { rules, results, niche, model: V2_MODEL() })
   return { id, ok: true, url: scan.url, before, after: agreement(next.answers, labels), added: added.length }
 }
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const out: Awaited<ReturnType<typeof rejudgeOne>>[] = []
     // a few at a time: each re-judge sends ~20 screenshots per checkpoint group
     for (let i = 0; i < ids.length; i += 3) {
-      const batch = await Promise.all(ids.slice(i, i + 3).map((id) => rejudgeOne(id, current, fresh.data, apiKey).catch((e) => ({ id, ok: false, error: (e as Error)?.message || JSON.stringify(e) }))))
+      const batch = await Promise.all(ids.slice(i, i + 3).map((id) => rejudgeOne(id, current, fresh.data, apiKey, req.nextUrl.searchParams.get('guards') !== '0').catch((e) => ({ id, ok: false, error: (e as Error)?.message || JSON.stringify(e) }))))
       out.push(...batch)
     }
     return NextResponse.json({ model: V2_MODEL(), scans: out })

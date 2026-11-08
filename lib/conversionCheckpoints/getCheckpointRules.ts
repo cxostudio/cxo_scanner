@@ -32,6 +32,8 @@ export type ScanRule = {
   /** Hard rule: 'not relevant' for these niches. */
   notRelevantNiches?: string[]
   shopifyControl?: string
+  /** Where a pass may be found (Airtable "Seen in"). Empty or 'Anywhere' = no restriction. */
+  seenIn?: string[]
 }
 
 type AirtableSingleRecord = {
@@ -111,6 +113,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     niches: list('Niches'),
     notRelevantNiches: list('Not relevant for niches'),
     shopifyControl: text('Shopify control'),
+    seenIn: list('Seen in'),
   }
 }
 

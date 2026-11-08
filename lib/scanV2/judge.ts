@@ -8,7 +8,10 @@ import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpo
 
 // A checkpoint with CXO Studio's definitions, straight from Airtable (getCheckpointRules.ts).
 export type Rule = ScanRule
-export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string }
+export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; seen?: string[]; rule?: string }
+
+/** Places on the page, as in Airtable "Seen in". The model says where its evidence sits. */
+export const PLACES = ['First screen', 'Header', 'Menu', 'Buy box', 'Gallery', 'Page sections', 'Cart', 'Footer', 'Pop-up or banner', 'Page code'] as const
 
 /** Niche names as in the Airtable "Niches" and "Not relevant for niches" fields. */
 export const NICHES = [
@@ -98,7 +101,10 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
-Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
+- Check the rules in the order given: "not relevant when" first, then "fail when", and only then "pass when". In "rule", name the line your answer rests on and quote its key words (for example: fail when: "only in the footer").
+- In "seen", list where on the page your evidence sits, using only these names: ${PLACES.join(', ')}. First screen = visible without scrolling (announcement bar and header included). Page sections = the blocks below the first screen and outside the buy box, gallery and footer. Page code = the measured facts. When a checkpoint says "counts only when seen in", something found only elsewhere is a "fail".
+
+Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","rule":"<the line it rests on>","seen":["<place>"],"evidence":"..."}]} with exactly one entry per checkpoint given.`
 }
 
 /** The kind of page: captured with the evidence, or read from the URL for scans saved before that. */
@@ -180,9 +186,11 @@ function describe(r: Rule): string {
     `- id: ${r.id}`,
     `  question: ${r.title}`,
     `  device: ${DEVICE[r.device || 'Both'] || DEVICE.Both}`,
-    `  pass when: ${r.pass}`,
-    r.fail ? `  fail when: ${r.fail}` : '',
+    // the exclusions first: the model otherwise passes on its first impression and skims the rest
     r.na ? `  not relevant when: ${r.na}` : '',
+    r.fail ? `  fail when: ${r.fail}` : '',
+    `  pass when: ${r.pass}`,
+    r.seenIn?.length && !r.seenIn.includes('Anywhere') ? `  counts only when seen in: ${r.seenIn.join(', ')}` : '',
     only.length ? `  only for niches: ${only.join(', ')}` : '',
     r.notRelevantNiches?.length ? `  not relevant for niches: ${r.notRelevantNiches.join(', ')}` : '',
     r.nicheNotes ? `  niche notes: ${r.nicheNotes}` : '',
@@ -213,7 +221,7 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
         temperature: 0,
         topP: 0.1,
         seed: 42,
-        maxTokens: 4000,
+        maxTokens: 6000,
         stream: false,
         responseFormat: { type: 'json_object' },
       } as any)
@@ -230,7 +238,8 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
         const v = byId.get(r.id)
         const answer = v && ['pass', 'fail', 'na', 'unknown'].includes(String(v.answer).toLowerCase()) ? (String(v.answer).toLowerCase() as Verdict['answer']) : 'unknown'
         // MISSING: the model skipped this checkpoint; judge() asks again for those
-        return { id: r.id, answer: v ? answer : 'unknown', evidence: v ? (v.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') : MISSING }
+        const seen = Array.isArray(v?.seen) ? v!.seen.filter((x): x is string => typeof x === 'string') : undefined
+        return { id: r.id, answer: v ? answer : 'unknown', evidence: v ? (v.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') : MISSING, seen, rule: typeof v?.rule === 'string' ? v.rule.slice(0, 200) : undefined }
       })
       return { niche: parsed.niche, verdicts }
     } catch (e) {
