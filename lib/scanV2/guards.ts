@@ -8,6 +8,10 @@ type Verdict = { answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; c
 const CART_SHIPPING_COST = 'recBVdoZfPXnwY7Ys'
 const HEADER_CATEGORIES = 'reclt5mHrGdpwf2lU'
 const CART_ADDON = 'recaOn94y8pUSo5JK'
+const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
+/** Pay-later offers are a payment option, not a trust signal (the definition says so). */
+const BNPL = /scalapay|klarna|afterpay|clearpay|alma|affirm|sezzle|zip pay|paypal pay in|in 3 (fois|x)|in 4 payments|pay later|en 3 fois|en 4 fois/i
+const TRUST = /secure|ssl|encrypt|guarantee|garantie|money.back|returns?|retour|trustpilot|rating|reviews?|avis|badge|sécuris|veilig|norton|mcafee/i
 
 /** Header entries that do not say what the store sells. */
 const GENERIC_NAV =
@@ -51,6 +55,11 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
     // a low-priced add-on must cost less than what is in the cart: the model sometimes says so and passes anyway
     if (r.id === CART_ADDON && /more expensive|pricier|costs? more|higher.priced|not cheaper|not lower/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'fail', evidence: 'The cart suggests products, but they cost more than what is already in the cart, so they are not a low-priced add-on.' })
+      continue
+    }
+
+    if (r.id === TRUST_NEAR_BUTTON && BNPL.test(v.evidence) && !TRUST.test(v.evidence.replace(BNPL, ''))) {
+      byId.set(r.id, { answer: 'fail', evidence: 'Only a pay-later offer sits near the button; it is a payment option, not a trust signal (secure checkout, guarantee, rating).' })
       continue
     }
 
