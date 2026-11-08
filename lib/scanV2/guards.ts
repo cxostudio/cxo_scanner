@@ -1,4 +1,6 @@
 // Guards: definitions the model keeps breaking even when the Airtable rule spells them out.
+// Where a pass may be found is NOT decided here: that is Airtable "Seen in" (index.ts applySeenIn).
+// Each guard below is listed in the Airtable "Code check" field of its checkpoint, so nothing is hidden.
 // Each guard reads the model's own evidence sentence and overrules a pass that the definition forbids.
 // They only ever turn a "pass" into a "fail"; everything else is left as the model answered.
 import type { ScanRule as Rule } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -11,8 +13,6 @@ const CART_ADDON = 'recaOn94y8pUSo5JK'
 const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
 const HOME_PRODUCTS = 'recspAXgCOM7wTkLm'
 const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
-/** Page areas the footer can never stand in for. */
-const NOT_FOOTER_AREAS = new Set(['Hero', 'Product grid', 'Reviews and social proof'])
 /** Pay-later offers are a payment option, not a trust signal (the definition says so). */
 const BNPL = /scalapay|klarna|afterpay|clearpay|alma|affirm|sezzle|zip pay|paypal pay in|in 3 (fois|x)|in 4 payments|pay later|en 3 fois|en 4 fois/i
 const TRUST = /secure|ssl|encrypt|guarantee|garantie|money.back|returns?|retour|trustpilot|rating|reviews?|avis|badge|sécuris|veilig|norton|mcafee/i
@@ -33,10 +33,6 @@ function quotedLabels(evidence: string) {
   return Array.from(evidence.matchAll(/['"‘“]([^'"’”]{2,30})['"’”]/g)).map((m) => m[1].trim())
 }
 
-/** "Near the button" checkpoints: found only in the cart drawer or the footer does not count. */
-const NEAR_BUTTON = /near (the )?(main )?(buy|add-to-cart|cta|button|price)|near the main cta|near the buy button/i
-const ELSEWHERE = /cart drawer|in the cart|the cart (shows|states|says)|footer/i
-const ON_PAGE = /buy box|product page|announcement|button|price|title|next to|below|above|beside|under/i
 
 export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
   for (const r of rules) {
@@ -62,12 +58,6 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
       continue
     }
 
-    // the model cites the footer for "first screen", "homepage reviews" and the like: wrong place
-    if (r.area && NOT_FOOTER_AREAS.has(r.area) && /footer/i.test(v.evidence) && !/hero|announcement|banner|first screen|top of|header bar|section|carousel|slider|under the header/i.test(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: `This only appears in the footer, not where the checkpoint asks for it (${r.area.toLowerCase()}).` })
-      continue
-    }
-
     // category or collection tiles are not products with prices
     if (r.id === HOME_PRODUCTS && /categor|collection/i.test(v.evidence) && !/[€$£]\s?\d|\d\s?[€$£]|price|prix|priced/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'fail', evidence: 'The homepage shows category or collection tiles, not products with prices that link to product pages.' })
@@ -87,8 +77,5 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
       continue
     }
 
-    if (r.area === 'Buy box' && NEAR_BUTTON.test(r.title) && ELSEWHERE.test(v.evidence) && !ON_PAGE.test(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: 'This only appears in the cart or the footer, not near the add-to-cart button on the product page.' })
-    }
   }
 }
