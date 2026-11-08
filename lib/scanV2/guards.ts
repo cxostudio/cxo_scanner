@@ -13,6 +13,10 @@ const CART_ADDON = 'recaOn94y8pUSo5JK'
 const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
 const HOME_PRODUCTS = 'recspAXgCOM7wTkLm'
 const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
+/** Checkpoints about customer PICTURES or VIDEOS: written reviews and testimonials never count. */
+const CUSTOMER_MEDIA = new Set(['recDdGiDiKLK3SIyX', 'recy3ghSc1IY6x9lf', 'recBIykwniSTLYVjI'])
+const MEDIA_WORDS = /photo|picture|image|video|clip|ugc|instagram|tiktok|reel|selfie|thumbnail|play (icon|button)/i
+const TEXT_PROOF = /testimonial|review|quote|rating|stars?\b|avis|témoignage/i
 /** Pay-later offers are a payment option, not a trust signal (the definition says so). */
 const BNPL = /scalapay|klarna|afterpay|clearpay|alma|affirm|sezzle|zip pay|paypal pay in|in 3 (fois|x)|in 4 payments|pay later|en 3 fois|en 4 fois/i
 const TRUST = /secure|ssl|encrypt|guarantee|garantie|money.back|returns?|retour|trustpilot|rating|reviews?|avis|badge|sécuris|veilig|norton|mcafee/i
@@ -70,6 +74,12 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
         byId.set(r.id, { answer: 'fail', evidence: `The footer links only to service pages (${Array.from(new Set(labels)).join(', ')}), not to the main categories or best-sellers.` })
         continue
       }
+    }
+
+    // written testimonials are not customer photos or videos, however positive or named
+    if (CUSTOMER_MEDIA.has(r.id) && (!MEDIA_WORDS.test(v.evidence) || (TEXT_PROOF.test(v.evidence) && !/photos? (of|from|by) (customers?|clients?|real)|customer (photos?|videos?|pictures?)|(user|creator).generated (photos?|videos?)|ugc|tiktok|instagram/i.test(v.evidence)))) {
+      byId.set(r.id, { answer: 'fail', evidence: 'There are written reviews or testimonials, but no photos or videos from customers. Written testimonials are not user-generated photos or videos.' })
+      continue
     }
 
     if (r.id === TRUST_NEAR_BUTTON && BNPL.test(v.evidence) && !TRUST.test(v.evidence.replace(BNPL, ''))) {
