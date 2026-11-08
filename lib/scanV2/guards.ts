@@ -12,7 +12,7 @@ const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
 const HOME_PRODUCTS = 'recspAXgCOM7wTkLm'
 const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
 /** Page areas the footer can never stand in for. */
-const NOT_FOOTER_AREAS = new Set(['Hero', 'Product grid', 'Reviews and social proof', 'Header'])
+const NOT_FOOTER_AREAS = new Set(['Hero', 'Product grid', 'Reviews and social proof'])
 /** Pay-later offers are a payment option, not a trust signal (the definition says so). */
 const BNPL = /scalapay|klarna|afterpay|clearpay|alma|affirm|sezzle|zip pay|paypal pay in|in 3 (fois|x)|in 4 payments|pay later|en 3 fois|en 4 fois/i
 const TRUST = /secure|ssl|encrypt|guarantee|garantie|money.back|returns?|retour|trustpilot|rating|reviews?|avis|badge|sécuris|veilig|norton|mcafee/i
