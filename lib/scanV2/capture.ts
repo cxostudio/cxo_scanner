@@ -722,6 +722,8 @@ async function readPopup(page: Page) {
       if (r.width < vw * 0.6 || r.height < vh * 0.2 || r.bottom <= 0 || r.top >= vh) return false
       const t = ((el as HTMLElement).innerText || '').toLowerCase()
       // cookie banners, cart drawers and menus are judged elsewhere
+      // country or language pickers only appear to visitors from another country (our server): not a pop-up a shopper gets
+      if (/country|pays|langue|language|region|région|ship(ping)? to|livraison vers|bon endroit|right place|land kiezen|choose your (location|store)/.test(t)) return false
       return t.length > 10 && !/cookie|consent|traceur/.test(t) && !/(cart|panier|winkelwagen|warenkorb)\b/.test(t.slice(0, 60))
     })
     if (!cands.length) return { found: false }
