@@ -7,7 +7,7 @@ import { api } from '@/lib/base'
 
 type Box = { x: number; y: number; w: number; h: number } // fractions of the image
 
-export function ExampleCrop({ img, checkpointId, checkpointTitle, store, labKey, mobile }: { img: { url: string; label: string }; checkpointId: string; checkpointTitle: string; store: string; labKey: string; mobile: boolean }) {
+export function ExampleCrop({ img, checkpointId, checkpointTitle, store, labKey, mobile, onBroken }: { img: { url: string; label: string }; checkpointId: string; checkpointTitle: string; store: string; labKey: string; mobile: boolean; onBroken?: () => void }) {
   const [on, setOn] = useState(false)
   const [box, setBox] = useState<Box | null>(null)
   const [state, setState] = useState('')
@@ -81,7 +81,7 @@ export function ExampleCrop({ img, checkpointId, checkpointTitle, store, labKey,
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img ref={pic} src={img.url} alt={img.label} className="block h-auto w-full" loading="lazy" draggable={false} />
+        <img ref={pic} src={img.url} alt={img.label} className="block h-auto w-full" loading="lazy" draggable={false} onError={onBroken} />
         {on && box && (
           <div
             className="pointer-events-none absolute border-2 border-[var(--cta-bg)]"

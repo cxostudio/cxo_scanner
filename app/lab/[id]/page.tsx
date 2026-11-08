@@ -202,6 +202,18 @@ export default function LabScan({ params }: { params: { id: string } }) {
     if (m === 'review' && !scan?.answers) load(true, key, true)
   }
 
+  // screenshot links are signed for a few hours: when one stops loading, fetch fresh links (labels kept)
+  const refreshing = useRef(0)
+  const refreshImages = useCallback(() => {
+    if (Date.now() - refreshing.current < 30_000) return
+    refreshing.current = Date.now()
+    load(compare || mode === 'review', key, true)
+  }, [load, compare, mode, key])
+  useEffect(() => {
+    const t = window.setInterval(refreshImages, 4 * 60 * 60 * 1000)
+    return () => window.clearInterval(t)
+  }, [refreshImages])
+
   const openCompare = () => {
     load(true, key, true).then(() => setCompare(true))
   }
@@ -388,7 +400,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
             )}
             <div className="flex flex-col gap-3">
               {images.map((img) => (
-                <ExampleCrop key={img.url} img={img} checkpointId={cp.id} checkpointTitle={cp.title} store={host} labKey={key} mobile={/^mobile/i.test(img.label)} />
+                <ExampleCrop key={img.url} img={img} checkpointId={cp.id} checkpointTitle={cp.title} store={host} labKey={key} mobile={/^mobile/i.test(img.label)} onBroken={refreshImages} />
               ))}
             </div>
           </section>
