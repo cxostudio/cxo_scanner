@@ -78,7 +78,8 @@ ${page.rules}
 First decide the store's niche, ${page.niche}. Use exactly one of: ${NICHES.join(', ')}. Fashion covers apparel, footwear, bags and jewellery.
 
 Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
-- "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device.
+- "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device. "judge desktop and mobile": the checkpoint must be met on BOTH. When one device clearly shows it and the other device's screenshots of the same part of the page clearly do not, answer "fail" and start the evidence with the device that misses it ("On mobile, ..."). When the other device's screenshots do not cover that part of the page, judge on the device that does.
+- Where something sits matters. The footer is never the first screen, never a homepage section and never "near the button": evidence found only in the footer does not pass those checkpoints.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
 - Mobile menu checkpoints are judged on the "mobile MENU opened" image (the menu after tapping the menu button). Without it they are "unknown".
 - Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
