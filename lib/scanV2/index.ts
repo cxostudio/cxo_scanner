@@ -133,7 +133,10 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
   await countCatalog(ev)
-  if (!ev.galleryTiles) ev.galleryTiles = await galleryTiles(ev).catch(() => [])
+  // off: Shopify's media list holds every variant's images, not the gallery a shopper sees, and it
+  // lowered agreement on the image checkpoints (80.6% -> 77.8% on 180 labels). Kept for a later
+  // version that reads the gallery the page actually shows.
+  if (process.env.SCAN_FULL_GALLERY === '1' && !ev.galleryTiles) ev.galleryTiles = await galleryTiles(ev).catch(() => [])
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
