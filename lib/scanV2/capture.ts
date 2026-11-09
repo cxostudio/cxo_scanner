@@ -1353,7 +1353,9 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     }
     // product tabs: opened after the page screenshots, so those show the page as a shopper lands on it
     if (detectPageTypeFromUrl(finalUrl) === 'product') {
-      const gallery = await readGallery(desktop).catch(() => ({ count: 0, videos: 0 }) as { tile?: Tile; count: number; videos: number })
+      // off by default: on the 10 labelled product pages it did not beat the screenshots (image checkpoints
+      // 80.6% before, 75.3% with it, within noise) and found the gallery on only 6. SCAN_GALLERY_OVERVIEW=1 to test.
+      const gallery = process.env.SCAN_GALLERY_OVERVIEW === '1' ? await readGallery(desktop).catch(() => ({ count: 0, videos: 0 }) as { tile?: Tile; count: number; videos: number }) : { count: 0, videos: 0 } as { tile?: Tile; count: number; videos: number }
       galleryTile = gallery.tile
       ;(facts as Record<string, unknown>).gallery = { images: gallery.count, videos: gallery.videos }
       const tabs = await openTabs(desktop).catch(() => ({ tiles: [] as Tile[], text: '' }))
