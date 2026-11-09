@@ -21,6 +21,8 @@ export type Evidence = {
   mobileTiles: Tile[]
   /** Product tabs the scanner opened (Description, Ingredients, Results...), one screenshot each. */
   tabTiles?: Tile[]
+  /** The whole product gallery, from Shopify's product data (added when judging, not stored). */
+  galleryTiles?: Tile[]
   cartHeader?: Tile
   cartTest?: string
   /** What opens from the header cart icon with one item in the cart: a drawer, or the cart page. */

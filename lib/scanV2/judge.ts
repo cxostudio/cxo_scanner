@@ -102,7 +102,7 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
 - Check the rules in the order given: "not relevant when" first, then "fail when", and only then "pass when". In "rule", name the line your answer rests on and quote its key words (for example: fail when: "only in the footer").
-- In "seen", list where on the page your evidence sits, using only these names: ${PLACES.join(', ')}. First screen = visible without scrolling (announcement bar and header included). Page sections = the blocks below the first screen and outside the buy box, gallery and footer. Product tabs the scanner opened ("product tab ... opened" images, "OPENED PRODUCT TABS" text) count as Page sections, or Buy box when the tabs sit inside the buy box. Page code = the measured facts. When a checkpoint says "counts only when seen in", something found only elsewhere is a "fail".
+- In "seen", list where on the page your evidence sits, using only these names: ${PLACES.join(', ')}. First screen = visible without scrolling (announcement bar and header included). Page sections = the blocks below the first screen and outside the buy box, gallery and footer. The "product gallery image N of M" pictures are every image of the product gallery, from the store's own product data: they count as Gallery, even when the screenshots only show the first one. Product tabs the scanner opened ("product tab ... opened" images, "OPENED PRODUCT TABS" text) count as Page sections, or Buy box when the tabs sit inside the buy box. Page code = the measured facts. When a checkpoint says "counts only when seen in", something found only elsewhere is a "fail".
 
 Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","rule":"<the line it rests on>","seen":["<place>"],"evidence":"..."}]} with exactly one entry per checkpoint given.`
 }
@@ -148,7 +148,7 @@ function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
   const isFooter = (t: Tile) => /footer|page bottom/i.test(t.label)
   const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
   const page = [...ev.desktopTiles, ...ev.mobileTiles]
-  const tabs = ev.tabTiles || []
+  const tabs = [...(ev.tabTiles || []), ...(ev.galleryTiles || [])]
   if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
   if (scope === 'footer') return page.filter(isFooter)
   if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]

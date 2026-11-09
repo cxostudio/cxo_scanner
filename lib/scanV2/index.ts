@@ -81,7 +81,7 @@ async function countCatalog(ev: Evidence) {
 /** Scans saved before discounts were measured: read the product's compare-at prices now (Shopify product .js). */
 async function backfillDiscounts(ev: Evidence) {
   const v = (ev.facts as Record<string, any>)?.variants
-  if (!ev.isShopify || !v || (typeof v.discounted === 'number' && Array.isArray(v.ratios))) return
+  if (!ev.isShopify || !v || (typeof v.discounted === 'number' && Array.isArray(v.ratios) && Array.isArray(v.gallery))) return
   try {
     const u = new URL(ev.url)
     if (!/\/products\//.test(u.pathname)) return
@@ -91,13 +91,49 @@ async function backfillDiscounts(ev: Evidence) {
     if (typeof v.discounted !== 'number') v.discounted = (p.variants || []).filter((x: any) => x.compare_at_price && x.compare_at_price > x.price).length
     // the shape of each gallery image, for "do all gallery images share the same shape"
     v.ratios = (p.media || []).filter((m: any) => m.media_type === 'image' && m.aspect_ratio).map((m: any) => Number(m.aspect_ratio))
+    // every gallery item, so the judge sees the whole gallery and not only the image on screen
+    const media = (p.media || []) as any[]
+    v.gallery = media
+      .filter((m) => m.media_type === 'image' && (m.src || m.preview_image?.src))
+      .map((m) => ({ src: String(m.src || m.preview_image.src), alt: String(m.alt || '').slice(0, 80) }))
+    v.galleryVideos = media.filter((m) => m.media_type === 'video' || m.media_type === 'external_video').length
   } catch {}
+}
+
+const GALLERY_MAX = 12
+/**
+ * The full product gallery as small images (Shopify product data, 400px wide): the screenshots only
+ * show the image on screen and the thumbnails, so close-ups, lifestyle, annotated or customer shots
+ * further in the gallery were invisible. Fetched at judge time, never stored.
+ */
+async function galleryTiles(ev: Evidence): Promise<Tile[]> {
+  const g = ((ev.facts as Record<string, any>)?.variants?.gallery || []) as { src: string; alt: string }[]
+  if (g.length < 2) return []
+  const list = g.slice(0, GALLERY_MAX)
+  const tiles = await Promise.all(
+    list.map(async (m, i) => {
+      try {
+        const src = m.src.startsWith('//') ? `https:${m.src}` : m.src
+        const url = `${src}${src.includes('?') ? '&' : '?'}width=400`
+        const r = await fetch(url, { signal: AbortSignal.timeout(6000) })
+        if (!r.ok) return null
+        const type = (r.headers.get('content-type') || 'image/jpeg').split(';')[0]
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) return null
+        const b64 = Buffer.from(await r.arrayBuffer()).toString('base64')
+        return { label: `product gallery image ${i + 1} of ${g.length} (from the store's product data${m.alt ? `, alt text: ${m.alt}` : ''})`, dataUrl: `data:${type};base64,${b64}` } as Tile
+      } catch {
+        return null
+      }
+    }),
+  )
+  return tiles.filter(Boolean) as Tile[]
 }
 
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean } = {}) {
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
   await countCatalog(ev)
+  if (!ev.galleryTiles) ev.galleryTiles = await galleryTiles(ev).catch(() => [])
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {

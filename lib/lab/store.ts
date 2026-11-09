@@ -130,6 +130,8 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
   // everything but the images (saved above as files)
   const stored: Record<string, unknown> = { ...ev }
   for (const k of IMAGE_KEYS) delete stored[k]
+  // fetched from Shopify again at each judge: never stored
+  delete stored.galleryTiles
   await upload(store, `scans/${id}/evidence.json`, stored as StoredEvidence)
   const meta: LabScan = {
     id,
