@@ -17,6 +17,7 @@ const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
 const QUICK_ADD = 'recUh4cUJHiSxfvun'
 const CATEGORY_PROMO = 'recin5p14RpTXTPtp'
 const BADGES = 'recg02Mog2Ho8dJFQ'
+const LOGIN = 'recJQvv7DmyS0KGJr'
 /** Checkpoints about customer PICTURES or VIDEOS: written reviews and testimonials never count. */
 const CUSTOMER_MEDIA = new Set(['recDdGiDiKLK3SIyX', 'recy3ghSc1IY6x9lf', 'recBIykwniSTLYVjI'])
 const MEDIA_WORDS = /photo|picture|image|video|clip|ugc|instagram|tiktok|reel|selfie|thumbnail|play (icon|button)/i
@@ -50,6 +51,11 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
     // no promotion running on this category: not relevant, never a fail (the model keeps failing it)
     if (v && r.id === CATEGORY_PROMO && v.answer === 'fail' && /no (category[- ]specific )?promotion|not category[- ]specific|only (a )?sitewide|sitewide (announcement|offer|bar|free shipping)|no (current )?(discount|sale|offer)/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'na', evidence: 'No promotion is running on this category, so there is nothing to show at the top.', seen: v.seen, by: 'Code check' })
+      continue
+    }
+    // login: fail only when the way in is a footer link; no entry point at all means the store does not promote accounts
+    if (v && r.id === LOGIN && v.answer === 'fail' && !/footer|pied de page|voettekst/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'na', evidence: 'There is no account entry point on the page, so the store does not promote customer accounts.', seen: v.seen, by: 'Code check' })
       continue
     }
     if (!v || v.answer !== 'pass' || v.coveredByShopify) continue
