@@ -239,6 +239,28 @@ function readGridAndNav(page: Page) {
   })
 }
 
+/** Wait until a sliding cart drawer has finished its animation (fully inside the screen, position stable). */
+async function settleDrawer(page: Page) {
+  let last = ''
+  for (let i = 0; i < 12; i++) {
+    const box = await page
+      .evaluate(() => {
+        let el = document.elementFromPoint(window.innerWidth - 40, window.innerHeight * 0.5) as HTMLElement | null
+        for (let k = 0; el && k < 10; k++, el = el.parentElement) {
+          if (getComputedStyle(el).position === 'fixed' || el.getAttribute('role') === 'dialog') {
+            const r = el.getBoundingClientRect()
+            return `${Math.round(r.left)},${Math.round(r.right)},${r.right <= window.innerWidth + 1 ? 1 : 0}`
+          }
+        }
+        return 'none'
+      })
+      .catch(() => 'none')
+    if (box === last && !box.endsWith(',0')) return
+    last = box
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
+
 async function scrollForLazyContent(page: Page) {
   await page
     .evaluate(async () => {
@@ -1266,6 +1288,7 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
     })
     .catch(() => false)
   if (alreadyOpen) {
+    await settleDrawer(page)
     const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
     if (b64) return { label: `${device} cart view after one item was added (the cart drawer)`, dataUrl: `data:image/jpeg;base64,${b64}` }
   }
@@ -1337,6 +1360,7 @@ async function cartView(page: Page, device: 'desktop' | 'mobile', width: number,
     .catch(() => null)
   if (process.env.SCANV2_DEBUG) console.log('[cart view] opened:', opened, page.url(), await page.evaluate(() => { const out: string[] = []; let el = document.elementFromPoint(window.innerWidth - 160, window.innerHeight * 0.5) as HTMLElement | null; for (let k = 0; el && k < 10; k++, el = el.parentElement) out.push(`${el.tagName}.${(el.getAttribute('class') || '').slice(0, 30)} pos=${getComputedStyle(el).position} shadow=${!!el.shadowRoot} txt=${(el.innerText || '').length}`); return out.join(' > ') + ' | before=' + String((window as any).__cxoSideBefore).slice(0, 80) }).catch(String))
   if (!opened) return undefined
+  if (opened === 'drawer') await settleDrawer(page)
   const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: 0, width, height } }).catch(() => null)
   if (!b64) return undefined
   const where = opened === 'page' ? 'the cart page' : 'the cart drawer'
