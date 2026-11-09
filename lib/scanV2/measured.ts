@@ -257,6 +257,14 @@ export const MEASURED: Record<string, Measure> = {
     return { answer: 'pass', evidence: `The pop-up on landing covers about ${p.coversPct}% of the phone screen and has a clear close button.` }
   },
   recYRJzuWC8lHXc40: (_ev, f) => {
+    // first the frames the gallery shows on the page (themes crop every photo to one shape), then the files
+    const frames: number[] = f?.gallery?.frameRatios || []
+    if (frames.length >= 2) {
+      const same = Math.max(...frames) / Math.min(...frames) <= 1.03
+      return same
+        ? { answer: 'pass', evidence: `The gallery shows all ${frames.length} images in frames of the same shape (${frames[0].toFixed(2)} width to height), so it keeps its height when swiping.` }
+        : { answer: 'fail', evidence: `The gallery shows images in frames of different shapes (from ${Math.min(...frames).toFixed(2)} to ${Math.max(...frames).toFixed(2)} width to height), so it changes height when swiping.` }
+    }
     const r: number[] = f?.variants?.ratios || []
     if (r.length === 1) return { answer: 'na', evidence: 'The product has a single image.' }
     if (r.length >= 2 && Math.max(...r) / Math.min(...r) <= 1.03)

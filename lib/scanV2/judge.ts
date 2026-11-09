@@ -82,6 +82,7 @@ First decide the store's niche, ${page.niche}. Use exactly one of: ${NICHES.join
 
 Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
 - "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device. "judge desktop and mobile": the checkpoint must be met on BOTH. When one device clearly shows it and the other device's screenshots of the same part of the page clearly do not, answer "fail" and start the evidence with the device that misses it ("On mobile, ..."). When the other device's screenshots do not cover that part of the page, judge on the device that does.
+- Pictures are judged only on what you see in the images. Words in the page text ("hugs your foot", "shown in use") never prove that a photo exists. For a checkpoint about images, name the image you mean (for example "the 3rd gallery image shows it worn"); if you cannot point to one, it is not there.
 - Where something sits matters. The footer is never the first screen, never a homepage section and never "near the button": evidence found only in the footer does not pass those checkpoints.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
 - Mobile menu checkpoints are judged on the "mobile MENU opened" image (the menu after tapping the menu button). Without it they are "unknown".

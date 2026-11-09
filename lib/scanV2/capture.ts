@@ -549,16 +549,22 @@ async function measureStickyAtc(page: Page) {
  * variants, recommendations and reviews, dedupe thumbnails. Then lay them out in one numbered
  * overview picture. Fewer than 2 images found → nothing (better no gallery than a wrong one).
  */
-async function readGallery(page: Page): Promise<{ tile?: Tile; count: number; videos: number }> {
+async function readGallery(page: Page, sheetToo = false): Promise<{ tile?: Tile; count: number; videos: number; ratios: number[] }> {
   const found = await page
     .evaluate(() => {
       // the buy form, or on headless themes the add-to-cart button itself
       // the main product's buy form: visible, near the top, not a quick-add in a drawer, a card or the header
-      const OUTSIDE = 'header, footer, nav, dialog, [class*="drawer" i], [class*="recommend" i], [class*="related" i], [class*="card" i], [class*="upsell" i], [class*="quick" i]'
+      const OUTSIDE = 'header, footer, nav, dialog, [class*="recommend" i], [class*="related" i], [class*="card" i], [class*="upsell" i], [class*="quick" i]'
+      // a real drawer floats over the page; some themes wrap the whole page in a "drawer-page" container
+      const inDrawer = (el: Element) => {
+        for (let p: Element | null = el; p && p !== document.body; p = p.parentElement)
+          if (/drawer/i.test(String((p as HTMLElement).className)) && /fixed|absolute/.test(getComputedStyle(p).position)) return true
+        return false
+      }
       const top = (el: Element) => el.getBoundingClientRect().top + window.scrollY
       const form =
         Array.from(document.querySelectorAll('form[action*="/cart/add"]'))
-          .filter((f) => f.getBoundingClientRect().width > 0 && !f.closest(OUTSIDE) && top(f) < 2000)
+          .filter((f) => f.getBoundingClientRect().width > 0 && !f.closest(OUTSIDE) && !inDrawer(f) && top(f) < 2000)
           .sort((a, b) => top(a) - top(b))[0] ||
         Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]')).find((b) => {
           const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || '').trim()
@@ -608,21 +614,30 @@ async function readGallery(page: Page): Promise<{ tile?: Tile; count: number; vi
       }
       const seen = new Set<string>()
       const out: string[] = []
+      // the frame each image is shown in, as the shopper sees it (themes crop to one shape): the
+      // largest rendered copy of each image, so thumbnails do not stand in for the main slides
+      const frames = new Map<string, number>()
       for (const img of imgs) {
         if (hiddenUpTo(img, section)) continue
         const src = best(img)
         if (!src || src.startsWith('data:')) continue
         const k = key(src)
+        const r = img.getBoundingClientRect()
+        if (r.width >= 120 && r.height >= 60) {
+          const prev = frames.get(k)
+          if (prev === undefined || r.width > 0) frames.set(k, r.width / r.height)
+        }
         if (seen.has(k)) continue
         seen.add(k)
         out.push(src.startsWith('//') ? `https:${src}` : src)
         if (out.length >= 12) break
       }
       const videos = Array.from(section.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"], [data-media-type*="video" i]')).filter((v) => !form.contains(v) && !v.closest(SKIP)).length
-      return { srcs: out, videos }
+      return { srcs: out, videos, ratios: Array.from(frames.values()).slice(0, 12) }
     })
     .catch(() => null)
-  if (!found || found.srcs.length < 2) return { count: found?.srcs.length || 0, videos: found?.videos || 0 }
+  const ratios = (found?.ratios || []).map((r) => Math.round(r * 100) / 100)
+  if (!found || found.srcs.length < 2 || !sheetToo) return { count: found?.srcs.length || 0, videos: found?.videos || 0, ratios }
   // one picture: a numbered grid of every gallery image, 4 per row
   const sheet = await page.browser().newPage()
   try {
@@ -638,9 +653,9 @@ async function readGallery(page: Page): Promise<{ tile?: Tile; count: number; vi
         .join('')}</div></body></html>`
     await sheet.setContent(html, { waitUntil: 'load', timeout: 15000 }).catch(() => {})
     const b64 = (await sheet.screenshot({ type: 'jpeg', quality: 70, encoding: 'base64', fullPage: true })) as string
-    return { tile: { label: `gallery overview: the ${found.srcs.length} images of the product gallery, as a shopper swipes through them`, dataUrl: `data:image/jpeg;base64,${b64}` }, count: found.srcs.length, videos: found.videos }
+    return { tile: { label: `gallery overview: the ${found.srcs.length} images of the product gallery, as a shopper swipes through them`, dataUrl: `data:image/jpeg;base64,${b64}` }, count: found.srcs.length, videos: found.videos, ratios }
   } catch {
-    return { count: found.srcs.length, videos: found.videos }
+    return { count: found.srcs.length, videos: found.videos, ratios }
   } finally {
     await sheet.close().catch(() => {})
   }
@@ -1355,9 +1370,11 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     if (detectPageTypeFromUrl(finalUrl) === 'product') {
       // off by default: on the 10 labelled product pages it did not beat the screenshots (image checkpoints
       // 80.6% before, 75.3% with it, within noise) and found the gallery on only 6. SCAN_GALLERY_OVERVIEW=1 to test.
-      const gallery = process.env.SCAN_GALLERY_OVERVIEW === '1' ? await readGallery(desktop).catch(() => ({ count: 0, videos: 0 }) as { tile?: Tile; count: number; videos: number }) : { count: 0, videos: 0 } as { tile?: Tile; count: number; videos: number }
+      // always read for the measurements (frame proportions, image count); the overview picture only
+      // with SCAN_GALLERY_OVERVIEW=1: it did not beat the screenshots on the labelled stores
+      const gallery = await readGallery(desktop, process.env.SCAN_GALLERY_OVERVIEW === '1').catch(() => ({ count: 0, videos: 0, ratios: [] as number[] }) as { tile?: Tile; count: number; videos: number; ratios: number[] })
       galleryTile = gallery.tile
-      ;(facts as Record<string, unknown>).gallery = { images: gallery.count, videos: gallery.videos }
+      ;(facts as Record<string, unknown>).gallery = { images: gallery.count, videos: gallery.videos, frameRatios: gallery.ratios }
       const tabs = await openTabs(desktop).catch(() => ({ tiles: [] as Tile[], text: '' }))
       tabTiles = tabs.tiles
       await desktop.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
