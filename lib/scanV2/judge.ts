@@ -87,7 +87,7 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 - Where something sits matters. The footer is never the first screen, never a homepage section and never "near the button": evidence found only in the footer does not pass those checkpoints.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
 - Mobile menu checkpoints are judged on the "mobile MENU opened" image (the menu after tapping the menu button). Without it they are "unknown".
-- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
+- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, only the drawer is shown to you and only the drawer counts: it is the route shoppers take to checkout. Something that exists only on the /cart page does not count. Without a drawer, the cart page is judged. Without cart images, cart checkpoints are "unknown".
 - Empty-cart checkpoints are judged ONLY on the "EMPTY cart" image. Without it they are "unknown"; never judge them from a cart that holds an item.
 - Every other cart checkpoint is judged ONLY on the images taken after one item was added ("cart view after one item was added", "CART PAGE"). Ignore the EMPTY cart image for them: an empty cart shows no product lines, totals or checkout button by design.
 - Pass only for something you can point to in the screenshots, the page text or the measured facts. Do not infer a feature from a nearby word (a shipping badge is not a coupon field).
@@ -122,7 +122,7 @@ function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
     `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
     ev.sellsOnline === false ? 'ONLINE PURCHASE: NOT OFFERED on this page. The main button sends shoppers to a store locator ("Find in store" / "Where to buy"); there is no add-to-cart.' : '',
     `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
-    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
+    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER (judge the drawer only; the /cart page is not shown)' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
     pageText ? `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}` : 'Judge these cart checkpoints ONLY on the cart images below. The product page is not shown on purpose.',
     pageText && ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
   ]
@@ -161,7 +161,9 @@ function footerTiles(tiles: Tile[]): Tile[] {
 }
 
 function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
-  const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  // a store with a cart drawer: the drawer is the route to checkout, so the /cart page is not judged (kept in the evidence)
+  const drawer = ev.cartKind === 'drawer' && !!(ev.cartView || ev.mobileCartView)
+  const cart = [ev.emptyCart, ev.cartView, ...(drawer ? [] : ev.cartPage || []), ev.mobileCartView, ...(drawer ? [] : ev.mobileCartPage || [])].filter(Boolean) as Tile[]
   const page = [...ev.desktopTiles, ...ev.mobileTiles]
   const gallery = (process.env.SCAN_GALLERY_OVERVIEW === '1' || (ev as { useGallery?: boolean }).useGallery) && ev.galleryTile ? [ev.galleryTile] : []
   const tabs = [...gallery, ...(ev.tabTiles || []), ...(ev.galleryTiles || [])]
