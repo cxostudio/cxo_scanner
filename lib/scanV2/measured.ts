@@ -359,5 +359,13 @@ export const MEASURED: Record<string, Measure> = {
   recEyoHMH2oyA0Hk3: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
 
   // Do colour variants show as image thumbnails or clear swatches? A single version has no colour choice.
-  recnbgJzDarhgi4RH: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
+  // Only sizes (or other options that do not change the look) to choose: there is no colour to show as a swatch.
+  recnbgJzDarhgi4RH: (_ev, f) => {
+    if (singleVersion(f.variants)) return { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' }
+    const names: string[] = f.variants?.optionNames || []
+    const VISUAL = /colou?r|couleur|kleur|farbe|color|style|pattern|motif|print|material|mati[eè]re|finish|shade|teinte|tint|design|model|mod[eè]le|edition|flavou?r|parfum|scent|geur/i
+    if (names.length && !names.some((n) => VISUAL.test(n)) && names.every((n) => /size|taille|maat|größe|grosse|talla|taglia|length|longueur|lengte|width|largeur|pointure|quantity|pack|title/i.test(n)))
+      return { answer: 'na', evidence: `The only choice is ${names.join(' and ').toLowerCase()}, which does not change how the product looks, so there are no colour variants to show.` }
+    return null
+  },
 }

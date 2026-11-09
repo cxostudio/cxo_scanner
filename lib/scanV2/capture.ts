@@ -516,6 +516,7 @@ async function measureVariants(page: Page) {
     let total = 0
     let soldOut = 0
     let discounted = 0
+    let optionNames: string[] = []
     try {
       if (/\/products\//.test(location.pathname)) {
         const r = await fetch(location.pathname.replace(/\/$/, '') + '.js')
@@ -524,6 +525,7 @@ async function measureVariants(page: Page) {
           total = p.variants.length
           soldOut = p.variants.filter((v: any) => !v.available).length
           discounted = p.variants.filter((v: any) => v.compare_at_price && v.compare_at_price > v.price).length
+          optionNames = (p.options || []).map((o: any) => String(typeof o === 'string' ? o : o?.name || ''))
         }
       }
     } catch {}
@@ -589,7 +591,7 @@ async function measureVariants(page: Page) {
       rows.set(key, (rows.get(key) || new Set()).add(handle))
     }
     const swatchRow = Array.from(rows.values()).some((s) => s.size >= 3)
-    return { total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size + (optionLabel || swatchRow ? 1 : 0) }
+    return { optionNames, total, soldOut, discounted, options: options.length, marked, atc, pickers: groups.size + (optionLabel || swatchRow ? 1 : 0) }
   })
 }
 

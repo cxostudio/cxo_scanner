@@ -8,6 +8,7 @@ import type { ScanRule as Rule } from '@/lib/conversionCheckpoints/getCheckpoint
 type Verdict = { answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; coveredByShopify?: boolean; seen?: string[]; by?: 'Code check' | 'Seen in' | 'Measured' }
 
 const CART_SHIPPING_COST = 'recBVdoZfPXnwY7Ys'
+const PDP_SHIPPING_COST = 'rec62ttMsx3Yk5lY6'
 const HEADER_CATEGORIES = 'reclt5mHrGdpwf2lU'
 const CART_ADDON = 'recaOn94y8pUSo5JK'
 const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
@@ -28,7 +29,7 @@ const GENERIC_NAV =
 
 /** A threshold or progress bar alone ("Spend $14 to unlock free shipping") says nothing about the cost below it. */
 function thresholdOnly(evidence: string) {
-  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)/i.test(evidence)
+  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)|offerte? (dès|à partir)|gratuite? (dès|à partir)|plus que|gratis vanaf|kostenlos ab/i.test(evidence)
   const cost = /shipping (costs?|is|fee|rate|price)\s*:?\s*[$€£]\s?\d|[$€£]\s?\d+(?:[.,]\d+)?\s*(shipping|delivery)|(otherwise|below (that|this|it)|under (that|this|it))[^.]*[$€£]\s?\d|free shipping (is )?(applied|included|on (all|every))|shipping:\s*free/i.test(evidence)
   // "calculated at checkout" plus an estimator or a tax line is still no shipping cost
   const later = /calculated (at|in) checkout|calculé(s)? (lors|à l'étape) |berekend bij|at checkout|estimate shipping|shipping estimator/i.test(evidence)
@@ -45,6 +46,11 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
   for (const r of rules) {
     const v = byId.get(r.id)
     if (!v || v.answer !== 'pass' || v.coveredByShopify) continue
+
+    if (r.id === PDP_SHIPPING_COST && thresholdOnly(v.evidence)) {
+      byId.set(r.id, { answer: 'fail', evidence: 'The product page only says when shipping is free; it does not say what shipping costs below that amount.', seen: v.seen, by: 'Code check' })
+      continue
+    }
 
     if (r.id === CART_SHIPPING_COST && thresholdOnly(v.evidence)) {
       byId.set(r.id, { answer: 'fail', evidence: 'The cart does not say what shipping costs: it only shows a free-shipping threshold or says shipping is calculated at checkout.', seen: v.seen, by: 'Code check' })
