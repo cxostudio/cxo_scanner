@@ -302,6 +302,20 @@ export const MEASURED: Record<string, Measure> = {
   ),
   recUUD0aehm1xJOs6: (_ev: Evidence, f: F) => smallCatalog(f, 30),
 
+  // Is good navigational feedback provided (active state)? The header link to this page must LOOK different.
+  recB9iXaHpr1wLOzT: (_ev: Evidence, f: F) => {
+    if (f.activeNav === true) return { answer: 'pass', evidence: 'The menu highlights the section you are in, so shoppers can tell where they are.' }
+    if (f.activeNav === false) return { answer: 'fail', evidence: 'The menu link to this page looks exactly like the others, so shoppers cannot tell where they are.' }
+    return null
+  },
+
+  // Are "Out of Stock" products clearly marked or hidden from the primary view? Sold-out cards up front fail.
+  recbh9OAh8JWdqt7U: (_ev: Evidence, f: F) => {
+    if (typeof f.soldOutFirst === 'number' && f.soldOutFirst >= 2)
+      return { answer: 'fail', evidence: `${f.soldOutFirst} of the first 4 products are sold out: the top of the grid should show products shoppers can buy, with sold-out ones further down.` }
+    return null
+  },
+
   // Does the product page have an option for potential customers to ask questions? (a chat widget in the page code)
   recRbVoxG8qjJlszm: (ev: Evidence) => {
     const chat = (ev as { mobileFacts?: { chatWidget?: string | null } }).mobileFacts?.chatWidget

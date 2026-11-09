@@ -155,6 +155,60 @@ async function measureHeaderSearch(page: Page): Promise<boolean | null> {
   })
 }
 
+/**
+ * Two things the model misreads in screenshots, measured in the page code:
+ * - activeNav: does the header link to the current page LOOK different from its siblings (bold, underline,
+ *   colour, border)? An 'active' class with no visible difference does not count. null when no header link points to this page.
+ * - soldOutFirst: how many of the first 4 product cards are marked sold out (category pages).
+ */
+function readGridAndNav(page: Page) {
+  return page.evaluate(() => {
+    const path = location.pathname.replace(/\/$/, '').toLowerCase()
+    const header = document.querySelector('header, [role="banner"], #shopify-section-header')
+    let activeNav: boolean | null = null
+    if (header && path && path !== '') {
+      const links = Array.from(header.querySelectorAll('a[href]')).filter((a) => (a as HTMLElement).offsetWidth > 0 && ((a as HTMLElement).innerText || '').trim())
+      const pathOf = (a: Element) => {
+        try {
+          return new URL(a.getAttribute('href') || '', location.href).pathname.replace(/\/$/, '').toLowerCase()
+        } catch {
+          return ''
+        }
+      }
+      const here = links.find((a) => pathOf(a) === path)
+      if (here) {
+        const look = (el: Element) => {
+          const s = getComputedStyle(el)
+          const t = el.firstElementChild ? getComputedStyle(el.firstElementChild) : s
+          const after = getComputedStyle(el, '::after')
+          return [s.fontWeight, s.textDecorationLine, s.color, s.borderBottomWidth, s.borderBottomStyle, t.fontWeight, t.textDecorationLine, after.content !== 'none' ? `${after.width}${after.opacity}${after.transform}${after.backgroundColor}` : ''].join('|')
+        }
+        const sib = links.filter((a) => a !== here && a.parentElement?.parentElement === here.parentElement?.parentElement).slice(0, 6)
+        if (sib.length) activeNav = sib.every((x) => look(x) !== look(here))
+      }
+    }
+    let soldOutFirst: number | null = null
+    const SOLD = /sold out|out of stock|épuisé|en rupture|uitverkocht|ausverkauft|agotado|esaurito/i
+    const cards: Element[] = []
+    const seen = new Set<string>()
+    for (const a of Array.from(document.querySelectorAll('main a[href*="/products/"], #MainContent a[href*="/products/"]'))) {
+      const href = (a.getAttribute('href') || '').split('?')[0]
+      if (seen.has(href) || (a as HTMLElement).offsetWidth === 0) continue
+      if (a.closest('header, footer, nav, [class*="drawer" i], [class*="recommend" i]')) continue
+      seen.add(href)
+      let card: Element = a
+      for (let i = 0; i < 6 && card.parentElement; i++) {
+        if (card.parentElement.querySelectorAll('a[href*="/products/"]').length > 3) break
+        card = card.parentElement
+      }
+      cards.push(card)
+      if (cards.length >= 4) break
+    }
+    if (cards.length >= 4) soldOutFirst = cards.filter((c) => SOLD.test((c as HTMLElement).innerText || '')).length
+    return { activeNav, soldOutFirst }
+  })
+}
+
 async function scrollForLazyContent(page: Page) {
   await page
     .evaluate(async () => {
@@ -1440,6 +1494,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         console.warn('[scanV2] facts failed', String(e).slice(0, 200))
         return {}
       })
+      Object.assign(facts, await readGridAndNav(desktop).catch(() => ({})))
       text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
       hiddenText = await readHiddenText(desktop)
       desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
