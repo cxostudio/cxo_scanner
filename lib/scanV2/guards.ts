@@ -98,7 +98,9 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
 
     if (r.id === FOOTER_CATEGORIES) {
       const labels = quotedLabels(v.evidence)
-      if (labels.length >= 1 && labels.every((l) => GENERIC_NAV.test(l))) {
+      // a quoted section heading ('Shop') with categories under it is not a service link: only fail when the model
+      // names several links and all of them are generic, and does not mention categories at all
+      if (labels.length >= 2 && labels.every((l) => GENERIC_NAV.test(l)) && !/categor|collection|bestseller|best-seller|section|under (it|the)|such as/i.test(v.evidence)) {
         byId.set(r.id, { answer: 'fail', evidence: `The footer links only to service pages (${Array.from(new Set(labels)).join(', ')}), not to the main categories or best-sellers.`, seen: v.seen, by: 'Code check' })
         continue
       }
