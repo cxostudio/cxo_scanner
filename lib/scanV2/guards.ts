@@ -13,6 +13,7 @@ const CART_ADDON = 'recaOn94y8pUSo5JK'
 const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
 const HOME_PRODUCTS = 'recspAXgCOM7wTkLm'
 const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
+const QUICK_ADD = 'recUh4cUJHiSxfvun'
 /** Checkpoints about customer PICTURES or VIDEOS: written reviews and testimonials never count. */
 const CUSTOMER_MEDIA = new Set(['recDdGiDiKLK3SIyX', 'recy3ghSc1IY6x9lf', 'recBIykwniSTLYVjI'])
 const MEDIA_WORDS = /photo|picture|image|video|clip|ugc|instagram|tiktok|reel|selfie|thumbnail|play (icon|button)/i
@@ -79,6 +80,12 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
     // written testimonials are not customer photos or videos, however positive or named
     if (CUSTOMER_MEDIA.has(r.id) && (!MEDIA_WORDS.test(v.evidence) || (TEXT_PROOF.test(v.evidence) && !/photos? (of|from|by) (customers?|clients?|real)|customer (photos?|videos?|pictures?)|(user|creator).generated (photos?|videos?)|ugc|tiktok|instagram/i.test(v.evidence)))) {
       byId.set(r.id, { answer: 'fail', evidence: 'There are written reviews or testimonials, but no photos or videos from customers. Written testimonials are not user-generated photos or videos.', seen: v.seen, by: 'Code check' })
+      continue
+    }
+
+    // "+1" next to colour dots is a variant count, never an add button
+    if (r.id === QUICK_ADD && /['"‘“]?\+\s?\d+['"’”]?/.test(v.evidence) && !/cart icon|bag icon|add to (cart|bag)|quick (add|view)|plus button/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'fail', evidence: "The '+1' next to the colour dots counts more variants; it is not an add-to-cart button. There is no quick add on the product cards.", seen: v.seen, by: 'Code check' })
       continue
     }
 
