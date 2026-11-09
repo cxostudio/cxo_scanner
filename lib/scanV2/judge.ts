@@ -117,6 +117,7 @@ function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
   return [
     `PAGE: ${ev.finalUrl} (${PAGE[pageKindOf(ev)].name})`,
     `TITLE: ${ev.title}`,
+    ...((ev as { knownNiche?: string }).knownNiche ? [`STORE NICHE (already decided for this store, use it as your niche): ${(ev as { knownNiche?: string }).knownNiche}`] : []),
     `MEASURED FACTS (desktop): ${JSON.stringify(ev.facts)}`,
     `MEASURED FACTS (mobile): ${JSON.stringify(ev.mobileFacts)}`,
     `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
@@ -314,5 +315,6 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
-  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts, usage }
+  const known = (ev as { knownNiche?: string }).knownNiche
+  return { niche: known ? majorityNiche([known]) : majorityNiche(out.map((o) => o.niche)), verdicts, usage }
 }
