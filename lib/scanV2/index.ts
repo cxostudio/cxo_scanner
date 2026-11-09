@@ -164,6 +164,11 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   // where the evidence sits must match Airtable "Seen in": the same rule for every checkpoint
   applySeenIn(rules, byId, verdicts)
   if (opts.guards !== false) applyGuards(rules, byId)
+  // a device that was not captured: its own checkpoints cannot be judged (the model otherwise borrows the other device)
+  for (const [dev, tiles] of [['Mobile only', ev.mobileTiles], ['Desktop only', ev.desktopTiles]] as const)
+    if (!tiles?.length)
+      for (const r of rules)
+        if (r.device === dev) byId.set(r.id, { answer: 'unknown', evidence: `The ${dev === 'Mobile only' ? 'mobile' : 'desktop'} version of the page could not be captured, so we could not check this.` })
   // no picture of a filled cart: cart checkpoints cannot be judged (the model otherwise borrows the product page)
   const filledCart = !!(ev.cartView || ev.cartPage?.length || ev.mobileCartView || ev.mobileCartPage?.length)
   if (!filledCart)

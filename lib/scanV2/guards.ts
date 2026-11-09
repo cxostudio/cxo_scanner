@@ -24,7 +24,7 @@ const TRUST = /secure|ssl|encrypt|guarantee|garantie|money.back|returns?|retour|
 
 /** Header entries that do not say what the store sells. */
 const GENERIC_NAV =
-  /^(shop( all)?|all products|products|learn|discover|explore|about( us)?|our story|subscribe|subscription|blog|journal|stories|find a store|store locator|stores|contact|help|faq|rewards|gift cards?|sale|new|bestsellers?|best sellers|collections?|menu|account|log ?in|search|cart|bag|cartes? cadeaux?|contact|nous contacter|livraisons?( et retours?)?|retours?|garantie( produit)?|mentions légales|cgv|conditions générales( de vente)?|le journal|journal|nos revendeurs|revendeurs|showroom|notre showroom.*|la boutique.*|boutique|à propos|qui sommes-nous)$/i
+  /^(shop( all)?|all products|products|learn|discover|explore|about( us)?|our story|subscribe|subscription|blog|journal|stories|find a store|store locator|stores|contact|help|faq|rewards|gift cards?|sale|new|bestsellers?|best sellers|collections?|menu|account|log ?in|search|cart|bag|cartes? cadeaux?|contact|nous contacter|livraisons?( et retours?)?|retours?|garantie( produit)?|mentions légales|cgv|conditions générales( de vente)?|le journal|journal|nos revendeurs|revendeurs|showroom|notre showroom.*|la boutique.*|boutique|à propos|qui sommes-nous|build (my|your) routine|take the quiz|quiz|find your (match|routine|fit)|science|research)$/i
 
 /** A threshold or progress bar alone ("Spend $14 to unlock free shipping") says nothing about the cost below it. */
 function thresholdOnly(evidence: string) {
