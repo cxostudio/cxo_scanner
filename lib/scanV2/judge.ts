@@ -148,7 +148,7 @@ function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
   const isFooter = (t: Tile) => /footer|page bottom/i.test(t.label)
   const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
   const page = [...ev.desktopTiles, ...ev.mobileTiles]
-  const gallery = process.env.SCAN_GALLERY_OVERVIEW === '1' && ev.galleryTile ? [ev.galleryTile] : []
+  const gallery = (process.env.SCAN_GALLERY_OVERVIEW === '1' || (ev as { useGallery?: boolean }).useGallery) && ev.galleryTile ? [ev.galleryTile] : []
   const tabs = [...gallery, ...(ev.tabTiles || []), ...(ev.galleryTiles || [])]
   if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
   if (scope === 'footer') return page.filter(isFooter)

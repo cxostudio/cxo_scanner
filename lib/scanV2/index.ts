@@ -129,7 +129,8 @@ async function galleryTiles(ev: Evidence): Promise<Tile[]> {
   return tiles.filter(Boolean) as Tile[]
 }
 
-export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean } = {}) {
+export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean; gallery?: boolean } = {}) {
+  if (opts.gallery) (ev as { useGallery?: boolean }).useGallery = true
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
   await countCatalog(ev)
