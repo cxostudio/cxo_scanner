@@ -239,23 +239,29 @@ function readGridAndNav(page: Page) {
   })
 }
 
-/** Wait until a sliding cart drawer has finished its animation (fully inside the screen, position stable). */
+/** Wait until a sliding cart drawer has finished its animation: the panel holding the checkout button is fully on screen and stops moving. */
 async function settleDrawer(page: Page) {
+  await new Promise((r) => setTimeout(r, 500))
   let last = ''
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 15; i++) {
     const box = await page
       .evaluate(() => {
-        let el = document.elementFromPoint(window.innerWidth - 40, window.innerHeight * 0.5) as HTMLElement | null
-        for (let k = 0; el && k < 10; k++, el = el.parentElement) {
-          if (getComputedStyle(el).position === 'fixed' || el.getAttribute('role') === 'dialog') {
-            const r = el.getBoundingClientRect()
-            return `${Math.round(r.left)},${Math.round(r.right)},${r.right <= window.innerWidth + 1 ? 1 : 0}`
-          }
+        const CHECKOUT = /subtotal|check ?out|checkout|afrekenen|zur kasse|commander|caisse/i
+        // the narrowest fixed container whose text has the checkout: the drawer panel, not the full-screen backdrop
+        let best: DOMRect | null = null
+        for (const el of Array.from(document.querySelectorAll('body *')) as HTMLElement[]) {
+          const cs = getComputedStyle(el)
+          if (cs.position !== 'fixed' && el.getAttribute('role') !== 'dialog') continue
+          const r = el.getBoundingClientRect()
+          if (r.width < 200 || r.width > window.innerWidth * 0.9 || r.height < 200) continue
+          if (!CHECKOUT.test((el.innerText || '').slice(0, 3000))) continue
+          if (!best || r.width < best.width) best = r
         }
-        return 'none'
+        if (!best) return 'none'
+        return `${Math.round(best.left)},${Math.round(best.right)},${best.right <= window.innerWidth + 1 && best.left >= -1 ? 1 : 0}`
       })
       .catch(() => 'none')
-    if (box === last && !box.endsWith(',0')) return
+    if (box === last && (box === 'none' || box.endsWith(',1'))) return
     last = box
     await new Promise((r) => setTimeout(r, 200))
   }
