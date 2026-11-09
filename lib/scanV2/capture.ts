@@ -205,7 +205,20 @@ function readGridAndNav(page: Page) {
       if (cards.length >= 4) break
     }
     if (cards.length >= 4) soldOutFirst = cards.filter((c) => SOLD.test((c as HTMLElement).innerText || '')).length
-    return { activeNav, soldOutFirst }
+    // desktop header: how many visible links go to a collection (the categories), outside any closed menu
+    let headerCollections: number | null = null
+    if (header) {
+      const hrefs = new Set(
+        Array.from(header.querySelectorAll('a[href*="/collections/"]'))
+          .filter((a) => {
+            const r = a.getBoundingClientRect()
+            return r.width > 0 && r.height > 0 && r.top < 260 && getComputedStyle(a).visibility !== 'hidden' && ((a as HTMLElement).innerText || '').trim()
+          })
+          .map((a) => (a.getAttribute('href') || '').split('?')[0]),
+      )
+      headerCollections = hrefs.size
+    }
+    return { activeNav, soldOutFirst, headerCollections }
   })
 }
 

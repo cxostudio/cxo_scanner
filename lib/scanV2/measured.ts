@@ -309,6 +309,13 @@ export const MEASURED: Record<string, Measure> = {
     return null
   },
 
+  // On desktop, are the main categories visible in the header without opening a menu? At most one collection link in the header bar fails.
+  reclt5mHrGdpwf2lU: (_ev: Evidence, f: F) => {
+    if (typeof f.headerCollections === 'number' && f.headerCollections <= 1)
+      return { answer: 'fail', evidence: 'On desktop, the header shows no category links (one at most): shoppers have to open the menu to see what the store sells.' }
+    return null
+  },
+
   // Are "Out of Stock" products clearly marked or hidden from the primary view? Sold-out cards up front fail.
   recbh9OAh8JWdqt7U: (_ev: Evidence, f: F) => {
     if (typeof f.soldOutFirst === 'number' && f.soldOutFirst >= 2)
