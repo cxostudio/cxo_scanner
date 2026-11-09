@@ -145,14 +145,27 @@ function scopeOf(area?: string): Scope {
  * Only the images an area needs: the cart is judged on cart images and never on the product page,
  * the buy box never on the cart drawer, the footer on the footer. Fewer images, fewer wrong reads.
  */
+/**
+ * The footer tiles of one device. Long pages get a dedicated "page bottom / footer" shot; short pages
+ * end inside the regular tiles, so the footer is in the last one (plus the one before when the last is
+ * a thin strip, as the footer usually starts above it).
+ */
+function footerTiles(tiles: Tile[]): Tile[] {
+  const own = tiles.filter((t) => /footer|page bottom/i.test(t.label))
+  if (own.length || !tiles.length) return own
+  const last = tiles[tiles.length - 1]
+  const m = last.label.match(/\((\d+)-(\d+)px/)
+  const thin = m ? Number(m[2]) - Number(m[1]) < 500 : false
+  return thin && tiles.length > 1 ? tiles.slice(-2) : [last]
+}
+
 function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
-  const isFooter = (t: Tile) => /footer|page bottom/i.test(t.label)
   const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
   const page = [...ev.desktopTiles, ...ev.mobileTiles]
   const gallery = (process.env.SCAN_GALLERY_OVERVIEW === '1' || (ev as { useGallery?: boolean }).useGallery) && ev.galleryTile ? [ev.galleryTile] : []
   const tabs = [...gallery, ...(ev.tabTiles || []), ...(ev.galleryTiles || [])]
   if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
-  if (scope === 'footer') return page.filter(isFooter)
+  if (scope === 'footer') return [ev.desktopTiles, ev.mobileTiles].flatMap(footerTiles)
   if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
   if (scope === 'page') return [...page, ...tabs]
   return [...page, ...tabs, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
