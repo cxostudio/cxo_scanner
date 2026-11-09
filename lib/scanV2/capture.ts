@@ -136,8 +136,16 @@ async function scrollForLazyContent(page: Page) {
         window.scrollTo(0, y)
         await new Promise((r) => setTimeout(r, 90))
       }
+      // the steps never land on the true bottom: stay there long enough for reveal-on-scroll
+      // sections (often the footer) to fade in, or they are captured almost transparent
+      window.scrollTo(0, max)
+      await new Promise((r) => setTimeout(r, 500))
       window.scrollTo(0, 0)
     })
+    .catch(() => {})
+  // safety net for common reveal-on-scroll systems that have not fired yet (Dawn, AOS, theme attrs)
+  await page
+    .addStyleTag({ content: '.scroll-trigger--offscreen,[data-aos]:not(.aos-animate),[hdt-reveal]:not([animationend]){opacity:1!important;transform:none!important;transition:none!important;animation:none!important}' })
     .catch(() => {})
   await new Promise((r) => setTimeout(r, 700))
 }
