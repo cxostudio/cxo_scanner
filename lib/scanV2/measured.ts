@@ -320,6 +320,8 @@ export const MEASURED: Record<string, Measure> = {
   recbh9OAh8JWdqt7U: (_ev: Evidence, f: F) => {
     if (typeof f.soldOutFirst === 'number' && f.soldOutFirst >= 2)
       return { answer: 'fail', evidence: `${f.soldOutFirst} of the first 4 products are sold out: the top of the grid should show products shoppers can buy, with sold-out ones further down.` }
+    if (f.soldOutFirst === 0 && typeof f.soldOutAny === 'number' && f.soldOutAny > 0)
+      return { answer: 'pass', evidence: 'Sold-out products are labelled on their cards and none of them sits in the first row of the grid.' }
     return null
   },
 

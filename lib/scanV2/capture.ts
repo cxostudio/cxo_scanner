@@ -218,7 +218,9 @@ function readGridAndNav(page: Page) {
       )
       headerCollections = hrefs.size
     }
-    return { activeNav, soldOutFirst, headerCollections }
+    const main = document.querySelector('main, #MainContent') as HTMLElement | null
+    const soldOutAny = main ? ((main.innerText || '').match(new RegExp(SOLD.source, 'gi')) || []).length : null
+    return { activeNav, soldOutFirst, soldOutAny, headerCollections }
   })
 }
 
