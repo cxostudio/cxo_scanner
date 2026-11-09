@@ -15,6 +15,8 @@ const TRUST_NEAR_BUTTON = 'recihw16WgNwYG09z'
 const HOME_PRODUCTS = 'recspAXgCOM7wTkLm'
 const FOOTER_CATEGORIES = 'recEgJJ3Ja7iD3B63'
 const QUICK_ADD = 'recUh4cUJHiSxfvun'
+const CATEGORY_PROMO = 'recin5p14RpTXTPtp'
+const BADGES = 'recg02Mog2Ho8dJFQ'
 /** Checkpoints about customer PICTURES or VIDEOS: written reviews and testimonials never count. */
 const CUSTOMER_MEDIA = new Set(['recDdGiDiKLK3SIyX', 'recy3ghSc1IY6x9lf', 'recBIykwniSTLYVjI'])
 const MEDIA_WORDS = /photo|picture|image|video|clip|ugc|instagram|tiktok|reel|selfie|thumbnail|play (icon|button)/i
@@ -45,7 +47,18 @@ function quotedLabels(evidence: string) {
 export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
   for (const r of rules) {
     const v = byId.get(r.id)
+    // no promotion running on this category: not relevant, never a fail (the model keeps failing it)
+    if (v && r.id === CATEGORY_PROMO && v.answer === 'fail' && /no (category[- ]specific )?promotion|not category[- ]specific|only (a )?sitewide|sitewide (announcement|offer|bar|free shipping)|no (current )?(discount|sale|offer)/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'na', evidence: 'No promotion is running on this category, so there is nothing to show at the top.', seen: v.seen, by: 'Code check' })
+      continue
+    }
     if (!v || v.answer !== 'pass' || v.coveredByShopify) continue
+
+    // merchandising badges only: discount badges ('-30%') alone are not a pass
+    if (r.id === BADGES && /-?\d+ ?%|discount|sale|promo|soldes|korting/i.test(v.evidence) && !/best ?seller|new\b|nouveau|nieuw|back in stock|limited|limit[ée]e?|exclusi|top|favou?rite|trending|award/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'fail', evidence: 'Cards only carry discount badges; there are no merchandising badges like Bestseller, New or Back in stock.', seen: v.seen, by: 'Code check' })
+      continue
+    }
 
     if (r.id === PDP_SHIPPING_COST && thresholdOnly(v.evidence)) {
       byId.set(r.id, { answer: 'fail', evidence: 'The product page only says when shipping is free; it does not say what shipping costs below that amount.', seen: v.seen, by: 'Code check' })
