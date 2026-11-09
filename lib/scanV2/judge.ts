@@ -158,8 +158,14 @@ function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
   return [...page, ...tabs, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
 }
 
-function images(ev: Evidence, scope: Scope | 'all' = 'all') {
-  const tiles = tilesFor(ev, scope)
+type DeviceKey = 'mobile' | 'desktop' | 'both'
+/** A checkpoint for one device is judged on that device's images only (Airtable "Device"). */
+function deviceOf(r: Rule): DeviceKey {
+  return r.device === 'Mobile only' ? 'mobile' : r.device === 'Desktop only' ? 'desktop' : 'both'
+}
+
+function images(ev: Evidence, scope: Scope | 'all' = 'all', device: DeviceKey = 'both') {
+  const tiles = tilesFor(ev, scope).filter((t) => device === 'both' || !/^(mobile|desktop)\b/i.test(t.label) || t.label.toLowerCase().startsWith(device))
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },
@@ -271,14 +277,16 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
   const usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
   // one set of requests per part of the page, each with only that part's images; a stable order
   // (by id) so the same checkpoints are always judged together from one run to the next
-  const byScope = new Map<Scope, Rule[]>()
+  // grouped by part of the page and by device: a mobile-only checkpoint never sees desktop screenshots
+  const byScope = new Map<string, Rule[]>()
   for (const r of [...rules].sort((x, y) => x.id.localeCompare(y.id))) {
-    const sc = scopeOf(r.area)
-    byScope.set(sc, [...(byScope.get(sc) || []), r])
+    const k = `${scopeOf(r.area)}|${deviceOf(r)}`
+    byScope.set(k, [...(byScope.get(k) || []), r])
   }
   const jobs: { group: Rule[]; shared: { text: string; imgs: ReturnType<typeof images> } }[] = []
-  for (const [sc, list] of Array.from(byScope)) {
-    const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc) }
+  for (const [k, list] of Array.from(byScope)) {
+    const [sc, dev] = k.split('|') as [Scope, DeviceKey]
+    const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc, dev) }
     for (let i = 0; i < list.length; i += GROUP_SIZE) jobs.push({ group: list.slice(i, i + GROUP_SIZE), shared })
   }
   const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage)))
