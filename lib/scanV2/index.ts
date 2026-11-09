@@ -22,6 +22,8 @@ export type V2Row = {
   rule?: string
   seen?: string[]
   by?: 'Seen in' | 'Code check' | 'Measured'
+  /** Shown in the free scan; other results are counted but locked. */
+  freeScan?: boolean
 }
 
 type Answer = Omit<Verdict, 'id'>
@@ -191,6 +193,7 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
       reason: v?.evidence || 'We could not check this one.',
       status,
       ...(v?.coveredByShopify ? { coveredByShopify: true } : {}),
+      ...((r as { freeScan?: boolean }).freeScan ? { freeScan: true } : {}),
       ...(v?.rule ? { rule: v.rule } : {}),
       ...(v?.seen?.length ? { seen: v.seen } : {}),
       ...(v?.by ? { by: v.by } : settled.has(r.id) && !v?.coveredByShopify ? { by: 'Measured' as const } : {}),

@@ -34,6 +34,8 @@ export type ScanRule = {
   shopifyControl?: string
   /** Where a pass may be found (Airtable "Seen in"). Empty or 'Anywhere' = no restriction. */
   seenIn?: string[]
+  /** Shown in the free scan (Airtable "Free scan"); the rest of the results appear as a locked count. */
+  freeScan?: boolean
 }
 
 type AirtableSingleRecord = {
@@ -114,6 +116,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     notRelevantNiches: list('Not relevant for niches'),
     shopifyControl: text('Shopify control'),
     seenIn: list('Seen in'),
+    freeScan: fields['Free scan'] === true,
   }
 }
 

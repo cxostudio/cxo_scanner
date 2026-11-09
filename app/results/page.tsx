@@ -24,6 +24,7 @@ const ResultSchema = z.array(
     reason: z.string(),
     status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
     coveredByShopify: z.boolean().optional(),
+    freeScan: z.boolean().optional(),
     checkpoint: z
       .object({
         requiredActions: z.string(),
@@ -146,9 +147,14 @@ export default function ResultsPage() {
 
   const report = useMemo(() => {
     if (!results) return null
+    // free scan: only the checkpoints ticked "Free scan" are shown; the other findings are counted and locked
+    // (test scans from the lab show everything)
+    const free = !labId && results.some((r) => r.freeScan)
+    const shown = free ? results.filter((r) => r.freeScan) : results
+    const lockedIssues = free ? results.filter((r) => !r.freeScan && r.status === 'fail').length : 0
     // "couldn't check" answers are never shown as failures or counted in the score
-    const unknown = results.filter((r) => r.status === 'unknown').length
-    const scored = results.filter((r) => r.status !== 'unknown')
+    const unknown = shown.filter((r) => r.status === 'unknown').length
+    const scored = shown.filter((r) => r.status !== 'unknown')
     const failed = scored.filter((r) => !r.passed)
     // shown apart from real passes: "not relevant for your store" and "covered by Shopify"
     const notRelevant = scored.filter((r) => r.status === 'na').length
@@ -160,8 +166,8 @@ export default function ResultsPage() {
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh }
-  }, [results])
+    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues }
+  }, [results, labId])
 
   const host = hostOf(url)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
@@ -416,6 +422,20 @@ export default function ResultsPage() {
                   </div>
                 )}
               </div>
+              {/* free scan: the other findings exist but stay in the full report */}
+              {report.lockedIssues > 0 && (
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
+                  <div>
+                    <p className="font-[var(--font-display)] text-[length:var(--text-lg)] font-semibold text-[var(--text)]">
+                      {report.lockedIssues} more {report.lockedIssues === 1 ? 'issue' : 'issues'} found on this page
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">They are in the full report, with the fix for each one.</p>
+                  </div>
+                  <a href={CALL_URL} className="cxo-btn cxo-btn-primary">
+                    Get the full report
+                  </a>
+                </div>
+              )}
             </div>
           </section>
 
