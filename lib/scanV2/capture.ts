@@ -21,7 +21,9 @@ export type Evidence = {
   mobileTiles: Tile[]
   /** Product tabs the scanner opened (Description, Ingredients, Results...), one screenshot each. */
   tabTiles?: Tile[]
-  /** The whole product gallery, from Shopify's product data (added when judging, not stored). */
+  /** The product gallery as a shopper swipes through it, read from the page: one overview picture. */
+  galleryTile?: Tile
+  /** The whole product gallery, from Shopify's product data (off by default, see index.ts). */
   galleryTiles?: Tile[]
   cartHeader?: Tile
   cartTest?: string
@@ -540,6 +542,110 @@ async function measureStickyAtc(page: Page) {
 }
 
 /** Text inside closed tabs / accordions, which innerText leaves out. */
+/**
+ * The product gallery as the shopper sees it, read from the page itself (not Shopify's media list,
+ * which mixes every variant's photos): start from the add-to-cart form, climb to the product
+ * section, take the images of its gallery in page order, skip slides the theme hides for other
+ * variants, recommendations and reviews, dedupe thumbnails. Then lay them out in one numbered
+ * overview picture. Fewer than 2 images found → nothing (better no gallery than a wrong one).
+ */
+async function readGallery(page: Page): Promise<{ tile?: Tile; count: number; videos: number }> {
+  const found = await page
+    .evaluate(() => {
+      // the buy form, or on headless themes the add-to-cart button itself
+      // the main product's buy form: visible, near the top, not a quick-add in a drawer, a card or the header
+      const OUTSIDE = 'header, footer, nav, dialog, [class*="drawer" i], [class*="recommend" i], [class*="related" i], [class*="card" i], [class*="upsell" i], [class*="quick" i]'
+      const top = (el: Element) => el.getBoundingClientRect().top + window.scrollY
+      const form =
+        Array.from(document.querySelectorAll('form[action*="/cart/add"]'))
+          .filter((f) => f.getBoundingClientRect().width > 0 && !f.closest(OUTSIDE) && top(f) < 2000)
+          .sort((a, b) => top(a) - top(b))[0] ||
+        Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]')).find((b) => {
+          const t = ((b as HTMLElement).innerText || (b as HTMLInputElement).value || '').trim()
+          const r = b.getBoundingClientRect()
+          return r.width > 80 && r.top + window.scrollY < 1800 && /add to (cart|bag|basket)|ajouter|in winkelwagen|in den warenkorb|buy now|acheter|añadir/i.test(t) && !b.closest('header, footer, nav, dialog, [class*="drawer" i]')
+        })
+      if (!form) return null
+      const big = (img: HTMLImageElement) => {
+        const r = img.getBoundingClientRect()
+        if (/\.svg(\?|$)/i.test(img.currentSrc || img.src)) return false
+        // slides off-screen in a slider still have a size; swatches and icons are small
+        return r.width >= 60 && Math.max(r.width, img.naturalWidth / 3) >= 120
+      }
+      const hiddenUpTo = (el: Element, stop: Element) => {
+        for (let p: Element | null = el; p && p !== stop; p = p.parentElement) {
+          if (p.hasAttribute('hidden')) return true
+          const cs = getComputedStyle(p)
+          if (cs.display === 'none' || cs.visibility === 'hidden') return true
+        }
+        return false
+      }
+      const SKIP = '[class*="recommend" i], [class*="related" i], [class*="review" i], [class*="upsell" i], [class*="cross-sell" i], [class*="complementary" i], header, footer, nav, dialog'
+      // a picture inside a link to another product is a product card (add-on, "you may also like"), not the gallery
+      const here = location.pathname.split('/products/')[1]?.split(/[/?#]/)[0]
+      const otherProduct = (img: Element) => {
+        const a = img.closest('a[href*="/products/"]')
+        const h = a?.getAttribute('href')?.split('/products/')[1]?.split(/[/?#]/)[0]
+        return !!h && h !== here
+      }
+      // the product section: the first ancestor of the buy form that also holds 2+ big images outside the form
+      let section: Element | null = form.parentElement
+      let imgs: HTMLImageElement[] = []
+      for (let k = 0; section && k < 10; k++, section = section.parentElement) {
+        imgs = Array.from(section.querySelectorAll('img')).filter((i) => !form.contains(i) && !i.closest(SKIP) && !otherProduct(i) && big(i as HTMLImageElement)) as HTMLImageElement[]
+        if (imgs.length >= 2) break
+      }
+      if (!section || imgs.length < 2) return null
+      const key = (src: string) =>
+        (src.split('?')[0].split('/').pop() || src)
+          .replace(/_(\d+x\d*|\d*x\d+|pico|icon|thumb|small|compact|medium|large|grande|original|master)(?=\.)/i, '')
+          .replace(/\.(jpe?g|png|webp|avif|gif)$/i, '')
+          .replace(/^[-_]+/, '')
+          .toLowerCase()
+      const best = (img: HTMLImageElement) => {
+        const set = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '').split(',').map((x) => x.trim().split(/\s+/)[0]).filter(Boolean)
+        return img.currentSrc || set[set.length - 1] || img.getAttribute('data-src') || img.src
+      }
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const img of imgs) {
+        if (hiddenUpTo(img, section)) continue
+        const src = best(img)
+        if (!src || src.startsWith('data:')) continue
+        const k = key(src)
+        if (seen.has(k)) continue
+        seen.add(k)
+        out.push(src.startsWith('//') ? `https:${src}` : src)
+        if (out.length >= 12) break
+      }
+      const videos = Array.from(section.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"], [data-media-type*="video" i]')).filter((v) => !form.contains(v) && !v.closest(SKIP)).length
+      return { srcs: out, videos }
+    })
+    .catch(() => null)
+  if (!found || found.srcs.length < 2) return { count: found?.srcs.length || 0, videos: found?.videos || 0 }
+  // one picture: a numbered grid of every gallery image, 4 per row
+  const sheet = await page.browser().newPage()
+  try {
+    const cols = 4
+    const cell = 300
+    const rows = Math.ceil(found.srcs.length / cols)
+    await sheet.setViewport({ width: cols * (cell + 10) + 10, height: rows * (cell + 10) + 50 })
+    const small = (u: string) => (/cdn\.shopify|\/cdn\/shop\//.test(u) ? u.replace(/([?&])width=\d+/, '$1').replace(/[?&]$/, '') + (u.includes('?') ? '&' : '?') + 'width=600' : u)
+    const html = `<html><body style="margin:0;padding:10px;background:#fff;font:600 14px sans-serif">
+      <div style="height:30px">Product gallery: ${found.srcs.length} image${found.srcs.length > 1 ? 's' : ''}${found.videos ? ` + ${found.videos} video${found.videos > 1 ? 's' : ''}` : ''}, in page order</div>
+      <div style="display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:10px">${found.srcs
+        .map((u, i) => `<div style="position:relative;width:${cell}px;height:${cell}px;background:#f2f2f2"><img src="${small(u).replace(/"/g, '&quot;')}" style="width:100%;height:100%;object-fit:contain"><span style="position:absolute;left:6px;top:6px;background:#000;color:#fff;padding:2px 7px;border-radius:10px">${i + 1}</span></div>`)
+        .join('')}</div></body></html>`
+    await sheet.setContent(html, { waitUntil: 'load', timeout: 15000 }).catch(() => {})
+    const b64 = (await sheet.screenshot({ type: 'jpeg', quality: 70, encoding: 'base64', fullPage: true })) as string
+    return { tile: { label: `gallery overview: the ${found.srcs.length} images of the product gallery, as a shopper swipes through them`, dataUrl: `data:image/jpeg;base64,${b64}` }, count: found.srcs.length, videos: found.videos }
+  } catch {
+    return { count: found.srcs.length, videos: found.videos }
+  } finally {
+    await sheet.close().catch(() => {})
+  }
+}
+
 /**
  * Product pages hide a lot in tabs (Description / Ingrédients / Résultats): before/after sliders,
  * how-to steps, ingredient lists. Click each tab of the product content, read what it shows and
@@ -1222,6 +1328,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // share of the page the desktop tiles cover: phones get as far down the page (it is longer there)
     let desktopShare = 1
     let tabTiles: Tile[] = []
+    let galleryTile: Tile | undefined
     let desktopTiles: Tile[] = []
     // a page that navigates again after loading (geo or locale redirect, consent wall, app reload) destroys the
     // context we read from: nothing comes back. Settle and read once more; a page we still cannot read is
@@ -1246,6 +1353,9 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     }
     // product tabs: opened after the page screenshots, so those show the page as a shopper lands on it
     if (detectPageTypeFromUrl(finalUrl) === 'product') {
+      const gallery = await readGallery(desktop).catch(() => ({ count: 0, videos: 0 }) as { tile?: Tile; count: number; videos: number })
+      galleryTile = gallery.tile
+      ;(facts as Record<string, unknown>).gallery = { images: gallery.count, videos: gallery.videos }
       const tabs = await openTabs(desktop).catch(() => ({ tiles: [] as Tile[], text: '' }))
       tabTiles = tabs.tiles
       await desktop.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
@@ -1379,6 +1489,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       desktopTiles,
       mobileTiles,
       tabTiles,
+      galleryTile,
       cartHeader: cart.tile,
       cartTest: cart.note,
       cartView: desktopCartView,

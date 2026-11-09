@@ -16,8 +16,8 @@ import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
 /** Which part of the evidence each saved image is, so it can be rebuilt for a re-judge. */
-type ImageRole = 'desktop' | 'mobile' | 'tab' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
-type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'tabTiles' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
+type ImageRole = 'desktop' | 'mobile' | 'tab' | 'gallery' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
+type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'tabTiles' | 'galleryTile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
 
 const BUCKET = 'test-scans'
 
@@ -60,7 +60,7 @@ export type LabScan = {
   history?: { judgedAt: string; model?: string; answers: LabScan['answers'] }[]
 }
 
-const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'tabTiles', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
+const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'tabTiles', 'galleryTile', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
 
 function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   const out: { role: ImageRole; tile: Tile }[] = []
@@ -68,6 +68,7 @@ function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   add('desktop', ev.desktopTiles)
   add('mobile', ev.mobileTiles)
   add('tab', ev.tabTiles)
+  add('gallery', ev.galleryTile)
   add('mobileMenu', ev.mobileMenu)
   add('cartHeader', ev.cartHeader)
   add('emptyCart', ev.emptyCart)
@@ -224,6 +225,7 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
     desktopTiles: of('desktop'),
     mobileTiles: of('mobile'),
     tabTiles: of('tab'),
+    galleryTile: of('gallery')[0],
     mobileMenu: of('mobileMenu')[0],
     cartHeader: of('cartHeader')[0],
     emptyCart: of('emptyCart')[0],
