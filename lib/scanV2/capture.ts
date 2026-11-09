@@ -701,7 +701,9 @@ async function readGallery(page: Page, sheetToo = false): Promise<{ tile?: Tile;
  * how-to steps, ingredient lists. Click each tab of the product content, read what it shows and
  * screenshot it. Desktop only, at most 5 tabs, never in the header, footer or menus.
  */
-const TAB_WORDS = /^(description|details?|détails|ingr[ée]dients?|composition|r[ée]sultats?|results?|how to use|utilisation|mode d'emploi|conseils?( d'utilisation)?|application|usage|care|entretien|dimensions|specifications?|caractéristiques|materials?|matières|shipping|livraison|faq|questions|benefits|bienfaits|nutrition|ingrediënten|gebruik)$/i
+const TAB_NAMES = "(description|details?|détails|ingr[ée]dients?|composition|r[ée]sultats?|results?|how to use|utilisation|mode d'emploi|conseils?( d'utilisation)?|application|usage|care|entretien|dimensions|specifications?|caractéristiques|materials?|matières|shipping|livraison|faq|questions|benefits|bienfaits|nutrition|ingrediënten|gebruik|delivery|returns?|retours?|verzending)"
+/** Product tabs and info rows: one name ('Description'), two joined ('Shipping & Returns', 'Details and care'), or any short row about delivery ('DE Shipping - Fast & Reliable Delivery'). */
+const TAB_WORDS = new RegExp(`^(?:[a-z]{2} )?${TAB_NAMES}(?:\\s*(?:&|and|et|en|\\+|/|-)\\s*${TAB_NAMES})?$|\\b(shipping|delivery|livraison|verzending|lieferung)\\b`, 'i')
 async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
   const found = await page
     .evaluate((src: string) => {
@@ -712,7 +714,7 @@ async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
         if (out.length >= 5) break
         if (el.closest('header, footer, nav, dialog, [role="dialog"], [class*="drawer" i], [class*="menu" i]')) continue
         const name = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim()
-        if (!name || name.length > 40 || !words.test(name)) continue
+        if (!name || name.length > 45 || !words.test(name)) continue
         const r = el.getBoundingClientRect()
         if (r.width < 20 || r.height < 12 || el.querySelector('[role="tab"], button')) continue
         // a link to another page is navigation, not a tab
@@ -991,6 +993,47 @@ async function walled(page: Page) {
   return text.length < 1500 && (BOT_WALL.test(`${title} ${text}`) || /verify you are human|needs to be verified/i.test(text))
 }
 
+/**
+ * Speed apps (Avada, Hyperspeed, WP Rocket-style loaders) park the theme's scripts as type="text/lazyload"
+ * until a real visitor moves or taps. Our visit never does, so the theme stays in its no-JS state: variant
+ * pickers hidden, cart drawers and chat widgets never load. Nudge them like a visitor would, then run the
+ * parked scripts in page order. Consent-blocked scripts (type text/plain) are left alone.
+ */
+async function runDelayedScripts(page: Page) {
+  const DELAYED = 'script[type="text/lazyload"],script[type="lazyload"],script[type="rocketlazyloadscript"],script[type="text/rocketlazyloadscript"],script[type*="delay" i],script[type="text/speedyscript"],script[type="text/boostjs"]'
+  const parked = await page.evaluate((sel: string) => document.querySelectorAll(sel).length, DELAYED).catch(() => 0)
+  if (!parked) return
+  await page
+    .evaluate(() => {
+      for (const t of ['mousemove', 'mousedown', 'touchstart', 'keydown', 'scroll', 'wheel', 'pointerdown']) for (const x of [window, document]) x.dispatchEvent(new Event(t, { bubbles: true }))
+    })
+    .catch(() => {})
+  await new Promise((r) => setTimeout(r, 1500))
+  await page
+    .evaluate(async (sel: string) => {
+      const list = Array.from(document.querySelectorAll(sel)) as HTMLScriptElement[]
+      for (const old of list) {
+        const s = document.createElement('script')
+        for (const a of Array.from(old.attributes)) if (a.name !== 'type') s.setAttribute(a.name, a.value)
+        const src = old.getAttribute('src') || old.getAttribute('data-src')
+        if (src) {
+          s.src = src
+          s.async = false
+          await new Promise<void>((r) => {
+            s.onload = s.onerror = () => r()
+            old.replaceWith(s)
+            setTimeout(r, 3000)
+          })
+        } else {
+          s.textContent = old.textContent
+          old.replaceWith(s)
+        }
+      }
+    }, DELAYED)
+    .catch(() => {})
+  await page.waitForNetworkIdle({ idleTime: 600, timeout: 5000 }).catch(() => {})
+}
+
 async function open(page: Page, url: string) {
   let res = null
   try {
@@ -1000,6 +1043,7 @@ async function open(page: Page, url: string) {
     if (rendered < 500) throw e
   }
   await page.waitForNetworkIdle({ idleTime: 800, timeout: 7000 }).catch(() => {})
+  await runDelayedScripts(page)
   return res
 }
 
@@ -1308,6 +1352,7 @@ async function mobileMenu(page: Page, width: number, height: number): Promise<Ti
 async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<Tile[]> {
   const origin = new URL(page.url()).origin
   const res = await page.goto(`${origin}/cart`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null)
+  await runDelayedScripts(page)
   if (!res || res.status() >= 400) return []
   await page.waitForNetworkIdle({ idleTime: 600, timeout: 5000 }).catch(() => {})
   // some stores (headless, drawer-only) redirect /cart elsewhere: then there is no cart page
@@ -1429,6 +1474,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       const t = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
       if (t) emptyCart = { ...t, label: `desktop EMPTY cart, before anything was added (${/cart page\)$/.test(t.label) ? 'the cart page' : 'the cart drawer'})` }
       await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+      await runDelayedScripts(desktop)
       await desktop.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
       await cleanPage(desktop)
     }
@@ -1444,6 +1490,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     if (itemInCart && opts.extended && !desktopCartView) {
       // a drawer that did not open (slow theme script, a click that landed while the page was busy): reload, try once more
       await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+      await runDelayedScripts(desktop)
       await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
       await cleanPage(desktop)
       desktopCartView = await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined)
@@ -1511,6 +1558,16 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
+      // a chat widget (live or AI) in the page code: it often only draws its bubble after a delay or a scroll
+      mobileFacts.chatWidget = await mobile
+        .evaluate(() => {
+          const CHAT = /gorgias|tidio|zendesk|zdassets|intercom|crisp\.chat|livechat|shopify[-_ ]?inbox|shopifychat|inbox\.shopify|richpanel|reamaze|freshchat|kustomer|trengo|helpscout|chatra|tawk\.to|drift|hubspot.*conversations|siena|alby|rep\.ai|manifest\.ai|chatty|willdesk|helpcenter.*chat/i
+          const srcs = Array.from(document.querySelectorAll('script[src], iframe[src]')).map((e) => e.getAttribute('src') || '')
+          const ids = Array.from(document.querySelectorAll('[id], [class]')).slice(0, 4000).map((e) => `${e.id} ${typeof e.className === 'string' ? e.className : ''}`)
+          const hit = [...srcs, ...ids].find((x) => CHAT.test(x) || /(^|[\s_-])(chat-?widget|chat-?bubble|live-?chat|chat-?launcher)([\s_-]|$)/i.test(x))
+          return hit ? hit.slice(0, 80) : null
+        })
+        .catch(() => null)
       mobileFacts.cookieBanner = cookieBanner
       mobileFacts.popup = popup
       mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
@@ -1520,6 +1577,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         // back to a clean page before the cart (the open menu would sit over the cart icon)
         if (menuTile && itemInCart) {
           await mobile.goto(rawUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+      await runDelayedScripts(mobile)
           await mobile.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
           await cleanPage(mobile)
         }

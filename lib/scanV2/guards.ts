@@ -30,7 +30,9 @@ const GENERIC_NAV =
 function thresholdOnly(evidence: string) {
   const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)/i.test(evidence)
   const cost = /shipping (costs?|is|fee|rate|price)\s*:?\s*[$€£]\s?\d|[$€£]\s?\d+(?:[.,]\d+)?\s*(shipping|delivery)|(otherwise|below (that|this|it)|under (that|this|it))[^.]*[$€£]\s?\d|free shipping (is )?(applied|included|on (all|every))|shipping:\s*free/i.test(evidence)
-  return threshold && !cost
+  // "calculated at checkout" plus an estimator or a tax line is still no shipping cost
+  const later = /calculated (at|in) checkout|calculé(s)? (lors|à l'étape) |berekend bij|at checkout|estimate shipping|shipping estimator/i.test(evidence)
+  return (threshold || later) && !cost
 }
 
 /** The quoted header labels in the evidence, when the model listed them. */
@@ -45,7 +47,7 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
     if (!v || v.answer !== 'pass' || v.coveredByShopify) continue
 
     if (r.id === CART_SHIPPING_COST && thresholdOnly(v.evidence)) {
-      byId.set(r.id, { answer: 'fail', evidence: 'The cart only shows how far you are from free shipping; it does not say what shipping costs below that amount.', seen: v.seen, by: 'Code check' })
+      byId.set(r.id, { answer: 'fail', evidence: 'The cart does not say what shipping costs: it only shows a free-shipping threshold or says shipping is calculated at checkout.', seen: v.seen, by: 'Code check' })
       continue
     }
 

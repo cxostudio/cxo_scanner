@@ -302,6 +302,13 @@ export const MEASURED: Record<string, Measure> = {
   ),
   recUUD0aehm1xJOs6: (_ev: Evidence, f: F) => smallCatalog(f, 30),
 
+  // Does the product page have an option for potential customers to ask questions? (a chat widget in the page code)
+  recRbVoxG8qjJlszm: (ev: Evidence) => {
+    const chat = (ev as { mobileFacts?: { chatWidget?: string | null } }).mobileFacts?.chatWidget
+    if (chat) return { answer: 'pass', evidence: 'The page loads a chat widget, so shoppers can ask a question while they shop.' }
+    return null
+  },
+
   // Is the mobile search bar easy to access and use? (one tap in the mobile header, measured)
   recHkGvsYH1vmYzwt: (ev: Evidence, f: F) => {
     const small = smallCatalog(f, 20)
