@@ -223,7 +223,19 @@ function readGridAndNav(page: Page) {
     }
     const main = document.querySelector('main, #MainContent') as HTMLElement | null
     const soldOutAny = main ? ((main.innerText || '').match(new RegExp(SOLD.source, 'gi')) || []).length : null
-    return { activeNav, soldOutFirst, soldOutAny, headerCollections }
+    // the page heading a shopper can actually see near the top (a visually hidden H1 does not count)
+    let visibleHeading: string | null = null
+    const root = document.querySelector('main, #MainContent') || document.body
+    for (const h of Array.from(root.querySelectorAll('h1, h2'))) {
+      const r = h.getBoundingClientRect()
+      const cs = getComputedStyle(h)
+      const text = ((h as HTMLElement).innerText || '').trim()
+      if (!text || r.width < 20 || r.height < 10 || r.top + scrollY > 900) continue
+      if (cs.visibility === 'hidden' || Number(cs.opacity) < 0.1 || cs.clip === 'rect(0px, 0px, 0px, 0px)' || /sr-only|visually-hidden|visuallyhidden/i.test(h.className)) continue
+      visibleHeading = text.slice(0, 80)
+      break
+    }
+    return { activeNav, soldOutFirst, soldOutAny, headerCollections, visibleHeading }
   })
 }
 

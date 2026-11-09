@@ -316,6 +316,13 @@ export const MEASURED: Record<string, Measure> = {
     return null
   },
 
+  // Does the category page have a clear and descriptive category heading? No visible heading near the top fails.
+  recKToQ0snBXyfpCo: (_ev: Evidence, f: F) => {
+    if (f.visibleHeading === null && 'visibleHeading' in f)
+      return { answer: 'fail', evidence: 'There is no visible heading at the top of the page: shoppers do not see the name of the category they are in.' }
+    return null
+  },
+
   // Are "Out of Stock" products clearly marked or hidden from the primary view? Sold-out cards up front fail.
   recbh9OAh8JWdqt7U: (_ev: Evidence, f: F) => {
     if (typeof f.soldOutFirst === 'number' && f.soldOutFirst >= 2)
