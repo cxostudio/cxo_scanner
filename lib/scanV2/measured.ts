@@ -302,6 +302,16 @@ export const MEASURED: Record<string, Measure> = {
   ),
   recUUD0aehm1xJOs6: (_ev: Evidence, f: F) => smallCatalog(f, 30),
 
+  // Is the mobile search bar easy to access and use? (one tap in the mobile header, measured)
+  recHkGvsYH1vmYzwt: (ev: Evidence, f: F) => {
+    const small = smallCatalog(f, 20)
+    if (small) return small
+    const m = (ev as { mobileFacts?: { headerSearch?: boolean | null } }).mobileFacts?.headerSearch
+    if (m === true) return { answer: 'pass', evidence: 'On mobile, search is one tap away in the header.' }
+    if (m === false) return { answer: 'fail', evidence: 'On mobile, there is no search icon in the header: shoppers have to open the menu or scroll to find search.' }
+    return null
+  },
+
   // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
   recEgJJ3Ja7iD3B63: (ev, f) => {
     if (!ev.isShopify || !f.footer) return null

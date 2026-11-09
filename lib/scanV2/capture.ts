@@ -128,6 +128,33 @@ export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
     .catch(() => {})
 }
 
+/**
+ * Mobile: is search one tap away in the header bar (icon, button or field), without opening the menu?
+ * null when no header bar is found, so the model decides.
+ */
+async function measureHeaderSearch(page: Page): Promise<boolean | null> {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  await new Promise((r) => setTimeout(r, 300))
+  return page.evaluate(() => {
+    const vw = window.innerWidth
+    const bar = Array.from(document.querySelectorAll('header, [role="banner"], #shopify-section-header, [class*="header" i]')).find((e) => {
+      const r = e.getBoundingClientRect()
+      return r.top < 80 && r.bottom > 30 && r.height < 220 && r.width > vw * 0.8
+    })
+    if (!bar) return null
+    const top = bar.getBoundingClientRect().bottom + 10
+    const SEARCH = /search|zoek|recherch|suche|buscar|cerca/i
+    return Array.from(document.querySelectorAll('a, button, input, [role="button"], summary, details-modal, predictive-search')).some((el) => {
+      const r = el.getBoundingClientRect()
+      const s = getComputedStyle(el)
+      if (!(r.width > 8 && r.height > 8 && r.top >= 0 && r.top < top && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.1)) return false
+      if (el.closest('[aria-modal="true"], dialog, [class*="drawer" i]:not(header *)')) return false
+      const meta = [el.getAttribute('aria-label'), el.getAttribute('href'), el.getAttribute('class'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('type'), el.getAttribute('name'), el.tagName, el.querySelector('svg')?.getAttribute('class'), el.querySelector('use')?.getAttribute('href'), (el as HTMLElement).innerText].join(' ')
+      return SEARCH.test(meta) || (el as HTMLInputElement).type === 'search'
+    })
+  })
+}
+
 async function scrollForLazyContent(page: Page) {
   await page
     .evaluate(async () => {
@@ -1483,6 +1510,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * desktopShare) / MOBILE.height)))
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
+      mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
       mobileFacts.cookieBanner = cookieBanner
       mobileFacts.popup = popup
       mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
