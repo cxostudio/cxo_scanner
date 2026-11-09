@@ -137,12 +137,15 @@ async function measureHeaderSearch(page: Page): Promise<boolean | null> {
   await new Promise((r) => setTimeout(r, 300))
   return page.evaluate(() => {
     const vw = window.innerWidth
-    const bar = Array.from(document.querySelectorAll('header, [role="banner"], #shopify-section-header, [class*="header" i]')).find((e) => {
+    // the header bar is the one holding the cart (an announcement bar above it also matches 'header' classes)
+    const bars = Array.from(document.querySelectorAll('header, [role="banner"], #shopify-section-header, [class*="header" i]')).filter((e) => {
       const r = e.getBoundingClientRect()
-      return r.top < 80 && r.bottom > 30 && r.height < 220 && r.width > vw * 0.8
+      return r.top < 120 && r.bottom > 30 && r.height < 240 && r.width > vw * 0.8
     })
+    const bar = bars.find((e) => e.querySelector('a[href*="/cart"], [class*="cart" i]')) || bars.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0]
     if (!bar) return null
-    const top = bar.getBoundingClientRect().bottom + 10
+    // some headers report a tiny box (sticky wrappers): look at least 140px down, never past 220px
+    const top = Math.min(220, Math.max(140, ...bars.map((b) => b.getBoundingClientRect().bottom + 10)))
     const SEARCH = /search|zoek|recherch|suche|buscar|cerca/i
     return Array.from(document.querySelectorAll('a, button, input, [role="button"], summary, details-modal, predictive-search')).some((el) => {
       const r = el.getBoundingClientRect()
