@@ -32,7 +32,7 @@ const GENERIC_NAV =
 
 /** A threshold or progress bar alone ("Spend $14 to unlock free shipping") says nothing about the cost below it. */
 function thresholdOnly(evidence: string) {
-  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)|offerte? (dès|à partir)|gratuite? (dès|à partir)|plus que|gratis vanaf|kostenlos ab/i.test(evidence)
+  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)|offerte? (dès|à partir)|gratuite? (dès|à partir)|plus que|gratis vanaf|kostenlos ab|(possible|disponible|available) (dès|à partir de|from|vanaf)/i.test(evidence)
   const cost = /shipping (costs?|is|fee|rate|price)\s*:?\s*[$€£]\s?\d|[$€£]\s?\d+(?:[.,]\d+)?\s*(shipping|delivery)|(otherwise|below (that|this|it)|under (that|this|it))[^.]*[$€£]\s?\d|free shipping (is )?(applied|included|on (all|every))|shipping:\s*free/i.test(evidence)
   // "calculated at checkout" plus an estimator or a tax line is still no shipping cost
   const later = /calculated (at|in) checkout|calculé(s)? (lors|à l'étape) |berekend bij|at checkout|estimate shipping|shipping estimator/i.test(evidence)
@@ -54,7 +54,7 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
       continue
     }
     // login: fail only when the way in is a footer link; no entry point at all means the store does not promote accounts
-    if (v && r.id === LOGIN && v.answer === 'fail' && !/footer|pied de page|voettekst/i.test(v.evidence)) {
+    if (v && r.id === LOGIN && v.answer === 'fail' && !/(only|just|solely)[^.]{0,40}(footer|pied de page|voettekst)|(footer|pied de page)[^.]{0,30}(link|lien)[^.]{0,30}(only|seul)|in the footer(?! either)(?![^.]*\bno\b)/i.test(v.evidence.replace(/no [^.]{0,60}(found )?in the footer/gi, ''))) {
       byId.set(r.id, { answer: 'na', evidence: 'There is no account entry point on the page, so the store does not promote customer accounts.', seen: v.seen, by: 'Code check' })
       continue
     }
