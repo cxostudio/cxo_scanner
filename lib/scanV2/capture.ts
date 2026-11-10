@@ -1560,11 +1560,11 @@ async function remoteCheckout(shopPage: Page): Promise<{ desktop?: { tiles: Tile
     )
     .catch(() => [])
   if (!items.length) return { desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }
-  const res = await fetch('https://api.browserbase.com/v1/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-BB-API-Key': key },
-    body: JSON.stringify({ projectId, proxies: true, browserSettings: { solveCaptchas: true } }),
-  }).catch(() => null)
+  const open = (body: object) =>
+    fetch('https://api.browserbase.com/v1/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BB-API-Key': key }, body: JSON.stringify(body) }).catch(() => null)
+  // proxies and captcha solving are paid features: on a plan without them (402), take a plain session
+  let res = await open({ projectId, proxies: true, browserSettings: { solveCaptchas: true } })
+  if (res && res.status === 402) res = await open({ projectId })
   const session = res && res.ok ? ((await res.json()) as { id: string; connectUrl: string }) : null
   if (!session?.connectUrl) return { desktop: { tiles: [], note: `remote browser unavailable (${res?.status ?? 'no response'})` }, mobile: [] }
   const browser = await puppeteer.connect({ browserWSEndpoint: session.connectUrl }).catch(() => null)
