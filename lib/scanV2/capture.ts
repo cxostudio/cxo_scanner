@@ -1509,7 +1509,7 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
     })
     .catch(() => ({ bot: false, form: false, url: '', text: '' }))
   if (state.bot) return { tiles: [], note: 'checkout shows a bot check to automated visits' }
-  if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname})` }
+  if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
   const all = await tiles(page, `${device} checkout`, width, height, max)
   return {
     tiles: all.filter((t) => !/footer|page bottom/i.test(t.label)).map((t) => ({ ...t, label: t.label.replace(`${device} checkout screenshot`, `${device} CHECKOUT first step screenshot`) })),
