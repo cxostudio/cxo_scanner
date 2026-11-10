@@ -83,6 +83,75 @@ const JPEG_QUALITY = 55
 const BOT_WALL = /verify you are human|are you a robot|security check(point)?|checking your browser|attention required|access denied|captcha|just a moment\.\.\.|pardon our interruption|request unsuccessful/i
 const NOT_FOUND = /\b404\b|page not found|pagina niet gevonden|page introuvable|página no encontrada|seite nicht gefunden|pagina non trovata/i
 
+/**
+ * Does the hero change by itself? Screenshots cannot show motion, so read what is visible in the hero
+ * (below the header and announcement bar) twice, 7 seconds apart, without touching the page.
+ * A video playing does not count as a slide change; a rotating announcement bar is outside the zone.
+ */
+async function heroMotion(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  const read = () =>
+    page.evaluate(() => {
+      const vh = window.innerHeight
+      const top = 140
+      const seen: string[] = []
+      const inZone = (r: DOMRect) => r.width > 120 && r.height > 60 && r.bottom > top + 40 && r.top < vh && r.left < window.innerWidth && r.right > 0
+      const shown = (el: Element) => {
+        let n: Element | null = el
+        while (n && n !== document.body) {
+          const cs = getComputedStyle(n)
+          if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.2 || cs.position === 'fixed') return false
+          n = n.parentElement
+        }
+        return true
+      }
+      for (const img of Array.from(document.images)) {
+        const r = img.getBoundingClientRect()
+        if (inZone(r) && shown(img)) seen.push(`img:${(img.currentSrc || img.src).split('?')[0].slice(-80)}@${Math.round(r.left / 20)}`)
+      }
+      for (const h of Array.from(document.querySelectorAll('h1,h2,h3,p,a.button,a[class*="btn"],button'))) {
+        const r = h.getBoundingClientRect()
+        const t = (h as HTMLElement).innerText?.trim()
+        if (t && t.length < 120 && r.top > top && r.top < vh && r.left >= 0 && r.right <= window.innerWidth && shown(h)) seen.push(`t:${t}`)
+      }
+      const zone = Array.from(document.querySelectorAll('*')).filter((el) => {
+        const r = el.getBoundingClientRect()
+        return r.top < vh && r.bottom > top && r.height > 200
+      })
+      const lib = zone.map((el) => (typeof el.className === 'string' ? el.className : '')).join(' ').match(/\b(swiper|slick|splide|flickity|glide|owl-carousel|keen-slider|slideshow|carousel|slider)\b/i)
+      const pause = Array.from(document.querySelectorAll('button,[role="button"]')).some((b) => {
+        const r = b.getBoundingClientRect()
+        const l = `${b.getAttribute('aria-label') || ''} ${(b as HTMLElement).innerText || ''}`
+        return r.top < vh && /pause|stop (the )?(slide|rotation|autoplay)/i.test(l)
+      })
+      const video = Array.from(document.querySelectorAll('video')).some((v) => {
+        const r = v.getBoundingClientRect()
+        return inZone(r) && shown(v)
+      })
+      return { seen: [...new Set(seen)].sort(), lib: lib ? lib[1].toLowerCase() : null, pause, video }
+    })
+  const a = await read().catch(() => null)
+  if (!a) return undefined
+  await new Promise((r) => setTimeout(r, 7000))
+  const b = await read().catch(() => null)
+  if (!b) return undefined
+  const before = new Set(a.seen)
+  const after = new Set(b.seen)
+  const appeared = [...after].filter((x) => !before.has(x))
+  const gone = [...before].filter((x) => !after.has(x))
+  const changed = appeared.length + gone.length >= 2 && appeared.length > 0 && gone.length > 0
+  return {
+    changedByItself: changed,
+    note: changed
+      ? 'Between two readings 7 seconds apart, without any scroll or click, the hero showed different images or text: it rotates on its own.'
+      : 'Between two readings 7 seconds apart, without any scroll or click, the hero stayed the same: it does not rotate on its own within 7 seconds.',
+    sliderLibrary: a.lib,
+    pauseButton: a.pause,
+    heroVideo: a.video,
+    examples: changed ? { before: gone.slice(0, 3), after: appeared.slice(0, 3) } : undefined,
+  }
+}
+
 /** Accept cookie banners (multilingual), close popups, unroll inner scroll wrappers. */
 export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
   const unroll = opts.unroll !== false
@@ -1780,6 +1849,9 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       throw new PageCheckError('redirected', 'This link redirects away from the product page (the product may be gone). Try another product URL.')
 
     await cleanPage(desktop)
+    // homepages only: does the hero rotate by itself (screenshots cannot show it)
+    const homePath = /^\/([a-z]{2}([-_][a-z]{2})?\/?)?$/i.test(new URL(finalUrl).pathname)
+    const motion = homePath ? await heroMotion(desktop).catch(() => undefined) : undefined
     await scrollForLazyContent(desktop)
     await cleanPage(desktop)
     let facts: Record<string, unknown> = {}
@@ -1806,6 +1878,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         return {}
       })
       Object.assign(facts, await readGridAndNav(desktop).catch(() => ({})))
+      if (motion) facts.heroMotion = motion
       text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
       hiddenText = await readHiddenText(desktop)
       desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
