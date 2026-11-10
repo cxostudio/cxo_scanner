@@ -30,8 +30,8 @@ export const MEASURED: Record<string, Measure> = {
     if (!t || t.total < 15) return null
     const share = t.small / t.total
     const ex = t.examples?.length ? ` (for example ${t.examples.slice(0, 3).map((e: string) => `"${e}"`).join(', ')})` : ''
-    if (share <= 0.1) return { answer: 'pass', evidence: `On a phone, ${t.total - t.small} of ${t.total} buttons and links are at least 24px in their smallest dimension; only ${t.small} are smaller.` }
-    if (share >= 0.25 && t.small >= 8) return { answer: 'fail', evidence: `On a phone, ${t.small} of ${t.total} buttons and links are under 24px in their smallest dimension${ex}, small enough to cause mis-taps.` }
+    if (share <= 0.05) return { answer: 'pass', evidence: `On a phone, ${t.total - t.small} of ${t.total} buttons and links are big enough or spaced far enough apart to tap without hitting a neighbor.` }
+    if (share >= 0.15 && t.small >= 6) return { answer: 'fail', evidence: `On a phone, ${t.small} of ${t.total} buttons and links are under 24px with another target right next to them${ex}, which causes mis-taps.` }
     return null
   },
 
@@ -62,7 +62,7 @@ export const MEASURED: Record<string, Measure> = {
     if (!Array.isArray(files) || !Array.isArray(fam)) return null
     const old = files.filter((u) => /\.(ttf|otf|eot)$/i.test(u)).length
     if (files.length >= 12 || fam.length >= 5 || old > 0)
-      return { answer: 'fail', evidence: `The page loads ${files.length} font files${fam.length ? ` across ${fam.length} families (${fam.slice(0, 4).join(', ')})` : ''}${old ? `, ${old} of them in older formats instead of WOFF2` : ''}. Fewer fonts show text sooner.` }
+      return { answer: 'fail', evidence: `The page loads ${files.length} font files${fam.length ? ` across ${fam.length} famil${fam.length === 1 ? 'y' : 'ies'} (${fam.slice(0, 4).join(', ')})` : ''}${old ? `, ${old} of them in older formats instead of WOFF2` : ''}. Fewer fonts show text sooner.` }
     if (files.length <= 8 && fam.length <= 3) return { answer: 'pass', evidence: `The page loads ${files.length} font files${fam.length ? ` for ${fam.length} famil${fam.length === 1 ? 'y' : 'ies'} (${fam.join(', ')})` : ''}, in modern formats.` }
     return null
   },

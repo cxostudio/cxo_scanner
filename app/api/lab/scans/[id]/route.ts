@@ -1,6 +1,6 @@
 // One test scan for labelling. The scanner's answers stay hidden until ?reveal=1, so labels are blind.
 import { NextRequest, NextResponse } from 'next/server'
-import { deleteTestScan, getHiddenText, getLabels, getModes, getNotes, isBlindCheck, getTestScan, imageUrls, labAllowed, labelQueue, lastReadError } from '@/lib/lab/store'
+import { deleteTestScan, loadEvidence, getHiddenText, getLabels, getModes, getNotes, isBlindCheck, getTestScan, imageUrls, labAllowed, labelQueue, lastReadError } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -12,6 +12,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (!scan) return NextResponse.json({ error: 'Scan not found', detail: lastReadError }, { status: 404 })
     const [labels, notes, urls, hiddenText, modes] = await Promise.all([getLabels(scan.id), getNotes(scan.id), imageUrls(scan), getHiddenText(scan.id), getModes(scan.id)])
     const reveal = req.nextUrl.searchParams.get('reveal') === '1'
+    // ?facts=1 (with reveal): the measured page facts, to check a measurement
+    if (reveal && req.nextUrl.searchParams.get('facts') === '1') {
+      const ev = await loadEvidence(scan)
+      return NextResponse.json({ id: scan.id, facts: ev?.facts ?? null, mobileFacts: ev?.mobileFacts ?? null })
+    }
     // history holds earlier answers: never sent, or labelling would not be blind
     const { history, rules: _rules, ...rest } = scan
     return NextResponse.json({

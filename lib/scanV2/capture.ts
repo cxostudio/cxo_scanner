@@ -299,11 +299,18 @@ async function mobileProbes(page: Page) {
         if (el.tagName === 'A' && p && (p.textContent || '').trim().length > ((el as HTMLElement).innerText || '').trim().length + 20) return false
         return true
       })
-      const small = els.filter((el) => {
+      // on screen horizontally (closed side menus keep a box off to the side)
+      const onScreen = els.filter((el) => {
         const r = el.getBoundingClientRect()
-        return Math.min(r.width, r.height) < 24
+        return r.right > 0 && r.left < window.innerWidth
       })
-      return { total: els.length, small: small.length, examples: small.slice(0, 5).map((el) => ((el as HTMLElement).innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 30)) }
+      const centers = onScreen.map((el) => {
+        const r = el.getBoundingClientRect()
+        return { el, x: r.left + r.width / 2, y: r.top + window.scrollY + r.height / 2, min: Math.min(r.width, r.height) }
+      })
+      // WCAG 2.2 target size: under 24px is only a problem when another target sits within 24px of its centre
+      const small = centers.filter((c) => c.min < 24 && centers.some((o) => o !== c && Math.hypot(o.x - c.x, o.y - c.y) < 24))
+      return { total: onScreen.length, small: small.length, examples: small.slice(0, 5).map((c) => ((c.el as HTMLElement).innerText || c.el.getAttribute('aria-label') || c.el.tagName).trim().slice(0, 30)) }
     })
     .catch(() => null)
   out.header = await (async () => {
