@@ -21,6 +21,24 @@ const PAGE: Record<string, string> = {
 }
 const ORDER = ['Home', 'Header, footer and navigation', 'Category', 'Product', 'Cart', 'Checkout', 'Search', 'Thank you']
 const VERDICTS = ['To review', 'Approved', 'Changes needed'] as const
+const PROPOSED: Record<string, string> = {
+  title: 'Proposed title',
+  pass: 'Proposed pass when',
+  fail: 'Proposed fail when',
+  na: 'Proposed not relevant when',
+  fix: 'Proposed short fix',
+  actions: 'Proposed required actions',
+  why: 'Proposed justification',
+}
+const LIVE: Record<string, string> = {
+  title: 'Conversion Checkpoint',
+  pass: 'Pass when',
+  fail: 'Fail when',
+  na: 'Not relevant when',
+  fix: 'Short fix',
+  actions: 'Required Actions',
+  why: 'Justifications & Benefits',
+}
 
 const apiUrl = () => process.env.API_URL ?? 'https://api.airtable.com/v0/app1HP8C17pAMjacf/Conversion%20Checkpoints'
 
@@ -123,16 +141,40 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
-  const body = (await req.json().catch(() => ({}))) as { id?: string; rewrite?: string; comment?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    id?: string
+    rewrite?: string
+    comment?: string
+    notes?: string
+    /** proposed texts, written by Claude for review (lab only) */
+    proposed?: Partial<Record<keyof ReviewText, string | null>>
+    /** copy the proposed texts into the live fields the report reads, and mark the rewrite Applied */
+    apply?: boolean
+  }
   if (!body.id || !/^rec[A-Za-z0-9]{14}$/.test(body.id)) return NextResponse.json({ error: 'Need a checkpoint id.' }, { status: 400 })
+  const apiKey = process.env.API_KEY
+  if (!apiKey) return NextResponse.json({ error: 'API_KEY missing on this deployment.' }, { status: 500 })
   const fields: Record<string, unknown> = {}
   if (body.rewrite !== undefined) {
     if (!VERDICTS.includes(body.rewrite as (typeof VERDICTS)[number])) return NextResponse.json({ error: 'Unknown verdict.' }, { status: 400 })
     fields['Rewrite'] = body.rewrite
   }
   if (body.comment !== undefined) fields['Rewrite comment'] = String(body.comment).slice(0, 5000)
-  const apiKey = process.env.API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'API_KEY missing on this deployment.' }, { status: 500 })
+  if (body.notes !== undefined) fields['Rewrite notes'] = String(body.notes).slice(0, 5000)
+  for (const [k, v] of Object.entries(body.proposed || {})) {
+    const name = PROPOSED[k as keyof ReviewText]
+    if (name) fields[name] = v
+  }
+  if (body.apply) {
+    // only an approved rewrite goes live, from the record as it is in Airtable now
+    const cur = await fetch(`${getListRecordsBaseUrl(apiUrl())}/${body.id}`, { headers: { Authorization: `Bearer ${apiKey}` }, cache: 'no-store' })
+    const rec = (await cur.json().catch(() => null)) as AirtableSingleRecord | null
+    if (!cur.ok || !rec) return NextResponse.json({ error: 'Could not read the checkpoint.' }, { status: 502 })
+    const item = toItem(rec)
+    if (item.rewrite !== 'Approved') return NextResponse.json({ error: `Not approved (${item.rewrite || 'no rewrite'}).` }, { status: 409 })
+    for (const k of Object.keys(LIVE) as (keyof ReviewText)[]) fields[LIVE[k]] = item.proposed[k]
+    fields['Rewrite'] = 'Applied'
+  }
   const res = await fetch(`${getListRecordsBaseUrl(apiUrl())}/${body.id}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
