@@ -52,7 +52,7 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>, catalogSi
     // empty cart: one button back to the shop ('Shop our bestsellers') is a pass only for a small catalog (under 10 products)
     if (v && r.id === EMPTY_CART && v.answer === 'pass' && !(typeof catalogSize === 'number' && catalogSize < 10)) {
       const outside = v.evidence.replace(/['"‘“][^'"’”]{1,60}['"’”]/g, ' ')
-      if (/button|link/i.test(outside) && !/products?|items?|categor|recommend|recently viewed|suggest|carousel|grid|tiles?|collections|thumbnails?|images of/i.test(outside)) {
+      if (/\b(a|one|single)\b[^.]{0,40}\b(button|link)\b/i.test(outside) && !/buttons|links|products?|items?|categor|recommend|recently viewed|suggest|carousel|grid|tiles?|collections|thumbnails?|images of/i.test(outside)) {
         byId.set(r.id, { answer: 'fail', evidence: 'The empty cart only offers a button back to the shop, with no products or categories to start again from.', seen: v.seen, by: 'Code check' })
         continue
       }
