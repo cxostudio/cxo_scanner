@@ -1584,14 +1584,14 @@ function shippingLines(text: string): string[] {
 }
 
 /** The product's first available variant as a permalink part, read from Shopify's product JSON. */
-function firstVariant(shopPage: Page): Promise<string[]> {
+function firstVariant(shopPage: Page, productPath: string): Promise<string[]> {
   return shopPage
-    .evaluate(async () => {
-      const path = location.pathname.replace(/\/$/, '')
+    .evaluate(async (pp: string) => {
+      const path = pp.replace(/\/$/, '')
       const p = await fetch(`${path}.js`).then((r) => r.json()).catch(() => null)
       const v = p && (p.variants || []).find((x: { available: boolean }) => x.available)
       return v ? [`${v.id}:1`] : []
-    })
+    }, productPath)
     .catch(() => [])
 }
 
@@ -1867,8 +1867,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // runs alongside the mobile capture, capped, so the whole scan stays inside the function's time limit
     // when our add-to-cart click failed (bundle widgets, custom buttons), checkout can still be reached from
     // the product's own data: its first available variant, through the cart permalink
-    const remoteItems = opts.extended && process.env.BROWSERBASE_API_KEY && /\/products\//.test(new URL(desktop.url()).pathname)
-      ? await cartItems(desktop).then(async (items) => (items.length ? items : await firstVariant(desktop)))
+    const remoteItems = opts.extended && process.env.BROWSERBASE_API_KEY && /\/products\//.test(new URL(finalUrl).pathname)
+      ? await cartItems(desktop).then(async (items) => (items.length ? items : await firstVariant(desktop, new URL(finalUrl).pathname)))
       : null
     const remoteOrigin = new URL(desktop.url()).origin
     const remoteCountry = remoteItems ? await marketCountry(desktop) : undefined
