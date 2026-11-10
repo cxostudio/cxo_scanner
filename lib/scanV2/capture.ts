@@ -1526,6 +1526,14 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   // express buttons (Shop Pay, Apple Pay, PayPal) render last: give them a moment
   await new Promise((r) => setTimeout(r, 2500))
   if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
+  // Shopify's checkout scrolls inside a column, so the document looks one screen tall: grow the viewport to the content
+  const inner = await page
+    .evaluate(() => Math.max(...Array.from(document.querySelectorAll('body, body *')).map((e) => (e as HTMLElement).scrollHeight || 0)))
+    .catch(() => 0)
+  if (inner > height + 50) {
+    await page.setViewport({ width, height: Math.min(inner, height * (max + 1)), deviceScaleFactor: 1, isMobile: device === 'mobile', hasTouch: device === 'mobile' }).catch(() => {})
+    await new Promise((r) => setTimeout(r, 800))
+  }
   const all = await tiles(page, `${device} checkout`, width, height, max)
   return {
     // the checkout's own footer holds the policy links (refund, privacy, terms): keep it
@@ -1720,7 +1728,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const desktopCheckout = remote
       ? remote.desktop
       : itemInCart && opts.extended
-        ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
+        ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).then((r) => (r.note ? { ...r, note: `our browser: ${r.note}` } : r)).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
         : undefined
     await desktop.close().catch(() => {})
 
