@@ -1520,7 +1520,8 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
       return { bot, form, url: location.href, text: (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 6000) }
     })
     .catch(() => ({ bot: false, form: false, url: '', text: '' }))
-  if (state.bot) return { tiles: [], note: 'the checkout refused our automated visit (bot check or error page)' }
+  // a form on screen means we got in: Shopify's own checkout carries hCaptcha / reCAPTCHA notices
+  if (state.bot && !state.form) return { tiles: [], note: `the checkout refused our automated visit (bot check or error page); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
   // express buttons (Shop Pay, Apple Pay, PayPal) render last: give them a moment
   await new Promise((r) => setTimeout(r, 2500))
   if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
