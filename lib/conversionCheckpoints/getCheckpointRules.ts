@@ -41,7 +41,7 @@ export type ScanRule = {
   impact?: number
 }
 
-type AirtableSingleRecord = {
+export type AirtableSingleRecord = {
   id: string
   createdTime?: string
   fields?: Record<string, unknown>
@@ -164,7 +164,7 @@ type ListResponse = {
  * Fetches all records matching `filterByFormula`, following `offset` pagination.
  * Retries on 429 / Airtable rate-limit payloads with exponential backoff.
  */
-async function fetchAllRecordsForFormula(
+export async function fetchAllRecordsForFormula(
   listBaseUrl: string,
   apiKey: string,
   filterByFormula: string,

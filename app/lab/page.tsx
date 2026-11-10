@@ -136,9 +136,14 @@ export default function LabHome() {
         <header className="flex flex-col gap-2">
           <p className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
             Scanner test lab
-            <Link href={`/admin/leads${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
-              Leads →
-            </Link>
+            <span className="flex gap-4">
+              <Link href={`/lab/review${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
+                Review rewrites →
+              </Link>
+              <Link href={`/admin/leads${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
+                Leads →
+              </Link>
+            </span>
           </p>
           <h1 className="font-[family-name:var(--font-display)] text-[32px] font-bold tracking-[-0.03em]">Label blind, then measure</h1>
           <p className="max-w-[680px] text-sm leading-relaxed text-[var(--text-muted)]">
