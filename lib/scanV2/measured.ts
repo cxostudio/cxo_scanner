@@ -42,7 +42,7 @@ export const MEASURED: Record<string, Measure> = {
     const n = p.linkRedirects.redirected.length
     if (p.entryRedirects >= 2) return { answer: 'fail', evidence: `Opening the page went through ${p.entryRedirects} redirects before landing, which adds a delay to every visit from that link.` }
     if (n >= 3) return { answer: 'fail', evidence: `${n} of ${p.linkRedirects.checked} menu and footer links redirect before landing (e.g. ${p.linkRedirects.redirected.slice(0, 2).join(', ')}): point them at the final URL.` }
-    if (n === 0 && p.entryRedirects <= 1) return { answer: 'pass', evidence: `The ${p.linkRedirects.checked} menu and footer links we checked go straight to their page, without redirects.` }
+    if (n <= 1 && p.entryRedirects <= 1) return { answer: 'pass', evidence: n ? `${p.linkRedirects.checked - n} of the ${p.linkRedirects.checked} menu and footer links we checked go straight to their page; one redirects once.` : `The ${p.linkRedirects.checked} menu and footer links we checked go straight to their page, without redirects.` }
     return null
   },
 

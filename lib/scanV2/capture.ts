@@ -164,7 +164,7 @@ async function desktopProbes(page: Page, entryRedirects: number) {
       const here = location.origin
       const hrefs = Array.from(document.querySelectorAll('header a[href], nav a[href], footer a[href]'))
         .map((a) => (a as HTMLAnchorElement).href.split('#')[0])
-        .filter((h) => h.startsWith(here) && !/\/(cart|account|search|checkout)/.test(h))
+        .filter((h) => h.startsWith(here) && !/\/(cart|account|search|checkout|customer_authentication|login|logout|localization)/.test(h))
       const unique = Array.from(new Set(hrefs)).slice(0, 12)
       const redirected: string[] = []
       for (const u of unique) {
