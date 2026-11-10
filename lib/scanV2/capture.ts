@@ -1583,6 +1583,18 @@ function shippingLines(text: string): string[] {
   return out
 }
 
+/** The product's first available variant as a permalink part, read from Shopify's product JSON. */
+function firstVariant(shopPage: Page): Promise<string[]> {
+  return shopPage
+    .evaluate(async () => {
+      const path = location.pathname.replace(/\/$/, '')
+      const p = await fetch(`${path}.js`).then((r) => r.json()).catch(() => null)
+      const v = p && (p.variants || []).find((x: { available: boolean }) => x.available)
+      return v ? [`${v.id}:1`] : []
+    })
+    .catch(() => [])
+}
+
 /** The market the shopper browsed in (Shopify.country), so checkout is filled for the same country. */
 function marketCountry(shopPage: Page): Promise<string | undefined> {
   // the shop's own country (meta.json) is its home market; our browsers sit in the US, so Shopify.country
@@ -1853,7 +1865,11 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
     // checkout: in a Browserbase browser when configured (Shopify refuses ours), otherwise in ours
     // runs alongside the mobile capture, capped, so the whole scan stays inside the function's time limit
-    const remoteItems = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await cartItems(desktop) : null
+    // when our add-to-cart click failed (bundle widgets, custom buttons), checkout can still be reached from
+    // the product's own data: its first available variant, through the cart permalink
+    const remoteItems = opts.extended && process.env.BROWSERBASE_API_KEY && /\/products\//.test(new URL(desktop.url()).pathname)
+      ? await cartItems(desktop).then(async (items) => (items.length ? items : await firstVariant(desktop)))
+      : null
     const remoteOrigin = new URL(desktop.url()).origin
     const remoteCountry = remoteItems ? await marketCountry(desktop) : undefined
     const remoteP: Promise<RemoteCheckout> | null = remoteItems
