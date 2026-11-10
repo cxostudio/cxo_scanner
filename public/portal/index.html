@@ -874,7 +874,6 @@ async function loadSite(pw,d){
   sitePage=(site.pages.find(p=>p.items.length)||site.pages[0]||{}).page;
   renderSite();
 }
-const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function renderSite(){
   if(!site) return;
   const pages=site.pages;
