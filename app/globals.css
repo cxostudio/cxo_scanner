@@ -117,6 +117,15 @@
   padding-left: 24px;
 }
 
+/* "What to do" steps in checkpoint actions are numbered */
+.custom-list ol {
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 24px;
+}
+
 .custom-list a {
   color: #2563eb;
   font-weight: 500;
