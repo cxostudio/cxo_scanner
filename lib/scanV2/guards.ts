@@ -32,7 +32,7 @@ const GENERIC_NAV =
 
 /** A threshold or progress bar alone ("Spend $14 to unlock free shipping") says nothing about the cost below it. */
 function thresholdOnly(evidence: string) {
-  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)|offerte? (dès|à partir)|gratuite? (dès|à partir)|plus que|gratis vanaf|kostenlos ab|(possible|disponible|available) (dès|à partir de|from|vanaf)/i.test(evidence)
+  const threshold = /unlock|away from|spend|threshold|progress|qualif|to get free|for free shipping|free shipping (on|over|above|from)|offerte? (dès|à partir)|gratuite? (dès|à partir)|shipping\s*[$€£]\s?\d+(?:[.,]\d+)?\s*\+|shipping\s*\d+(?:[.,]\d+)?\s*[$€£]\s*\+|plus que|gratis vanaf|kostenlos ab|(possible|disponible|available) (dès|à partir de|from|vanaf)/i.test(evidence)
   const cost = /shipping (costs?|is|fee|rate|price)\s*:?\s*[$€£]\s?\d|[$€£]\s?\d+(?:[.,]\d+)?\s*(shipping|delivery)|(otherwise|below (that|this|it)|under (that|this|it))[^.]*[$€£]\s?\d|free shipping (is )?(applied|included|on (all|every))|shipping:\s*free/i.test(evidence)
   // "calculated at checkout" plus an estimator or a tax line is still no shipping cost
   const later = /calculated (at|in) checkout|calculé(s)? (lors|à l'étape) |berekend bij|at checkout|estimate shipping|shipping estimator/i.test(evidence)
