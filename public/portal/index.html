@@ -874,7 +874,6 @@ async function loadSite(pw,d){
   sitePage=(site.pages.find(p=>p.items.length)||site.pages[0]||{}).page;
   renderSite();
 }
-function renderSite(){
   if(!site) return;
   const pages=site.pages;
   document.getElementById('sitePages').innerHTML=pages.map(p=>`<button type="button" data-sp="${p.page}" aria-pressed="${p.page===sitePage}">${C.sitePages[p.page]||p.page}</button>`).join('');
@@ -886,7 +885,7 @@ function renderSite(){
   const items=pg.items.filter(i=>siteDev==='all'||i.device==='Both'||i.device.toLowerCase().startsWith(siteDev));
   const judged=items.filter(i=>i.status==='pass'||i.status==='fail');
   const passed=judged.filter(i=>i.status==='pass').length, toFix=judged.length-passed;
-  sum.innerHTML=`<span class="big">${judged.length?Math.round(passed/judged.length*100):0}%</span><span>${passed} / ${judged.length} ${C.siteScore}</span><span><b style="color:var(--ink)">${toFix}</b> ${C.siteToFix}</span><span>${C.siteScanned} ${dLong(pg.scannedAt)} · <a href="${esc(pg.url)}" target="_blank" rel="noopener">${esc(pg.url.replace(/^https?:\/\//,''))}</a></span>`;
+  sum.innerHTML=`<span class="big">${judged.length?Math.round(passed/judged.length*100):0}%</span><span>${passed} / ${judged.length} ${C.siteScore}</span><span><b style="color:var(--ink)">${toFix}</b> ${C.siteToFix}</span><span>${C.siteScanned} ${dLong(pg.scannedAt)} · <a href="${encodeURI(pg.url)}" target="_blank" rel="noopener">${esc(pg.url.replace(/^https?:\/\//,''))}</a></span>`;
   // fixes first (highest impact first), then done, then the rest; grouped by part of the page
   const rank={fail:0,pass:1,unknown:2,na:3};
   const areas=[...new Set(items.map(i=>i.area))];
