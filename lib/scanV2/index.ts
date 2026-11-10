@@ -142,7 +142,9 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   if (process.env.SCAN_FULL_GALLERY === '1' && !ev.galleryTiles) ev.galleryTiles = await galleryTiles(ev).catch(() => [])
   const settled = new Map<string, Answer & { coveredByShopify?: boolean }>()
   for (const r of rules) {
-    if (ev.isShopify && r.shopifyControl === 'Handled by Shopify') {
+    // checkout settings are the merchant's to change: once checkout is captured, judge them on what it shows
+    const seenCheckout = Boolean(ev.checkout?.length) && Boolean((r as { pageTypeIds?: string[] }).pageTypeIds?.includes('recOkHTZH3nxsQNMb'))
+    if (ev.isShopify && r.shopifyControl === 'Handled by Shopify' && !seenCheckout) {
       settled.set(r.id, { answer: 'pass', evidence: 'Shopify handles this by default.', coveredByShopify: true })
       continue
     }

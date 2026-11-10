@@ -1585,7 +1585,32 @@ function shippingLines(text: string): string[] {
 
 /** The market the shopper browsed in (Shopify.country), so checkout is filled for the same country. */
 function marketCountry(shopPage: Page): Promise<string | undefined> {
-  return shopPage.evaluate(() => (window as unknown as { Shopify?: { country?: string } }).Shopify?.country).catch(() => undefined)
+  // the shop's own country (meta.json) is its home market; our browsers sit in the US, so Shopify.country
+  // would often say US and show dollar prices the store's real shoppers never see
+  return shopPage
+    .evaluate(async () => {
+      const meta = await fetch('/meta.json').then((r) => r.json()).catch(() => null)
+      return (meta && meta.country) || (window as unknown as { Shopify?: { country?: string } }).Shopify?.country
+    })
+    .catch(() => undefined)
+}
+
+/** Switch the session to a market (country + currency) the Shopify way, before the cart is built. */
+async function setMarket(page: Page, origin: string, country?: string) {
+  if (!country) return
+  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+  await page
+    .evaluate(
+      (c) =>
+        fetch('/localization', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `form_type=localization&utf8=%E2%9C%93&_method=put&country_code=${encodeURIComponent(c)}&return_to=%2F`,
+          credentials: 'include',
+        }).catch(() => null),
+      country,
+    )
+    .catch(() => {})
 }
 
 /**
@@ -1675,6 +1700,7 @@ async function remoteCheckout(origin: string, items: string[], country?: string)
     const desk = (await browser.pages())[0] || (await browser.newPage())
     await desk.setViewport({ width: DESKTOP.width, height: DESKTOP.height, deviceScaleFactor: 1 })
     const entry = `${origin}/cart/${items.join(',')}`
+    await setMarket(desk, origin, country)
     const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2, entry, country).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
     let mobile: Tile[] = []
     if (desktop.tiles.length) {
