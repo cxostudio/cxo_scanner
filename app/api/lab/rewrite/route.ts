@@ -146,6 +146,8 @@ export async function POST(req: NextRequest) {
     rewrite?: string
     comment?: string
     notes?: string
+    /** what the scanner is asked (kept apart from the client title) */
+    question?: string
     /** proposed texts, written by Claude for review (lab only) */
     proposed?: Partial<Record<keyof ReviewText, string | null>>
     /** copy the proposed texts into the live fields the report reads, and mark the rewrite Applied */
@@ -161,6 +163,7 @@ export async function POST(req: NextRequest) {
   }
   if (body.comment !== undefined) fields['Rewrite comment'] = String(body.comment).slice(0, 5000)
   if (body.notes !== undefined) fields['Rewrite notes'] = String(body.notes).slice(0, 5000)
+  if (body.question !== undefined) fields['Scanner question'] = String(body.question).slice(0, 500)
   for (const [k, v] of Object.entries(body.proposed || {})) {
     const name = PROPOSED[k as keyof ReviewText]
     if (name) fields[name] = v

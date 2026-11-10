@@ -223,11 +223,11 @@ const DEVICE: Record<string, string> = {
 
 function describe(r: Rule): string {
   const desc = r.description.replace(/\s+/g, ' ').slice(0, r.pass ? 400 : 900)
-  if (!r.pass) return `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${desc}`
+  if (!r.pass) return `- id: ${r.id}\n  question: ${r.question || r.title}\n  what good looks like: ${desc}`
   const only = (r.niches || []).filter((n) => n !== 'All')
   return [
     `- id: ${r.id}`,
-    `  question: ${r.title}`,
+    `  question: ${r.question || r.title}`,
     `  device: ${DEVICE[r.device || 'Both'] || DEVICE.Both}`,
     // the exclusions first: the model otherwise passes on its first impression and skims the rest
     r.na ? `  not relevant when: ${r.na}` : '',

@@ -23,6 +23,8 @@ export type ScanRule = {
   area?: string
   device?: 'Both' | 'Desktop only' | 'Mobile only'
   method?: string
+  /** What the scanner is asked (Airtable "Scanner question"); the client title can change without moving accuracy. */
+  question?: string
   pass?: string
   fail?: string
   na?: string
@@ -111,6 +113,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     area: text('Page area'),
     device: device === 'Desktop only' || device === 'Mobile only' || device === 'Both' ? device : undefined,
     method: text('Check method'),
+    question: text('Scanner question'),
     pass: text('Pass when'),
     fail: text('Fail when'),
     na: text('Not relevant when'),
