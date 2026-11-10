@@ -1491,15 +1491,16 @@ async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number,
  * The first step of checkout, with the item already in the cart. We never type anything: no email, no
  * address, so no abandoned checkout is created and no recovery email is sent. Bot checks are reported, never guessed.
  */
-async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<{ tiles: Tile[]; note?: string; text?: string }> {
-  const origin = new URL(page.url()).origin
+async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number, entry?: string): Promise<{ tiles: Tile[]; note?: string; text?: string }> {
+  const origin = entry ? new URL(entry).origin : new URL(page.url()).origin
   // Shopify's checkout refuses obvious automation: look like the browser we are
   await page
     .evaluateOnNewDocument(() => {
       Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false })
     })
     .catch(() => {})
-  let res = await page.goto(`${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
+  // `entry`: a cart permalink (/cart/<variant>:<qty>), which builds the cart and lands on checkout by itself
+  let res = await page.goto(entry || `${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => null)
   if (!res) return { tiles: [], note: 'checkout did not load' }
   // "There was a problem with our checkout": one reload, as the page itself suggests
   await new Promise((r) => setTimeout(r, 2500))
@@ -1563,14 +1564,14 @@ async function remoteCheckout(shopPage: Page): Promise<{ desktop?: { tiles: Tile
   try {
     const desk = (await browser.pages())[0] || (await browser.newPage())
     await desk.setViewport({ width: DESKTOP.width, height: DESKTOP.height, deviceScaleFactor: 1 })
-    await desk.goto(`${origin}/cart/${items.join(',')}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-    const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
+    const entry = `${origin}/cart/${items.join(',')}`
+    const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2, entry).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
     let mobile: Tile[] = []
     if (desktop.tiles.length) {
       const mob = await browser.newPage()
       await mob.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
       await mob.setUserAgent(MOBILE_UA)
-      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
+      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2, entry).catch(() => ({ tiles: [] as Tile[] }))).tiles
     }
     return { desktop, mobile }
   } finally {
@@ -1715,7 +1716,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // the icon opened a drawer (or nothing): capture the cart page too
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
     // checkout: in a Browserbase browser when configured (Shopify refuses ours), otherwise in ours
-    const remote = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await remoteCheckout(desktop).catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] })) : null
+    const remote = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await remoteCheckout(desktop).then((r) => (r.desktop?.note ? { ...r, desktop: { ...r.desktop, note: `remote browser: ${r.desktop.note}` } } : r)).catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] })) : null
     const desktopCheckout = remote
       ? remote.desktop
       : itemInCart && opts.extended
