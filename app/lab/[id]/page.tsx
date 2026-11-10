@@ -82,7 +82,14 @@ export default function LabScan({ params }: { params: { id: string } }) {
         .then((raw: Scan) => {
           const s: Scan = {
             ...raw,
-            checkpoints: raw.checkpoints.filter((c) => !c.skip),
+            // ?only=checkout (or cart): label one part of the funnel without the rest of the page
+            checkpoints: raw.checkpoints.filter((c) => {
+              if (c.skip) return false
+              const only = new URLSearchParams(window.location.search).get('only')
+              if (only === 'checkout') return Boolean(c.pageTypeIds?.includes(CHECKOUT_PAGE_TYPE))
+              if (only === 'cart') return Boolean(c.pageTypeIds?.includes(CART_PAGE_TYPE) || c.area === 'Cart drawer')
+              return true
+            }),
             leftOut: { measured: raw.checkpoints.filter((c) => c.skip === 'measured').length, niche: raw.checkpoints.filter((c) => c.skip === 'niche').length },
           }
           setScan(s)
