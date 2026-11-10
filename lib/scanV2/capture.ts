@@ -152,6 +152,229 @@ async function heroMotion(page: Page) {
   }
 }
 
+/**
+ * Desktop checks screenshots cannot answer, read from the live page: redirects on the way in and on
+ * menu links, the tab title when the shopper switches tabs, an exit-intent pop-up, how inline links are
+ * styled, web fonts, and how videos are set up. Each part returns null when it cannot tell.
+ */
+async function desktopProbes(page: Page, entryRedirects: number) {
+  const out: Record<string, unknown> = { entryRedirects }
+  out.linkRedirects = await page
+    .evaluate(async () => {
+      const here = location.origin
+      const hrefs = Array.from(document.querySelectorAll('header a[href], nav a[href], footer a[href]'))
+        .map((a) => (a as HTMLAnchorElement).href.split('#')[0])
+        .filter((h) => h.startsWith(here) && !/\/(cart|account|search|checkout)/.test(h))
+      const unique = Array.from(new Set(hrefs)).slice(0, 12)
+      const redirected: string[] = []
+      for (const u of unique) {
+        try {
+          const r = await fetch(u, { method: 'GET', redirect: 'manual', credentials: 'same-origin' })
+          if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) redirected.push(u.replace(here, ''))
+        } catch {}
+      }
+      return { checked: unique.length, redirected }
+    })
+    .catch(() => null)
+  out.links = await page
+    .evaluate(() => {
+      const links = Array.from(document.querySelectorAll('main p a[href], main li a[href], article p a[href], [class*="rte" i] a[href], [class*="description" i] p a[href]')).filter((a) => {
+        const r = a.getBoundingClientRect()
+        const parentText = (a.parentElement?.innerText || '').trim()
+        return r.width > 0 && parentText.length > ((a as HTMLElement).innerText || '').trim().length + 15
+      })
+      if (links.length < 2) return null
+      let distinct = 0
+      for (const a of links.slice(0, 30)) {
+        const cs = getComputedStyle(a)
+        const ps = getComputedStyle(a.parentElement as Element)
+        const underline = cs.textDecorationLine.includes('underline') || cs.borderBottomStyle !== 'none'
+        const color = cs.color !== ps.color
+        const weight = Math.abs(Number(cs.fontWeight) - Number(ps.fontWeight)) >= 200
+        if (underline || color || weight) distinct++
+      }
+      return { inline: Math.min(links.length, 30), distinct }
+    })
+    .catch(() => null)
+  out.fontFamilies = await page
+    .evaluate(() => {
+      const fam = new Set<string>()
+      document.fonts.forEach((f) => {
+        if (f.status === 'loaded' && !/icon|awesome|material|symbol|glyph/i.test(f.family)) fam.add(f.family.replace(/["']/g, ''))
+      })
+      return Array.from(fam).slice(0, 12)
+    })
+    .catch(() => null)
+  out.videos = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('video'))
+        .filter((v) => !v.closest('header, footer'))
+        .slice(0, 8)
+        .map((v) => {
+          const r = v.getBoundingClientRect()
+          return {
+            autoplay: v.autoplay || v.hasAttribute('autoplay'),
+            muted: v.muted || v.hasAttribute('muted'),
+            poster: !!v.getAttribute('poster'),
+            preload: v.getAttribute('preload') || '',
+            lazy: !v.getAttribute('src') && !v.querySelector('source[src]'),
+            aboveFold: r.top + window.scrollY < window.innerHeight,
+          }
+        }),
+    )
+    .catch(() => null)
+  // the tab title when the shopper switches to another tab (the page is told it is hidden)
+  out.tabTitle = await page
+    .evaluate(async () => {
+      const before = document.title
+      try {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+        document.hasFocus = () => false
+      } catch {}
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('blur'))
+      await new Promise((r) => setTimeout(r, 2500))
+      const after = document.title
+      try {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false })
+      } catch {}
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+      return { before: before.slice(0, 80), after: after.slice(0, 80), changed: after !== before }
+    })
+    .catch(() => null)
+  // exit intent: the mouse leaves the page through the top edge; does an offer or reminder appear?
+  out.exitIntent = await page
+    .evaluate(async () => {
+      const big = () =>
+        Array.from(document.querySelectorAll('body *')).filter((el) => {
+          const cs = getComputedStyle(el)
+          if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.3) return false
+          const r = el.getBoundingClientRect()
+          return r.width * r.height > window.innerWidth * window.innerHeight * 0.12 && r.height > 120
+        }).length
+      const before = big()
+      const tools = /klaviyo|privy|optinmonster|justuno|wisepops|poptin|sumo|omnisend|getsitecontrol|optimonk|hellobar|popupsmart|attentive|postscript/i.test(Array.from(document.scripts).map((s) => s.src).join(' '))
+      for (const target of [document, document.documentElement, document.body]) {
+        target.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, clientX: 600, clientY: -5, relatedTarget: null }))
+        target.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, clientX: 600, clientY: -5, relatedTarget: null }))
+      }
+      await new Promise((r) => setTimeout(r, 2500))
+      return { shown: big() > before, popupTool: tools }
+    })
+    .catch(() => null)
+  return out
+}
+
+/** Phone checks: logo sharpness, tap target sizes, how the header behaves on scroll, email field types. */
+async function mobileProbes(page: Page) {
+  const out: Record<string, unknown> = {}
+  out.logo = await page
+    .evaluate(() => {
+      const head = document.querySelector('header') || document.body
+      const cands = Array.from(head.querySelectorAll('a[href="/"] img, a[href="/"] svg, [class*="logo" i] img, [class*="logo" i] svg, img[alt*="logo" i]'))
+      const el = cands.find((e) => e.getBoundingClientRect().width > 20)
+      if (!el) return null
+      const w = el.getBoundingClientRect().width
+      if (el.tagName.toLowerCase() === 'svg') return { kind: 'svg', width: Math.round(w) }
+      const img = el as HTMLImageElement
+      const src = img.currentSrc || img.src
+      if (/\.svg(\?|$)/i.test(src)) return { kind: 'svg', width: Math.round(w) }
+      const widths = (img.getAttribute('srcset') || '').split(',').map((c) => parseInt((c.trim().split(/\s+/)[1] || '').replace(/w$/, ''), 10)).filter((n) => n > 0)
+      const best = Math.max(img.naturalWidth || 0, ...widths)
+      return { kind: 'image', width: Math.round(w), bestSource: best, ratio: Math.round((best / w) * 10) / 10 }
+    })
+    .catch(() => null)
+  out.tapTargets = await page
+    .evaluate(() => {
+      const els = Array.from(document.querySelectorAll('a[href], button, input:not([type="hidden"]), select, [role="button"]')).filter((el) => {
+        const r = el.getBoundingClientRect()
+        if (r.width < 4 || r.height < 4) return false
+        const cs = getComputedStyle(el)
+        if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.2) return false
+        // links inside running text are exempt (WCAG target size exception)
+        const p = el.closest('p, li')
+        if (el.tagName === 'A' && p && (p.textContent || '').trim().length > ((el as HTMLElement).innerText || '').trim().length + 20) return false
+        return true
+      })
+      const small = els.filter((el) => {
+        const r = el.getBoundingClientRect()
+        return Math.min(r.width, r.height) < 24
+      })
+      return { total: els.length, small: small.length, examples: small.slice(0, 5).map((el) => ((el as HTMLElement).innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 30)) }
+    })
+    .catch(() => null)
+  out.header = await (async () => {
+    const read = () =>
+      page.evaluate(() => {
+        const cart = Array.from(document.querySelectorAll('a[href*="/cart"], [class*="cart" i] button, button[aria-label*="cart" i], button[aria-label*="bag" i], a[aria-label*="cart" i]')).find((e) => {
+          const r = e.getBoundingClientRect()
+          return r.width > 0 && r.height > 0
+        })
+        if (!cart) return null
+        let bar: Element | null = cart
+        let fixed: Element | null = null
+        for (let p: Element | null = cart; p && p !== document.body; p = p.parentElement) {
+          const pos = getComputedStyle(p).position
+          if (pos === 'fixed' || pos === 'sticky') fixed = p
+          bar = p
+        }
+        const box = (fixed || cart).getBoundingClientRect()
+        const r = cart.getBoundingClientRect()
+        return { visible: r.bottom > 0 && r.top < window.innerHeight * 0.5, height: Math.round(Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0))), sticky: !!fixed }
+      })
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+    await new Promise((r) => setTimeout(r, 300))
+    for (let y = 300; y <= 1500; y += 300) {
+      await page.evaluate((v) => window.scrollTo(0, v), y).catch(() => {})
+      await new Promise((r) => setTimeout(r, 120))
+    }
+    await new Promise((r) => setTimeout(r, 500))
+    const down = await read().catch(() => null)
+    for (let y = 1300; y >= 1000; y -= 100) {
+      await page.evaluate((v) => window.scrollTo(0, v), y).catch(() => {})
+      await new Promise((r) => setTimeout(r, 120))
+    }
+    await new Promise((r) => setTimeout(r, 500))
+    const up = await read().catch(() => null)
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+    return down && up ? { down, up } : null
+  })()
+  out.emailFields = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('input')).filter((i) => /e-?mail|courriel/i.test(`${i.name} ${i.id} ${i.placeholder} ${i.getAttribute('aria-label') || ''} ${i.type}`) && i.type !== 'hidden')
+        .slice(0, 6)
+        .map((i) => ({ type: i.type, inputmode: i.getAttribute('inputmode') || '', autocomplete: i.getAttribute('autocomplete') || '' })),
+    )
+    .catch(() => null)
+  return out
+}
+
+/** Google's PageSpeed Insights for the phone: field data from real visitors (CrUX) when Google has it, plus a lab run. */
+async function pageSpeed(url: string) {
+  const key = process.env.PAGESPEED_API_KEY ? `&key=${process.env.PAGESPEED_API_KEY}` : ''
+  const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance${key}`, { signal: AbortSignal.timeout(55000) })
+  if (!res.ok) return { error: `PageSpeed answered ${res.status}` }
+  const d = (await res.json()) as any
+  const field = (src: any) =>
+    src?.metrics
+      ? {
+          scope: src === d.loadingExperience ? 'page' : 'origin',
+          lcpMs: src.metrics.LARGEST_CONTENTFUL_PAINT_MS?.percentile ?? null,
+          inpMs: src.metrics.INTERACTION_TO_NEXT_PAINT?.percentile ?? null,
+          cls: src.metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.percentile != null ? src.metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile / 100 : null,
+          overall: src.overall_category || null,
+        }
+      : null
+  const audits = d.lighthouseResult?.audits || {}
+  return {
+    field: field(d.loadingExperience?.metrics ? d.loadingExperience : null) || field(d.originLoadingExperience),
+    lab: { lcpMs: audits['largest-contentful-paint']?.numericValue ?? null, cls: audits['cumulative-layout-shift']?.numericValue ?? null, score: d.lighthouseResult?.categories?.performance?.score ?? null },
+  }
+}
+
 /** Accept cookie banners (multilingual), close popups, unroll inner scroll wrappers. */
 export async function cleanPage(page: Page, opts: { unroll?: boolean } = {}) {
   const unroll = opts.unroll !== false
@@ -969,7 +1192,7 @@ const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadserv
 
 /** What the page actually downloaded: image formats (by content type, since Shopify serves WebP
  *  without saying so in the URL) and whether images come through a CDN (response headers). */
-type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number }
+type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number; thirdPartyScripts?: string[]; fontFiles?: string[] }
 const NET = new WeakMap<Page, NetStats>()
 const CDN_HEADERS = /^(cf-ray|cf-cache-status|x-amz-cf-id|x-served-by|x-cache|x-fastly-request-id|akamai-cache-status|x-akamai|server-timing|x-cdn|cdn-cache|x-shopid|x-shardid)$/i
 
@@ -978,7 +1201,7 @@ export function netStats(page: Page): NetStats | null {
 }
 
 async function prepare(page: Page) {
-  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0 }
+  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [] }
   NET.set(page, stats)
   page.on('response', (res) => {
     try {
@@ -1014,6 +1237,10 @@ async function prepare(page: Page) {
       })()
       // never block the store's own files (themes bundle scripts with tracker-like names)
       const firstParty = !!pageHost && (host === pageHost || host.endsWith(`.${pageHost}`) || host.replace(/^www\./, '') === pageHost)
+      // what the page asks for, before we block anything: third-party script hosts and font files
+      // (the platform's own CDN is not a third party)
+      if (type === 'script' && !firstParty && host && !/(^|\.)(shopify\.com|shopifycloud\.com|shopifysvc\.com|myshopify\.com)$/.test(host) && !stats.thirdPartyScripts!.includes(host)) stats.thirdPartyScripts!.push(host)
+      if (type === 'font' && stats.fontFiles!.length < 60) stats.fontFiles!.push(req.url().split('?')[0].slice(-120))
       if (type === 'media' || (!firstParty && BLOCK_HOSTS.test(host))) {
         if (process.env.SCANV2_DEBUG) console.log('[blocked]', type, req.url().slice(0, 110))
         return void req.abort().catch(() => {})
@@ -1822,6 +2049,8 @@ function sweepStaleProfiles() {
 export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
   const t0 = Date.now()
   sweepStaleProfiles()
+  // Google's speed data takes 20 to 50 seconds: ask now, read it at the end
+  const psiP = opts.extended ? pageSpeed(rawUrl).catch((e) => ({ error: String((e as Error)?.message || e).slice(0, 80) })) : null
   const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
   try {
     // Desktop first, then mobile: one tab at a time keeps the serverless browser within memory.
@@ -1903,6 +2132,10 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       throw new PageCheckError('unreachable', "We couldn't read this page: it kept reloading or blocked our visit. Try again, or try another product URL.")
     const isShopify = await desktop.evaluate(() => !!(window as any).Shopify).catch(() => false)
     if (opts.extended) (facts as Record<string, unknown>).hover = await measureHover(desktop).catch(() => [])
+    if (opts.extended) {
+      ;(facts as Record<string, unknown>).probes = await desktopProbes(desktop, res?.request().redirectChain().length ?? 0).catch(() => null)
+      await cleanPage(desktop)
+    }
     ;(facts as Record<string, unknown>).network = netStats(desktop)
     // cheap (one product JSON fetch): the Live default-variant checkpoint uses it on every scan
     ;(facts as Record<string, unknown>).variants = await measureVariants(desktop).catch(() => null)
@@ -2013,6 +2246,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         })
         .catch(() => ({}))
       mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
+      if (opts.extended) mobileFacts.probes = await mobileProbes(mobile).catch(() => null)
       // phone pages run 1.5 to 2 times longer than desktop: take as many tiles as it takes to reach the
       // same point of the page as the desktop tiles (at most MOBILE_MAX), so both devices can be compared
       const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
@@ -2059,6 +2293,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       desktopCheckout = r.desktop
       mobileCheckout = r.mobile
     }
+    if (psiP) (facts as Record<string, unknown>).pageSpeed = await psiP
 
     return {
       url: rawUrl,

@@ -24,6 +24,144 @@ function smallCatalog(f: F, under: number) {
 }
 
 export const MEASURED: Record<string, Measure> = {
+  // Are tap targets (buttons, links) large enough? (phone; links inside running text are exempt)
+  recXGNziP5Vz4r5bD: (ev) => {
+    const t = (ev.mobileFacts as F)?.probes?.tapTargets
+    if (!t || t.total < 15) return null
+    const share = t.small / t.total
+    const ex = t.examples?.length ? ` (for example ${t.examples.slice(0, 3).map((e: string) => `"${e}"`).join(', ')})` : ''
+    if (share <= 0.1) return { answer: 'pass', evidence: `On a phone, ${t.total - t.small} of ${t.total} buttons and links are at least 24px in their smallest dimension; only ${t.small} are smaller.` }
+    if (share >= 0.25 && t.small >= 8) return { answer: 'fail', evidence: `On a phone, ${t.small} of ${t.total} buttons and links are under 24px in their smallest dimension${ex}, small enough to cause mis-taps.` }
+    return null
+  },
+
+  // Are unnecessary redirects minimized? (the way in, and the menu and footer links)
+  reciIqr6dppb76SqL: (_ev, f) => {
+    const p = f.probes
+    if (!p || !p.linkRedirects || p.linkRedirects.checked < 4) return null
+    const n = p.linkRedirects.redirected.length
+    if (p.entryRedirects >= 2) return { answer: 'fail', evidence: `Opening the page went through ${p.entryRedirects} redirects before landing, which adds a delay to every visit from that link.` }
+    if (n >= 3) return { answer: 'fail', evidence: `${n} of ${p.linkRedirects.checked} menu and footer links redirect before landing (e.g. ${p.linkRedirects.redirected.slice(0, 2).join(', ')}): point them at the final URL.` }
+    if (n === 0 && p.entryRedirects <= 1) return { answer: 'pass', evidence: `The ${p.linkRedirects.checked} menu and footer links we checked go straight to their page, without redirects.` }
+    return null
+  },
+
+  // Are third-party scripts and apps minimized? (hosts the page asks scripts from, the platform excluded)
+  rec0ceXwiHz4HiVM5: (_ev, f) => {
+    const hosts: string[] | undefined = f.network?.thirdPartyScripts
+    if (!Array.isArray(hosts)) return null
+    if (hosts.length <= 10) return { answer: 'pass', evidence: `The page loads scripts from ${hosts.length} outside services, a light load.` }
+    if (hosts.length >= 20) return { answer: 'fail', evidence: `The page loads scripts from ${hosts.length} outside services (${hosts.slice(0, 5).join(', ')}…). Each one slows the page; remove the apps you no longer use.` }
+    return null
+  },
+
+  // Are the web fonts optimized? (font files the page asks for, and families in use)
+  rech8DlQso3uFnGxE: (_ev, f) => {
+    const files: string[] | undefined = f.network?.fontFiles
+    const fam: string[] | undefined = f.probes?.fontFamilies
+    if (!Array.isArray(files) || !Array.isArray(fam)) return null
+    const old = files.filter((u) => /\.(ttf|otf|eot)$/i.test(u)).length
+    if (files.length >= 12 || fam.length >= 5 || old > 0)
+      return { answer: 'fail', evidence: `The page loads ${files.length} font files${fam.length ? ` across ${fam.length} families (${fam.slice(0, 4).join(', ')})` : ''}${old ? `, ${old} of them in older formats instead of WOFF2` : ''}. Fewer fonts show text sooner.` }
+    if (files.length <= 8 && fam.length <= 3) return { answer: 'pass', evidence: `The page loads ${files.length} font files${fam.length ? ` for ${fam.length} famil${fam.length === 1 ? 'y' : 'ies'} (${fam.join(', ')})` : ''}, in modern formats.` }
+    return null
+  },
+
+  // Are icons and graphics crisp on high-resolution phone screens? (the logo: SVG, or an image with 2x pixels)
+  recirnxnpZsdR8kMh: (ev) => {
+    const l = (ev.mobileFacts as F)?.probes?.logo
+    if (!l) return null
+    if (l.kind === 'svg') return { answer: 'pass', evidence: 'The logo is an SVG, sharp on every screen.' }
+    if (l.ratio >= 1.8) return { answer: 'pass', evidence: `The logo image has ${l.bestSource}px for ${l.width}px on screen: sharp on high-resolution phones.` }
+    if (l.ratio < 1.3) return { answer: 'fail', evidence: `The logo image has only ${l.bestSource}px for ${l.width}px on screen, so it looks soft on high-resolution phones. Use an SVG or a 2x image.` }
+    return null
+  },
+
+  // Does the tab title change when the shopper switches tabs?
+  rec4FB41t10SPslqM: (_ev, f) => {
+    const t = f.probes?.tabTitle
+    if (!t) return null
+    if (t.changed) return { answer: 'pass', evidence: `When the shopper switches tabs, the title changes from "${t.before}" to "${t.after}".` }
+    return { answer: 'fail', evidence: 'When the shopper switches to another tab, the tab title stays the same.' }
+  },
+
+  // Exit-intent capture on desktop
+  rec6WruKWvBOCeFQj: (_ev, f) => {
+    const x = f.probes?.exitIntent
+    if (!x) return null
+    if (x.shown) return { answer: 'pass', evidence: 'When the mouse leaves the page through the top, an offer or reminder appears.' }
+    if (!x.popupTool) return { answer: 'fail', evidence: 'Nothing appears when the mouse leaves the page, and no pop-up tool is installed.' }
+    return null // a pop-up tool is there but may only fire once per visitor: we cannot tell
+  },
+
+  // Are links styled to be clearly distinguishable from regular text? (links inside running text)
+  recakyzDaPUM9FbXZ: (_ev, f) => {
+    const l = f.probes?.links
+    if (!l || l.inline < 3) return null
+    const share = l.distinct / l.inline
+    if (share >= 0.8) return { answer: 'pass', evidence: `${l.distinct} of ${l.inline} links inside text have their own color, underline or weight.` }
+    if (share <= 0.4) return { answer: 'fail', evidence: `Only ${l.distinct} of ${l.inline} links inside text look different from the text around them.` }
+    return null
+  },
+
+  // Do site forms use the right input types? (email fields open the email keyboard)
+  recdK25UxUaLUxNpj: (ev) => {
+    const e: F[] | undefined = (ev.mobileFacts as F)?.probes?.emailFields
+    if (!Array.isArray(e) || !e.length) return null
+    const bad = e.filter((x) => x.type !== 'email' && x.inputmode !== 'email')
+    if (!bad.length) return { answer: 'pass', evidence: `The email field${e.length > 1 ? 's' : ''} on the page open${e.length > 1 ? '' : 's'} the email keyboard on a phone.` }
+    return { answer: 'fail', evidence: `${bad.length} email field${bad.length > 1 ? 's open' : ' opens'} the plain text keyboard on a phone (input type "${bad[0].type}"), so shoppers hunt for the @.` }
+  },
+
+  // On mobile, does the header stay out of the way while scrolling but come back?
+  recioIHrJVb0beqd7: (ev) => {
+    const h = (ev.mobileFacts as F)?.probes?.header
+    if (!h) return null
+    if (!h.down.visible && h.up.visible) return { answer: 'pass', evidence: 'On a phone the header hides while scrolling down and comes back on scrolling up.' }
+    if (h.down.visible && h.down.height <= 64) return { answer: 'pass', evidence: `On a phone the header stays as a slim bar (${h.down.height}px) while scrolling.` }
+    if (h.down.visible && h.down.height >= 110) return { answer: 'fail', evidence: `On a phone a ${h.down.height}px header stays on screen while scrolling, covering a large part of the page.` }
+    if (!h.down.visible && !h.up.visible) return { answer: 'fail', evidence: 'On a phone the header scrolls away and does not come back when scrolling up, so the menu and cart are only reachable at the top.' }
+    return null
+  },
+
+  // Is video content optimized?
+  recBOqpDJKwLNtjM1: (ev, f) => {
+    const v: F[] | null | undefined = f.probes?.videos
+    const embeds = (ev.mobileFacts as F)?.videos?.count ?? 0
+    if (!Array.isArray(v)) return null
+    if (!v.length && !embeds) return { answer: 'na', evidence: 'There is no video on this page.' }
+    if (!v.length) return null
+    const sound = v.filter((x) => x.autoplay && !x.muted)
+    const eager = v.filter((x) => !x.aboveFold && !x.lazy && x.preload !== 'none' && x.preload !== 'metadata')
+    if (sound.length) return { answer: 'fail', evidence: `${sound.length} video${sound.length > 1 ? 's play' : ' plays'} automatically with sound.` }
+    if (eager.length) return { answer: 'fail', evidence: `${eager.length} video${eager.length > 1 ? 's' : ''} below the first screen start loading with the page instead of when the shopper scrolls to ${eager.length > 1 ? 'them' : 'it'}.` }
+    return { answer: 'pass', evidence: `${v.length} video${v.length > 1 ? 's are' : ' is'} muted when autoplaying and only load${v.length > 1 ? '' : 's'} when needed.` }
+  },
+
+  // Does the site pass Google's Core Web Vitals on mobile?
+  rec7nzBOS46ENhUiQ: (_ev, f) => {
+    const p = f.pageSpeed
+    const x = p?.field
+    if (!x || x.lcpMs == null || x.cls == null) return null
+    const bad: string[] = []
+    if (x.lcpMs > 2500) bad.push(`largest image or text appears after ${(x.lcpMs / 1000).toFixed(1)}s (good: 2.5s)`)
+    if (x.inpMs != null && x.inpMs > 200) bad.push(`taps take ${x.inpMs}ms to respond (good: 200ms)`)
+    if (x.cls > 0.1) bad.push(`layout shift ${x.cls} (good: 0.1)`)
+    const scope = x.scope === 'page' ? 'this page' : 'the whole site'
+    if (!bad.length) return { answer: 'pass', evidence: `Google's data from real phone visitors to ${scope}: all Core Web Vitals are good (LCP ${(x.lcpMs / 1000).toFixed(1)}s${x.inpMs != null ? `, INP ${x.inpMs}ms` : ''}, CLS ${x.cls}).` }
+    return { answer: 'fail', evidence: `Google's data from real phone visitors to ${scope}: ${bad.join('; ')}.` }
+  },
+
+  // Does the hero load fast on mobile (LCP)?
+  recOxBLy8NfUAjKfS: (_ev, f) => {
+    const p = f.pageSpeed
+    const ms = p?.field?.lcpMs ?? p?.lab?.lcpMs
+    if (typeof ms !== 'number') return null
+    const src = p?.field?.lcpMs != null ? "Google's data from real phone visitors" : "Google's lab test on a mid-range phone"
+    if (ms <= 2500) return { answer: 'pass', evidence: `${src}: the main image or text appears after ${(ms / 1000).toFixed(1)}s (good: 2.5s or less).` }
+    return { answer: 'fail', evidence: `${src}: the main image or text appears after ${(ms / 1000).toFixed(1)}s, slower than the 2.5s Google counts as good.` }
+  },
+
   // Do you use pure black for text or backgrounds? (pass = no pure black)
   recSs12TogM60Mf6w: (_ev, f) => {
     const t = f.pureBlack?.textElements
