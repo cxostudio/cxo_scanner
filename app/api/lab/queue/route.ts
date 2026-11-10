@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const cp = req.nextUrl.searchParams.get('cp')
   if (cp) {
     const scans = loaded
-      .filter(({ scan }) => labelQueue(scan).some((c) => c.id === cp && !c.skip))
+      .filter(({ scan }) => labelQueue(scan).some((c) => c.id === cp && c.skip !== 'niche'))
       .map(({ scan, labels }) => ({ id: scan.id, url: scan.url, label: labels[cp] || null }))
     return NextResponse.json({ cp, scans })
   }
@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
   const rows = new Map<string, { id: string; title: string; status?: string; area?: string; method?: string; stores: number; labelled: number }>()
   for (const { scan, labels } of loaded) {
     for (const c of labelQueue(scan)) {
-      if (c.skip) continue
+      // measured checkpoints are in too: a new measurement needs your eye before it can go Live
+      if (c.skip === 'niche') continue
       const r = rows.get(c.id) || { id: c.id, title: c.title, status: c.status, area: c.area, method: c.method, stores: 0, labelled: 0 }
       r.stores++
       if (labels[c.id] && labels[c.id] !== 'skip') r.labelled++

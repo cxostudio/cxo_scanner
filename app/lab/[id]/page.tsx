@@ -86,7 +86,8 @@ export default function LabScan({ params }: { params: { id: string } }) {
             ...raw,
             // ?only=checkout (or cart): label one part of the funnel without the rest of the page
             checkpoints: raw.checkpoints.filter((c) => {
-              if (c.skip) return false
+              // a checkpoint measured in the page code opens when asked for by ?cp= (to check a new measurement)
+              if (c.skip && !(c.skip === 'measured' && new URLSearchParams(window.location.search).get('cp') === c.id)) return false
               const only = new URLSearchParams(window.location.search).get('only')
               if (only === 'checkout') return Boolean(c.pageTypeIds?.includes(CHECKOUT_PAGE_TYPE))
               if (only === 'cart') return Boolean(c.pageTypeIds?.includes(CART_PAGE_TYPE) || c.area === 'Cart drawer')
