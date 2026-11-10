@@ -1494,8 +1494,12 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   const origin = new URL(page.url()).origin
   const res = await page.goto(`${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
   if (!res) return { tiles: [], note: 'checkout did not load' }
-  await page.waitForNetworkIdle({ idleTime: 800, timeout: 8000 }).catch(() => {})
-  await new Promise((r) => setTimeout(r, 1200))
+  // Shopify's checkout is a heavy app: wait for its form, not just the network
+  await page
+    .waitForSelector('input[type="email"], input[autocomplete="email"], input[name*="email" i], input[autocomplete="tel"], input[name="address1"], input[autocomplete="shipping address-line1"]', { timeout: 20000 })
+    .catch(() => {})
+  await page.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
+  await new Promise((r) => setTimeout(r, 800))
   const state = await page
     .evaluate(() => {
       const t = (document.body?.innerText || '').slice(0, 4000)
