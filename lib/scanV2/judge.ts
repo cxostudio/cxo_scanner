@@ -115,10 +115,11 @@ export const pageKindOf = (ev: Evidence): PageKind => ev.pageType || detectPageT
 function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
   if (scope === 'checkout')
     return [
-      `PAGE: the FIRST STEP of checkout on ${ev.finalUrl.replace(/^(https?:\/\/[^/]+).*/, '$1')}, reached with one product in the cart. Nothing was typed: later steps (shipping methods, payment) are not shown.`,
+      `PAGE: the FIRST STEP of checkout on ${ev.finalUrl.replace(/^(https?:\/\/[^/]+).*/, '$1')}, reached with the product in the cart. No email, name or phone was typed. ${ev.checkoutShippingNote ? `The scanner tried a public test address to reveal the shipping methods, but: ${ev.checkoutShippingNote}.` : 'The scanner typed a public test address (street, postcode, city only) so the shipping methods, their prices and delivery estimates are shown: judge them as a shopper from that country would see them. The address itself is ours, not the store\'s.'}`,
       `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
       `VISIBLE TEXT OF THE CHECKOUT (desktop):\n${ev.checkoutText || ''}`,
-      'Judge these checkout checkpoints ONLY on the checkout images and text. If a checkpoint is about a later step (shipping method, payment, confirmation) and nothing on this first step shows it, answer unknown.',
+      `WHAT THE PRODUCT PAGE PROMISED ABOUT SHIPPING (lines from the store's own product page, for comparing with checkout):\n${(ev.shippingPromises || []).join('\n') || '(nothing about shipping cost or time)'}`,
+      'Judge these checkout checkpoints ONLY on the checkout images and text (and the product page shipping lines above when a checkpoint compares them). Shopify Plus blocks (reviews, guarantees, timers, add-ons) count like any other checkout content. If a checkpoint is about a step not shown here (card form, confirmation, post-purchase) and nothing shows it, answer unknown.',
     ].join('\n\n')
   const pageText = scope !== 'cart'
   return [

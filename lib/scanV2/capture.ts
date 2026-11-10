@@ -39,6 +39,10 @@ export type Evidence = {
   mobileCheckout?: Tile[]
   /** Why checkout could not be captured (bot check, redirect, not Shopify...). */
   checkoutNote?: string
+  /** Why the shipping methods could not be shown after the test address. */
+  checkoutShippingNote?: string
+  /** Lines from the product page that promise something about shipping (cost, threshold, time). */
+  shippingPromises?: string[]
   /** Visible text of the checkout first step (desktop). */
   checkoutText?: string
   /** The cart opened BEFORE anything is added (empty-cart checkpoints). */
@@ -1491,7 +1495,7 @@ async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number,
  * The first step of checkout, with the item already in the cart. We never type anything: no email, no
  * address, so no abandoned checkout is created and no recovery email is sent. Bot checks are reported, never guessed.
  */
-async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number, entry?: string): Promise<{ tiles: Tile[]; note?: string; text?: string }> {
+async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number, entry?: string, country?: string): Promise<{ tiles: Tile[]; note?: string; text?: string; shippingNote?: string }> {
   const origin = entry ? new URL(entry).origin : new URL(page.url()).origin
   // Shopify's checkout refuses obvious automation: look like the browser we are
   await page
@@ -1526,6 +1530,10 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   // express buttons (Shop Pay, Apple Pay, PayPal) render last: give them a moment
   await new Promise((r) => setTimeout(r, 2500))
   if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
+  // a public address (no email, no phone) makes Shopify show its shipping methods
+  const shippingNote = entry ? await revealShipping(page, country).catch(() => 'could not fill the test address') : undefined
+  const text = entry ? await page.evaluate(() => (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 8000)).catch(() => state.text) : state.text
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
   // Shopify's checkout scrolls inside a column, so the document looks one screen tall: grow the viewport to the content
   const inner = await page
     .evaluate(() => Math.max(...Array.from(document.querySelectorAll('body, body *')).map((e) => (e as HTMLElement).scrollHeight || 0)))
@@ -1538,7 +1546,8 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   return {
     // the checkout's own footer holds the policy links (refund, privacy, terms): keep it
     tiles: all.map((t) => ({ ...t, label: t.label.replace(`${device} checkout screenshot`, `${device} CHECKOUT first step screenshot`).replace(/page bottom \/ footer/i, 'CHECKOUT bottom / policy links') })),
-    text: state.text,
+    text,
+    shippingNote,
   }
 }
 
@@ -1547,7 +1556,7 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
  * Browserbase browser (real fingerprint, residential IP): the same cart is rebuilt there through Shopify's cart
  * permalink (/cart/<variant>:<qty>), then the first checkout step is captured on desktop and mobile.
  */
-type RemoteCheckout = { desktop?: { tiles: Tile[]; note?: string; text?: string }; mobile: Tile[] }
+type RemoteCheckout = { desktop?: { tiles: Tile[]; note?: string; text?: string; shippingNote?: string }; mobile: Tile[] }
 
 /** The cart's lines as permalink parts (`<variant>:<qty>`), read in the shopper's own session. */
 function cartItems(shopPage: Page): Promise<string[]> {
@@ -1560,7 +1569,95 @@ function cartItems(shopPage: Page): Promise<string[]> {
     .catch(() => [])
 }
 
-async function remoteCheckout(origin: string, items: string[]): Promise<RemoteCheckout> {
+/** Lines of the product page that promise something about shipping: compared with what checkout charges. */
+function shippingLines(text: string): string[] {
+  const out: string[] = []
+  for (const raw of text.split(/\n+/)) {
+    const l = raw.replace(/\s+/g, ' ').trim()
+    if (l.length < 6 || l.length > 180) continue
+    if (!/shipping|delivery|livraison|livré|verzend|bezorg|levering|versand|lieferung|envío|spedizione/i.test(l)) continue
+    if (!/\d|free|gratuit|gratis|kostenlos/i.test(l)) continue
+    if (!out.includes(l)) out.push(l)
+    if (out.length >= 12) break
+  }
+  return out
+}
+
+/** The market the shopper browsed in (Shopify.country), so checkout is filled for the same country. */
+function marketCountry(shopPage: Page): Promise<string | undefined> {
+  return shopPage.evaluate(() => (window as unknown as { Shopify?: { country?: string } }).Shopify?.country).catch(() => undefined)
+}
+
+/**
+ * Public landmark addresses, one per common market. Used only to make Shopify show its shipping methods:
+ * no email or phone is ever typed, so no abandoned-checkout email can be sent and no order is placed.
+ */
+const TEST_ADDRESS: Record<string, { address1: string; zip: string; city: string; zone?: string }> = {
+  NL: { address1: 'Museumstraat 1', zip: '1071 XX', city: 'Amsterdam' },
+  BE: { address1: 'Rue de la Loi 16', zip: '1000', city: 'Bruxelles' },
+  FR: { address1: '5 Avenue Anatole France', zip: '75007', city: 'Paris' },
+  DE: { address1: 'Platz der Republik 1', zip: '11011', city: 'Berlin' },
+  AT: { address1: 'Dr.-Karl-Renner-Ring 3', zip: '1010', city: 'Wien' },
+  LU: { address1: '23 Rue du Marché-aux-Herbes', zip: '1728', city: 'Luxembourg' },
+  ES: { address1: 'Paseo del Prado 8', zip: '28014', city: 'Madrid', zone: 'M' },
+  IT: { address1: 'Piazza del Colosseo 1', zip: '00184', city: 'Roma', zone: 'RM' },
+  GB: { address1: '10 Downing Street', zip: 'SW1A 2AA', city: 'London' },
+  IE: { address1: 'Merrion Street Upper', zip: 'D02 R583', city: 'Dublin' },
+  CH: { address1: 'Bundesplatz 3', zip: '3005', city: 'Bern' },
+  DK: { address1: 'Prins Jørgens Gård 1', zip: '1218', city: 'København' },
+  SE: { address1: 'Riksgatan 1', zip: '100 12', city: 'Stockholm' },
+  US: { address1: '1600 Pennsylvania Avenue NW', zip: '20500', city: 'Washington', zone: 'DC' },
+  CA: { address1: '111 Wellington St', zip: 'K1A 0A9', city: 'Ottawa', zone: 'ON' },
+  AU: { address1: '2 Macquarie St', zip: '2000', city: 'Sydney', zone: 'NSW' },
+}
+
+/**
+ * Type a public address (never an email or phone) so Shopify lists its shipping methods, delivery estimates
+ * and the shipping cost. Returns a note when the methods did not appear.
+ */
+async function revealShipping(page: Page, country?: string): Promise<string | undefined> {
+  const sel = await page.$('select[name="countryCode"]')
+  let code = country && TEST_ADDRESS[country] ? country : undefined
+  if (sel) {
+    const current = await sel.evaluate((e) => (e as HTMLSelectElement).value).catch(() => '')
+    if (code && current !== code) {
+      const ok = await page.select('select[name="countryCode"]', code).then((v) => v.length > 0).catch(() => false)
+      if (!ok) code = undefined
+      await new Promise((r) => setTimeout(r, 1200))
+    }
+    if (!code) code = TEST_ADDRESS[current] ? current : undefined
+  }
+  const a = code ? TEST_ADDRESS[code] : undefined
+  if (!a) return `no test address for this country (${country || 'unknown'})`
+  const type = async (name: string, value: string) => {
+    const el = await page.$(`input[name="${name}"]`)
+    if (!el) return false
+    await el.click({ clickCount: 3 }).catch(() => {})
+    await el.type(value, { delay: 15 }).catch(() => {})
+    await page.keyboard.press('Escape').catch(() => {}) // close the address suggestions
+    return true
+  }
+  if (!(await type('address1', a.address1))) return 'address field not found'
+  await type('postalCode', a.zip)
+  await type('city', a.city)
+  if (a.zone) await page.select('select[name="zone"]', a.zone).catch(() => [])
+  await page.mouse.click(5, 5).catch(() => {}) // blur, so Shopify fetches the rates
+  // wait for the shipping methods to replace "Enter your shipping address..."
+  const shown = await page
+    .waitForFunction(
+      () => {
+        const t = document.body?.innerText || ''
+        return !/enter (your|a) shipping address to view|saisissez votre adresse de livraison|vul je verzendadres in|geben sie ihre lieferadresse ein/i.test(t) && !/calculating|calcul en cours/i.test(t)
+      },
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  await new Promise((r) => setTimeout(r, 1500))
+  return shown ? undefined : 'shipping methods did not appear for the test address'
+}
+
+async function remoteCheckout(origin: string, items: string[], country?: string): Promise<RemoteCheckout> {
   const key = process.env.BROWSERBASE_API_KEY
   const projectId = process.env.BROWSERBASE_PROJECT_ID
   if (!key || !projectId) return { mobile: [] }
@@ -1578,13 +1675,13 @@ async function remoteCheckout(origin: string, items: string[]): Promise<RemoteCh
     const desk = (await browser.pages())[0] || (await browser.newPage())
     await desk.setViewport({ width: DESKTOP.width, height: DESKTOP.height, deviceScaleFactor: 1 })
     const entry = `${origin}/cart/${items.join(',')}`
-    const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2, entry).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
+    const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2, entry, country).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
     let mobile: Tile[] = []
     if (desktop.tiles.length) {
       const mob = await browser.newPage()
       await mob.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
       await mob.setUserAgent(MOBILE_UA)
-      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2, entry).catch(() => ({ tiles: [] as Tile[] }))).tiles
+      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2, entry, country).catch(() => ({ tiles: [] as Tile[] }))).tiles
     }
     return { desktop, mobile }
   } finally {
@@ -1732,15 +1829,16 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // runs alongside the mobile capture, capped, so the whole scan stays inside the function's time limit
     const remoteItems = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await cartItems(desktop) : null
     const remoteOrigin = new URL(desktop.url()).origin
+    const remoteCountry = remoteItems ? await marketCountry(desktop) : undefined
     const remoteP: Promise<RemoteCheckout> | null = remoteItems
       ? Promise.race([
-          remoteItems.length ? remoteCheckout(remoteOrigin, remoteItems) : Promise.resolve<RemoteCheckout>({ desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }),
+          remoteItems.length ? remoteCheckout(remoteOrigin, remoteItems, remoteCountry) : Promise.resolve<RemoteCheckout>({ desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }),
           new Promise<RemoteCheckout>((r) => setTimeout(() => r({ desktop: { tiles: [], note: 'took too long' }, mobile: [] }), 120000)),
         ])
           .then((r) => (r.desktop?.note ? { ...r, desktop: { ...r.desktop, note: `remote browser: ${r.desktop.note}` } } : r))
           .catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] }))
       : null
-    let desktopCheckout: { tiles: Tile[]; note?: string; text?: string } | undefined = remoteP
+    let desktopCheckout: { tiles: Tile[]; note?: string; text?: string; shippingNote?: string } | undefined = remoteP
       ? undefined
       : itemInCart && opts.extended
         ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).then((r) => (r.note ? { ...r, note: `our browser: ${r.note}` } : r)).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
@@ -1868,6 +1966,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       mobileCheckout,
       checkoutNote: desktopCheckout?.note,
       checkoutText: desktopCheckout?.text,
+      checkoutShippingNote: desktopCheckout?.shippingNote,
+      shippingPromises: shippingLines(`${bodyText}\n${hiddenText}`),
       cartKind,
       isShopify,
       text: text.slice(0, 14000),
