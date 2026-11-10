@@ -1,6 +1,7 @@
 // Test lab: judge saved test scans again, on the same evidence, with the checkpoint definitions as
 // they are in Airtable right now. Louis labels each store once; we iterate definitions and the
 // judge until a checkpoint reaches 90%, without new scans or new labels.
+import { judgeErrors } from '@/lib/scanV2/judge'
 import { NextRequest, NextResponse } from 'next/server'
 import { refreshCheckpointRulesCache, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { filterCheckpointsByUrl } from '@/lib/conversionCheckpoints/filterByUrlPageType'
@@ -65,7 +66,7 @@ async function rejudgeOne(id: string, current: Map<string, ScanRule>, fresh: Fre
     // nothing saved: per checkpoint, the live answer and the answer with the proposed wording, next to the label
     const was = new Map(scan.answers.map((a) => [a.id, a.answer]))
     const rows = results.map((r) => ({ id: r.ruleId, before: was.get(r.ruleId) || 'unknown', after: r.status, reason: r.reason, label: labels[r.ruleId] || null }))
-    return { id, ok: true, url: scan.url, dry: true, rows }
+    return { id, ok: true, url: scan.url, dry: true, rows, errors: judgeErrors.splice(0) }
   }
   const next = await saveRejudge(scan, { rules, results, niche, model: V2_MODEL() })
   return { id, ok: true, url: scan.url, before, after: agreement(next.answers, labels), added: added.length }

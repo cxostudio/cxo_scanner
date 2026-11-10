@@ -243,6 +243,9 @@ function describe(r: Rule): string {
     .join('\n')
 }
 
+/** Recent model-call failures, for the lab's dry run (no keys, messages only). */
+export const judgeErrors: string[] = []
+
 export type Usage = { calls: number; inputTokens: number; outputTokens: number; costUsd: number }
 
 async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }, usage?: Usage): Promise<{ niche?: string; verdicts: Verdict[] }> {
@@ -290,6 +293,8 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
     }
   }
   console.warn('[scanV2] group failed', lastErr)
+  judgeErrors.push(String((lastErr as Error)?.message || lastErr).slice(0, 300))
+  if (judgeErrors.length > 20) judgeErrors.shift()
   return { verdicts: group.map((r) => ({ id: r.id, answer: 'unknown', evidence: 'We could not check this one.' })) }
 }
 
