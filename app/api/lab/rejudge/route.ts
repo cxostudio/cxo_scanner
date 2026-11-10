@@ -35,7 +35,8 @@ function withProposed(fresh: Fresh, only?: Set<string>): Map<string, ScanRule> {
     fresh.rules.map((r) => {
       const f = rec.get(r.id) || {}
       if (only && !only.has(r.id)) return [r.id, r]
-      if (!['To review', 'Approved', 'Changes needed'].includes(String(f['Rewrite'] || ''))) return [r.id, r]
+      // without ?cps= only rewrites still in review; a checkpoint named in ?cps= is tested whatever its status
+      if (!only && !['To review', 'Approved', 'Changes needed'].includes(String(f['Rewrite'] || ''))) return [r.id, r]
       return [r.id, { ...r, pass: str(f, 'Proposed pass when') ?? r.pass, fail: str(f, 'Proposed fail when') ?? r.fail, na: str(f, 'Proposed not relevant when') ?? r.na }]
     }),
   )
