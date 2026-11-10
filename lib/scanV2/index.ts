@@ -167,7 +167,7 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   // definitions the model keeps breaking (threshold read as a shipping cost, generic header entries, cart read as the buy box)
   // where the evidence sits must match Airtable "Seen in": the same rule for every checkpoint
   applySeenIn(rules, byId, verdicts)
-  if (opts.guards !== false) applyGuards(rules, byId)
+  if (opts.guards !== false) applyGuards(rules, byId, typeof ev.facts?.catalogSize === 'number' ? ev.facts.catalogSize : undefined)
   // a device that was not captured: its own checkpoints cannot be judged (the model otherwise borrows the other device)
   for (const [dev, tiles] of [['Mobile only', ev.mobileTiles], ['Desktop only', ev.desktopTiles]] as const)
     if (!tiles?.length)

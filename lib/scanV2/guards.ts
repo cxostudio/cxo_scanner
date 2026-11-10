@@ -18,6 +18,7 @@ const QUICK_ADD = 'recUh4cUJHiSxfvun'
 const CATEGORY_PROMO = 'recin5p14RpTXTPtp'
 const BADGES = 'recg02Mog2Ho8dJFQ'
 const LOGIN = 'recJQvv7DmyS0KGJr'
+const EMPTY_CART = 'rec53BnzEh3jbjz4O'
 /** Checkpoints about customer PICTURES or VIDEOS: written reviews and testimonials never count. */
 const CUSTOMER_MEDIA = new Set(['recDdGiDiKLK3SIyX', 'recy3ghSc1IY6x9lf', 'recBIykwniSTLYVjI'])
 const MEDIA_WORDS = /photo|picture|image|video|clip|ugc|instagram|tiktok|reel|selfie|thumbnail|play (icon|button)/i
@@ -45,9 +46,17 @@ function quotedLabels(evidence: string) {
 }
 
 
-export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
+export function applyGuards(rules: Rule[], byId: Map<string, Verdict>, catalogSize?: number) {
   for (const r of rules) {
     const v = byId.get(r.id)
+    // empty cart: one button back to the shop ('Shop our bestsellers') is a pass only for a small catalog (under 10 products)
+    if (v && r.id === EMPTY_CART && v.answer === 'pass' && !(typeof catalogSize === 'number' && catalogSize < 10)) {
+      const outside = v.evidence.replace(/['"‘“][^'"’”]{1,60}['"’”]/g, ' ')
+      if (/button|link/i.test(outside) && !/products?|items?|categor|recommend|recently viewed|suggest|carousel|grid|tiles?|collections|thumbnails?|images of/i.test(outside)) {
+        byId.set(r.id, { answer: 'fail', evidence: 'The empty cart only offers a button back to the shop, with no products or categories to start again from.', seen: v.seen, by: 'Code check' })
+        continue
+      }
+    }
     // no promotion running on this category: not relevant, never a fail (the model keeps failing it)
     if (v && r.id === CATEGORY_PROMO && v.answer === 'fail' && /no (category[- ]specific )?promotion|not category[- ]specific|only (a )?sitewide|sitewide (announcement|offer|bar|free shipping)|no (current )?(discount|sale|offer)/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'na', evidence: 'No promotion is running on this category, so there is nothing to show at the top.', seen: v.seen, by: 'Code check' })
