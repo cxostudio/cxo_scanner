@@ -1495,7 +1495,7 @@ async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number,
  * The first step of checkout, with the item already in the cart. We never type anything: no email, no
  * address, so no abandoned checkout is created and no recovery email is sent. Bot checks are reported, never guessed.
  */
-async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number, entry?: string, country?: string): Promise<{ tiles: Tile[]; note?: string; text?: string; shippingNote?: string }> {
+async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number, entry?: string, country?: string, fill = true): Promise<{ tiles: Tile[]; note?: string; text?: string; shippingNote?: string }> {
   const origin = entry ? new URL(entry).origin : new URL(page.url()).origin
   // Shopify's checkout refuses obvious automation: look like the browser we are
   await page
@@ -1531,8 +1531,9 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   await new Promise((r) => setTimeout(r, 2500))
   if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
   // a public address (no email, no phone) makes Shopify show its shipping methods
-  const shippingNote = entry ? await revealShipping(page, country).catch(() => 'could not fill the test address') : undefined
-  const text = entry ? await page.evaluate(() => (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 8000)).catch(() => state.text) : state.text
+  // desktop only: the methods are the same on mobile, and the scan has to fit the function's time limit
+  const shippingNote = entry && fill ? await revealShipping(page, country).catch(() => 'could not fill the test address') : undefined
+  const text = entry && fill ? await page.evaluate(() => (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 8000)).catch(() => state.text) : state.text
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
   // Shopify's checkout scrolls inside a column, so the document looks one screen tall: grow the viewport to the content
   const inner = await page
@@ -1719,7 +1720,7 @@ async function remoteCheckout(origin: string, items: string[], country?: string)
       const mob = await browser.newPage()
       await mob.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
       await mob.setUserAgent(MOBILE_UA)
-      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2, entry, country).catch(() => ({ tiles: [] as Tile[] }))).tiles
+      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2, entry, country, false).catch(() => ({ tiles: [] as Tile[] }))).tiles
     }
     return { desktop, mobile }
   } finally {
@@ -1875,7 +1876,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const remoteP: Promise<RemoteCheckout> | null = remoteItems
       ? Promise.race([
           remoteItems.length ? remoteCheckout(remoteOrigin, remoteItems, remoteCountry) : Promise.resolve<RemoteCheckout>({ desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }),
-          new Promise<RemoteCheckout>((r) => setTimeout(() => r({ desktop: { tiles: [], note: 'took too long' }, mobile: [] }), 120000)),
+          new Promise<RemoteCheckout>((r) => setTimeout(() => r({ desktop: { tiles: [], note: 'took too long' }, mobile: [] }), 100000)),
         ])
           .then((r) => (r.desktop?.note ? { ...r, desktop: { ...r.desktop, note: `remote browser: ${r.desktop.note}` } } : r))
           .catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] }))
