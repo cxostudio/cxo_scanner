@@ -116,7 +116,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       client: key, name: cfg.name, logo: cfg.logo, cxoLogo: CXO_LOGO, lang: cfg.lang || 'en',
-      cockpit: Boolean(strong && cfg.shop), timeline: Boolean(cfg.timelineLists?.length),
+      cockpit: Boolean(strong && cfg.shop), timeline: Boolean(cfg.timelineLists?.length), sitecheck: Boolean(cfg.pages),
       perfUrl: cfg.perfUrl || null, perfLabel: cfg.perfLabel || null,
       mode: cfg.capHours != null ? 'retainer' : 'payg',
       cap: cfg.capHours ?? null,

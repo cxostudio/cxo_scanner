@@ -36,6 +36,9 @@ export type ScanRule = {
   seenIn?: string[]
   /** Shown in the free scan (Airtable "Free scan"); the rest of the results appear as a locked count. */
   freeScan?: boolean
+  /** The fix in one sentence (Airtable "Short fix"), and the expected revenue effect 1 to 5 ("Impact weight"). */
+  shortFix?: string
+  impact?: number
 }
 
 type AirtableSingleRecord = {
@@ -117,6 +120,8 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     shopifyControl: text('Shopify control'),
     seenIn: list('Seen in'),
     freeScan: fields['Free scan'] === true,
+    shortFix: text('Short fix'),
+    impact: typeof fields['Impact weight'] === 'number' ? (fields['Impact weight'] as number) : undefined,
   }
 }
 

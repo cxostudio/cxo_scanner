@@ -267,6 +267,17 @@
   .legend i.bar{width:16px; height:8px; border:0; border-radius:3px; background:#22A06B}
   .log{margin-top:4px}
   .logm{font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:#52525B; font-weight:600; margin:16px 0 4px}
+  .sitesum{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 18px; margin-top:14px; font-size:14px; color:var(--muted)}
+  .sitesum .big{font-size:28px; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums}
+  .sitesum a{color:inherit}
+  .sitegroup{margin-bottom:16px}
+  .siterow{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; padding:12px 0; border-top:1px solid var(--line)}
+  .siterow:first-of-type{border-top:0}
+  .siterow .t{font-weight:600; color:var(--ink); font-size:14.5px}
+  .siterow .r{grid-column:2; font-size:13.5px; color:var(--muted)}
+  .siterow .fx{grid-column:2; font-size:13.5px; color:var(--ink)}
+  .st{font-size:11.5px; font-weight:700; border-radius:6px; padding:3px 8px; white-space:nowrap; align-self:start}
+  .st.fail{background:#FDECEB; color:#A8302B} .st.pass{background:#E7F6EF; color:#13704A} .st.na,.st.unknown{background:var(--surface); color:#52525B}
   .filters{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px}
   .filters button{font:inherit; font-size:12.5px; font-weight:600; color:#52525B; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:5px 11px; min-height:32px; cursor:pointer; display:inline-flex; align-items:center; gap:6px}
   .filters button[aria-pressed="true"]{border-color:var(--ink); color:var(--ink)}
@@ -317,6 +328,7 @@
     <nav class="tabs hide" id="tabs" role="tablist" aria-label="Sections">
       <button type="button" role="tab" id="tabOverview" data-view="viewOverview" aria-selected="false"></button>
       <button type="button" role="tab" id="tabTimeline" data-view="viewTimeline" aria-selected="false"></button>
+      <button type="button" role="tab" id="tabSite" data-view="viewSite" aria-selected="false"></button>
       <button type="button" role="tab" id="tabWork" data-view="viewWork" aria-selected="false"></button>
     </nav>
 
@@ -344,6 +356,17 @@
         </section>
       </div>
       <div class="ovwarn hide" id="ovError"></div>
+    </section>
+
+    <section class="view hide" id="viewSite" role="tabpanel" aria-labelledby="tabSite">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="sechd" style="flex-wrap:wrap;gap:10px">
+          <div class="mseg" id="sitePages"></div>
+          <div class="mseg" id="siteDevices"></div>
+        </div>
+        <div class="sitesum" id="siteSum"></div>
+      </div>
+      <div id="siteList"></div>
     </section>
 
     <section class="view hide" id="viewTimeline" role="tabpanel" aria-labelledby="tabTimeline">
@@ -712,6 +735,7 @@ async function loadWith(pw,month,force){
   if(fresh) resetCockpit();
   accessKey=pw; applyData(d);
   if(fresh) loadCockpit(pw,d);
+  if(fresh) loadSite(pw,d);
   return true;
 }
 function showError(){
@@ -752,7 +776,9 @@ async function submitReq(){
 }
 /* ───────────────────────── cockpit (Overview + Timeline) ───────────────────────── */
 const CSTR={
-  en:{ overview:'Overview', timeline:'Impact timeline', work:'Work & hours',
+  en:{ overview:'Overview', timeline:'Impact timeline', work:'Work & hours', site:'Site check',
+    sitePages:{home:'Homepage',collection:'Collection page',product:'Product page',cart:'Cart',checkout:'Checkout'}, siteDev:{all:'All devices',desktop:'Desktop',mobile:'Mobile'},
+    siteSt:{fail:'To fix',pass:'Done',na:'Not relevant',unknown:'Could not check'}, siteScore:'checks passed', siteToFix:'to fix', siteScanned:'Scanned', siteFix:'Fix:', siteNone:'This page has not been scanned yet.', siteErr:'Could not load the site check.',
     sales:'Net sales', orders:'Orders', aov:'Average order value', cr:'Conversion rate', rpv:'Revenue per visitor',
     vsLY:'vs last year',
     roiTitle:'Return on CXO', perMonth:'/ month', roiSub:'Extra revenue generated right now by the A/B test winners currently live, measured against the original version.',
@@ -775,7 +801,9 @@ const CSTR={
     stage:{home:'Home / Landing',plp:'Collection',pdp:'Product page',cart:'Cart',checkout:'Checkout',site:'Site-wide'},
     type:{bp:'Best practice',test:'A/B test',fix:'Fix',build:'Build'}, verdict:{winner:'Winner',neutral:'Neutral',loser:'Loser',running:'Running',pending:'Verdict to add'}, showAll:n=>`Show all (${n})`,
     perfErr:'Store data is not connected yet.', tlErr:'Could not load the timeline.' },
-  fr:{ overview:'Vue d’ensemble', timeline:'Timeline d’impact', work:'Travaux & heures',
+  fr:{ overview:'Vue d’ensemble', timeline:'Timeline d’impact', work:'Travaux & heures', site:'Analyse du site',
+    sitePages:{home:'Page d’accueil',collection:'Page collection',product:'Page produit',cart:'Panier',checkout:'Checkout'}, siteDev:{all:'Tous les appareils',desktop:'Ordinateur',mobile:'Mobile'},
+    siteSt:{fail:'À corriger',pass:'OK',na:'Non concerné',unknown:'Non vérifié'}, siteScore:'points validés', siteToFix:'à corriger', siteScanned:'Analysé le', siteFix:'Correctif :', siteNone:'Cette page n’a pas encore été analysée.', siteErr:'Impossible de charger l’analyse du site.',
     sales:'Ventes nettes', orders:'Commandes', aov:'Panier moyen', cr:'Taux de conversion', rpv:'Revenu par visiteur',
     vsLY:'vs an dernier',
     roiTitle:'Retour sur CXO', perMonth:'/ mois', roiSub:'Revenu supplémentaire généré en ce moment par les variantes gagnantes des tests A/B en ligne, mesuré contre la version d’origine.',
@@ -814,7 +842,7 @@ let curBoard=null;
 
 function setView(id){
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===id)));
-  ['viewOverview','viewTimeline','viewWork'].forEach(v=>document.getElementById(v).classList.toggle('hide',v!==id));
+  ['viewOverview','viewTimeline','viewSite','viewWork'].forEach(v=>document.getElementById(v).classList.toggle('hide',v!==id));
   try{localStorage.setItem('cxoportal:tab',id);}catch(e){}
   if(id==='viewTimeline') renderChart();
 }
@@ -823,17 +851,59 @@ function renderTabs(d){
   document.getElementById('tabOverview').textContent=C.overview;
   document.getElementById('tabTimeline').textContent=C.timeline;
   document.getElementById('tabWork').textContent=C.work;
-  const avail={viewOverview:!!d.cockpit, viewTimeline:!!d.timeline, viewWork:true};
+  document.getElementById('tabSite').textContent=C.site;
+  const avail={viewOverview:!!d.cockpit, viewTimeline:!!d.timeline, viewSite:!!d.sitecheck, viewWork:true};
+  document.getElementById('tabSite').hidden=!avail.viewSite;
   document.getElementById('tabOverview').hidden=!avail.viewOverview;
   document.getElementById('tabTimeline').hidden=!avail.viewTimeline;
   const tabs=document.getElementById('tabs');
-  if(!avail.viewOverview&&!avail.viewTimeline){ tabs.classList.add('hide'); setView('viewWork'); return; }
+  if(!avail.viewOverview&&!avail.viewTimeline&&!avail.viewSite){ tabs.classList.add('hide'); setView('viewWork'); return; }
   tabs.classList.remove('hide');
   let saved=null; try{saved=localStorage.getItem('cxoportal:tab');}catch(e){}
   const current=document.querySelector('#tabs button[aria-selected="true"]')?.dataset.view;
   const pick=[current,saved,avail.viewOverview?'viewOverview':'viewWork'].find(v=>v&&avail[v]);
   setView(pick);
 }
+// ── Site check: the CXO checklist on the client's own pages ──
+let site=null, sitePage=null, siteDev='all';
+async function loadSite(pw,d){
+  if(!d.sitecheck) return;
+  site=null;
+  try{ const r=await fetch('/api/sitecheck?k='+encodeURIComponent(pw)); const j=await r.json(); if(!r.ok) throw new Error(j.error); site=j; }
+  catch(e){ document.getElementById('siteList').innerHTML=`<div class="ovwarn">${C.siteErr}</div>`; return; }
+  sitePage=(site.pages.find(p=>p.items.length)||site.pages[0]||{}).page;
+  renderSite();
+}
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function renderSite(){
+  if(!site) return;
+  const pages=site.pages;
+  document.getElementById('sitePages').innerHTML=pages.map(p=>`<button type="button" data-sp="${p.page}" aria-pressed="${p.page===sitePage}">${C.sitePages[p.page]||p.page}</button>`).join('');
+  document.getElementById('siteDevices').innerHTML=['all','desktop','mobile'].map(k=>`<button type="button" data-sd="${k}" aria-pressed="${k===siteDev}">${C.siteDev[k]}</button>`).join('');
+  const pg=pages.find(p=>p.page===sitePage);
+  const sum=document.getElementById('siteSum'), list=document.getElementById('siteList');
+  if(!pg||!pg.items.length){ sum.innerHTML=''; list.innerHTML=`<div class="panel">${C.siteNone}</div>`; return; }
+  // a checkpoint for both devices shows under each; device-only ones only under theirs
+  const items=pg.items.filter(i=>siteDev==='all'||i.device==='Both'||i.device.toLowerCase().startsWith(siteDev));
+  const judged=items.filter(i=>i.status==='pass'||i.status==='fail');
+  const passed=judged.filter(i=>i.status==='pass').length, toFix=judged.length-passed;
+  sum.innerHTML=`<span class="big">${judged.length?Math.round(passed/judged.length*100):0}%</span><span>${passed} / ${judged.length} ${C.siteScore}</span><span><b style="color:var(--ink)">${toFix}</b> ${C.siteToFix}</span><span>${C.siteScanned} ${dLong(pg.scannedAt)} · <a href="${esc(pg.url)}" target="_blank" rel="noopener">${esc(pg.url.replace(/^https?:\/\//,''))}</a></span>`;
+  // fixes first (highest impact first), then done, then the rest; grouped by part of the page
+  const rank={fail:0,pass:1,unknown:2,na:3};
+  const areas=[...new Set(items.map(i=>i.area))];
+  const order=a=>Math.min(...items.filter(i=>i.area===a).map(i=>rank[i.status]));
+  list.innerHTML=areas.sort((a,b)=>order(a)-order(b)).map(a=>{
+    const rows=items.filter(i=>i.area===a).sort((x,y)=>rank[x.status]-rank[y.status]||(y.impact||0)-(x.impact||0)).map(i=>`
+      <div class="siterow"><span class="st ${i.status}">${C.siteSt[i.status]||i.status}</span><span class="t">${esc(i.title)}</span>
+      <span class="r">${esc(i.reason)}</span>${i.status==='fail'&&i.fix?`<span class="fx"><b>${C.siteFix}</b> ${esc(i.fix)}</span>`:''}</div>`).join('');
+    return `<section class="panel sitegroup"><div class="paneltitle">${esc(a)}</div>${rows}</section>`;
+  }).join('');
+}
+document.addEventListener('click',e=>{
+  const p=e.target.closest('[data-sp]'); if(p){ sitePage=p.dataset.sp; renderSite(); return; }
+  const dv=e.target.closest('[data-sd]'); if(dv){ siteDev=dv.dataset.sd; renderSite(); }
+});
+
 async function loadCockpit(pw,d){
   if(!d.cockpit&&!d.timeline) return;
   cockpitFor=pw;
@@ -1057,7 +1127,7 @@ function resetCockpit(){
   perf=null; tl=null; cockpitFor=null; stageFilter='all'; logAll=false;
   document.getElementById('tabs').classList.add('hide');
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected','false'));
-  ['viewOverview','viewTimeline'].forEach(v=>document.getElementById(v).classList.add('hide'));
+  ['viewOverview','viewTimeline','viewSite'].forEach(v=>document.getElementById(v).classList.add('hide'));
   document.getElementById('viewWork').classList.remove('hide');
   ['kpis','minis','latestList','nowList','metricSeg','legend','filters','log','roiPanel','funnelPanel','healthTitle','healthMeta'].forEach(id=>document.getElementById(id).innerHTML='');
   document.getElementById('roiPanel').classList.add('hide'); document.getElementById('health').classList.add('hide'); curBoard=null;
