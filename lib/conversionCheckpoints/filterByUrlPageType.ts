@@ -17,6 +17,8 @@ const PRODUCT_PAGE_TYPE_ID = 'recq3oalwwoefg2x5'
 const CATEGORY_PAGE_TYPE_ID = 'recpwt9mnrffkte9i'
 // The product scan adds one item to the cart and captures the cart view, so cart checkpoints run there too.
 const CART_PAGE_TYPE_ID = 'recdyiscpsbfrbbha'
+// ...and opens the first step of checkout. Test scans only until these checkpoints are labelled.
+const CHECKOUT_PAGE_TYPE_ID = 'recokhtzh3nxsqnmb'
 
 /** Check methods the scanner cannot do on its own: they stay in the paid audit. */
 const NOT_SCANNABLE_METHODS = new Set(['Manual (audit only)', 'Customer upload'])
@@ -37,12 +39,12 @@ function normalizeId(id: string): string {
   return id.trim().toLowerCase()
 }
 
-export function getRequiredPageTypeIds(pageType: UrlPageType): string[] {
+export function getRequiredPageTypeIds(pageType: UrlPageType, opts: ScanSelectionOptions = {}): string[] {
   const ids =
     pageType === 'homepage'
       ? [GENERAL_PAGE_TYPE_ID, HOME_PAGE_TYPE_ID]
       : pageType === 'product'
-        ? [GENERAL_PAGE_TYPE_ID, PRODUCT_PAGE_TYPE_ID, CART_PAGE_TYPE_ID]
+        ? [GENERAL_PAGE_TYPE_ID, PRODUCT_PAGE_TYPE_ID, CART_PAGE_TYPE_ID, ...(opts.includeDrafts ? [CHECKOUT_PAGE_TYPE_ID] : [])]
         : pageType === 'category'
           ? [GENERAL_PAGE_TYPE_ID, CATEGORY_PAGE_TYPE_ID]
           : [GENERAL_PAGE_TYPE_ID]
@@ -93,7 +95,7 @@ export function filterCheckpointsByPageType(
   pageType: UrlPageType,
   opts: ScanSelectionOptions = {},
 ): CheckpointFilterResult {
-  const requiredPageTypeIds = getRequiredPageTypeIds(pageType)
+  const requiredPageTypeIds = getRequiredPageTypeIds(pageType, opts)
 
   const recordById = new Map(records.map((r) => [r.id, r]))
   rules = rules.filter((rule) => ruleIsScannable(rule, opts))

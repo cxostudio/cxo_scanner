@@ -40,7 +40,7 @@ function nicheVerdict(r: Rule, niche: Niche): Answer | null {
 
 /** Every image the judge sees, in order. Test scans store them in this order (lib/lab). */
 export function evidenceImages(ev: Evidence): Tile[] {
-  return [...ev.desktopTiles, ...ev.mobileTiles, ev.galleryTile, ...(ev.tabTiles || []), ev.mobileMenu, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  return [...ev.desktopTiles, ...ev.mobileTiles, ev.galleryTile, ...(ev.tabTiles || []), ev.mobileMenu, ev.cartHeader, ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || []), ...(ev.checkout || []), ...(ev.mobileCheckout || [])].filter(Boolean) as Tile[]
 }
 
 const UNMEASURED = 'This is measured in the page code, and the scanner could not measure it on this page.'
@@ -177,6 +177,11 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
     for (const r of rules)
       if (/cart/i.test(r.area || '') && r.id !== EMPTY_CART && !settled.has(r.id) && !byId.get(r.id)?.coveredByShopify && byId.get(r.id)?.answer !== 'na')
         byId.set(r.id, { answer: 'unknown', evidence: 'We could not open the cart with a product in it on this store, so we could not check this.' })
+  // no picture of checkout: checkout checkpoints cannot be judged (Shopify defaults stay covered)
+  if (!ev.checkout?.length)
+    for (const r of rules)
+      if ((r as { pageTypeIds?: string[] }).pageTypeIds?.includes('recOkHTZH3nxsQNMb') && !settled.has(r.id) && !byId.get(r.id)?.coveredByShopify && byId.get(r.id)?.answer !== 'na')
+        byId.set(r.id, { answer: 'unknown', evidence: `We could not open checkout on this store${ev.checkoutNote ? ` (${ev.checkoutNote})` : ''}, so we could not check this.` })
   // niche rules are facts in Airtable, not the model's call: they override any answer
   for (const r of rules) {
     const n = nicheVerdict(r, niche)

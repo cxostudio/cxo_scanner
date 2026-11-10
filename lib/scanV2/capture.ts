@@ -33,6 +33,13 @@ export type Evidence = {
   /** The /cart page as well, when the icon opened a drawer (both are judged, the drawer first). */
   cartPage?: Tile[]
   mobileCartPage?: Tile[]
+  /** The first step of checkout with one item in the cart (contact and delivery form, order summary, express buttons). */
+  checkout?: Tile[]
+  mobileCheckout?: Tile[]
+  /** Why checkout could not be captured (bot check, redirect, not Shopify...). */
+  checkoutNote?: string
+  /** Visible text of the checkout first step (desktop). */
+  checkoutText?: string
   /** The cart opened BEFORE anything is added (empty-cart checkpoints). */
   emptyCart?: Tile
   /** The mobile navigation after tapping the menu button. */
@@ -1479,6 +1486,33 @@ async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number,
   return all.filter((t) => !/footer/i.test(t.label)).map((t) => ({ ...t, label: t.label.replace(`${device} cart page screenshot`, `${device} CART PAGE (/cart) screenshot`) }))
 }
 
+/**
+ * The first step of checkout, with the item already in the cart. We never type anything: no email, no
+ * address, so no abandoned checkout is created and no recovery email is sent. Bot checks are reported, never guessed.
+ */
+async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<{ tiles: Tile[]; note?: string; text?: string }> {
+  const origin = new URL(page.url()).origin
+  const res = await page.goto(`${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
+  if (!res) return { tiles: [], note: 'checkout did not load' }
+  await page.waitForNetworkIdle({ idleTime: 800, timeout: 8000 }).catch(() => {})
+  await new Promise((r) => setTimeout(r, 1200))
+  const state = await page
+    .evaluate(() => {
+      const t = (document.body?.innerText || '').slice(0, 4000)
+      const bot = /verify (that )?you are (a )?human|are you a robot|captcha|checking your browser|access denied|unusual traffic/i.test(t) || !!document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"]')
+      const form = !!document.querySelector('input[type="email"], input[autocomplete="email"], input[name*="email" i], input[autocomplete="tel"], input[name="address1"], input[autocomplete="shipping address-line1"]')
+      return { bot, form, url: location.href, text: (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 6000) }
+    })
+    .catch(() => ({ bot: false, form: false, url: '', text: '' }))
+  if (state.bot) return { tiles: [], note: 'checkout shows a bot check to automated visits' }
+  if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname})` }
+  const all = await tiles(page, `${device} checkout`, width, height, max)
+  return {
+    tiles: all.filter((t) => !/footer|page bottom/i.test(t.label)).map((t) => ({ ...t, label: t.label.replace(`${device} checkout screenshot`, `${device} CHECKOUT first step screenshot`) })),
+    text: state.text,
+  }
+}
+
 const kindOf = (t?: Tile): 'drawer' | 'page' | 'none' => (!t ? 'none' : /cart page\)$/.test(t.label) ? 'page' : 'drawer')
 
 /** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */
@@ -1615,12 +1649,14 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const cartKind = itemInCart && opts.extended ? kindOf(desktopCartView) : undefined
     // the icon opened a drawer (or nothing): capture the cart page too
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
+    const desktopCheckout = itemInCart && opts.extended ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined })) : undefined
     await desktop.close().catch(() => {})
 
     let mobileTiles: Tile[] = []
     let mobileFacts: Record<string, unknown> = {}
     let mobileCartView: Tile | undefined
     let mobileCartPage: Tile[] = []
+    let mobileCheckout: Tile[] = []
     let menuTile: Tile | undefined
     try {
       const mobile = await browser.newPage()
@@ -1703,6 +1739,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       if (itemInCart && opts.extended) {
         mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
         if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
+        if (desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
       }
       await mobile.close().catch(() => {})
     } catch (e) {
@@ -1727,6 +1764,10 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       cartPage: desktopCartPage,
       emptyCart,
       mobileCartPage,
+      checkout: desktopCheckout?.tiles,
+      mobileCheckout,
+      checkoutNote: desktopCheckout?.note,
+      checkoutText: desktopCheckout?.text,
       cartKind,
       isShopify,
       text: text.slice(0, 14000),

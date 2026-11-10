@@ -32,17 +32,19 @@ type Scan = {
   leftOut?: { measured: number; niche: number }
 }
 type LabelMode = 'blind' | 'review'
-type Tab = 'desktop' | 'mobile' | 'gallery' | 'menu' | 'cart' | 'text'
+type Tab = 'desktop' | 'mobile' | 'gallery' | 'menu' | 'cart' | 'checkout' | 'text'
 const TABS: { tab: Tab; word: string }[] = [
   { tab: 'desktop', word: 'Desktop' },
   { tab: 'mobile', word: 'Mobile' },
   { tab: 'gallery', word: 'Gallery' },
   { tab: 'menu', word: 'Menu' },
   { tab: 'cart', word: 'Cart' },
+  { tab: 'checkout', word: 'Checkout' },
   { tab: 'text', word: 'Hidden text' },
 ]
 
 const CART_PAGE_TYPE = 'recDYiScpsBfRbbha'
+const CHECKOUT_PAGE_TYPE = 'recOkHTZH3nxsQNMb'
 const BUTTONS: { label: Label; word: string; key: string; fg: string; bg: string }[] = [
   { label: 'pass', word: 'Pass', key: 'P', fg: 'var(--result-pass-fg)', bg: 'var(--result-pass-bg)' },
   { label: 'fail', word: 'Fail', key: 'F', fg: 'var(--result-fail-fg)', bg: 'var(--result-fail-bg)' },
@@ -51,7 +53,7 @@ const BUTTONS: { label: Label; word: string; key: string; fg: string; bg: string
 ]
 const WORD: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'Not relevant', skip: "Can't tell", unknown: "Couldn't check" }
 const tabOf = (label: string): Tab =>
-  /^gallery overview/.test(label) ? 'gallery' : /MENU opened/.test(label) ? 'menu' : /cart (view|page)|CART PAGE|cart drawer|header AFTER|EMPTY cart/i.test(label) ? 'cart' : /^mobile/i.test(label) ? 'mobile' : 'desktop'
+  /CHECKOUT/.test(label) ? 'checkout' : /^gallery overview/.test(label) ? 'gallery' : /MENU opened/.test(label) ? 'menu' : /cart (view|page)|CART PAGE|cart drawer|header AFTER|EMPTY cart/i.test(label) ? 'cart' : /^mobile/i.test(label) ? 'mobile' : 'desktop'
 /** Cart tab: the empty cart first, then the cart with one item, the cart page, the header last. */
 const cartRank = (label: string) => (/EMPTY cart/.test(label) ? 0 : /cart view/i.test(label) ? 1 : /CART PAGE/.test(label) ? 2 : 3)
 
@@ -128,7 +130,8 @@ export default function LabScan({ params }: { params: { id: string } }) {
   // open the screenshots the checkpoint is about
   useEffect(() => {
     if (!cp) return
-    if (cp.pageTypeIds?.includes(CART_PAGE_TYPE) || cp.area === 'Cart drawer') setTab('cart')
+    if (cp.pageTypeIds?.includes(CHECKOUT_PAGE_TYPE)) setTab('checkout')
+    else if (cp.pageTypeIds?.includes(CART_PAGE_TYPE) || cp.area === 'Cart drawer') setTab('cart')
     else if (cp.area === 'Gallery' && scan?.images.some((i) => tabOf(i.label) === 'gallery')) setTab('gallery')
     else if (/menu|navigation/i.test(cp.title) && /mobile/i.test(`${cp.title} ${cp.device}`)) setTab('menu')
     else if (cp.device === 'Mobile only') setTab('mobile')

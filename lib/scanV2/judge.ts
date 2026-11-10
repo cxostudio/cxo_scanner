@@ -113,6 +113,13 @@ Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoi
 export const pageKindOf = (ev: Evidence): PageKind => ev.pageType || detectPageTypeFromUrl(ev.finalUrl || ev.url)
 
 function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
+  if (scope === 'checkout')
+    return [
+      `PAGE: the FIRST STEP of checkout on ${ev.finalUrl.replace(/^(https?:\/\/[^/]+).*/, '$1')}, reached with one product in the cart. Nothing was typed: later steps (shipping methods, payment) are not shown.`,
+      `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
+      `VISIBLE TEXT OF THE CHECKOUT (desktop):\n${ev.checkoutText || ''}`,
+      'Judge these checkout checkpoints ONLY on the checkout images and text. If a checkpoint is about a later step (shipping method, payment, confirmation) and nothing on this first step shows it, answer unknown.',
+    ].join('\n\n')
   const pageText = scope !== 'cart'
   return [
     `PAGE: ${ev.finalUrl} (${PAGE[pageKindOf(ev)].name})`,
@@ -132,13 +139,21 @@ function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
 }
 
 type Tile = Evidence['desktopTiles'][number]
-type Scope = 'header' | 'footer' | 'cart' | 'page'
+type Scope = 'header' | 'footer' | 'cart' | 'checkout' | 'page'
 
 /** Which part of the evidence a page area is judged on. */
+const CHECKOUT_PAGE_TYPE = 'recOkHTZH3nxsQNMb'
+/** Checkout checkpoints are judged on the checkout images only, whatever their page area. */
+function scopeFor(r: Rule): Scope {
+  if ((r as { pageTypeIds?: string[] }).pageTypeIds?.includes(CHECKOUT_PAGE_TYPE)) return 'checkout'
+  return scopeOf(r.area)
+}
+
 function scopeOf(area?: string): Scope {
   const a = (area || '').toLowerCase()
   if (/header|navigation|menu/.test(a)) return 'header'
   if (/footer/.test(a)) return 'footer'
+  if (/checkout form|order summary/.test(a)) return 'checkout'
   if (/cart|checkout/.test(a)) return 'cart'
   return 'page'
 }
@@ -171,6 +186,7 @@ function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
   if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
   if (scope === 'footer') return [ev.desktopTiles, ev.mobileTiles].flatMap(footerTiles)
   if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+  if (scope === 'checkout') return [...(ev.checkout || []), ...(ev.mobileCheckout || [])]
   if (scope === 'page') return [...page, ...tabs]
   return [...page, ...tabs, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
 }
@@ -297,7 +313,7 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
   // grouped by part of the page and by device: a mobile-only checkpoint never sees desktop screenshots
   const byScope = new Map<string, Rule[]>()
   for (const r of [...rules].sort((x, y) => x.id.localeCompare(y.id))) {
-    const k = `${scopeOf(r.area)}|${deviceOf(r)}`
+    const k = `${scopeFor(r)}|${deviceOf(r)}`
     byScope.set(k, [...(byScope.get(k) || []), r])
   }
   const jobs: { group: Rule[]; shared: { text: string; imgs: ReturnType<typeof images> } }[] = []

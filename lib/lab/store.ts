@@ -16,8 +16,8 @@ import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
 /** Which part of the evidence each saved image is, so it can be rebuilt for a re-judge. */
-type ImageRole = 'desktop' | 'mobile' | 'tab' | 'gallery' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
-type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'tabTiles' | 'galleryTile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
+type ImageRole = 'desktop' | 'mobile' | 'tab' | 'gallery' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage' | 'checkout' | 'mobileCheckout'
+type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'tabTiles' | 'galleryTile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage' | 'checkout' | 'mobileCheckout'>
 
 const BUCKET = 'test-scans'
 
@@ -60,7 +60,7 @@ export type LabScan = {
   history?: { judgedAt: string; model?: string; answers: LabScan['answers'] }[]
 }
 
-const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'tabTiles', 'galleryTile', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
+const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'tabTiles', 'galleryTile', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage', 'checkout', 'mobileCheckout'] as const
 
 function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   const out: { role: ImageRole; tile: Tile }[] = []
@@ -76,6 +76,8 @@ function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   add('cartPage', ev.cartPage)
   add('mobileCartView', ev.mobileCartView)
   add('mobileCartPage', ev.mobileCartPage)
+  add('checkout', ev.checkout)
+  add('mobileCheckout', ev.mobileCheckout)
   return out
 }
 
@@ -233,6 +235,8 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
     cartPage: of('cartPage'),
     mobileCartView: of('mobileCartView')[0],
     mobileCartPage: of('mobileCartPage'),
+    checkout: of('checkout'),
+    mobileCheckout: of('mobileCheckout'),
   }
 }
 
