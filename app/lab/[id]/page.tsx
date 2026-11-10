@@ -121,8 +121,9 @@ export default function LabScan({ params }: { params: { id: string } }) {
     setMode(m)
     load(c || m === 'review', k).then((s) => {
       if (!s) return
-      // continue where labelling stopped
-      const first = s.checkpoints.findIndex((cp) => !s.labels?.[cp.id])
+      // ?cp=rec… opens one checkpoint (links from Claude to relabel); otherwise continue where labelling stopped
+      const want = q.get('cp') ? s.checkpoints.findIndex((cp) => cp.id === q.get('cp')) : -1
+      const first = want >= 0 ? want : s.checkpoints.findIndex((cp) => !s.labels?.[cp.id])
       setI(first < 0 ? 0 : first)
     })
   }, [load])
