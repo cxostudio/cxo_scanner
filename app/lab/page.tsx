@@ -137,6 +137,9 @@ export default function LabHome() {
           <p className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
             Scanner test lab
             <span className="flex gap-4">
+              <Link href={`/lab/queue${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
+                Label by checkpoint →
+              </Link>
               <Link href={`/lab/review${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
                 Review rewrites →
               </Link>

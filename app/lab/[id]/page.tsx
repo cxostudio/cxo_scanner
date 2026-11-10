@@ -70,6 +70,8 @@ export default function LabScan({ params }: { params: { id: string } }) {
   const [modes, setModes] = useState<Record<string, LabelMode>>({})
   const [disagree, setDisagree] = useState(false)
   const [saved, setSaved] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  // ?queue=1&cp=rec…: label this one checkpoint across stores; each label moves on to the next store
+  const [queue, setQueue] = useState<{ cp: string; left: number; total: number } | null>(null)
   const saveTimer = useRef<number>(0)
 
   const load = useCallback(
@@ -117,6 +119,16 @@ export default function LabScan({ params }: { params: { id: string } }) {
       } catch {}
     }
     setKey(k)
+    if (q.get('queue') && q.get('cp')) {
+      const qs = new URLSearchParams({ cp: q.get('cp')! })
+      if (k) qs.set('key', k)
+      fetch(api(`/lab/queue?${qs}`))
+        .then((r) => r.json())
+        .then((d: { scans: { id: string; label: string | null }[] }) =>
+          setQueue({ cp: q.get('cp')!, total: d.scans.length, left: d.scans.filter((x) => !x.label && x.id !== params.id).length }),
+        )
+        .catch(() => setQueue({ cp: q.get('cp')!, total: 0, left: 0 }))
+    }
     setCompare(c)
     setMode(m)
     load(c || m === 'review', k).then((s) => {
@@ -170,11 +182,27 @@ export default function LabScan({ params }: { params: { id: string } }) {
       const nextModes = { ...modes, [cp.id]: shown ? ('review' as const) : ('blind' as const) }
       setLabels(next)
       setModes(nextModes)
-      persist(next, notes, nextModes)
       setDisagree(false)
+      if (queue && cp.id === queue.cp) {
+        setSaved('saving')
+        const qk = key ? `?key=${encodeURIComponent(key)}` : ''
+        fetch(api(`/lab/labels/${params.id}${qk}`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ labels: next, notes, modes: nextModes }) })
+          .then(async (r) => {
+            if (!r.ok) throw new Error(String(r.status))
+            setSaved('saved')
+            const qs = new URLSearchParams({ cp: queue.cp })
+            if (key) qs.set('key', key)
+            const d = await fetch(api(`/lab/queue?${qs}`)).then((x) => x.json())
+            const nextScan = (d.scans as { id: string; label: string | null }[]).find((x) => !x.label && x.id !== params.id)
+            window.location.href = nextScan ? `/scan/lab/${nextScan.id}?cp=${queue.cp}&queue=1${key ? `&key=${encodeURIComponent(key)}` : ''}` : `/scan/lab/queue${key ? `?key=${encodeURIComponent(key)}` : ''}`
+          })
+          .catch(() => setSaved('error'))
+        return
+      }
+      persist(next, notes, nextModes)
       setI((n) => Math.min(n + 1, scan.checkpoints.length - 1))
     },
-    [cp, scan, labels, notes, modes, shown, persist],
+    [cp, scan, labels, notes, modes, shown, persist, queue, key, params.id],
   )
 
   const setNote = (text: string) => {
@@ -244,6 +272,13 @@ export default function LabScan({ params }: { params: { id: string } }) {
 
   return (
     <Shell>
+      {queue && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-md)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text)]">
+          <b>Labelling one checkpoint across stores.</b>
+          <span className="text-[var(--text-muted)]">{queue.left} more {queue.left === 1 ? 'store' : 'stores'} to go after this one. Your label saves and opens the next store.</span>
+          <Link href={`/lab/queue${q}`} className="ml-auto underline">Pick another checkpoint</Link>
+        </div>
+      )}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link href={`/lab${q}`} className="text-sm text-[var(--text-muted)] hover:underline">← Lab</Link>
         <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.02em]">
