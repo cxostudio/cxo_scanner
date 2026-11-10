@@ -1492,8 +1492,19 @@ async function cartPage(page: Page, device: 'desktop' | 'mobile', width: number,
  */
 async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: number, height: number, max: number): Promise<{ tiles: Tile[]; note?: string; text?: string }> {
   const origin = new URL(page.url()).origin
-  const res = await page.goto(`${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
+  // Shopify's checkout refuses obvious automation: look like the browser we are
+  await page
+    .evaluateOnNewDocument(() => {
+      Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false })
+    })
+    .catch(() => {})
+  let res = await page.goto(`${origin}/checkout`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
   if (!res) return { tiles: [], note: 'checkout did not load' }
+  // "There was a problem with our checkout": one reload, as the page itself suggests
+  await new Promise((r) => setTimeout(r, 2500))
+  if (await page.evaluate(() => /problem with (our|the) checkout|try again in a few minutes/i.test(document.body?.innerText || '')).catch(() => false)) {
+    res = await page.reload({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => res)
+  }
   // Shopify's checkout is a heavy app: wait for its form, not just the network
   await page
     .waitForSelector('input[type="email"], input[autocomplete="email"], input[name*="email" i], input[autocomplete="tel"], input[name="address1"], input[autocomplete="shipping address-line1"]', { timeout: 20000 })
@@ -1503,12 +1514,12 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   const state = await page
     .evaluate(() => {
       const t = (document.body?.innerText || '').slice(0, 4000)
-      const bot = /verify (that )?you are (a )?human|are you a robot|captcha|checking your browser|access denied|unusual traffic/i.test(t) || !!document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"]')
+      const bot = /verify (that )?you are (a )?human|are you a robot|captcha|checking your browser|access denied|unusual traffic|problem with (our|the) checkout|try again in a few minutes/i.test(t) || !!document.querySelector('iframe[src*="captcha"], iframe[src*="challenge"]')
       const form = !!document.querySelector('input[type="email"], input[autocomplete="email"], input[name*="email" i], input[autocomplete="tel"], input[name="address1"], input[autocomplete="shipping address-line1"]')
       return { bot, form, url: location.href, text: (document.body?.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').slice(0, 6000) }
     })
     .catch(() => ({ bot: false, form: false, url: '', text: '' }))
-  if (state.bot) return { tiles: [], note: 'checkout shows a bot check to automated visits' }
+  if (state.bot) return { tiles: [], note: 'the checkout refused our automated visit (bot check or error page)' }
   if (!state.form) return { tiles: [], note: `no checkout form found (${new URL(state.url || origin).pathname}); page says: ${state.text.replace(/\s+/g, ' ').slice(0, 160)}` }
   const all = await tiles(page, `${device} checkout`, width, height, max)
   return {
