@@ -1547,18 +1547,23 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
  * Browserbase browser (real fingerprint, residential IP): the same cart is rebuilt there through Shopify's cart
  * permalink (/cart/<variant>:<qty>), then the first checkout step is captured on desktop and mobile.
  */
-async function remoteCheckout(shopPage: Page): Promise<{ desktop?: { tiles: Tile[]; note?: string; text?: string }; mobile: Tile[] }> {
-  const key = process.env.BROWSERBASE_API_KEY
-  const projectId = process.env.BROWSERBASE_PROJECT_ID
-  if (!key || !projectId) return { mobile: [] }
-  const origin = new URL(shopPage.url()).origin
-  const items: string[] = await shopPage
+type RemoteCheckout = { desktop?: { tiles: Tile[]; note?: string; text?: string }; mobile: Tile[] }
+
+/** The cart's lines as permalink parts (`<variant>:<qty>`), read in the shopper's own session. */
+function cartItems(shopPage: Page): Promise<string[]> {
+  return shopPage
     .evaluate(() =>
       fetch('/cart.js', { credentials: 'include' })
         .then((r) => r.json())
         .then((c) => (c.items || []).map((i: { variant_id: number; quantity: number }) => `${i.variant_id}:${i.quantity}`)),
     )
     .catch(() => [])
+}
+
+async function remoteCheckout(origin: string, items: string[]): Promise<RemoteCheckout> {
+  const key = process.env.BROWSERBASE_API_KEY
+  const projectId = process.env.BROWSERBASE_PROJECT_ID
+  if (!key || !projectId) return { mobile: [] }
   if (!items.length) return { desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }
   const open = (body: object) =>
     fetch('https://api.browserbase.com/v1/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BB-API-Key': key }, body: JSON.stringify(body) }).catch(() => null)
@@ -1724,9 +1729,19 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // the icon opened a drawer (or nothing): capture the cart page too
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
     // checkout: in a Browserbase browser when configured (Shopify refuses ours), otherwise in ours
-    const remote = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await remoteCheckout(desktop).then((r) => (r.desktop?.note ? { ...r, desktop: { ...r.desktop, note: `remote browser: ${r.desktop.note}` } } : r)).catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] })) : null
-    const desktopCheckout = remote
-      ? remote.desktop
+    // runs alongside the mobile capture, capped, so the whole scan stays inside the function's time limit
+    const remoteItems = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await cartItems(desktop) : null
+    const remoteOrigin = new URL(desktop.url()).origin
+    const remoteP: Promise<RemoteCheckout> | null = remoteItems
+      ? Promise.race([
+          remoteItems.length ? remoteCheckout(remoteOrigin, remoteItems) : Promise.resolve<RemoteCheckout>({ desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }),
+          new Promise<RemoteCheckout>((r) => setTimeout(() => r({ desktop: { tiles: [], note: 'took too long' }, mobile: [] }), 120000)),
+        ])
+          .then((r) => (r.desktop?.note ? { ...r, desktop: { ...r.desktop, note: `remote browser: ${r.desktop.note}` } } : r))
+          .catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] }))
+      : null
+    let desktopCheckout: { tiles: Tile[]; note?: string; text?: string } | undefined = remoteP
+      ? undefined
       : itemInCart && opts.extended
         ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).then((r) => (r.note ? { ...r, note: `our browser: ${r.note}` } : r)).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
         : undefined
@@ -1819,12 +1834,16 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       if (itemInCart && opts.extended) {
         mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
         if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
-        if (remote) mobileCheckout = remote.mobile
-        else if (desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
+        if (!remoteP && desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
       }
       await mobile.close().catch(() => {})
     } catch (e) {
       console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
+    }
+    if (remoteP) {
+      const r = await remoteP
+      desktopCheckout = r.desktop
+      mobileCheckout = r.mobile
     }
 
     return {
