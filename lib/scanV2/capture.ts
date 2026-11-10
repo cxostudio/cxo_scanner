@@ -5,6 +5,7 @@
 //   - the cart view after that (drawer or cart page), desktop and mobile, for cart checkpoints
 //   - a page check first: 404s, redirects away from the product, bot walls
 import type { Page } from 'puppeteer-core'
+import puppeteer from 'puppeteer-core'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -1528,6 +1529,51 @@ async function checkoutStep(page: Page, device: 'desktop' | 'mobile', width: num
   }
 }
 
+/**
+ * Shopify's checkout refuses our serverless browser. With BROWSERBASE_API_KEY set, the checkout step runs in a
+ * Browserbase browser (real fingerprint, residential IP): the same cart is rebuilt there through Shopify's cart
+ * permalink (/cart/<variant>:<qty>), then the first checkout step is captured on desktop and mobile.
+ */
+async function remoteCheckout(shopPage: Page): Promise<{ desktop?: { tiles: Tile[]; note?: string; text?: string }; mobile: Tile[] }> {
+  const key = process.env.BROWSERBASE_API_KEY
+  const projectId = process.env.BROWSERBASE_PROJECT_ID
+  if (!key || !projectId) return { mobile: [] }
+  const origin = new URL(shopPage.url()).origin
+  const items: string[] = await shopPage
+    .evaluate(() =>
+      fetch('/cart.js', { credentials: 'include' })
+        .then((r) => r.json())
+        .then((c) => (c.items || []).map((i: { variant_id: number; quantity: number }) => `${i.variant_id}:${i.quantity}`)),
+    )
+    .catch(() => [])
+  if (!items.length) return { desktop: { tiles: [], note: 'cart empty, checkout not opened' }, mobile: [] }
+  const res = await fetch('https://api.browserbase.com/v1/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-BB-API-Key': key },
+    body: JSON.stringify({ projectId, proxies: true, browserSettings: { solveCaptchas: true } }),
+  }).catch(() => null)
+  const session = res && res.ok ? ((await res.json()) as { id: string; connectUrl: string }) : null
+  if (!session?.connectUrl) return { desktop: { tiles: [], note: `remote browser unavailable (${res?.status ?? 'no response'})` }, mobile: [] }
+  const browser = await puppeteer.connect({ browserWSEndpoint: session.connectUrl }).catch(() => null)
+  if (!browser) return { desktop: { tiles: [], note: 'remote browser did not connect' }, mobile: [] }
+  try {
+    const desk = (await browser.pages())[0] || (await browser.newPage())
+    await desk.setViewport({ width: DESKTOP.width, height: DESKTOP.height, deviceScaleFactor: 1 })
+    await desk.goto(`${origin}/cart/${items.join(',')}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+    const desktop = await checkoutStep(desk, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
+    let mobile: Tile[] = []
+    if (desktop.tiles.length) {
+      const mob = await browser.newPage()
+      await mob.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+      await mob.setUserAgent(MOBILE_UA)
+      mobile = (await checkoutStep(mob, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
+    }
+    return { desktop, mobile }
+  } finally {
+    await browser.close().catch(() => {})
+  }
+}
+
 const kindOf = (t?: Tile): 'drawer' | 'page' | 'none' => (!t ? 'none' : /cart page\)$/.test(t.label) ? 'page' : 'drawer')
 
 /** Warm serverless instances keep /tmp between scans: drop Chrome profiles left by scans that ended badly. */
@@ -1664,7 +1710,13 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     const cartKind = itemInCart && opts.extended ? kindOf(desktopCartView) : undefined
     // the icon opened a drawer (or nothing): capture the cart page too
     const desktopCartPage = itemInCart && opts.extended && cartKind !== 'page' ? await cartPage(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 1).catch(() => []) : []
-    const desktopCheckout = itemInCart && opts.extended ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined })) : undefined
+    // checkout: in a Browserbase browser when configured (Shopify refuses ours), otherwise in ours
+    const remote = itemInCart && opts.extended && process.env.BROWSERBASE_API_KEY ? await remoteCheckout(desktop).catch(() => ({ desktop: { tiles: [] as Tile[], note: 'remote checkout failed', text: undefined as string | undefined }, mobile: [] as Tile[] })) : null
+    const desktopCheckout = remote
+      ? remote.desktop
+      : itemInCart && opts.extended
+        ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
+        : undefined
     await desktop.close().catch(() => {})
 
     let mobileTiles: Tile[] = []
@@ -1754,7 +1806,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       if (itemInCart && opts.extended) {
         mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
         if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
-        if (desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
+        if (remote) mobileCheckout = remote.mobile
+        else if (desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
       }
       await mobile.close().catch(() => {})
     } catch (e) {
