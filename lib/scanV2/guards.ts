@@ -49,7 +49,7 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>) {
   for (const r of rules) {
     const v = byId.get(r.id)
     // no promotion running on this category: not relevant, never a fail (the model keeps failing it)
-    if (v && r.id === CATEGORY_PROMO && v.answer === 'fail' && /no (price |category[- ]specific )?promotion (is )?(running|active)|no (current )?(price )?(discount|sale|offer) (is )?(running|active)/i.test(v.evidence)) {
+    if (v && r.id === CATEGORY_PROMO && v.answer === 'fail' && /no (category[- ]specific )?promotion|not category[- ]specific|only (a )?sitewide|sitewide (announcement|offer|bar|free shipping)|no (current )?(discount|sale|offer)/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'na', evidence: 'No promotion is running on this category, so there is nothing to show at the top.', seen: v.seen, by: 'Code check' })
       continue
     }
