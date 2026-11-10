@@ -874,6 +874,7 @@ async function loadSite(pw,d){
   sitePage=(site.pages.find(p=>p.items.length)||site.pages[0]||{}).page;
   renderSite();
 }
+function renderSite(){
   if(!site) return;
   const pages=site.pages;
   document.getElementById('sitePages').innerHTML=pages.map(p=>`<button type="button" data-sp="${p.page}" aria-pressed="${p.page===sitePage}">${C.sitePages[p.page]||p.page}</button>`).join('');
