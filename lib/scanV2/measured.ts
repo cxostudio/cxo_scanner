@@ -307,7 +307,14 @@ export const MEASURED: Record<string, Measure> = {
   },
 
   // Does the page stay stable while it loads (no jumping buttons or text)?
-  recouiE072opsajby: (ev) => {
+  recouiE072opsajby: (ev, f) => {
+    // real visitors first (Google's field data, 75th percentile), then our own phone capture
+    const field = f.pageSpeed?.field
+    if (field && typeof field.cls === 'number') {
+      const c = Math.round(field.cls * 100) / 100
+      if (c <= 0.1) return { answer: 'pass', evidence: `For real visitors on Google's data, the page barely moves while loading (layout shift ${c}; "good" is 0.1 or less).` }
+      if (c > 0.25) return { answer: 'fail', evidence: `For real visitors on Google's data, content jumps while the page loads (layout shift ${c}; Google rates above 0.25 as poor).` }
+    }
     const cls = (ev.mobileFacts as F).layoutShift
     if (typeof cls !== 'number') return null
     if (cls <= 0.1) return { answer: 'pass', evidence: `The page barely moves while loading on a phone (layout shift ${cls}, Google's limit for "good" is 0.1).` }
@@ -325,13 +332,34 @@ export const MEASURED: Record<string, Measure> = {
 
   // Are images optimized for the web? (formats as downloaded: Shopify serves WebP without a .webp URL)
   recxGK8wpGe3v4DPX: (_ev, f) => {
+    // weight first (Google PageSpeed): Shopify serves WebP everywhere, yet images can still be far too big
+    const save = f.pageSpeed?.savings?.imagesKiB
+    if (typeof save === 'number' && save >= 300) return { answer: 'fail', evidence: `Google PageSpeed estimates the images on this page could be about ${save} KiB lighter (larger than shown, or not compressed enough), which slows the page on phones.` }
     const imgs: Record<string, number> = f.network?.images || {}
     const raster = Object.entries(imgs).filter(([t]) => !/svg|gif|x-icon|vnd\.microsoft/.test(t))
     const total = raster.reduce((a, [, n]) => a + n, 0)
     if (total < 5) return null
     const modern = raster.filter(([t]) => /webp|avif/.test(t)).reduce((a, [, n]) => a + n, 0)
-    if (modern / total >= 0.7) return { answer: 'pass', evidence: `${modern} of ${total} images were delivered in modern formats (WebP or AVIF).` }
+    if (modern / total >= 0.7 && !(typeof save === 'number' && save > 100)) return { answer: 'pass', evidence: `${modern} of ${total} images were delivered in modern formats (WebP or AVIF)${typeof save === 'number' ? ', and Google PageSpeed finds little left to gain' : ''}.` }
     if (modern / total < 0.3) return { answer: 'fail', evidence: `Only ${modern} of ${total} images were delivered in modern formats (WebP or AVIF), so images are heavier than needed.` }
+    return null
+  },
+
+  // Are CSS, JavaScript, and HTML minified? (Google PageSpeed: what minifying would still save)
+  rec18dg644AXcffV0: (_ev, f) => {
+    const k = f.pageSpeed?.savings?.unminifiedKiB
+    if (typeof k !== 'number') return null
+    if (k <= 5) return { answer: 'pass', evidence: 'The CSS and JavaScript are minified: Google PageSpeed finds nothing meaningful left to save.' }
+    if (k >= 25) return { answer: 'fail', evidence: `Some CSS or JavaScript is not minified: Google PageSpeed estimates about ${k} KiB could be saved.` }
+    return null
+  },
+
+  // Is browser caching enabled? (Google PageSpeed: files sent with short cache lifetimes)
+  receyw3XXgQfA6ylx: (_ev, f) => {
+    const k = f.pageSpeed?.savings?.cacheKiB
+    if (typeof k !== 'number') return null
+    if (k <= 50) return { answer: 'pass', evidence: 'Files are cached by the browser, so returning visitors do not download them again.' }
+    if (k >= 300) return { answer: 'fail', evidence: `About ${k} KiB of files are sent with short cache lifetimes (Google PageSpeed), so returning visitors download them again on every visit.` }
     return null
   },
 

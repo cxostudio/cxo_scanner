@@ -360,6 +360,16 @@ async function mobileProbes(page: Page) {
 }
 
 /** Google's PageSpeed Insights for the phone: field data from real visitors (CrUX) when Google has it, plus a lab run. */
+/** An audit's estimated savings in KiB: 0 when it passes, parsed from "Est savings of 1,295 KiB" otherwise. */
+function kib(a: any): number | null {
+  if (!a) return null
+  if (a.score === 1) return 0
+  const m = String(a.displayValue || '').match(/([\d.,]+)\s*(KiB|MiB)/i)
+  if (!m) return a.score == null ? null : 0
+  const n = parseFloat(m[1].replace(/,/g, ''))
+  return Math.round(/MiB/i.test(m[2]) ? n * 1024 : n)
+}
+
 async function pageSpeed(url: string) {
   const key = process.env.PAGESPEED_API_KEY ? `&key=${process.env.PAGESPEED_API_KEY}` : ''
   const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance${key}`, { signal: AbortSignal.timeout(55000) })
@@ -379,6 +389,16 @@ async function pageSpeed(url: string) {
   return {
     field: field(d.loadingExperience?.metrics ? d.loadingExperience : null) || field(d.originLoadingExperience),
     lab: { lcpMs: audits['largest-contentful-paint']?.numericValue ?? null, cls: audits['cumulative-layout-shift']?.numericValue ?? null, score: d.lighthouseResult?.categories?.performance?.score ?? null },
+    // Lighthouse 13 savings, in KiB, for the measured technical checkpoints (null when the audit is missing)
+    savings: {
+      imagesKiB: kib(audits['image-delivery-insight']),
+      cacheKiB: kib(audits['cache-insight']),
+      unminifiedKiB:
+        audits['unminified-css'] || audits['unminified-javascript']
+          ? Math.round(((audits['unminified-css']?.details?.overallSavingsBytes || 0) + (audits['unminified-javascript']?.details?.overallSavingsBytes || 0)) / 1024)
+          : null,
+    },
+    lighthouse: d.lighthouseResult?.lighthouseVersion ?? null,
   }
 }
 
