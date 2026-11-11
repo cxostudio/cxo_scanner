@@ -375,7 +375,8 @@ export default function ResultsPage() {
                 />
               </div>
 
-              <div className="relative min-w-0 lg:order-1">
+              <div className="min-w-0 lg:order-1">
+                <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
                     const isOpen = open.has(r.ruleId)
@@ -426,17 +427,18 @@ export default function ResultsPage() {
                     </button>
                   </div>
                 )}
+                </div>
+                {/* free scan: the other findings exist but stay in the full report */}
+                <LockedFindings
+                  locked={report.locked}
+                  qualified={qualified}
+                  monthlyAtStake={numbers ? numbers.lift10 : null}
+                  shortEur={shortEur}
+                  buyUrl={FULL_REPORT_URL}
+                  callUrl={CALL_URL}
+                  price={FULL_REPORT_PRICE}
+                />
               </div>
-              {/* free scan: the other findings exist but stay in the full report */}
-              <LockedFindings
-                locked={report.locked}
-                qualified={qualified}
-                monthlyAtStake={numbers ? numbers.lift10 : null}
-                shortEur={shortEur}
-                buyUrl={FULL_REPORT_URL}
-                callUrl={CALL_URL}
-                price={FULL_REPORT_PRICE}
-              />
             </div>
           </section>
 
