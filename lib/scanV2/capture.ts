@@ -597,6 +597,27 @@ async function scrollForLazyContent(page: Page) {
   await page
     .addStyleTag({ content: '.scroll-trigger--offscreen,[data-aos]:not(.aos-animate),[hdt-reveal]:not([animationend]){opacity:1!important;transform:none!important;transition:none!important;animation:none!important}' })
     .catch(() => {})
+  // any other theme's reveal (half-faded testimonials, sections that never appeared): finish it.
+  // Only elements with real content and a reveal-style class, never empty overlays.
+  await page
+    .addStyleTag({ content: '*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition:none!important}' })
+    .catch(() => {})
+  await page
+    .evaluate(() => {
+      const reveal = /(^|[\s_-])(aos|animate|animated|animation|reveal|fade|appear|scroll-trigger|motion|wow|in-view)/i
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+        const st = getComputedStyle(el)
+        if (Number(st.opacity) >= 1 && st.visibility !== 'hidden') continue
+        if (!reveal.test(el.className?.toString() || '') && !el.hasAttribute('data-aos') && !el.hasAttribute('data-cascade')) continue
+        if (!(el.innerText || '').trim() && !el.querySelector('img, video, svg')) continue
+        // never menus, drawers, pop-ups or anything floating: those are hidden on purpose
+        if (st.position === 'fixed' || st.position === 'absolute' || el.closest('header, nav, dialog, aside, [role="dialog"], [aria-modal], [aria-hidden="true"], [class*="drawer" i], [class*="modal" i], [class*="popup" i], [class*="menu" i], [class*="dropdown" i], [class*="tooltip" i]')) continue
+        el.style.setProperty('opacity', '1', 'important')
+        el.style.setProperty('visibility', 'visible', 'important')
+        el.style.setProperty('transform', 'none', 'important')
+      }
+    })
+    .catch(() => {})
   await new Promise((r) => setTimeout(r, 700))
 }
 

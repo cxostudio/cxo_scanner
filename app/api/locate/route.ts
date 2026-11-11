@@ -180,6 +180,8 @@ export async function POST(request: NextRequest) {
           if (op >= 1 && st.visibility !== 'hidden') continue
           if (!reveal.test(el.className?.toString() || '') && !el.hasAttribute('data-aos') && !el.hasAttribute('data-cascade')) continue
           if (!(el.innerText || '').trim() && !el.querySelector('img, video, svg')) continue
+          // never menus, drawers, pop-ups or anything floating: those are hidden on purpose
+          if (st.position === 'fixed' || st.position === 'absolute' || el.closest('header, nav, dialog, aside, [role="dialog"], [aria-modal], [aria-hidden="true"], [class*="drawer" i], [class*="modal" i], [class*="popup" i], [class*="menu" i], [class*="dropdown" i], [class*="tooltip" i]')) continue
           el.style.setProperty('opacity', '1', 'important')
           el.style.setProperty('visibility', 'visible', 'important')
           el.style.setProperty('transform', 'none', 'important')
