@@ -1108,6 +1108,23 @@ export default function Home() {
         validUrl = `https://${validUrl}`;
       }
 
+      // The free scan is a product-page scan: a homepage or collection becomes the store's
+      // best-selling product, so every free checkpoint applies. Test emails scan what they gave.
+      try {
+        localStorage.removeItem("scanResolvedFrom");
+        if (!isTestEmail(emailTrimmed) && detectPageTypeFromUrl(validUrl) !== "product") {
+          const r = await fetch(api(`/resolve-product?url=${encodeURIComponent(validUrl)}`));
+          const d = (await r.json().catch(() => null)) as { url?: string; resolved?: boolean } | null;
+          if (r.ok && d?.resolved && d.url) {
+            localStorage.setItem("scanResolvedFrom", validUrl);
+            validUrl = d.url;
+            setWebsiteUrl(validUrl);
+          }
+        }
+      } catch (resolveErr) {
+        console.warn("Could not find a product page, scanning the URL given:", resolveErr);
+      }
+
       // ✅ Rules depend only on page type — request by `pageType` so all domains' homepages
       //    (product / category / other) share ONE 3-day browser cache entry, not one per URL.
       const pageTypeKey = detectPageTypeFromUrl(validUrl);

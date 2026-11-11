@@ -7,6 +7,7 @@ import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
+import { LockedFindings } from '../components/LockedFindings'
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
@@ -15,6 +16,9 @@ import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } fro
 // Calendly once available; until then the existing booking form (same as YourPath)
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
+// the paid full report (a payment link); until it exists, the full-scan page
+const FULL_REPORT_URL = process.env.NEXT_PUBLIC_FULL_REPORT_URL || CHECKLIST_URL
+const FULL_REPORT_PRICE = process.env.NEXT_PUBLIC_FULL_REPORT_PRICE || ''
 
 const ResultSchema = z.array(
   z.object({
@@ -81,6 +85,7 @@ export default function ResultsPage() {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
   const [labId, setLabId] = useState<string | null>(null)
+  const [resolvedFrom, setResolvedFrom] = useState<string | null>(null)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -90,6 +95,7 @@ export default function ResultsPage() {
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
       setLabId(localStorage.getItem('scanLabId'))
+      setResolvedFrom(localStorage.getItem('scanResolvedFrom'))
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -151,7 +157,8 @@ export default function ResultsPage() {
     // (test scans from the lab show everything)
     const free = !labId && results.some((r) => r.freeScan)
     const shown = free ? results.filter((r) => r.freeScan) : results
-    const lockedIssues = free ? results.filter((r) => !r.freeScan && r.status === 'fail').length : 0
+    const locked = free ? results.filter((r) => !r.freeScan && r.status === 'fail') : []
+    const lockedIssues = locked.length
     // "couldn't check" answers are never shown as failures or counted in the score
     const unknown = shown.filter((r) => r.status === 'unknown').length
     const scored = shown.filter((r) => r.status !== 'unknown')
@@ -166,7 +173,7 @@ export default function ResultsPage() {
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues }
+    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
   }, [results, labId])
 
   const host = hostOf(url)
@@ -258,6 +265,14 @@ export default function ResultsPage() {
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {host} · {pageName} · {report.total} checkpoints
             </p>
+            {resolvedFrom && (
+              <p className="-mt-3 text-sm text-[var(--text-muted)]">
+                The free scan checks one product page, so we scanned your best-selling product:{' '}
+                <a className="font-semibold text-[var(--text)] underline underline-offset-2" href={/^https?:\/\//i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer">
+                  {(() => { try { return decodeURIComponent(new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).pathname) } catch { return url } })()}
+                </a>
+              </p>
+            )}
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
                 <>
@@ -423,19 +438,15 @@ export default function ResultsPage() {
                 )}
               </div>
               {/* free scan: the other findings exist but stay in the full report */}
-              {report.lockedIssues > 0 && (
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
-                  <div>
-                    <p className="font-[var(--font-display)] text-[length:var(--text-lg)] font-semibold text-[var(--text)]">
-                      {report.lockedIssues} more {report.lockedIssues === 1 ? 'issue' : 'issues'} found on this page
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--text-muted)]">They are in the full report, with the fix for each one.</p>
-                  </div>
-                  <a href={CALL_URL} className="cxo-btn cxo-btn-primary">
-                    Get the full report
-                  </a>
-                </div>
-              )}
+              <LockedFindings
+                locked={report.locked}
+                qualified={qualified}
+                monthlyAtStake={numbers ? numbers.lift10 : null}
+                shortEur={shortEur}
+                buyUrl={FULL_REPORT_URL}
+                callUrl={CALL_URL}
+                price={FULL_REPORT_PRICE}
+              />
             </div>
           </section>
 
