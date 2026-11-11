@@ -36,7 +36,7 @@ type Finding = { id: string; title: string; reason?: string }
 const CONSENT_WORDS = ['accept', 'allow all', 'agree', 'aceptar', 'accepter', 'tout accepter', 'akzeptieren', 'accetta', 'aceitar', 'ok', 'got it', 'alle akzeptieren', 'accepteren']
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string }
+  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string; region?: string }
   const device: Device = body.device === 'mobile' ? 'mobile' : 'desktop'
   const D = DEVICES[device]
   const WIDTH = D.width
@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
   const findings = (Array.isArray(body.findings) ? body.findings : [])
     .filter((f) => f && typeof f.id === 'string' && typeof f.title === 'string')
     .slice(0, 30)
-  if (!raw || !findings.length) return NextResponse.json({ error: 'url and findings are required' }, { status: 400 })
+  // lab: region 'bottom' returns only a capture of the end of the page (footer examples), no pins
+  const bottomOnly = body.region === 'bottom'
+  if (!raw || (!findings.length && !bottomOnly)) return NextResponse.json({ error: 'url and findings are required' }, { status: 400 })
   const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
 
   let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
@@ -205,6 +207,23 @@ export async function POST(request: NextRequest) {
       })
       .catch(() => undefined)
     await new Promise((r) => setTimeout(r, 300))
+
+    if (bottomOnly) {
+      await page.evaluate(async () => {
+        const end = () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+        for (let y = 0; y < end(); y += 600) {
+          window.scrollTo(0, y)
+          await new Promise((r) => setTimeout(r, 120))
+        }
+        window.scrollTo(0, end())
+        await new Promise((r) => setTimeout(r, 600))
+        window.scrollTo(0, 0)
+      })
+      const full = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight))
+      const h = Math.min(1800, full)
+      const shot = await page.screenshot({ type: 'jpeg', quality: 80, clip: { x: 0, y: full - h, width: WIDTH, height: h }, captureBeyondViewport: true })
+      return NextResponse.json({ device, screenshot: `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`, width: WIDTH, height: h, pins: [] })
+    }
 
     const { candidates, height } = await page.evaluate(
       (maxH: number, maxN: number) => {
