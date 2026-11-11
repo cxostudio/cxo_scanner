@@ -131,6 +131,9 @@ async function galleryTiles(ev: Evidence): Promise<Tile[]> {
   return tiles.filter(Boolean) as Tile[]
 }
 
+/** Minified files and browser caching: Shopify handles its own, apps often do not. */
+const APP_CAUSED = new Set(['rec18dg644AXcffV0', 'receyw3XXgQfA6ylx'])
+
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean; gallery?: boolean } = {}) {
   if (opts.gallery) (ev as { useGallery?: boolean }).useGallery = true
   ev.sellsOnline = sellsOnline(ev)
@@ -144,6 +147,15 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   for (const r of rules) {
     // checkout settings are the merchant's to change: once checkout is captured, judge them on what it shows
     const seenCheckout = Boolean(ev.checkout?.length) && Boolean((r as { pageTypeIds?: string[] }).pageTypeIds?.includes('recOkHTZH3nxsQNMb'))
+    // Shopify minifies and caches its own files, but apps add their own: measure these two (PageSpeed)
+    // and only fall back to "handled by Shopify" when there is no measurement
+    if (ev.isShopify && APP_CAUSED.has(r.id)) {
+      const m = MEASURED[r.id]?.(ev, ev.facts as Record<string, any>)
+      if (m) {
+        settled.set(r.id, m.answer === 'fail' ? { ...m, evidence: `${m.evidence} Shopify handles its own files, so this comes from installed apps and custom code.` } : m)
+        continue
+      }
+    }
     if (ev.isShopify && r.shopifyControl === 'Handled by Shopify' && !seenCheckout) {
       settled.set(r.id, { answer: 'pass', evidence: 'Shopify handles this by default.', coveredByShopify: true })
       continue
