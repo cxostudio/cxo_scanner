@@ -23,5 +23,7 @@ export async function GET(req: NextRequest) {
       { score: a.score, mode: a.scoreDisplayMode, title: a.title, value: a.displayValue ?? null, items: Array.isArray(a.details?.items) ? a.details.items.length : null, savingsMs: a.metricSavings?.LCP ?? a.details?.overallSavingsMs ?? null, savingsBytes: a.details?.overallSavingsBytes ?? null },
     ]),
   )
-  return NextResponse.json({ version: lr.lighthouseVersion, categories: Object.fromEntries(Object.entries(lr.categories || {}).map(([k, c]: [string, any]) => [k, c.score])), audits })
+  const detail = (req.nextUrl.searchParams.get('detail') || '').split(',').filter(Boolean)
+  const details = Object.fromEntries(detail.map((id) => [id, lr.audits?.[id]?.details ?? null]))
+  return NextResponse.json({ details, version: lr.lighthouseVersion, categories: Object.fromEntries(Object.entries(lr.categories || {}).map(([k, c]: [string, any]) => [k, c.score])), audits })
 }
