@@ -240,9 +240,9 @@ export function YourPath({
                 </>
               ) : (
                 <>
-                  <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">At your size, working together wouldn’t pay for itself yet. Fix the quick wins yourself first.</p>
+                  <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">At your size, ongoing optimisation wouldn’t pay for itself yet: fix the quick wins above first. The exception is a redesign. If you’re planning to rebuild your store and take it to the next level, we build it on these findings so it converts from day one.</p>
                   <a href={callUrl} className="cxo-btn cxo-btn-ghost self-start">
-                    Planning a redesign? Let’s talk <Arrow />
+                    Plan my redesign <Arrow />
                   </a>
                 </>
               )}

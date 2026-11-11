@@ -526,7 +526,8 @@ export default function Home() {
           })
           .passthrough()
           .optional(),
-      }),
+        // keep everything else the API sends (freeScan for the free-scan gate, by, seen…)
+      }).passthrough(),
     );
 
     const parseApiErrorMessage = async (

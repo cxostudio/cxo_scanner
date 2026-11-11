@@ -85,8 +85,6 @@ export default function ResultsPage() {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
   const [labId, setLabId] = useState<string | null>(null)
-  const [resolvedFrom, setResolvedFrom] = useState<string | null>(null)
-  const [resolvedHow, setResolvedHow] = useState('')
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -96,8 +94,6 @@ export default function ResultsPage() {
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
       setLabId(localStorage.getItem('scanLabId'))
-      setResolvedFrom(localStorage.getItem('scanResolvedFrom'))
-      setResolvedHow(localStorage.getItem('scanResolvedHow') || '')
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -267,14 +263,6 @@ export default function ResultsPage() {
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {host} · {pageName} · {report.total} checkpoints
             </p>
-            {resolvedFrom && (
-              <p className="-mt-3 text-sm text-[var(--text-muted)]">
-                The free scan checks one product page, so we scanned {resolvedHow === 'best-selling' ? 'your best-selling product' : 'one of your products'}:{' '}
-                <a className="font-semibold text-[var(--text)] underline underline-offset-2" href={/^https?:\/\//i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer">
-                  {(() => { try { return decodeURIComponent(new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).pathname) } catch { return url } })()}
-                </a>
-              </p>
-            )}
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
                 <>

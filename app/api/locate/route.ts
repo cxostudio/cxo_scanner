@@ -68,12 +68,21 @@ export async function POST(request: NextRequest) {
         const hit = els.find((el) => {
           const t = (el.innerText || (el as HTMLInputElement).value || '').trim().toLowerCase()
           const r = el.getBoundingClientRect()
-          return t.length > 0 && t.length < 30 && r.width > 0 && r.height > 0 && words.some((w) => t === w || t.startsWith(w + ' ') || t.includes(w))
+          // never a real link (a footer 'Facebook' link once matched 'ok' and opened Facebook):
+          // only buttons, or links that go nowhere; short words like 'ok' must be the whole label
+          const href = el.tagName === 'A' ? (el.getAttribute('href') || '').trim() : ''
+          if (href && href !== '#' && !href.startsWith('javascript:')) return false
+          const word = (w: string) => (w.length <= 3 ? t === w : t === w || t.startsWith(w + ' ') || new RegExp('\\b' + w + '\\b').test(t))
+          return t.length > 0 && t.length < 30 && r.width > 0 && r.height > 0 && words.some(word)
         })
         hit?.click()
       }, CONSENT_WORDS)
       .catch(() => undefined)
     await new Promise((r) => setTimeout(r, 700))
+    // if a click still took us off the store, go back to the page we were asked to pin
+    try {
+      if (new URL(page.url()).host !== new URL(url).host) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    } catch {}
 
     // newsletter popups and chat bubbles: Escape, then hide anything fixed that covers the page,
     // and undo the scroll lock popups put on <html>/<body>
