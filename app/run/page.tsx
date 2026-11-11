@@ -813,7 +813,8 @@ export default function Home() {
                 })
                 .passthrough()
                 .optional(),
-            }),
+              // keep freeScan, by, seen… (the results page needs freeScan for the gate)
+            }).passthrough(),
           )
           .parse(finalData.results);
 
