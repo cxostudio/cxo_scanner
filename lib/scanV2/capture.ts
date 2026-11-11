@@ -372,7 +372,7 @@ function kib(a: any): number | null {
 
 async function pageSpeed(url: string) {
   const key = process.env.PAGESPEED_API_KEY ? `&key=${process.env.PAGESPEED_API_KEY}` : ''
-  const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance${key}`, { signal: AbortSignal.timeout(55000) })
+  const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance&category=accessibility${key}`, { signal: AbortSignal.timeout(55000) })
   if (!res.ok) return { error: `PageSpeed answered ${res.status}` }
   const d = (await res.json()) as any
   const field = (src: any) =>
@@ -397,6 +397,12 @@ async function pageSpeed(url: string) {
         audits['unminified-css'] || audits['unminified-javascript']
           ? Math.round(((audits['unminified-css']?.details?.overallSavingsBytes || 0) + (audits['unminified-javascript']?.details?.overallSavingsBytes || 0)) / 1024)
           : null,
+    },
+    // accessibility audits used by measured checkpoints: 1 pass, 0 fail, null not run
+    a11y: {
+      metaViewport: audits['meta-viewport']?.score ?? null,
+      imageAlt: audits['image-alt']?.score ?? null,
+      imageAltMissing: Array.isArray(audits['image-alt']?.details?.items) ? audits['image-alt'].details.items.length : null,
     },
     lighthouse: d.lighthouseResult?.lighthouseVersion ?? null,
   }

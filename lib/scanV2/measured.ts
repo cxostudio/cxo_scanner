@@ -235,6 +235,9 @@ export const MEASURED: Record<string, Measure> = {
 
   // Are all images labeled with alt text for accessibility and SEO purposes?
   rechriROBfHKhi1MQ: (_ev, f) => {
+    const lh = f.pageSpeed?.a11y
+    if (lh?.imageAlt === 1) return { answer: 'pass', evidence: 'Every image on the page has alt text (Google PageSpeed check).' }
+    if (lh?.imageAlt === 0 && (lh.imageAltMissing || 0) >= 2) return { answer: 'fail', evidence: `${lh.imageAltMissing} images have no alt text (Google PageSpeed), so screen readers and Google cannot tell what they show.` }
     const total = f.images?.total
     const missing = f.images?.missingAlt
     if (typeof total !== 'number' || total < 3) return null
@@ -260,10 +263,15 @@ export const MEASURED: Record<string, Measure> = {
   },
 
   // Are touch gestures like pinch-to-zoom or swipe properly supported and not blocked on mobile?
-  recmfE93txjDPFQgc: (ev) => {
+  recmfE93txjDPFQgc: (ev, f) => {
+    // Google's audit (an Android phone) decides: iPhones ignore zoom limits since iOS 10, and many themes
+    // send maximum-scale=1 to iPhones only, so our iPhone capture alone would report a block that isn't there
+    const lh = f.pageSpeed?.a11y?.metaViewport
+    if (lh === 1) return { answer: 'pass', evidence: 'Pinch-to-zoom is not blocked on phones (Google PageSpeed check).' }
+    if (lh === 0) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on Android phones (user-scalable=no or a maximum zoom under 5, per Google PageSpeed), so shoppers cannot zoom in on details.' }
     const meta: string | null = (ev.mobileFacts as F).viewportMeta ?? null
     if (meta === null) return null
-    if (/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/i.test(meta)) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on phones, so shoppers cannot zoom in on details.' }
+    if (/user-scalable\s*=\s*(no|0)/i.test(meta)) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on phones, so shoppers cannot zoom in on details.' }
     return { answer: 'pass', evidence: 'Pinch-to-zoom is not blocked on phones.' }
   },
 
