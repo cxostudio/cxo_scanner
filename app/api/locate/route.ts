@@ -234,8 +234,23 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
     'Answer only JSON: {"pins":[{"finding":"<finding id>","element":"<element id or null>","confidence":0-1}]}'
   try {
     const openRouter = new OpenRouter({ apiKey })
-    const res = await openRouter.chat.send({
-      model: process.env.OPENROUTER_LOCATE_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite',
+    // the provider fails now and then ("Provider returned error"): try again, then a second model
+    const models = [process.env.OPENROUTER_LOCATE_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash']
+    let res: unknown = null
+    let lastErr: unknown = null
+    for (const model of models) {
+      try {
+        res = await sendOnce(model)
+        break
+      } catch (e) {
+        lastErr = e
+        debug.push(`retry after: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (!res) throw lastErr
+    async function sendOnce(model: string) {
+    return openRouter.chat.send({
+      model,
       messages: [
         { role: 'system', content: system },
         {
@@ -251,6 +266,7 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
       stream: false,
       responseFormat: { type: 'json_object' },
     } as never)
+    }
     const content = (res as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content
     const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p: { text?: string }) => p?.text || '').join('') : ''
     debug.push(`ai: ${text.slice(0, 600)}`)
