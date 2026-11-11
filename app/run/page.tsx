@@ -19,6 +19,7 @@ interface Rule {
   id: string;
   title: string;
   description: string;
+  freeScan?: boolean;
 }
 
 interface CheckpointPresentation {
@@ -110,6 +111,7 @@ const RuleSchema = z.object({
     .string()
     .min(1, "Rule description is required")
     .max(5000, "Rule description must be less than 5000 characters"),
+  freeScan: z.boolean().optional(),
 });
 
 const URLSchema = z
@@ -1383,7 +1385,9 @@ export default function Home() {
   }, [isLoading]);
 
   const host = instantPreviewFromWebsiteUrl(websiteUrl)?.host ?? "";
-  const STEP_LABELS = stepLabels(rules.length);
+  // the free scan shows its free checkpoints (40), test scans everything
+  const freeCount = rules.filter((r) => r.freeScan).length;
+  const STEP_LABELS = stepLabels(freeCount && !isTestEmail(email) ? freeCount : rules.length);
   // the label never runs ahead of the bar: both read the same clamped value, the label rounds down
   const barPct = Math.min(100, Math.max(0, displayProgressPercent));
   const pct = Math.floor(barPct);
@@ -1493,15 +1497,15 @@ const Line = ({ d }: { d: string }) => (
 const stepLabels = (rules: number) => [
   "Loading your page",
   "Scanning every element",
-  `Benchmarking ${rules || 42} conversion rules`,
+  `Running ${rules || 40} checks`,
   "Calculating lost revenue",
   "Building your action plan",
 ];
 const STEP_ICONS = [
   <Line key="0" d='<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>' />,
   <Line key="1" d='<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M4 12h16"/>' />,
-  <Line key="2" d='<path d="M9 12.5 11 14.5 15.5 10"/><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6z"/>' />,
-  <Line key="3" d='<circle cx="12" cy="12" r="9"/><path d="M15.5 8.6a4.2 4.2 0 1 0 0 6.8M7.5 10.8h6M7.5 13.2h6"/>' />,
+  <Line key="2" d='<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/><path d="m7.8 10.6 1.9 1.9 3.6-3.6"/>' />,
+  <Line key="3" d='<path d="M3 5v14a1 1 0 0 0 1 1h17"/><path d="m7 8 4.5 4.5 3-3L20 15"/><path d="M16 15h4v-4"/>' />,
   <Line key="4" d='<path d="m4 6.5 1.5 1.5L8.5 5M4 12.5 5.5 14 8.5 11M4 18.5 5.5 20l3-3"/><path d="M12 7h8M12 13h8M12 19h8"/>' />,
 ];
 function Spinner() {
