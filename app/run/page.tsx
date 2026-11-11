@@ -1232,6 +1232,8 @@ export default function Home() {
       try {
         localStorage.removeItem("scanPreviewMobile");
         localStorage.removeItem("scanLabId");
+        // pins and page captures from an earlier scan: a new scan always captures the page again
+        Object.keys(localStorage).filter((k) => k.startsWith("scanLocate")).forEach((k) => localStorage.removeItem(k));
         localStorage.removeItem("scanPreviewDesktop");
       } catch {
         /* ignore */
@@ -1505,7 +1507,7 @@ const STEP_ICONS = [
   <Line key="0" d='<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>' />,
   <Line key="1" d='<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M4 12h16"/>' />,
   <Line key="2" d='<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/><path d="m7.8 10.6 1.9 1.9 3.6-3.6"/>' />,
-  <Line key="3" d='<path d="M3 5v14a1 1 0 0 0 1 1h17"/><path d="m7 8 4.5 4.5 3-3L20 15"/><path d="M16 15h4v-4"/>' />,
+  <Line key="3" d='<path d="M3 4h15l-5.5 7v6.5L8.5 19.5V11z"/><path d="M19 13.5s-1.7 1.9-1.7 3.1a1.7 1.7 0 0 0 3.4 0c0-1.2-1.7-3.1-1.7-3.1z"/>' />,
   <Line key="4" d='<path d="m4 6.5 1.5 1.5L8.5 5M4 12.5 5.5 14 8.5 11M4 18.5 5.5 20l3-3"/><path d="M12 7h8M12 13h8M12 19h8"/>' />,
 ];
 function Spinner() {

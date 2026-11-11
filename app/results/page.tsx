@@ -118,8 +118,9 @@ export default function ResultsPage() {
     if (!failed.length) return
     const ctrls: AbortController[] = []
     ;(['desktop', 'mobile'] as Device[]).forEach((d) => {
-      // v2: drops copies saved before the pinning fix (some were screenshots of another site)
-      const key = `scanLocate:v2:${d}`
+      // v3: drops copies saved before the full-page capture fix. Each new scan clears these too
+      // (app/run), so a saved copy only serves reloads of the same results.
+      const key = `scanLocate:v3:${d}`
       try {
         const cached = JSON.parse(localStorage.getItem(key) || 'null') as { url: string; data: Located } | null
         if (cached?.url === url && cached.data?.screenshot && cached.data.pins?.length) {
