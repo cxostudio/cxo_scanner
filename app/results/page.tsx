@@ -118,10 +118,11 @@ export default function ResultsPage() {
     if (!failed.length) return
     const ctrls: AbortController[] = []
     ;(['desktop', 'mobile'] as Device[]).forEach((d) => {
-      const key = `scanLocate:${d}`
+      // v2: drops copies saved before the pinning fix (some were screenshots of another site)
+      const key = `scanLocate:v2:${d}`
       try {
         const cached = JSON.parse(localStorage.getItem(key) || 'null') as { url: string; data: Located } | null
-        if (cached?.url === url && cached.data?.screenshot) {
+        if (cached?.url === url && cached.data?.screenshot && cached.data.pins?.length) {
           setLocated((p) => ({ ...p, [d]: cached.data }))
           return
         }
