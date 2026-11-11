@@ -146,15 +146,63 @@ export async function POST(request: NextRequest) {
       })
       .catch(() => undefined)
 
-    // nudge lazy images into place, then back to the top
+    // Show the page as a shopper sees it after scrolling through it: scroll slowly so lazy sections
+    // and scroll-reveal animations fire, then freeze every animation in its finished state.
+    await page
+      .addStyleTag({
+        content: `*, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition: none !important; scroll-behavior: auto !important; }`,
+      })
+      .catch(() => undefined)
     await page.evaluate(async (h: number) => {
-      for (let y = 0; y < h; y += 700) {
+      for (let y = 0; y < h; y += 400) {
         window.scrollTo(0, y)
-        await new Promise((r) => setTimeout(r, 120))
+        await new Promise((r) => setTimeout(r, 180))
       }
-      window.scrollTo(0, 0)
+      window.scrollTo(0, h)
+      await new Promise((r) => setTimeout(r, 400))
     }, MAX_HEIGHT)
-    await new Promise((r) => setTimeout(r, 400))
+    await page
+      .evaluate(() => {
+        // lazy images that are still empty: load them now
+        for (const img of Array.from(document.querySelectorAll<HTMLImageElement>('img'))) {
+          img.loading = 'eager'
+          const lazy = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original')
+          if (lazy && (!img.currentSrc || img.currentSrc.startsWith('data:'))) img.src = lazy
+          const set = img.getAttribute('data-srcset')
+          if (set && !img.srcset) img.srcset = set
+        }
+        // scroll-reveal content still hidden or half faded (AOS, theme "animate" / "reveal" classes):
+        // show it in its final state. Only elements with page content, never empty overlays.
+        const reveal = /(^|[\s_-])(aos|animate|animated|animation|reveal|fade|appear|scroll-trigger|motion|wow|in-view|lazy)/i
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          const op = Number(st.opacity)
+          if (op >= 1 && st.visibility !== 'hidden') continue
+          if (!reveal.test(el.className?.toString() || '') && !el.hasAttribute('data-aos') && !el.hasAttribute('data-cascade')) continue
+          if (!(el.innerText || '').trim() && !el.querySelector('img, video, svg')) continue
+          el.style.setProperty('opacity', '1', 'important')
+          el.style.setProperty('visibility', 'visible', 'important')
+          el.style.setProperty('transform', 'none', 'important')
+          el.style.setProperty('clip-path', 'none', 'important')
+        }
+      })
+      .catch(() => undefined)
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await new Promise((r) => setTimeout(r, 600))
+    // sticky bars that appear on scroll (add-to-cart bar, back-to-top) would be printed in the middle
+    // of a full-page shot: hide everything fixed except the header at the very top
+    await page
+      .evaluate(() => {
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          if (st.position !== 'fixed') continue
+          const r = el.getBoundingClientRect()
+          if (r.top <= 1 && r.height < 200) continue
+          el.style.setProperty('display', 'none', 'important')
+        }
+      })
+      .catch(() => undefined)
+    await new Promise((r) => setTimeout(r, 300))
 
     const { candidates, height } = await page.evaluate(
       (maxH: number, maxN: number) => {
