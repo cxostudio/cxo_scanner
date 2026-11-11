@@ -86,6 +86,7 @@ export default function ResultsPage() {
   const [visible, setVisible] = useState(10)
   const [labId, setLabId] = useState<string | null>(null)
   const [resolvedFrom, setResolvedFrom] = useState<string | null>(null)
+  const [resolvedHow, setResolvedHow] = useState('')
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -96,6 +97,7 @@ export default function ResultsPage() {
       setUrl(localStorage.getItem('scanUrl') || '')
       setLabId(localStorage.getItem('scanLabId'))
       setResolvedFrom(localStorage.getItem('scanResolvedFrom'))
+      setResolvedHow(localStorage.getItem('scanResolvedHow') || '')
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -267,7 +269,7 @@ export default function ResultsPage() {
             </p>
             {resolvedFrom && (
               <p className="-mt-3 text-sm text-[var(--text-muted)]">
-                The free scan checks one product page, so we scanned your best-selling product:{' '}
+                The free scan checks one product page, so we scanned {resolvedHow === 'best-selling' ? 'your best-selling product' : 'one of your products'}:{' '}
                 <a className="font-semibold text-[var(--text)] underline underline-offset-2" href={/^https?:\/\//i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer">
                   {(() => { try { return decodeURIComponent(new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).pathname) } catch { return url } })()}
                 </a>

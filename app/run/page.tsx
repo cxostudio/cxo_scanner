@@ -1112,11 +1112,13 @@ export default function Home() {
       // best-selling product, so every free checkpoint applies. Test emails scan what they gave.
       try {
         localStorage.removeItem("scanResolvedFrom");
+        localStorage.removeItem("scanResolvedHow");
         if (!isTestEmail(emailTrimmed) && detectPageTypeFromUrl(validUrl) !== "product") {
           const r = await fetch(api(`/resolve-product?url=${encodeURIComponent(validUrl)}`));
-          const d = (await r.json().catch(() => null)) as { url?: string; resolved?: boolean } | null;
+          const d = (await r.json().catch(() => null)) as { url?: string; resolved?: boolean; how?: string } | null;
           if (r.ok && d?.resolved && d.url) {
             localStorage.setItem("scanResolvedFrom", validUrl);
+            localStorage.setItem("scanResolvedHow", d.how || "");
             validUrl = d.url;
             setWebsiteUrl(validUrl);
           }
