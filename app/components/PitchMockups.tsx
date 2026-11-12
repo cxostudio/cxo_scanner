@@ -128,17 +128,21 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
               <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
                 <li className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
                   <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
-                  <span className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">{here?.label || 'This page'}{pageKey === 'product' ? ' and cart' : ''} <span className="font-normal text-[var(--text-muted)]">· this scan</span></span>
-                  <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)]">
+                  <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                  <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{here?.label || 'This page'}{pageKey === 'product' ? ' and cart' : ''} <span className="font-normal text-[var(--text-muted)]">· this scan</span></span>
+                  <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
                     <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
+                  </span>
                   </span>
                 </li>
                 {others.map((p) => (
                   <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
                     <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
-                    <span className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
-                    <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)]">
+                    <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                    <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
+                    <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
                       {p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b>
+                    </span>
                     </span>
                   </li>
                 ))}
