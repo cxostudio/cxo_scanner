@@ -133,7 +133,7 @@ export function FullStoreOffer({ variant, lockedCount, qualified, buyUrl, callUr
       <div className="flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
         <div className="flex flex-wrap items-center gap-3">{qualified ? [call, buy] : [buy, call]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
-          {qualified ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'The €49 is deducted from a CRO audit if you go further with us.'}
+          {qualified ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
         </p>
       </div>
     </section>

@@ -213,11 +213,11 @@ export function YourPath({
               className="flex min-w-0 flex-col gap-3"
               style={{ opacity: on ? 1 : 0.55, transform: on ? 'none' : 'translateY(6px)', transition: `opacity .5s ${ease} 1.35s, transform .5s ${ease} 1.35s` }}
             >
-              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">Next: scan your full website</p>
-              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">300+ checkpoints, the same way you just saw:</p>
-              <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart', 'Checkout', 'Thank you page']} />
+              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">Next: your whole store, home to checkout</p>
+              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
+              <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart', 'Checkout']} />
               <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
-                Scan the full website <Arrow />
+                Get the full report, €49 <Arrow />
               </a>
             </div>
           </li>

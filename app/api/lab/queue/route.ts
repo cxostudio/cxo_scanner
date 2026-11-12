@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
       .filter(({ scan }) => labelQueue(scan).some((c) => c.id === cp && c.skip !== 'niche'))
       .map(({ scan, labels }) => {
         const a = scan.answers.find((x) => x.id === cp)
-        return { id: scan.id, url: scan.url, label: labels[cp] || null, answered: Boolean(a && a.answer !== 'unknown') }
+        return { id: scan.id, url: scan.url, label: labels[cp] || null, answered: Boolean(a && a.answer !== 'unknown' && !a.coveredByShopify) }
       })
       // scans where the scanner gave an answer first: a label on a "couldn't check" teaches nothing
       // (older scans have no data for new measurements)

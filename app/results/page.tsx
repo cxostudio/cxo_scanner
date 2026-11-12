@@ -86,7 +86,7 @@ export default function ResultsPage() {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
   // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
-  const [gate, setGate] = useState<'' | 'b' | 'cd'>('')
+  const [gate, setGate] = useState<'' | 'b' | 'cd'>('cd')
   const [labId, setLabId] = useState<string | null>(null)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
@@ -99,6 +99,7 @@ export default function ResultsPage() {
       setLabId(localStorage.getItem('scanLabId'))
       const g = new URLSearchParams(window.location.search).get('gate')
       if (g === 'b' || g === 'cd') setGate(g)
+      else if (g === 'a') setGate('')
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -184,7 +185,8 @@ export default function ResultsPage() {
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+    const extra = free && gate ? locked.length : 0
+    return { toFix: failed.length + extra, checked: scored.length + unknown + extra, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
   }, [results, labId, gate])
 
   const host = hostOf(url)
@@ -282,11 +284,11 @@ export default function ResultsPage() {
                   Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
                 </>
               ) : (
-                <>Your {pageName.toLowerCase()} has {report.failed.length} things to fix</>
+                <>Your {pageName.toLowerCase()} has {report.toFix} things to fix</>
               )}
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
-              {report.failed.length} of {report.total} checks failed
+              {report.toFix} of {report.checked} checks failed
               {report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
               {numbers && ' That figure is what a 10% lift in conversion is worth to you.'}
             </p>
@@ -345,7 +347,7 @@ export default function ResultsPage() {
                 <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
-                    {report.failed.length} to fix
+                    {report.toFix} to fix
                   </span>{' '}
                   ·{' '}
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
@@ -465,12 +467,12 @@ export default function ResultsPage() {
           <YourPath
             money={numbers}
             qualified={qualified}
-            checked={report?.total ?? 0}
-            toFix={report?.failed.length ?? 0}
+            checked={report?.checked ?? 0}
+            toFix={report?.toFix ?? 0}
             eur={eur}
             shortEur={shortEur}
             callUrl={CALL_URL}
-            fullScanUrl={CHECKLIST_URL}
+            fullScanUrl={FULL_REPORT_URL}
             host={host}
           />
         </div>
