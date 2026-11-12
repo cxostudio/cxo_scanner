@@ -402,3 +402,12 @@ export async function getHiddenText(id: string): Promise<string> {
   const ev = await readJson<{ hiddenText?: string }>(`scans/${safeId(id)}/evidence.json`)
   return ev?.hiddenText || ''
 }
+
+/** Suggested labels for the grid (a second model's opinion), per scan: checkpoint id → suggestion. */
+export type LabSuggestion = { label: LabLabel; why: string; model: string; at: string }
+export async function getSuggestions(id: string): Promise<Record<string, LabSuggestion>> {
+  return (await readLatest<Record<string, LabSuggestion>>(`suggestions/${safeId(id)}`)) || {}
+}
+export async function saveSuggestions(id: string, data: Record<string, LabSuggestion>) {
+  await writeVersion(await bucket(), `suggestions/${safeId(id)}`, data)
+}

@@ -2,7 +2,7 @@
 // GET            → checkpoints with how many stores have them and how many are labelled (most needed first)
 // GET ?cp=rec…   → the scans with that checkpoint, labelled or not, in a stable order
 import { NextRequest, NextResponse } from 'next/server'
-import { MIN_LABELS } from '@/lib/lab/verdict'
+import { MIN_LABELS, minLabels } from '@/lib/lab/verdict'
 import { getLabels, getTestScan, labAllowed, labelQueue, listTestScans, type LabScan } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
@@ -44,8 +44,8 @@ export async function GET(req: NextRequest) {
   }
   // most useful first: checkpoints still short of the labels needed to go Live, then the rest
   const checkpoints = Array.from(rows.values()).sort((a, b) => {
-    const need = (r: typeof a) => (r.labelled < MIN_LABELS ? 0 : 1)
+    const need = (r: typeof a) => (r.labelled < minLabels(r.method) ? 0 : 1)
     return need(a) - need(b) || a.labelled - b.labelled || b.stores - a.stores
   })
-  return NextResponse.json({ min: MIN_LABELS, checkpoints })
+  return NextResponse.json({ min: MIN_LABELS, checkpoints: checkpoints.map((c) => ({ ...c, min: minLabels(c.method) })) })
 }

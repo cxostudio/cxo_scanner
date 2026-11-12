@@ -9,7 +9,7 @@ import { MIN_LABELS, TARGET, VERDICT_LABEL, type Verdict } from '@/lib/lab/verdi
 
 type ScanRow = { id: string; url: string; createdAt: string; niche: string; checkpoints: number; labelled: number }
 type NoteRow = { scan: string; url: string; id: string; title: string; note: string }
-type AccRow = { id: string; title: string; status?: string; area?: string; labelled: number; agree: number; unknown: number; flips: number; runs: number; verdict: Verdict; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
+type AccRow = { id: string; title: string; status?: string; method?: string; min?: number; area?: string; labelled: number; agree: number; unknown: number; flips: number; runs: number; verdict: Verdict; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
 
 const host = (u: string) => {
   try {
@@ -227,7 +227,7 @@ export default function LabHome() {
               <div className="flex flex-col divide-y empty:hidden divide-[var(--border)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
                 {shown.map((a) => {
                   const rate = a.agree / a.labelled
-                  const enough = a.labelled >= MIN_LABELS
+                  const enough = a.labelled >= (a.min ?? MIN_LABELS)
                   const fg = !enough ? 'var(--text-muted)' : rate >= TARGET ? 'var(--result-pass-fg)' : 'var(--result-fail-fg)'
                   return (
                     <div key={a.id}>

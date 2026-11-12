@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/base'
 
-type Row = { id: string; title: string; status?: string; area?: string; method?: string; stores: number; labelled: number }
+type Row = { id: string; title: string; status?: string; area?: string; method?: string; stores: number; labelled: number; min?: number }
 
 export default function LabelQueue() {
   const [key, setKey] = useState('')
@@ -30,7 +30,7 @@ export default function LabelQueue() {
   }, [])
 
   const shown = useMemo(
-    () => (rows || []).filter((r) => (filter === 'all' || r.labelled < min) && (!q || r.title.toLowerCase().includes(q.toLowerCase()))),
+    () => (rows || []).filter((r) => (filter === 'all' || r.labelled < (r.min ?? min)) && (!q || r.title.toLowerCase().includes(q.toLowerCase()))),
     [rows, filter, min, q],
   )
 
@@ -88,10 +88,13 @@ export default function LabelQueue() {
                 </p>
               </div>
               <span className="text-[13px] text-[var(--text-muted)]">
-                <b className="text-[var(--text)]">{r.labelled}</b> of {r.stores} stores labelled
+                <b className="text-[var(--text)]">{r.labelled}</b>/{r.min ?? min} needed · {r.stores} stores
               </span>
-              <button type="button" className="cxo-btn cxo-btn-primary !px-4 !py-1.5 text-sm" onClick={() => start(r)} disabled={going === r.id || r.labelled >= r.stores}>
-                {r.labelled >= r.stores ? 'Done' : going === r.id ? 'Opening…' : 'Start'}
+              <Link href={`/lab/grid?cp=${r.id}${key ? `&key=${encodeURIComponent(key)}` : ''}`} className="cxo-btn cxo-btn-primary !px-4 !py-1.5 text-sm">
+                Grid
+              </Link>
+              <button type="button" className="cxo-btn cxo-btn-ghost !px-4 !py-1.5 text-sm" onClick={() => start(r)} disabled={going === r.id || r.labelled >= r.stores}>
+                {r.labelled >= r.stores ? 'Done' : going === r.id ? 'Opening…' : 'One by one'}
               </button>
             </li>
           ))}

@@ -1,6 +1,6 @@
 // Test lab: every saved test scan, with labelling progress and accuracy per checkpoint.
 import { NextRequest, NextResponse } from 'next/server'
-import { verdictOf } from '@/lib/lab/verdict'
+import { minLabels, verdictOf } from '@/lib/lab/verdict'
 import { getLabels, getModes, getNotes, getTestScan, labAllowed, labelQueue, listTestScans, type LabLabel, type LabScan } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     // accuracy per checkpoint: scanner answer vs Louis's label, on labelled scans ("skip" and
     // the scanner's "couldn't check" are counted apart, never as agreement)
-    const acc = new Map<string, { id: string; title: string; status?: string; area?: string; labelled: number; agree: number; unknown: number; flips: number; runs: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }>()
+    const acc = new Map<string, { id: string; title: string; status?: string; method?: string; min?: number; area?: string; labelled: number; agree: number; unknown: number; flips: number; runs: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }>()
     // seeing the scanner's answer can pull labels toward it: compare agreement on both kinds
     const bias = { blind: { labelled: 0, agree: 0 }, review: { labelled: 0, agree: 0 } }
     for (const { scan, labels, modes } of scans) {
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
         const louis = labels[cp.id]
         if (!louis || louis === 'skip') continue
         const ai = answers.get(cp.id)?.answer || 'unknown'
-        const row = acc.get(cp.id) || { id: cp.id, title: cp.title, status: cp.status, area: cp.area, labelled: 0, agree: 0, unknown: 0, flips: 0, runs: 99, mismatches: [] }
+        const row = acc.get(cp.id) || { id: cp.id, title: cp.title, status: cp.status, method: cp.method, area: cp.area, labelled: 0, agree: 0, unknown: 0, flips: 0, runs: 99, mismatches: [] }
         const seen = [...past.map((m) => m.get(cp.id)).filter(Boolean), ai]
         if (new Set(seen).size > 1) row.flips++
         row.runs = Math.min(row.runs, seen.length)
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       bias,
       accuracy: Array.from(acc.values())
         .filter((a) => a.labelled > 0)
-        .map((a) => ({ ...a, runs: a.runs === 99 ? 1 : a.runs, verdict: verdictOf(a) }))
+        .map((a) => ({ ...a, min: minLabels(a.method), runs: a.runs === 99 ? 1 : a.runs, verdict: verdictOf(a) }))
         .sort((a, b) => a.agree / a.labelled - b.agree / b.labelled),
     })
   } catch (e) {
