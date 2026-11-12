@@ -186,7 +186,11 @@ export default function ResultsPage() {
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
     const extra = free && gate ? locked.length : 0
-    return { toFix: failed.length + extra, checked: scored.length + unknown + extra, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+    // one set of numbers everywhere: every check run on this page, the free ones explained,
+    // the locked findings counted, and the rest (passed or not relevant) waiting in the full report
+    const pageChecks = free && gate ? results.length : scored.length + unknown
+    const hidden = free && gate ? results.length - shown.length - locked.length : 0
+    return { free: free && Boolean(gate), pageChecks, hidden, toFix: failed.length + extra, checked: pageChecks, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
   }, [results, labId, gate])
 
   const host = hostOf(url)
@@ -276,7 +280,7 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.total} checkpoints
+              {host} · {pageName} · {report.pageChecks} checks
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -289,7 +293,9 @@ export default function ResultsPage() {
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
               {report.toFix} of {report.checked} checks failed
-              {report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
+              {report.free
+                ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
+                : report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
               {numbers && ' That figure is what a 10% lift in conversion is worth to you.'}
             </p>
 
@@ -356,6 +362,7 @@ export default function ResultsPage() {
                   {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
                   {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
+                  {report.hidden > 0 && ` · ${report.hidden} more in the full report`}
                   {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
                 </p>
               </div>
@@ -447,7 +454,7 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} lockedCount={report.locked.length} qualified={qualified} buyUrl={FULL_REPORT_URL} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.locked.length} qualified={qualified} buyUrl={FULL_REPORT_URL} callUrl={CALL_URL} price="€49" />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
