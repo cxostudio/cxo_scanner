@@ -36,7 +36,7 @@ type Finding = { id: string; title: string; reason?: string }
 const CONSENT_WORDS = ['accept', 'allow all', 'agree', 'aceptar', 'accepter', 'tout accepter', 'akzeptieren', 'accetta', 'aceitar', 'ok', 'got it', 'alle akzeptieren', 'accepteren']
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string }
+  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string; region?: string }
   const device: Device = body.device === 'mobile' ? 'mobile' : 'desktop'
   const D = DEVICES[device]
   const WIDTH = D.width
@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
   const findings = (Array.isArray(body.findings) ? body.findings : [])
     .filter((f) => f && typeof f.id === 'string' && typeof f.title === 'string')
     .slice(0, 30)
-  if (!raw || !findings.length) return NextResponse.json({ error: 'url and findings are required' }, { status: 400 })
+  // lab: region 'bottom' returns only a capture of the end of the page (footer examples), no pins
+  const bottomOnly = body.region === 'bottom'
+  if (!raw || (!findings.length && !bottomOnly)) return NextResponse.json({ error: 'url and findings are required' }, { status: 400 })
   const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
 
   let browser: Awaited<ReturnType<typeof launchPuppeteerBrowser>> | null = null
@@ -68,12 +70,21 @@ export async function POST(request: NextRequest) {
         const hit = els.find((el) => {
           const t = (el.innerText || (el as HTMLInputElement).value || '').trim().toLowerCase()
           const r = el.getBoundingClientRect()
-          return t.length > 0 && t.length < 30 && r.width > 0 && r.height > 0 && words.some((w) => t === w || t.startsWith(w + ' ') || t.includes(w))
+          // never a real link (a footer 'Facebook' link once matched 'ok' and opened Facebook):
+          // only buttons, or links that go nowhere; short words like 'ok' must be the whole label
+          const href = el.tagName === 'A' ? (el.getAttribute('href') || '').trim() : ''
+          if (href && href !== '#' && !href.startsWith('javascript:')) return false
+          const word = (w: string) => (w.length <= 3 ? t === w : t === w || t.startsWith(w + ' ') || new RegExp('\\b' + w + '\\b').test(t))
+          return t.length > 0 && t.length < 30 && r.width > 0 && r.height > 0 && words.some(word)
         })
         hit?.click()
       }, CONSENT_WORDS)
       .catch(() => undefined)
     await new Promise((r) => setTimeout(r, 700))
+    // if a click still took us off the store, go back to the page we were asked to pin
+    try {
+      if (new URL(page.url()).host !== new URL(url).host) await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    } catch {}
 
     // newsletter popups and chat bubbles: Escape, then hide anything fixed that covers the page,
     // and undo the scroll lock popups put on <html>/<body>
@@ -137,15 +148,82 @@ export async function POST(request: NextRequest) {
       })
       .catch(() => undefined)
 
-    // nudge lazy images into place, then back to the top
+    // Show the page as a shopper sees it after scrolling through it: scroll slowly so lazy sections
+    // and scroll-reveal animations fire, then freeze every animation in its finished state.
+    await page
+      .addStyleTag({
+        content: `*, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition: none !important; scroll-behavior: auto !important; }`,
+      })
+      .catch(() => undefined)
     await page.evaluate(async (h: number) => {
-      for (let y = 0; y < h; y += 700) {
+      for (let y = 0; y < h; y += 400) {
         window.scrollTo(0, y)
-        await new Promise((r) => setTimeout(r, 120))
+        await new Promise((r) => setTimeout(r, 180))
       }
-      window.scrollTo(0, 0)
+      window.scrollTo(0, h)
+      await new Promise((r) => setTimeout(r, 400))
     }, MAX_HEIGHT)
-    await new Promise((r) => setTimeout(r, 400))
+    await page
+      .evaluate(() => {
+        // lazy images that are still empty: load them now
+        for (const img of Array.from(document.querySelectorAll<HTMLImageElement>('img'))) {
+          img.loading = 'eager'
+          const lazy = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original')
+          if (lazy && (!img.currentSrc || img.currentSrc.startsWith('data:'))) img.src = lazy
+          const set = img.getAttribute('data-srcset')
+          if (set && !img.srcset) img.srcset = set
+        }
+        // scroll-reveal content still hidden or half faded (AOS, theme "animate" / "reveal" classes):
+        // show it in its final state. Only elements with page content, never empty overlays.
+        const reveal = /(^|[\s_-])(aos|animate|animated|animation|reveal|fade|appear|scroll-trigger|motion|wow|in-view|lazy)/i
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          const op = Number(st.opacity)
+          if (op >= 1 && st.visibility !== 'hidden') continue
+          if (!reveal.test(el.className?.toString() || '') && !el.hasAttribute('data-aos') && !el.hasAttribute('data-cascade')) continue
+          if (!(el.innerText || '').trim() && !el.querySelector('img, video, svg')) continue
+          // never menus, drawers, pop-ups or anything floating: those are hidden on purpose
+          if (st.position === 'fixed' || st.position === 'absolute' || el.closest('header, nav, dialog, aside, [role="dialog"], [aria-modal], [aria-hidden="true"], [class*="drawer" i], [class*="modal" i], [class*="popup" i], [class*="menu" i], [class*="dropdown" i], [class*="tooltip" i]')) continue
+          el.style.setProperty('opacity', '1', 'important')
+          el.style.setProperty('visibility', 'visible', 'important')
+          el.style.setProperty('transform', 'none', 'important')
+          el.style.setProperty('clip-path', 'none', 'important')
+        }
+      })
+      .catch(() => undefined)
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await new Promise((r) => setTimeout(r, 600))
+    // sticky bars that appear on scroll (add-to-cart bar, back-to-top) would be printed in the middle
+    // of a full-page shot: hide everything fixed except the header at the very top
+    await page
+      .evaluate(() => {
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+          const st = getComputedStyle(el)
+          if (st.position !== 'fixed') continue
+          const r = el.getBoundingClientRect()
+          if (r.top <= 1 && r.height < 200) continue
+          el.style.setProperty('display', 'none', 'important')
+        }
+      })
+      .catch(() => undefined)
+    await new Promise((r) => setTimeout(r, 300))
+
+    if (bottomOnly) {
+      await page.evaluate(async () => {
+        const end = () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+        for (let y = 0; y < end(); y += 600) {
+          window.scrollTo(0, y)
+          await new Promise((r) => setTimeout(r, 120))
+        }
+        window.scrollTo(0, end())
+        await new Promise((r) => setTimeout(r, 600))
+        window.scrollTo(0, 0)
+      })
+      const full = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight))
+      const h = Math.min(1800, full)
+      const shot = await page.screenshot({ type: 'jpeg', quality: 80, clip: { x: 0, y: full - h, width: WIDTH, height: h }, captureBeyondViewport: true })
+      return NextResponse.json({ device, screenshot: `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`, width: WIDTH, height: h, pins: [] })
+    }
 
     const { candidates, height } = await page.evaluate(
       (maxH: number, maxN: number) => {
@@ -225,8 +303,23 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
     'Answer only JSON: {"pins":[{"finding":"<finding id>","element":"<element id or null>","confidence":0-1}]}'
   try {
     const openRouter = new OpenRouter({ apiKey })
-    const res = await openRouter.chat.send({
-      model: process.env.OPENROUTER_LOCATE_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite',
+    // the provider fails now and then ("Provider returned error"): try again, then a second model
+    const models = [process.env.OPENROUTER_LOCATE_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash']
+    let res: unknown = null
+    let lastErr: unknown = null
+    for (const model of models) {
+      try {
+        res = await sendOnce(model)
+        break
+      } catch (e) {
+        lastErr = e
+        debug.push(`retry after: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (!res) throw lastErr
+    async function sendOnce(model: string) {
+    return openRouter.chat.send({
+      model,
       messages: [
         { role: 'system', content: system },
         {
@@ -242,6 +335,7 @@ async function matchFindings(findings: Finding[], candidates: Candidate[], scree
       stream: false,
       responseFormat: { type: 'json_object' },
     } as never)
+    }
     const content = (res as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content
     const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p: { text?: string }) => p?.text || '').join('') : ''
     debug.push(`ai: ${text.slice(0, 600)}`)

@@ -23,6 +23,8 @@ export type ScanRule = {
   area?: string
   device?: 'Both' | 'Desktop only' | 'Mobile only'
   method?: string
+  /** What the scanner is asked (Airtable "Scanner question"); the client title can change without moving accuracy. */
+  question?: string
   pass?: string
   fail?: string
   na?: string
@@ -32,9 +34,16 @@ export type ScanRule = {
   /** Hard rule: 'not relevant' for these niches. */
   notRelevantNiches?: string[]
   shopifyControl?: string
+  /** Where a pass may be found (Airtable "Seen in"). Empty or 'Anywhere' = no restriction. */
+  seenIn?: string[]
+  /** Shown in the free scan (Airtable "Free scan"); the rest of the results appear as a locked count. */
+  freeScan?: boolean
+  /** The fix in one sentence (Airtable "Short fix"), and the expected revenue effect 1 to 5 ("Impact weight"). */
+  shortFix?: string
+  impact?: number
 }
 
-type AirtableSingleRecord = {
+export type AirtableSingleRecord = {
   id: string
   createdTime?: string
   fields?: Record<string, unknown>
@@ -104,6 +113,7 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     area: text('Page area'),
     device: device === 'Desktop only' || device === 'Mobile only' || device === 'Both' ? device : undefined,
     method: text('Check method'),
+    question: text('Scanner question'),
     pass: text('Pass when'),
     fail: text('Fail when'),
     na: text('Not relevant when'),
@@ -111,6 +121,10 @@ export function mapAirtableRecordToRule(record: AirtableSingleRecord): ScanRule 
     niches: list('Niches'),
     notRelevantNiches: list('Not relevant for niches'),
     shopifyControl: text('Shopify control'),
+    seenIn: list('Seen in'),
+    freeScan: fields['Free scan'] === true,
+    shortFix: text('Short fix'),
+    impact: typeof fields['Impact weight'] === 'number' ? (fields['Impact weight'] as number) : undefined,
   }
 }
 
@@ -153,7 +167,7 @@ type ListResponse = {
  * Fetches all records matching `filterByFormula`, following `offset` pagination.
  * Retries on 429 / Airtable rate-limit payloads with exponential backoff.
  */
-async function fetchAllRecordsForFormula(
+export async function fetchAllRecordsForFormula(
   listBaseUrl: string,
   apiKey: string,
   filterByFormula: string,
@@ -248,9 +262,10 @@ let refreshInFlight: Promise<CheckpointRulesOk | null> | null = null
 
 /**
  * How long the in-memory Airtable cache is treated as fresh before a re-pull.
- * Default 1 day; override with CHECKPOINTS_CACHE_TTL_MS (ms).
+ * Default 1 hour, so a definition edited in Airtable reaches scans the same hour (the lab's
+ * Promote and re-judge refresh at once); override with CHECKPOINTS_CACHE_TTL_MS (ms).
  */
-const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60_000 // 1 day
+const DEFAULT_CACHE_TTL_MS = 60 * 60_000 // 1 hour
 
 function cacheTtlMs(): number {
   const n = parseInt(process.env.CHECKPOINTS_CACHE_TTL_MS ?? '', 10)

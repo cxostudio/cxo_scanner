@@ -45,7 +45,7 @@ import {
 } from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
-import { getConversionCheckpointRules, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { getConversionCheckpointRules, refreshCheckpointRulesCache, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { filterCheckpointsByUrl, isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import {
   buildCheckpointPresentationMap,
@@ -54,6 +54,7 @@ import {
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
 import { saveTestScan } from '@/lib/lab/store'
+import { saveLeadScan } from '@/lib/leads/store'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -1149,7 +1150,9 @@ export async function POST(request: NextRequest) {
     // with their definitions. The list the browser sent is only a fallback.
     let v2Rules: ScanRule[] = rules
     try {
-      const cpRes = await getConversionCheckpointRules()
+      // lab scans (test emails) always use today's definitions: Louis edits and re-scans in one go
+      const fresh = isTestEmail(email) ? await refreshCheckpointRulesCache().catch(() => null) : null
+      const cpRes = fresh?.ok ? fresh.data : await getConversionCheckpointRules()
       if (cpRes.ok) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
         const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {
@@ -1180,6 +1183,8 @@ export async function POST(request: NextRequest) {
       try {
         const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
+        // lead dashboard (/admin/leads): score, counts and answers only, no screenshots or page text
+        if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
         // test scans are kept for blind labelling (lib/lab); customer scans never are
         let labId: string | undefined
         if (email && isTestEmail(email)) {

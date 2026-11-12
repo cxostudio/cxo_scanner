@@ -16,7 +16,152 @@ function singleVersion(v: any) {
   return !!v && v.total === 1 && !(v.pickers > 0)
 }
 
+/** The store sells fewer products than `under`: search checkpoints do not apply. Count from Shopify's products.json. */
+function smallCatalog(f: F, under: number) {
+  const n = f.catalogSize
+  if (typeof n !== 'number' || n >= under) return null
+  return { answer: 'na' as const, evidence: `The store sells ${n} product${n === 1 ? '' : 's'}: shoppers can see the whole range from the menu, so search matters little here.` }
+}
+
 export const MEASURED: Record<string, Measure> = {
+  // Are tap targets (buttons, links) large enough? (phone; links inside running text are exempt)
+  recXGNziP5Vz4r5bD: (ev) => {
+    const t = (ev.mobileFacts as F)?.probes?.tapTargets
+    if (!t || t.total < 15) return null
+    const share = t.small / t.total
+    const ex = t.examples?.length ? ` (for example ${t.examples.slice(0, 3).map((e: string) => `"${e}"`).join(', ')})` : ''
+    if (share <= 0.05) return { answer: 'pass', evidence: `On a phone, ${t.total - t.small} of ${t.total} buttons and links are big enough or spaced far enough apart to tap without hitting a neighbor.` }
+    if (share >= 0.15 && t.small >= 6) return { answer: 'fail', evidence: `On a phone, ${t.small} of ${t.total} buttons and links are under 24px with another target right next to them${ex}, which causes mis-taps.` }
+    return null
+  },
+
+  // Are unnecessary redirects minimized? (the way in, and the menu and footer links)
+  reciIqr6dppb76SqL: (_ev, f) => {
+    const p = f.probes
+    if (!p || !p.linkRedirects || p.linkRedirects.checked < 4) return null
+    const n = p.linkRedirects.redirected.length
+    if (p.entryRedirects >= 2) return { answer: 'fail', evidence: `Opening the page went through ${p.entryRedirects} redirects before landing, which adds a delay to every visit from that link.` }
+    if (n >= 3) return { answer: 'fail', evidence: `${n} of ${p.linkRedirects.checked} menu and footer links redirect before landing (e.g. ${p.linkRedirects.redirected.slice(0, 2).join(', ')}): point them at the final URL.` }
+    if (n <= 1 && p.entryRedirects <= 1) return { answer: 'pass', evidence: n ? `${p.linkRedirects.checked - n} of the ${p.linkRedirects.checked} menu and footer links we checked go straight to their page; one redirects once.` : `The ${p.linkRedirects.checked} menu and footer links we checked go straight to their page, without redirects.` }
+    return null
+  },
+
+  // Are third-party scripts and apps minimized? (hosts the page asks scripts from, the platform excluded)
+  rec0ceXwiHz4HiVM5: (_ev, f) => {
+    const hosts: string[] | undefined = f.network?.thirdPartyScripts
+    if (!Array.isArray(hosts)) return null
+    if (hosts.length <= 10) return { answer: 'pass', evidence: `The page loads scripts from ${hosts.length} outside services, a light load.` }
+    if (hosts.length >= 20) return { answer: 'fail', evidence: `The page loads scripts from ${hosts.length} outside services (${hosts.slice(0, 5).join(', ')}…). Each one slows the page; remove the apps you no longer use.` }
+    return null
+  },
+
+  // Are the web fonts optimized? (font files the page asks for, and families in use)
+  rech8DlQso3uFnGxE: (_ev, f) => {
+    const files: string[] | undefined = f.network?.fontFiles
+    const fam: string[] | undefined = f.probes?.fontFamilies
+    if (!Array.isArray(files) || !Array.isArray(fam)) return null
+    const old = files.filter((u) => /\.(ttf|otf|eot)$/i.test(u)).length
+    if (files.length >= 12 || fam.length >= 5 || old > 0)
+      return { answer: 'fail', evidence: `The page loads ${files.length} font files${fam.length ? ` across ${fam.length} famil${fam.length === 1 ? 'y' : 'ies'} (${fam.slice(0, 4).join(', ')})` : ''}${old ? `, ${old} of them in older formats instead of WOFF2` : ''}. Fewer fonts show text sooner.` }
+    if (files.length <= 8 && fam.length <= 3) return { answer: 'pass', evidence: `The page loads ${files.length} font files${fam.length ? ` for ${fam.length} famil${fam.length === 1 ? 'y' : 'ies'} (${fam.join(', ')})` : ''}, in modern formats.` }
+    return null
+  },
+
+  // Are icons and graphics crisp on high-resolution phone screens? (the logo: SVG, or an image with 2x pixels)
+  recirnxnpZsdR8kMh: (ev) => {
+    const l = (ev.mobileFacts as F)?.probes?.logo
+    if (!l) return null
+    if (l.kind === 'svg') return { answer: 'pass', evidence: 'The logo is an SVG, sharp on every screen.' }
+    if (l.ratio >= 1.8) return { answer: 'pass', evidence: `The logo image has ${l.bestSource}px for ${l.width}px on screen: sharp on high-resolution phones.` }
+    if (l.ratio < 1.3) return { answer: 'fail', evidence: `The logo image has only ${l.bestSource}px for ${l.width}px on screen, so it looks soft on high-resolution phones. Use an SVG or a 2x image.` }
+    return null
+  },
+
+  // Does the tab title change when the shopper switches tabs?
+  rec4FB41t10SPslqM: (_ev, f) => {
+    const t = f.probes?.tabTitle
+    if (!t) return null
+    if (t.changed) return { answer: 'pass', evidence: `When the shopper switches tabs, the title changes from "${t.before}" to "${t.after}".` }
+    return { answer: 'fail', evidence: 'When the shopper switches to another tab, the tab title stays the same.' }
+  },
+
+  // Exit-intent capture on desktop
+  rec6WruKWvBOCeFQj: (_ev, f) => {
+    const x = f.probes?.exitIntent
+    if (!x) return null
+    if (x.shown) return { answer: 'pass', evidence: 'When the mouse leaves the page through the top, an offer or reminder appears.' }
+    if (!x.popupTool) return { answer: 'fail', evidence: 'Nothing appears when the mouse leaves the page, and no pop-up tool is installed.' }
+    return null // a pop-up tool is there but may only fire once per visitor: we cannot tell
+  },
+
+  // Are links styled to be clearly distinguishable from regular text? (links inside running text)
+  recakyzDaPUM9FbXZ: (_ev, f) => {
+    const l = f.probes?.links
+    if (!l || l.inline < 3) return null
+    const share = l.distinct / l.inline
+    if (share >= 0.8) return { answer: 'pass', evidence: `${l.distinct} of ${l.inline} links inside text have their own color, underline or weight.` }
+    if (share <= 0.4) return { answer: 'fail', evidence: `Only ${l.distinct} of ${l.inline} links inside text look different from the text around them.` }
+    return null
+  },
+
+  // Do site forms use the right input types? (email fields open the email keyboard)
+  recdK25UxUaLUxNpj: (ev) => {
+    const e: F[] | undefined = (ev.mobileFacts as F)?.probes?.emailFields
+    if (!Array.isArray(e) || !e.length) return null
+    const bad = e.filter((x) => x.type !== 'email' && x.inputmode !== 'email')
+    if (!bad.length) return { answer: 'pass', evidence: `The email field${e.length > 1 ? 's' : ''} on the page open${e.length > 1 ? '' : 's'} the email keyboard on a phone.` }
+    return { answer: 'fail', evidence: `${bad.length} email field${bad.length > 1 ? 's open' : ' opens'} the plain text keyboard on a phone (input type "${bad[0].type}"), so shoppers hunt for the @.` }
+  },
+
+  // On mobile, does the header stay out of the way while scrolling but come back?
+  recioIHrJVb0beqd7: (ev) => {
+    const h = (ev.mobileFacts as F)?.probes?.header
+    if (!h) return null
+    if (!h.down.visible && h.up.visible) return { answer: 'pass', evidence: 'On a phone the header hides while scrolling down and comes back on scrolling up.' }
+    if (h.down.visible && h.down.height <= 64) return { answer: 'pass', evidence: `On a phone the header stays as a slim bar (${h.down.height}px) while scrolling.` }
+    if (h.down.visible && h.down.height >= 110) return { answer: 'fail', evidence: `On a phone a ${h.down.height}px header stays on screen while scrolling, covering a large part of the page.` }
+    if (!h.down.visible && !h.up.visible) return { answer: 'fail', evidence: 'On a phone the header scrolls away and does not come back when scrolling up, so the menu and cart are only reachable at the top.' }
+    return null
+  },
+
+  // Is video content optimized?
+  recBOqpDJKwLNtjM1: (ev, f) => {
+    const v: F[] | null | undefined = f.probes?.videos
+    const embeds = (ev.mobileFacts as F)?.videos?.count ?? 0
+    if (!Array.isArray(v)) return null
+    if (!v.length && !embeds) return { answer: 'na', evidence: 'There is no video on this page.' }
+    if (!v.length) return null
+    const sound = v.filter((x) => x.autoplay && !x.muted)
+    const eager = v.filter((x) => !x.aboveFold && !x.lazy && x.preload !== 'none' && x.preload !== 'metadata')
+    if (sound.length) return { answer: 'fail', evidence: `${sound.length} video${sound.length > 1 ? 's play' : ' plays'} automatically with sound.` }
+    if (eager.length) return { answer: 'fail', evidence: `${eager.length} video${eager.length > 1 ? 's' : ''} below the first screen start loading with the page instead of when the shopper scrolls to ${eager.length > 1 ? 'them' : 'it'}.` }
+    return { answer: 'pass', evidence: `${v.length} video${v.length > 1 ? 's are' : ' is'} muted when autoplaying and only load${v.length > 1 ? '' : 's'} when needed.` }
+  },
+
+  // Does the site pass Google's Core Web Vitals on mobile?
+  rec7nzBOS46ENhUiQ: (_ev, f) => {
+    const p = f.pageSpeed
+    const x = p?.field
+    if (!x || x.lcpMs == null || x.cls == null) return null
+    const bad: string[] = []
+    if (x.lcpMs > 2500) bad.push(`largest image or text appears after ${(x.lcpMs / 1000).toFixed(1)}s (good: 2.5s)`)
+    if (x.inpMs != null && x.inpMs > 200) bad.push(`taps take ${x.inpMs}ms to respond (good: 200ms)`)
+    if (x.cls > 0.1) bad.push(`layout shift ${x.cls} (good: 0.1)`)
+    const scope = x.scope === 'page' ? 'this page' : 'the whole site'
+    if (!bad.length) return { answer: 'pass', evidence: `Google's data from real phone visitors to ${scope}: all Core Web Vitals are good (LCP ${(x.lcpMs / 1000).toFixed(1)}s${x.inpMs != null ? `, INP ${x.inpMs}ms` : ''}, CLS ${x.cls}).` }
+    return { answer: 'fail', evidence: `Google's data from real phone visitors to ${scope}: ${bad.join('; ')}.` }
+  },
+
+  // Does the hero load fast on mobile (LCP)?
+  recOxBLy8NfUAjKfS: (_ev, f) => {
+    const p = f.pageSpeed
+    const ms = p?.field?.lcpMs ?? p?.lab?.lcpMs
+    if (typeof ms !== 'number') return null
+    const src = p?.field?.lcpMs != null ? "Google's data from real phone visitors" : "Google's lab test on a mid-range phone"
+    if (ms <= 2500) return { answer: 'pass', evidence: `${src}: the main image or text appears after ${(ms / 1000).toFixed(1)}s (good: 2.5s or less).` }
+    return { answer: 'fail', evidence: `${src}: the main image or text appears after ${(ms / 1000).toFixed(1)}s, slower than the 2.5s Google counts as good.` }
+  },
+
   // Do you use pure black for text or backgrounds? (pass = no pure black)
   recSs12TogM60Mf6w: (_ev, f) => {
     const t = f.pureBlack?.textElements
@@ -90,6 +235,9 @@ export const MEASURED: Record<string, Measure> = {
 
   // Are all images labeled with alt text for accessibility and SEO purposes?
   rechriROBfHKhi1MQ: (_ev, f) => {
+    const lh = f.pageSpeed?.a11y
+    if (lh?.imageAlt === 1) return { answer: 'pass', evidence: 'Every image on the page has alt text (Google PageSpeed check).' }
+    if (lh?.imageAlt === 0 && (lh.imageAltMissing || 0) >= 2) return { answer: 'fail', evidence: `${lh.imageAltMissing} images have no alt text (Google PageSpeed), so screen readers and Google cannot tell what they show.` }
     const total = f.images?.total
     const missing = f.images?.missingAlt
     if (typeof total !== 'number' || total < 3) return null
@@ -115,10 +263,15 @@ export const MEASURED: Record<string, Measure> = {
   },
 
   // Are touch gestures like pinch-to-zoom or swipe properly supported and not blocked on mobile?
-  recmfE93txjDPFQgc: (ev) => {
+  recmfE93txjDPFQgc: (ev, f) => {
+    // Google's audit (an Android phone) decides: iPhones ignore zoom limits since iOS 10, and many themes
+    // send maximum-scale=1 to iPhones only, so our iPhone capture alone would report a block that isn't there
+    const lh = f.pageSpeed?.a11y?.metaViewport
+    if (lh === 1) return { answer: 'pass', evidence: 'Pinch-to-zoom is not blocked on phones (Google PageSpeed check).' }
+    if (lh === 0) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on Android phones (user-scalable=no or a maximum zoom under 5, per Google PageSpeed), so shoppers cannot zoom in on details.' }
     const meta: string | null = (ev.mobileFacts as F).viewportMeta ?? null
     if (meta === null) return null
-    if (/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/i.test(meta)) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on phones, so shoppers cannot zoom in on details.' }
+    if (/user-scalable\s*=\s*(no|0)/i.test(meta)) return { answer: 'fail', evidence: 'The page blocks pinch-to-zoom on phones, so shoppers cannot zoom in on details.' }
     return { answer: 'pass', evidence: 'Pinch-to-zoom is not blocked on phones.' }
   },
 
@@ -154,13 +307,22 @@ export const MEASURED: Record<string, Measure> = {
   recpms3eLz0EUb0qR: (ev) => {
     const m = ev.mobileFacts as F
     if (typeof m.bodyFontPx !== 'number' || (m.textBlocks || 0) < 3) return null
+    // 16px+ passes for every audience; 14 to 16px passes too unless the store sells to older shoppers,
+    // which the model judges from the products and the people shown (it gets bodyFontPx in the mobile facts)
     if (m.bodyFontPx >= 16) return { answer: 'pass', evidence: `Body text on phones is ${m.bodyFontPx}px, readable without zooming.` }
-    if (m.bodyFontPx < 14) return { answer: 'fail', evidence: `Body text on phones is ${m.bodyFontPx}px, small enough that shoppers may need to zoom (16px is the usual minimum).` }
+    if (m.bodyFontPx < 12) return { answer: 'fail', evidence: `Body text on phones is ${m.bodyFontPx}px, small enough that shoppers need to zoom (Google counts text under 12px as illegible).` }
     return null
   },
 
   // Does the page stay stable while it loads (no jumping buttons or text)?
-  recouiE072opsajby: (ev) => {
+  recouiE072opsajby: (ev, f) => {
+    // real visitors first (Google's field data, 75th percentile), then our own phone capture
+    const field = f.pageSpeed?.field
+    if (field && typeof field.cls === 'number') {
+      const c = Math.round(field.cls * 100) / 100
+      if (c <= 0.1) return { answer: 'pass', evidence: `For real visitors on Google's data, the page barely moves while loading (layout shift ${c}; "good" is 0.1 or less).` }
+      if (c > 0.25) return { answer: 'fail', evidence: `For real visitors on Google's data, content jumps while the page loads (layout shift ${c}; Google rates above 0.25 as poor).` }
+    }
     const cls = (ev.mobileFacts as F).layoutShift
     if (typeof cls !== 'number') return null
     if (cls <= 0.1) return { answer: 'pass', evidence: `The page barely moves while loading on a phone (layout shift ${cls}, Google's limit for "good" is 0.1).` }
@@ -178,13 +340,34 @@ export const MEASURED: Record<string, Measure> = {
 
   // Are images optimized for the web? (formats as downloaded: Shopify serves WebP without a .webp URL)
   recxGK8wpGe3v4DPX: (_ev, f) => {
+    // weight first (Google PageSpeed): Shopify serves WebP everywhere, yet images can still be far too big
+    const save = f.pageSpeed?.savings?.imagesKiB
+    if (typeof save === 'number' && save >= 300) return { answer: 'fail', evidence: `Google PageSpeed estimates the images on this page could be about ${save} KiB lighter (larger than shown, or not compressed enough), which slows the page on phones.` }
     const imgs: Record<string, number> = f.network?.images || {}
     const raster = Object.entries(imgs).filter(([t]) => !/svg|gif|x-icon|vnd\.microsoft/.test(t))
     const total = raster.reduce((a, [, n]) => a + n, 0)
     if (total < 5) return null
     const modern = raster.filter(([t]) => /webp|avif/.test(t)).reduce((a, [, n]) => a + n, 0)
-    if (modern / total >= 0.7) return { answer: 'pass', evidence: `${modern} of ${total} images were delivered in modern formats (WebP or AVIF).` }
+    if (modern / total >= 0.7 && !(typeof save === 'number' && save > 100)) return { answer: 'pass', evidence: `${modern} of ${total} images were delivered in modern formats (WebP or AVIF)${typeof save === 'number' ? ', and Google PageSpeed finds little left to gain' : ''}.` }
     if (modern / total < 0.3) return { answer: 'fail', evidence: `Only ${modern} of ${total} images were delivered in modern formats (WebP or AVIF), so images are heavier than needed.` }
+    return null
+  },
+
+  // Are CSS, JavaScript, and HTML minified? (Google PageSpeed: what minifying would still save)
+  rec18dg644AXcffV0: (_ev, f) => {
+    const k = f.pageSpeed?.savings?.unminifiedKiB
+    if (typeof k !== 'number') return null
+    if (k <= 5) return { answer: 'pass', evidence: 'The CSS and JavaScript are minified: Google PageSpeed finds nothing meaningful left to save.' }
+    if (k >= 25) return { answer: 'fail', evidence: `Some CSS or JavaScript is not minified: Google PageSpeed estimates about ${k} KiB could be saved.` }
+    return null
+  },
+
+  // Is browser caching enabled? (Google PageSpeed: files sent with short cache lifetimes)
+  receyw3XXgQfA6ylx: (_ev, f) => {
+    const k = f.pageSpeed?.savings?.cacheKiB
+    if (typeof k !== 'number') return null
+    if (k <= 50) return { answer: 'pass', evidence: 'Files are cached by the browser, so returning visitors do not download them again.' }
+    if (k >= 300) return { answer: 'fail', evidence: `About ${k} KiB of files are sent with short cache lifetimes (Google PageSpeed), so returning visitors download them again on every visit.` }
     return null
   },
 
@@ -226,6 +409,42 @@ export const MEASURED: Record<string, Measure> = {
 
   // Do discounted items in the cart show the old price struck through, or the saving?
   // No version of the product has a compare-at price: the item added to the cart is not discounted.
+  // gallery images share one shape: read from Shopify's media list. Mixed shapes are left to the
+  // model, since many themes crop them into one frame and the gallery does not jump.
+  // cookie banner: screenshots never show it (it is accepted and hidden first), so only the
+  // measurement can judge it. Not seen → couldn't check (often geo-targeted to EU visitors).
+  recqdZbBbXoGLLZYV: (ev) => {
+    const c = (ev.mobileFacts as Record<string, any>)?.cookieBanner
+    if (!c?.found) return { answer: 'unknown', evidence: 'No cookie banner was shown to our visit (stores often show it only to EU visitors), so we could not check it.' }
+    if (c.coversPct >= 60) return { answer: 'fail', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen.` }
+    if (!c.reject) return { answer: 'fail', evidence: 'The cookie banner has no one-tap reject option next to accept.' }
+    return { answer: 'pass', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen and can be accepted or rejected in one tap.` }
+  },
+  // pop-ups on landing: screenshots never show them (they are closed first), so the reading decides
+  recYZBCXc8EmCPzXq: (ev) => {
+    const p = (ev.mobileFacts as Record<string, any>)?.popup
+    if (!p) return null
+    if (!p.found) return { answer: 'na', evidence: 'No pop-up appeared in the first seconds of the visit on mobile.' }
+    if (p.coversPct >= 60) return { answer: 'fail', evidence: `A pop-up covers about ${p.coversPct}% of the phone screen as soon as the page opens.` }
+    if (!p.close || p.closeSize < 24) return { answer: 'fail', evidence: 'A pop-up appears on landing without a clear close button.' }
+    if (p.coversPct > 33) return { answer: 'fail', evidence: `A pop-up appears on landing and covers about ${p.coversPct}% of the phone screen (more than a third).` }
+    return { answer: 'pass', evidence: `The pop-up on landing covers about ${p.coversPct}% of the phone screen and has a clear close button.` }
+  },
+  recYRJzuWC8lHXc40: (_ev, f) => {
+    // first the frames the gallery shows on the page (themes crop every photo to one shape), then the files
+    const frames: number[] = f?.gallery?.frameRatios || []
+    if (frames.length >= 2) {
+      const same = Math.max(...frames) / Math.min(...frames) <= 1.03
+      return same
+        ? { answer: 'pass', evidence: `The gallery shows all ${frames.length} images in frames of the same shape (${frames[0].toFixed(2)} width to height), so it keeps its height when swiping.` }
+        : { answer: 'fail', evidence: `The gallery shows images in frames of different shapes (from ${Math.min(...frames).toFixed(2)} to ${Math.max(...frames).toFixed(2)} width to height), so it changes height when swiping.` }
+    }
+    const r: number[] = f?.variants?.ratios || []
+    if (r.length === 1) return { answer: 'na', evidence: 'The product has a single image.' }
+    if (r.length >= 2 && Math.max(...r) / Math.min(...r) <= 1.03)
+      return { answer: 'pass', evidence: `All ${r.length} product images have the same shape (${r[0].toFixed(2)} width to height), so the gallery keeps its height.` }
+    return null
+  },
   recbEhE51TXFkDDnC: (_ev, f) => {
     const v = f.variants
     if (!v || !v.total || typeof v.discounted !== 'number') return null
@@ -246,6 +465,62 @@ export const MEASURED: Record<string, Measure> = {
     if (t.overflow) return { answer: 'fail', evidence: 'On a phone the page scrolls sideways at the footer: it is wider than the screen.' }
     if (share >= 0.75) return { answer: 'pass', evidence: `On a phone, ${t.comfortable} of ${t.targets} footer links are easy to tap: big enough and spaced apart.` }
     return { answer: 'fail', evidence: `On a phone, only ${t.comfortable} of ${t.targets} footer links are easy to tap: they sit about ${t.typicalGap}px apart, under the 36px a thumb needs.` }
+  },
+
+  // Search checkpoints on small stores: with under 20 products the whole range fits in the menu
+  ...Object.fromEntries(
+    ['recjEVPpCRkdi17EE', 'recHkGvsYH1vmYzwt', 'recPKeMkL99ewxiFu', 'rec9YqyUjHjIYlVIH', 'recWctdeyEyTRSFcU', 'recEwhpkC7Fpe6drp', 'recabn64gTwNLfVr6', 'recgzCeCt88qIsOG2'].map((id) => [
+      id,
+      (_ev: Evidence, f: F) => smallCatalog(f, 20),
+    ]),
+  ),
+  recUUD0aehm1xJOs6: (_ev: Evidence, f: F) => smallCatalog(f, 30),
+
+  // Is good navigational feedback provided (active state)? The header link to this page must LOOK different.
+  recB9iXaHpr1wLOzT: (_ev: Evidence, f: F) => {
+    if (f.activeNav === true) return { answer: 'pass', evidence: 'The menu highlights the section you are in, so shoppers can tell where they are.' }
+    if (f.activeNav === false) return { answer: 'fail', evidence: 'The menu link to this page looks exactly like the others, so shoppers cannot tell where they are.' }
+    return null
+  },
+
+  // On desktop, are the main categories visible in the header without opening a menu? At most one collection link in the header bar fails.
+  reclt5mHrGdpwf2lU: (_ev: Evidence, f: F) => {
+    if (typeof f.headerCollections === 'number' && f.headerCollections <= 1)
+      return { answer: 'fail', evidence: 'On desktop, the header shows no category links (one at most): shoppers have to open the menu to see what the store sells.' }
+    return null
+  },
+
+  // Does the category page have a clear and descriptive category heading? No visible heading near the top fails.
+  recKToQ0snBXyfpCo: (_ev: Evidence, f: F) => {
+    if (f.visibleHeading === null && 'visibleHeading' in f)
+      return { answer: 'fail', evidence: 'There is no visible heading at the top of the page: shoppers do not see the name of the category they are in.' }
+    return null
+  },
+
+  // Are "Out of Stock" products clearly marked or hidden from the primary view? Sold-out cards up front fail.
+  recbh9OAh8JWdqt7U: (_ev: Evidence, f: F) => {
+    if (typeof f.soldOutFirst === 'number' && f.soldOutFirst >= 2)
+      return { answer: 'fail', evidence: `${f.soldOutFirst} of the first 4 products are sold out: the top of the grid should show products shoppers can buy, with sold-out ones further down.` }
+    if (f.soldOutFirst === 0 && typeof f.soldOutAny === 'number' && f.soldOutAny > 0)
+      return { answer: 'pass', evidence: 'Sold-out products are labelled on their cards and none of them sits in the first row of the grid.' }
+    return null
+  },
+
+  // Does the product page have an option for potential customers to ask questions? (a chat widget in the page code)
+  recRbVoxG8qjJlszm: (ev: Evidence) => {
+    const chat = (ev as { mobileFacts?: { chatWidget?: string | null } }).mobileFacts?.chatWidget
+    if (chat) return { answer: 'pass', evidence: 'The page loads a chat widget, so shoppers can ask a question while they shop.' }
+    return null
+  },
+
+  // Is the mobile search bar easy to access and use? (one tap in the mobile header, measured)
+  recHkGvsYH1vmYzwt: (ev: Evidence, f: F) => {
+    const small = smallCatalog(f, 20)
+    if (small) return small
+    const m = (ev as { mobileFacts?: { headerSearch?: boolean | null } }).mobileFacts?.headerSearch
+    if (m === true) return { answer: 'pass', evidence: 'On mobile, search is one tap away in the header.' }
+    if (m === false) return { answer: 'fail', evidence: 'On mobile, there is no search icon in the header: shoppers have to open the menu or scroll to find search.' }
+    return null
   },
 
   // Are product categories or popular links included in the footer for quick access? (Shopify: collection links)
@@ -274,5 +549,13 @@ export const MEASURED: Record<string, Measure> = {
   recEyoHMH2oyA0Hk3: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there is no option to choose.' } : null),
 
   // Do colour variants show as image thumbnails or clear swatches? A single version has no colour choice.
-  recnbgJzDarhgi4RH: (_ev, f) => (singleVersion(f.variants) ? { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' } : null),
+  // Only sizes (or other options that do not change the look) to choose: there is no colour to show as a swatch.
+  recnbgJzDarhgi4RH: (_ev, f) => {
+    if (singleVersion(f.variants)) return { answer: 'na', evidence: 'This product has a single version, so there are no colour variants.' }
+    const names: string[] = f.variants?.optionNames || []
+    const VISUAL = /colou?r|couleur|kleur|farbe|color|style|pattern|motif|print|material|mati[eè]re|finish|shade|teinte|tint|design|model|mod[eè]le|edition|flavou?r|parfum|scent|geur/i
+    if (names.length && !names.some((n) => VISUAL.test(n)) && names.every((n) => /size|taille|maat|größe|grosse|talla|taglia|length|longueur|lengte|width|largeur|pointure|quantity|pack|title/i.test(n)))
+      return { answer: 'na', evidence: `The only choice is ${names.join(' and ').toLowerCase()}, which does not change how the product looks, so there are no colour variants to show.` }
+    return null
+  },
 }

@@ -66,7 +66,8 @@ export function ScanDevices({
   return (
     <div className="max-[1023px]:px-2">
       <div className="relative aspect-[5/3] w-full" aria-hidden>
-        <div className="absolute left-0 top-0 w-[86%]">
+        {/* isolate: the scan line and grid stay inside the laptop, under the phone */}
+        <div className="absolute left-0 top-0 isolate z-0 w-[86%]">
           <div className="overflow-hidden rounded-[16px] border-[9px] border-[var(--text)] bg-[var(--text)] max-[560px]:rounded-[10px] max-[560px]:border-[5px]">
             <div className="relative aspect-[16/10] overflow-hidden rounded-[6px] bg-[var(--surface-muted)] max-[560px]:rounded-[4px]">
               {desktop ? <img src={desktop} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} />}
@@ -80,7 +81,7 @@ export function ScanDevices({
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 right-0 w-[26%]">
+        <div className="absolute bottom-0 right-0 z-[1] w-[26%]">
           <div className="overflow-hidden rounded-[22px] border-[6px] border-[var(--text)] bg-[var(--text)] shadow-[0_24px_48px_-18px_rgba(9,9,11,.35)] max-[560px]:rounded-[14px] max-[560px]:border-[4px]">
             <div className="relative aspect-[9/19] overflow-hidden rounded-[16px] bg-[var(--surface)] max-[560px]:rounded-[10px]">
               {mobileSrc ? <img src={mobileSrc} alt="" className="block w-full object-cover object-top" /> : <Placeholder hint={instant} small />}

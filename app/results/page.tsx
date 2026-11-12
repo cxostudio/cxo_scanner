@@ -7,6 +7,8 @@ import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
+import { LockedFindings } from '../components/LockedFindings'
+import { LockedRow, FullStoreOffer } from '../components/PitchMockups'
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
@@ -15,6 +17,9 @@ import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } fro
 // Calendly once available; until then the existing booking form (same as YourPath)
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
+// the paid full report (a payment link); until it exists, the full-scan page
+const FULL_REPORT_URL = process.env.NEXT_PUBLIC_FULL_REPORT_URL || CHECKLIST_URL
+const FULL_REPORT_PRICE = process.env.NEXT_PUBLIC_FULL_REPORT_PRICE || ''
 
 const ResultSchema = z.array(
   z.object({
@@ -24,6 +29,7 @@ const ResultSchema = z.array(
     reason: z.string(),
     status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
     coveredByShopify: z.boolean().optional(),
+    freeScan: z.boolean().optional(),
     checkpoint: z
       .object({
         requiredActions: z.string(),
@@ -79,6 +85,8 @@ export default function ResultsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
+  // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
+  const [gate, setGate] = useState<'' | 'b' | 'cd'>('cd')
   const [labId, setLabId] = useState<string | null>(null)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
@@ -89,6 +97,9 @@ export default function ResultsPage() {
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
       setLabId(localStorage.getItem('scanLabId'))
+      const g = new URLSearchParams(window.location.search).get('gate')
+      if (g === 'b' || g === 'cd') setGate(g)
+      else if (g === 'a') setGate('')
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -113,10 +124,12 @@ export default function ResultsPage() {
     if (!failed.length) return
     const ctrls: AbortController[] = []
     ;(['desktop', 'mobile'] as Device[]).forEach((d) => {
-      const key = `scanLocate:${d}`
+      // v3: drops copies saved before the full-page capture fix. Each new scan clears these too
+      // (app/run), so a saved copy only serves reloads of the same results.
+      const key = `scanLocate:v3:${d}`
       try {
         const cached = JSON.parse(localStorage.getItem(key) || 'null') as { url: string; data: Located } | null
-        if (cached?.url === url && cached.data?.screenshot) {
+        if (cached?.url === url && cached.data?.screenshot && cached.data.pins?.length) {
           setLocated((p) => ({ ...p, [d]: cached.data }))
           return
         }
@@ -146,22 +159,39 @@ export default function ResultsPage() {
 
   const report = useMemo(() => {
     if (!results) return null
+    // free scan: only the checkpoints ticked "Free scan" are shown; the other findings are counted and locked
+    // (test scans from the lab show everything)
+    const free = !labId && results.some((r) => r.freeScan)
+    const shown = free ? results.filter((r) => r.freeScan) : results
+    const locked = free ? results.filter((r) => !r.freeScan && r.status === 'fail') : []
+    const lockedIssues = locked.length
     // "couldn't check" answers are never shown as failures or counted in the score
-    const unknown = results.filter((r) => r.status === 'unknown').length
-    const scored = results.filter((r) => r.status !== 'unknown')
+    const unknown = shown.filter((r) => r.status === 'unknown').length
+    const scored = shown.filter((r) => r.status !== 'unknown')
     const failed = scored.filter((r) => !r.passed)
     // shown apart from real passes: "not relevant for your store" and "covered by Shopify"
     const notRelevant = scored.filter((r) => r.status === 'na').length
     const byShopify = scored.filter((r) => r.coveredByShopify).length
-    const listed = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const base = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const lockedIds = new Set(locked.map((r) => r.ruleId))
+    const rank = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
+    const listed =
+      free && gate
+        ? [...[...base.filter((r) => !r.passed), ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
+        : base
     const areas = LEVERS.map((l) => {
       const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh }
-  }, [results])
+    const extra = free && gate ? locked.length : 0
+    // one set of numbers everywhere: every check run on this page, the free ones explained,
+    // the locked findings counted, and the rest (passed or not relevant) waiting in the full report
+    const pageChecks = free && gate ? results.length : scored.length + unknown
+    const hidden = free && gate ? results.length - shown.length - locked.length : 0
+    return { free: free && Boolean(gate), pageChecks, hidden, toFix: failed.length + extra, checked: pageChecks, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+  }, [results, labId, gate])
 
   const host = hostOf(url)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
@@ -250,7 +280,7 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.total} checkpoints
+              {host} · {pageName} · {report.pageChecks} checks
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -258,12 +288,14 @@ export default function ResultsPage() {
                   Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
                 </>
               ) : (
-                <>Your {pageName.toLowerCase()} has {report.failed.length} things to fix</>
+                <>Your {pageName.toLowerCase()} has {report.toFix} things to fix</>
               )}
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
-              {report.failed.length} of {report.total} checks failed
-              {report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
+              {report.toFix} of {report.checked} checks failed
+              {report.free
+                ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
+                : report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
               {numbers && ' That figure is what a 10% lift in conversion is worth to you.'}
             </p>
 
@@ -321,7 +353,7 @@ export default function ResultsPage() {
                 <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
-                    {report.failed.length} to fix
+                    {report.toFix} to fix
                   </span>{' '}
                   ·{' '}
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
@@ -330,6 +362,7 @@ export default function ResultsPage() {
                   {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
                   {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
+                  {report.hidden > 0 && ` · ${report.hidden} more in the full report`}
                   {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
                 </p>
               </div>
@@ -364,9 +397,12 @@ export default function ResultsPage() {
                 />
               </div>
 
-              <div className="relative min-w-0 lg:order-1">
+              <div className="min-w-0 lg:order-1">
+                <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
+                    if (report.lockedIds.has(r.ruleId) && gate)
+                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={FULL_REPORT_URL} price="€49" />
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -415,6 +451,21 @@ export default function ResultsPage() {
                     </button>
                   </div>
                 )}
+                </div>
+                {/* free scan: the other findings exist but stay in the full report */}
+                {gate ? (
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.locked.length} qualified={qualified} buyUrl={FULL_REPORT_URL} callUrl={CALL_URL} price="€49" />
+                ) : (
+                <LockedFindings
+                  locked={report.locked}
+                  qualified={qualified}
+                  monthlyAtStake={numbers ? numbers.lift10 : null}
+                  shortEur={shortEur}
+                  buyUrl={FULL_REPORT_URL}
+                  callUrl={CALL_URL}
+                  price={FULL_REPORT_PRICE}
+                />
+                )}
               </div>
             </div>
           </section>
@@ -423,12 +474,12 @@ export default function ResultsPage() {
           <YourPath
             money={numbers}
             qualified={qualified}
-            checked={report?.total ?? 0}
-            toFix={report?.failed.length ?? 0}
+            checked={report?.checked ?? 0}
+            toFix={report?.toFix ?? 0}
             eur={eur}
             shortEur={shortEur}
             callUrl={CALL_URL}
-            fullScanUrl={CHECKLIST_URL}
+            fullScanUrl={FULL_REPORT_URL}
             host={host}
           />
         </div>

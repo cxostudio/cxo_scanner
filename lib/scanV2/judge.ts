@@ -8,7 +8,10 @@ import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpo
 
 // A checkpoint with CXO Studio's definitions, straight from Airtable (getCheckpointRules.ts).
 export type Rule = ScanRule
-export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string }
+export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; seen?: string[]; rule?: string; by?: 'Seen in' | 'Code check' | 'Measured' }
+
+/** Places on the page, as in Airtable "Seen in". The model says where its evidence sits. */
+export const PLACES = ['First screen', 'Header', 'Menu', 'Buy box', 'Gallery', 'Page sections', 'Cart', 'Footer', 'Pop-up or banner', 'Page code'] as const
 
 /** Niche names as in the Airtable "Niches" and "Not relevant for niches" fields. */
 export const NICHES = [
@@ -78,10 +81,13 @@ ${page.rules}
 First decide the store's niche, ${page.niche}. Use exactly one of: ${NICHES.join(', ')}. Fashion covers apparel, footwear, bags and jewellery.
 
 Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
-- "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device.
+- "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device. "judge desktop and mobile": the checkpoint must be met on BOTH. When one device clearly shows it and the other device's screenshots of the same part of the page clearly do not, answer "fail" and start the evidence with the device that misses it ("On mobile, ..."). When the other device's screenshots do not cover that part of the page, judge on the device that does.
+- Pictures are judged only on what you see in the images. Words in the page text ("hugs your foot", "shown in use") never prove that a photo exists. For a checkpoint about images, name the image you mean (for example "the 3rd gallery image shows it worn"); if you cannot point to one, it is not there.
+- Seen means seen in a screenshot. Text that is only in the page text (the other messages of a rotating announcement bar, hidden carousel slides, closed drawers) proves the store has it, not that shoppers see it: it does not pass checkpoints about what is visible on the first screen, near the button or in the cart.
+- Where something sits matters. The footer is never the first screen, never a homepage section and never "near the button": evidence found only in the footer does not pass those checkpoints.
 - "only for niches" / "not relevant for niches": if the store's niche is outside the first list or inside the second, answer "na".
 - Mobile menu checkpoints are judged on the "mobile MENU opened" image (the menu after tapping the menu button). Without it they are "unknown".
-- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, judge the drawer: it is what most shoppers use on the way to checkout. Use the cart page only for something the drawer sends shoppers to (a "view cart" link) or when there is no drawer. Say in the evidence whether you judged the drawer or the cart page. Without cart images, cart checkpoints are "unknown".
+- Cart checkpoints are judged on the cart images (taken with one item in the cart). When the store has a cart DRAWER, only the drawer is shown to you and only the drawer counts: it is the route shoppers take to checkout. Something that exists only on the /cart page does not count. Without a drawer, the cart page is judged. Without cart images, cart checkpoints are "unknown".
 - Empty-cart checkpoints are judged ONLY on the "EMPTY cart" image. Without it they are "unknown"; never judge them from a cart that holds an item.
 - Every other cart checkpoint is judged ONLY on the images taken after one item was added ("cart view after one item was added", "CART PAGE"). Ignore the EMPTY cart image for them: an empty cart shows no product lines, totals or checkout button by design.
 - Pass only for something you can point to in the screenshots, the page text or the measured facts. Do not infer a feature from a nearby word (a shipping badge is not a coupon field).
@@ -97,23 +103,35 @@ Each checkpoint comes with "pass when", "fail when" and "not relevant when" rule
 
 - Write "evidence" for the store owner: one short, plain sentence naming what is (or is not) on their page and where. No screenshot numbers, no jargon, no em dashes.
 
-Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","evidence":"..."}]} with exactly one entry per checkpoint given.`
+- Check the rules in the order given: "not relevant when" first, then "fail when", and only then "pass when". In "rule", name the line your answer rests on and quote its key words (for example: fail when: "only in the footer").
+- In "seen", list where on the page your evidence sits, using only these names: ${PLACES.join(', ')}. First screen = visible without scrolling (announcement bar and header included). When the evidence is on the first screen, also name the part it sits in (Header, Buy box, Gallery or Page sections). Page sections = the blocks below the first screen and outside the buy box, gallery and footer. The "gallery overview" picture shows every image of the product gallery in page order, numbered, as a shopper swipes through it: use it for every gallery checkpoint (close-ups, lifestyle, annotations, customer photos, thumbnails count, backgrounds), it counts as Gallery. The "product gallery image N of M" pictures are every image of the product gallery, from the store's own product data: they count as Gallery, even when the screenshots only show the first one. Product tabs the scanner opened ("product tab ... opened" images, "OPENED PRODUCT TABS" text) count as Page sections, or Buy box when the tabs sit inside the buy box. Page code = the measured facts. When a checkpoint says "counts only when seen in", something found only elsewhere is a "fail".
+
+Reply with JSON only: {"niche":"<one of the niches>","results":[{"id":"<checkpoint id>","answer":"pass|fail|na|unknown","rule":"<the line it rests on>","seen":["<place>"],"evidence":"..."}]} with exactly one entry per checkpoint given.`
 }
 
 /** The kind of page: captured with the evidence, or read from the URL for scans saved before that. */
 export const pageKindOf = (ev: Evidence): PageKind => ev.pageType || detectPageTypeFromUrl(ev.finalUrl || ev.url)
 
 function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
+  if (scope === 'checkout')
+    return [
+      `PAGE: the FIRST STEP of checkout on ${ev.finalUrl.replace(/^(https?:\/\/[^/]+).*/, '$1')}, reached with the product in the cart. No email, name or phone was typed. ${ev.checkoutShippingNote ? `The scanner tried a public test address to reveal the shipping methods, but: ${ev.checkoutShippingNote}.` : 'The scanner typed a public test address (street, postcode, city only) so the shipping methods, their prices and delivery estimates are shown: judge them as a shopper from that country would see them. The address itself is ours, not the store\'s.'}`,
+      `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
+      `VISIBLE TEXT OF THE CHECKOUT (desktop):\n${ev.checkoutText || ''}`,
+      `WHAT THE PRODUCT PAGE PROMISED ABOUT SHIPPING (lines from the store's own product page, for comparing with checkout):\n${(ev.shippingPromises || []).join('\n') || '(nothing about shipping cost or time)'}`,
+      'Judge these checkout checkpoints ONLY on the checkout images and text (and the product page shipping lines above when a checkpoint compares them). Shopify Plus blocks (reviews, guarantees, timers, add-ons) count like any other checkout content. If a checkpoint is about a step not shown here (card form, confirmation, post-purchase) and nothing shows it, answer unknown.',
+    ].join('\n\n')
   const pageText = scope !== 'cart'
   return [
     `PAGE: ${ev.finalUrl} (${PAGE[pageKindOf(ev)].name})`,
     `TITLE: ${ev.title}`,
+    ...((ev as { knownNiche?: string }).knownNiche ? [`STORE NICHE (already decided for this store, use it as your niche): ${(ev as { knownNiche?: string }).knownNiche}`] : []),
     `MEASURED FACTS (desktop): ${JSON.stringify(ev.facts)}`,
     `MEASURED FACTS (mobile): ${JSON.stringify(ev.mobileFacts)}`,
     `PLATFORM: ${ev.isShopify ? 'Shopify' : 'not Shopify (or not detected)'}`,
     ev.sellsOnline === false ? 'ONLINE PURCHASE: NOT OFFERED on this page. The main button sends shoppers to a store locator ("Find in store" / "Where to buy"); there is no add-to-cart.' : '',
     `CART TEST: ${ev.cartTest || 'not run'}${ev.cartHeader ? ' (see the image of the header after adding to cart)' : ''}${ev.cartView || ev.mobileCartView ? ' (see the images of the cart view after adding to cart)' : ''}`,
-    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER; the cart page (/cart) is captured too' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
+    `CART TYPE: ${ev.cartKind === 'drawer' ? (ev.cartPage?.length || ev.mobileCartPage?.length ? 'the cart icon opens a cart DRAWER (judge the drawer only; the /cart page is not shown)' : 'the cart icon opens a cart DRAWER; the store has no separate cart page') : ev.cartKind === 'page' ? 'the cart icon goes to the CART PAGE (no drawer)' : ev.cartKind === 'none' ? 'nothing opened from the cart icon; the cart page (/cart) is captured' : 'cart not tested'}`,
     pageText ? `VISIBLE TEXT (desktop, top to bottom):\n${ev.text}` : 'Judge these cart checkpoints ONLY on the cart images below. The product page is not shown on purpose.',
     pageText && ev.hiddenText ? `TEXT INSIDE CLOSED TABS / ACCORDIONS:\n${ev.hiddenText}` : '',
   ]
@@ -122,13 +140,21 @@ function evidenceText(ev: Evidence, scope: Scope | 'all' = 'all') {
 }
 
 type Tile = Evidence['desktopTiles'][number]
-type Scope = 'header' | 'footer' | 'cart' | 'page'
+type Scope = 'header' | 'footer' | 'cart' | 'checkout' | 'page'
 
 /** Which part of the evidence a page area is judged on. */
+const CHECKOUT_PAGE_TYPE = 'recOkHTZH3nxsQNMb'
+/** Checkout checkpoints are judged on the checkout images only, whatever their page area. */
+function scopeFor(r: Rule): Scope {
+  if ((r as { pageTypeIds?: string[] }).pageTypeIds?.includes(CHECKOUT_PAGE_TYPE)) return 'checkout'
+  return scopeOf(r.area)
+}
+
 function scopeOf(area?: string): Scope {
   const a = (area || '').toLowerCase()
   if (/header|navigation|menu/.test(a)) return 'header'
   if (/footer/.test(a)) return 'footer'
+  if (/checkout form|order summary/.test(a)) return 'checkout'
   if (/cart|checkout/.test(a)) return 'cart'
   return 'page'
 }
@@ -137,19 +163,43 @@ function scopeOf(area?: string): Scope {
  * Only the images an area needs: the cart is judged on cart images and never on the product page,
  * the buy box never on the cart drawer, the footer on the footer. Fewer images, fewer wrong reads.
  */
-function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
-  const isFooter = (t: Tile) => /footer|page bottom/i.test(t.label)
-  const cart = [ev.emptyCart, ev.cartView, ...(ev.cartPage || []), ev.mobileCartView, ...(ev.mobileCartPage || [])].filter(Boolean) as Tile[]
-  const page = [...ev.desktopTiles, ...ev.mobileTiles]
-  if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
-  if (scope === 'footer') return page.filter(isFooter)
-  if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
-  if (scope === 'page') return page
-  return [...page, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+/**
+ * The footer tiles of one device. Long pages get a dedicated "page bottom / footer" shot; short pages
+ * end inside the regular tiles, so the footer is in the last one (plus the one before when the last is
+ * a thin strip, as the footer usually starts above it).
+ */
+function footerTiles(tiles: Tile[]): Tile[] {
+  const own = tiles.filter((t) => /footer|page bottom/i.test(t.label))
+  if (own.length || !tiles.length) return own
+  const last = tiles[tiles.length - 1]
+  const m = last.label.match(/\((\d+)-(\d+)px/)
+  const thin = m ? Number(m[2]) - Number(m[1]) < 500 : false
+  return thin && tiles.length > 1 ? tiles.slice(-2) : [last]
 }
 
-function images(ev: Evidence, scope: Scope | 'all' = 'all') {
-  const tiles = tilesFor(ev, scope)
+function tilesFor(ev: Evidence, scope: Scope | 'all'): Tile[] {
+  // a store with a cart drawer: the drawer is the route to checkout, so the /cart page is not judged (kept in the evidence)
+  const drawer = ev.cartKind === 'drawer' && !!(ev.cartView || ev.mobileCartView)
+  const cart = [ev.emptyCart, ev.cartView, ...(drawer ? [] : ev.cartPage || []), ev.mobileCartView, ...(drawer ? [] : ev.mobileCartPage || [])].filter(Boolean) as Tile[]
+  const page = [...ev.desktopTiles, ...ev.mobileTiles]
+  const gallery = (process.env.SCAN_GALLERY_OVERVIEW === '1' || (ev as { useGallery?: boolean }).useGallery) && ev.galleryTile ? [ev.galleryTile] : []
+  const tabs = [...gallery, ...(ev.tabTiles || []), ...(ev.galleryTiles || [])]
+  if (scope === 'header') return [ev.desktopTiles[0], ev.mobileTiles[0], ev.mobileMenu, ev.cartHeader].filter(Boolean) as Tile[]
+  if (scope === 'footer') return [ev.desktopTiles, ev.mobileTiles].flatMap(footerTiles)
+  if (scope === 'cart') return [...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+  if (scope === 'checkout') return [...(ev.checkout || []), ...(ev.mobileCheckout || [])]
+  if (scope === 'page') return [...page, ...tabs]
+  return [...page, ...tabs, ...(ev.mobileMenu ? [ev.mobileMenu] : []), ...(ev.cartHeader ? [ev.cartHeader] : []), ...cart]
+}
+
+type DeviceKey = 'mobile' | 'desktop' | 'both'
+/** A checkpoint for one device is judged on that device's images only (Airtable "Device"). */
+function deviceOf(r: Rule): DeviceKey {
+  return r.device === 'Mobile only' ? 'mobile' : r.device === 'Desktop only' ? 'desktop' : 'both'
+}
+
+function images(ev: Evidence, scope: Scope | 'all' = 'all', device: DeviceKey = 'both') {
+  const tiles = tilesFor(ev, scope).filter((t) => device === 'both' || !/^(mobile|desktop)\b/i.test(t.label) || t.label.toLowerCase().startsWith(device))
   return tiles.flatMap((t) => [
     { type: 'text' as const, text: `[${t.label}]` },
     { type: 'image_url' as const, imageUrl: { url: t.dataUrl } },
@@ -173,15 +223,17 @@ const DEVICE: Record<string, string> = {
 
 function describe(r: Rule): string {
   const desc = r.description.replace(/\s+/g, ' ').slice(0, r.pass ? 400 : 900)
-  if (!r.pass) return `- id: ${r.id}\n  question: ${r.title}\n  what good looks like: ${desc}`
+  if (!r.pass) return `- id: ${r.id}\n  question: ${r.question || r.title}\n  what good looks like: ${desc}`
   const only = (r.niches || []).filter((n) => n !== 'All')
   return [
     `- id: ${r.id}`,
-    `  question: ${r.title}`,
+    `  question: ${r.question || r.title}`,
     `  device: ${DEVICE[r.device || 'Both'] || DEVICE.Both}`,
-    `  pass when: ${r.pass}`,
-    r.fail ? `  fail when: ${r.fail}` : '',
+    // the exclusions first: the model otherwise passes on its first impression and skims the rest
     r.na ? `  not relevant when: ${r.na}` : '',
+    r.fail ? `  fail when: ${r.fail}` : '',
+    `  pass when: ${r.pass}`,
+    r.seenIn?.length && !r.seenIn.includes('Anywhere') ? `  counts only when seen in: ${r.seenIn.join(', ')}` : '',
     only.length ? `  only for niches: ${only.join(', ')}` : '',
     r.notRelevantNiches?.length ? `  not relevant for niches: ${r.notRelevantNiches.join(', ')}` : '',
     r.nicheNotes ? `  niche notes: ${r.nicheNotes}` : '',
@@ -191,7 +243,12 @@ function describe(r: Rule): string {
     .join('\n')
 }
 
-async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }): Promise<{ niche?: string; verdicts: Verdict[] }> {
+/** Recent model-call failures, for the lab's dry run (no keys, messages only). */
+export const judgeErrors: string[] = []
+
+export type Usage = { calls: number; inputTokens: number; outputTokens: number; costUsd: number }
+
+async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }, usage?: Usage): Promise<{ niche?: string; verdicts: Verdict[] }> {
   const list = group.map(describe).join('\n')
   const content = [
     { type: 'text' as const, text: shared.text },
@@ -210,17 +267,25 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
         temperature: 0,
         topP: 0.1,
         seed: 42,
-        maxTokens: 4000,
+        maxTokens: 6000,
         stream: false,
         responseFormat: { type: 'json_object' },
       } as any)
+      if (usage) {
+        const u = res?.usage || {}
+        usage.calls++
+        usage.inputTokens += Number(u.promptTokens ?? u.prompt_tokens ?? 0)
+        usage.outputTokens += Number(u.completionTokens ?? u.completion_tokens ?? 0)
+        usage.costUsd += Number(u.cost ?? 0)
+      }
       const parsed = parse(res?.choices?.[0]?.message?.content)
       const byId = new Map(parsed.results.map((v) => [v.id, v]))
       const verdicts = group.map((r) => {
         const v = byId.get(r.id)
         const answer = v && ['pass', 'fail', 'na', 'unknown'].includes(String(v.answer).toLowerCase()) ? (String(v.answer).toLowerCase() as Verdict['answer']) : 'unknown'
         // MISSING: the model skipped this checkpoint; judge() asks again for those
-        return { id: r.id, answer: v ? answer : 'unknown', evidence: v ? (v.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') : MISSING }
+        const seen = Array.isArray(v?.seen) ? v!.seen.filter((x): x is string => typeof x === 'string') : undefined
+        return { id: r.id, answer: v ? answer : 'unknown', evidence: v ? (v.evidence || 'We could not check this one.').replace(/\s*—\s*/g, ', ') : MISSING, seen, rule: typeof v?.rule === 'string' ? v.rule.slice(0, 200) : undefined }
       })
       return { niche: parsed.niche, verdicts }
     } catch (e) {
@@ -228,6 +293,8 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
     }
   }
   console.warn('[scanV2] group failed', lastErr)
+  judgeErrors.push(String((lastErr as Error)?.message || lastErr).slice(0, 300))
+  if (judgeErrors.length > 20) judgeErrors.shift()
   return { verdicts: group.map((r) => ({ id: r.id, answer: 'unknown', evidence: 'We could not check this one.' })) }
 }
 
@@ -244,28 +311,32 @@ function majorityNiche(answers: (string | undefined)[]): Niche {
   return best
 }
 
-export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[] }> {
+export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[]; usage: Usage }> {
   const client = new OpenRouter({ apiKey })
+  const usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
   // one set of requests per part of the page, each with only that part's images; a stable order
   // (by id) so the same checkpoints are always judged together from one run to the next
-  const byScope = new Map<Scope, Rule[]>()
+  // grouped by part of the page and by device: a mobile-only checkpoint never sees desktop screenshots
+  const byScope = new Map<string, Rule[]>()
   for (const r of [...rules].sort((x, y) => x.id.localeCompare(y.id))) {
-    const sc = scopeOf(r.area)
-    byScope.set(sc, [...(byScope.get(sc) || []), r])
+    const k = `${scopeFor(r)}|${deviceOf(r)}`
+    byScope.set(k, [...(byScope.get(k) || []), r])
   }
   const jobs: { group: Rule[]; shared: { text: string; imgs: ReturnType<typeof images> } }[] = []
-  for (const [sc, list] of Array.from(byScope)) {
-    const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc) }
+  for (const [k, list] of Array.from(byScope)) {
+    const [sc, dev] = k.split('|') as [Scope, DeviceKey]
+    const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc, dev) }
     for (let i = 0; i < list.length; i += GROUP_SIZE) jobs.push({ group: list.slice(i, i + GROUP_SIZE), shared })
   }
-  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared)))
+  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage)))
   const verdicts = out.flatMap((o) => o.verdicts)
   // checkpoints the model skipped get one more try, together
   const skipped = rules.filter((r) => verdicts.find((v) => v.id === r.id)?.evidence === MISSING)
   if (skipped.length) {
-    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) })).verdicts.map((v) => [v.id, v]))
+    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) }, usage)).verdicts.map((v) => [v.id, v]))
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
-  return { niche: majorityNiche(out.map((o) => o.niche)), verdicts }
+  const known = (ev as { knownNiche?: string }).knownNiche
+  return { niche: known ? majorityNiche([known]) : majorityNiche(out.map((o) => o.niche)), verdicts, usage }
 }
