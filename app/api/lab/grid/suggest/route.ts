@@ -7,9 +7,9 @@ import { getSuggestions, getTestScan, imageUrls, labAllowed, labelQueue, saveSug
 import { pickImages } from '@/lib/lab/gridImages'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 90
+export const maxDuration = 120
 
-const MODEL = process.env.OPENROUTER_SUGGEST_MODEL || 'google/gemini-2.5-pro'
+const MODEL = process.env.OPENROUTER_SUGGEST_MODEL || 'anthropic/claude-sonnet-4.5'
 
 export async function POST(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const urls = await imageUrls(scan)
   const labels = scan.images.map((i) => i.label)
   const idx = pickImages(cp, labels)
-  const imgs = idx.map((i) => urls[i]).filter(Boolean)
+  const imgs = idx.map((i) => urls[i]).filter(Boolean).slice(0, 2)
   if (!imgs.length) return NextResponse.json({ error: 'No screenshot for this checkpoint' }, { status: 422 })
 
   const prompt = `You are a senior e-commerce CRO specialist labelling a test set. Look at the screenshots of ${scan.url} and answer one checkpoint.
