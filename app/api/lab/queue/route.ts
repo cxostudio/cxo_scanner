@@ -21,7 +21,13 @@ export async function GET(req: NextRequest) {
   if (cp) {
     const scans = loaded
       .filter(({ scan }) => labelQueue(scan).some((c) => c.id === cp && c.skip !== 'niche'))
-      .map(({ scan, labels }) => ({ id: scan.id, url: scan.url, label: labels[cp] || null }))
+      .map(({ scan, labels }) => {
+        const a = scan.answers.find((x) => x.id === cp)
+        return { id: scan.id, url: scan.url, label: labels[cp] || null, answered: Boolean(a && a.answer !== 'unknown') }
+      })
+      // scans where the scanner gave an answer first: a label on a "couldn't check" teaches nothing
+      // (older scans have no data for new measurements)
+      .sort((a, b) => Number(b.answered) - Number(a.answered))
     return NextResponse.json({ cp, scans })
   }
 
