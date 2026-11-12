@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
 import { LockedFindings } from '../components/LockedFindings'
+import { LockedRow, FullStoreOffer } from '../components/PitchMockups'
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
@@ -84,6 +85,8 @@ export default function ResultsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
+  // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
+  const [gate, setGate] = useState<'' | 'b' | 'cd'>('')
   const [labId, setLabId] = useState<string | null>(null)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
@@ -94,6 +97,8 @@ export default function ResultsPage() {
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
       setLabId(localStorage.getItem('scanLabId'))
+      const g = new URLSearchParams(window.location.search).get('gate')
+      if (g === 'b' || g === 'cd') setGate(g)
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -166,15 +171,21 @@ export default function ResultsPage() {
     // shown apart from real passes: "not relevant for your store" and "covered by Shopify"
     const notRelevant = scored.filter((r) => r.status === 'na').length
     const byShopify = scored.filter((r) => r.coveredByShopify).length
-    const listed = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const base = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const lockedIds = new Set(locked.map((r) => r.ruleId))
+    const rank = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
+    const listed =
+      free && gate
+        ? [...[...base.filter((r) => !r.passed), ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
+        : base
     const areas = LEVERS.map((l) => {
       const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
     const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
-  }, [results, labId])
+    return { lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+  }, [results, labId, gate])
 
   const host = hostOf(url)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
@@ -381,6 +392,8 @@ export default function ResultsPage() {
                 <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
+                    if (report.lockedIds.has(r.ruleId) && gate)
+                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={FULL_REPORT_URL} price="€49" />
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -431,6 +444,9 @@ export default function ResultsPage() {
                 )}
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
+                {gate ? (
+                  <FullStoreOffer variant={gate} lockedCount={report.locked.length} qualified={qualified} buyUrl={FULL_REPORT_URL} callUrl={CALL_URL} price="€49" />
+                ) : (
                 <LockedFindings
                   locked={report.locked}
                   qualified={qualified}
@@ -440,6 +456,7 @@ export default function ResultsPage() {
                   callUrl={CALL_URL}
                   price={FULL_REPORT_PRICE}
                 />
+                )}
               </div>
             </div>
           </section>
