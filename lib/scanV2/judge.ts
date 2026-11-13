@@ -331,9 +331,22 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
   const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage)))
   const verdicts = out.flatMap((o) => o.verdicts)
   // checkpoints the model skipped get one more try, together
+  // checkpoints the model skipped get one more try, each with ITS OWN part of the page: a skipped checkout
+  // checkpoint retried on the product page answered "no phone field on the product page"
   const skipped = rules.filter((r) => verdicts.find((v) => v.id === r.id)?.evidence === MISSING)
   if (skipped.length) {
-    const retry = new Map((await judgeGroup(client, ev, skipped, { text: evidenceText(ev), imgs: images(ev) }, usage)).verdicts.map((v) => [v.id, v]))
+    const again = new Map<string, Rule[]>()
+    for (const r of skipped) {
+      const k = `${scopeFor(r)}|${deviceOf(r)}`
+      again.set(k, [...(again.get(k) || []), r])
+    }
+    const retried = await Promise.all(
+      Array.from(again).map(([k, list]) => {
+        const [sc, dev] = k.split('|') as [Scope, DeviceKey]
+        return judgeGroup(client, ev, list, { text: evidenceText(ev, sc), imgs: images(ev, sc, dev) }, usage)
+      }),
+    )
+    const retry = new Map(retried.flatMap((o) => o.verdicts).map((v) => [v.id, v]))
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
