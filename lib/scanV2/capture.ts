@@ -178,21 +178,17 @@ async function dropdownProbe(page: Page) {
       if (!header) return []
       const out: { x: number; y: number; text: string; haspopup: boolean }[] = []
       const seen = new Set<string>()
-      for (const el of Array.from(header.querySelectorAll('nav a, nav button, nav summary, [role="menubar"] > *, header li > a, header li > button, header details > summary'))) {
+      for (const el of Array.from(header.querySelectorAll('nav a, nav button, nav summary, [role="menubar"] > *, li > a, li > button, details > summary, [class*="menu" i] > a, [class*="menu" i] > button, [class*="nav" i] button'))) {
         const r = el.getBoundingClientRect()
         if (!vis(el) || r.top > 220 || r.height > 80) continue
         const text = ((el as HTMLElement).innerText || '').trim().replace(/\s+/g, ' ')
         if (!text || text.length > 30 || seen.has(text)) continue
-        const li = el.closest('li, details')
-        const owns = Boolean(
-          el.getAttribute('aria-haspopup') || el.getAttribute('aria-expanded') !== null || el.tagName === 'SUMMARY' ||
-            (li && li.querySelector('ul a, [class*="mega" i] a, [class*="dropdown" i] a, [class*="submenu" i] a')),
-        )
-        if (!owns) continue
+        // every short text item in the header is tried: many themes (mega menus) do not announce their submenus
+        if (/^(search|account|log ?in|sign ?in|cart|bag|panier|compte|menu)$/i.test(text)) continue
         seen.add(text)
-        out.push({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text, haspopup: Boolean(el.getAttribute('aria-haspopup') || el.tagName === 'SUMMARY') })
+        out.push({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text, haspopup: Boolean(el.getAttribute('aria-haspopup') || el.getAttribute('aria-expanded') !== null || el.tagName === 'SUMMARY') })
       }
-      return out.slice(0, 4)
+      return out.sort((a, b) => a.y - b.y || a.x - b.x).slice(0, 6)
     })
     .catch(() => [] as { x: number; y: number; text: string; haspopup: boolean }[])
   if (!items.length) return { items: 0, tested: [] as unknown[] }
@@ -250,7 +246,7 @@ async function dropdownProbe(page: Page) {
     await page.mouse.move(5, 700).catch(() => {})
     await new Promise((r) => setTimeout(r, 350))
   }
-  return { items: items.length, tested }
+  return { items: tested.filter((t) => t.opened !== 'no').length, tried: items.length, tested }
 }
 
 async function desktopProbes(page: Page, entryRedirects: number) {

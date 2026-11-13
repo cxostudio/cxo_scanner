@@ -358,7 +358,7 @@ export const MEASURED: Record<string, Measure> = {
   recLehZKzun1Rxv0Z: (_ev, f) => {
     const d = f.probes?.dropdowns
     if (!d) return null
-    if (d.items === 0) return { answer: 'na', evidence: 'The desktop header has no dropdown menus.' }
+    if (d.items === 0) return (d.tried || 0) >= 2 ? { answer: 'na', evidence: `None of the ${d.tried} top-level menu items tested opens a dropdown on hover or click.` } : null
     const t = (d.tested || []) as { text: string; opened: string; openMs: number | null; stayed: boolean | null }[]
     const open = t.filter((x) => x.opened !== 'no')
     if (!open.length) return null
