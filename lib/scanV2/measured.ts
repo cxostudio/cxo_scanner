@@ -353,6 +353,22 @@ export const MEASURED: Record<string, Measure> = {
     return null
   },
 
+  // On desktop, do dropdown menus open smoothly and stay open while moving to a subcategory?
+  // (capture hovers each top-level header item, then moves the mouse diagonally to a submenu link)
+  recLehZKzun1Rxv0Z: (_ev, f) => {
+    const d = f.probes?.dropdowns
+    if (!d) return null
+    if (d.items === 0) return { answer: 'na', evidence: 'The desktop header has no dropdown menus.' }
+    const t = (d.tested || []) as { text: string; opened: string; openMs: number | null; stayed: boolean | null }[]
+    const open = t.filter((x) => x.opened !== 'no')
+    if (!open.length) return null
+    const closed = open.filter((x) => x.stayed === false)
+    if (closed.length) return { answer: 'fail', evidence: `The "${closed[0].text}" menu closed while the mouse moved toward a subcategory${closed.length > 1 ? ` (${closed.length} of ${open.length} menus did)` : ''}, so shoppers have to aim carefully or start again.` }
+    const slow = open.filter((x) => x.opened === 'hover' && (x.openMs || 0) > 800)
+    if (slow.length) return { answer: 'fail', evidence: `The "${slow[0].text}" menu took about ${Math.round((slow[0].openMs || 0) / 100) / 10}s to open on hover, which feels unresponsive.` }
+    return { answer: 'pass', evidence: `${open.length === 1 ? 'The dropdown menu' : `All ${open.length} dropdown menus tested`} ${open.some((x) => x.opened === 'click') ? 'open on click and stay open' : 'open quickly on hover and stay open'} while the mouse moves to a subcategory (${open.map((x) => x.text).join(', ')}).` }
+  },
+
   // Are CSS, JavaScript, and HTML minified? (Google PageSpeed: what minifying would still save)
   rec18dg644AXcffV0: (_ev, f) => {
     const k = f.pageSpeed?.savings?.unminifiedKiB

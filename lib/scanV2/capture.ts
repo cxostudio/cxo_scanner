@@ -157,6 +157,102 @@ async function heroMotion(page: Page) {
  * menu links, the tab title when the shopper switches tabs, an exit-intent pop-up, how inline links are
  * styled, web fonts, and how videos are set up. Each part returns null when it cannot tell.
  */
+/**
+ * Desktop dropdown menus, tested like a shopper: hover each top-level header item, see whether a
+ * submenu opens (and how fast), then move the mouse diagonally to a link in it and check the menu is
+ * still open on arrival. Menus that open on click count as staying open (they do by design).
+ */
+async function dropdownProbe(page: Page) {
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+  await page.mouse.move(5, 700).catch(() => {})
+  await new Promise((r) => setTimeout(r, 300))
+  // top-level items in the header, left to right, that look like they own a submenu
+  const items = await page
+    .evaluate(() => {
+      const vis = (el: Element) => {
+        const r = el.getBoundingClientRect()
+        const st = getComputedStyle(el)
+        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.05
+      }
+      const header = document.querySelector('header') || document.querySelector('[class*="header" i]')
+      if (!header) return []
+      const out: { x: number; y: number; text: string; haspopup: boolean }[] = []
+      const seen = new Set<string>()
+      for (const el of Array.from(header.querySelectorAll('nav a, nav button, nav summary, [role="menubar"] > *, header li > a, header li > button, header details > summary'))) {
+        const r = el.getBoundingClientRect()
+        if (!vis(el) || r.top > 220 || r.height > 80) continue
+        const text = ((el as HTMLElement).innerText || '').trim().replace(/\s+/g, ' ')
+        if (!text || text.length > 30 || seen.has(text)) continue
+        const li = el.closest('li, details')
+        const owns = Boolean(
+          el.getAttribute('aria-haspopup') || el.getAttribute('aria-expanded') !== null || el.tagName === 'SUMMARY' ||
+            (li && li.querySelector('ul a, [class*="mega" i] a, [class*="dropdown" i] a, [class*="submenu" i] a')),
+        )
+        if (!owns) continue
+        seen.add(text)
+        out.push({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text, haspopup: Boolean(el.getAttribute('aria-haspopup') || el.tagName === 'SUMMARY') })
+      }
+      return out.slice(0, 4)
+    })
+    .catch(() => [] as { x: number; y: number; text: string; haspopup: boolean }[])
+  if (!items.length) return { items: 0, tested: [] as unknown[] }
+
+  const visibleLinks = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]'))
+        .filter((a) => {
+          const r = a.getBoundingClientRect()
+          const st = getComputedStyle(a)
+          return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && Number(st.opacity) > 0.05 && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('a') === a
+        })
+        .map((a) => {
+          const r = a.getBoundingClientRect()
+          return { key: `${(a as HTMLAnchorElement).href}|${Math.round(r.left)}|${Math.round(r.top)}`, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+        }),
+    )
+
+  const tested: { text: string; opened: 'hover' | 'click' | 'no'; openMs: number | null; stayed: boolean | null }[] = []
+  for (const it of items) {
+    try {
+      const before = new Set((await visibleLinks()).map((l) => l.key))
+      await page.mouse.move(it.x, it.y, { steps: 4 })
+      let opened: 'hover' | 'click' | 'no' = 'no'
+      let openMs: number | null = null
+      let fresh: { key: string; x: number; y: number }[] = []
+      const t0 = Date.now()
+      while (Date.now() - t0 < 1200) {
+        fresh = (await visibleLinks()).filter((l) => !before.has(l.key) && l.y > it.y + 10)
+        if (fresh.length >= 2) {
+          opened = 'hover'
+          openMs = Date.now() - t0
+          break
+        }
+        await new Promise((r) => setTimeout(r, 60))
+      }
+      if (opened === 'no' && it.haspopup) {
+        await page.mouse.click(it.x, it.y)
+        await new Promise((r) => setTimeout(r, 500))
+        fresh = (await visibleLinks()).filter((l) => !before.has(l.key) && l.y > it.y + 10)
+        if (fresh.length >= 2) opened = 'click'
+      }
+      let stayed: boolean | null = null
+      if (opened !== 'no') {
+        // the link farthest to the side (the diagonal a shopper's mouse takes), then check it is still there
+        const target = fresh.slice().sort((a, b) => Math.abs(b.x - it.x) - Math.abs(a.x - it.x) || a.y - b.y)[0]
+        await page.mouse.move(target.x, target.y, { steps: 14 })
+        await new Promise((r) => setTimeout(r, 250))
+        const after = new Set((await visibleLinks()).map((l) => l.key))
+        stayed = after.has(target.key)
+      }
+      tested.push({ text: it.text, opened, openMs, stayed })
+    } catch {}
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.mouse.move(5, 700).catch(() => {})
+    await new Promise((r) => setTimeout(r, 350))
+  }
+  return { items: items.length, tested }
+}
+
 async function desktopProbes(page: Page, entryRedirects: number) {
   const out: Record<string, unknown> = { entryRedirects }
   out.linkRedirects = await page
@@ -265,6 +361,8 @@ async function desktopProbes(page: Page, entryRedirects: number) {
       return { shown: big() > before, popupTool: tools }
     })
     .catch(() => null)
+  // last: it hovers and opens menus
+  out.dropdowns = await dropdownProbe(page).catch(() => null)
   return out
 }
 
