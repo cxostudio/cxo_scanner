@@ -1340,7 +1340,7 @@ const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadserv
 
 /** What the page actually downloaded: image formats (by content type, since Shopify serves WebP
  *  without saying so in the URL) and whether images come through a CDN (response headers). */
-type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number; thirdPartyScripts?: string[]; fontFiles?: string[]; text?: { total: number; compressed: number; br: number; plain: string[] } }
+type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number; thirdPartyScripts?: string[]; fontFiles?: string[]; text?: { total: number; compressed: number; br: number; plain: string[]; plainKiB?: number; plainBig?: number } }
 const NET = new WeakMap<Page, NetStats>()
 const CDN_HEADERS = /^(cf-ray|cf-cache-status|x-amz-cf-id|x-served-by|x-cache|x-fastly-request-id|akamai-cache-status|x-akamai|server-timing|x-cdn|cdn-cache|x-shopid|x-shardid)$/i
 
@@ -1349,7 +1349,7 @@ export function netStats(page: Page): NetStats | null {
 }
 
 async function prepare(page: Page) {
-  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [], text: { total: 0, compressed: 0, br: 0, plain: [] } }
+  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [], text: { total: 0, compressed: 0, br: 0, plain: [], plainKiB: 0, plainBig: 0 } }
   NET.set(page, stats)
   page.on('response', (res) => {
     try {
@@ -1360,13 +1360,19 @@ async function prepare(page: Page) {
         const h = res.headers()
         const len = Number(h['content-length'] || 0)
         const st = res.status()
-        if (st >= 200 && st < 300 && !(len && len < 1024) && !res.fromCache()) {
+        // blob: and data: scripts never travel over the network, and empty bodies have nothing to compress
+        if (/^https?:/.test(res.url()) && st >= 200 && st < 300 && h['content-length'] !== '0' && !(len && len < 1024) && !res.fromCache()) {
           const enc = (h['content-encoding'] || '').toLowerCase()
           stats.text!.total++
           if (/br|gzip|zstd|deflate/.test(enc)) {
             stats.text!.compressed++
             if (/br|zstd/.test(enc)) stats.text!.br++
-          } else if (stats.text!.plain.length < 8) stats.text!.plain.push(res.url().split('?')[0].slice(-90))
+          } else {
+            const kib = len / 1024
+            stats.text!.plainKiB = (stats.text!.plainKiB || 0) + kib
+            if (kib >= 10) stats.text!.plainBig = (stats.text!.plainBig || 0) + 1
+            if (stats.text!.plain.length < 8) stats.text!.plain.push(`${res.url().split('?')[0].slice(-80)}${len ? ` (${Math.round(kib)} KB)` : ''}`)
+          }
         }
         return
       }

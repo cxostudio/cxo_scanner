@@ -335,11 +335,12 @@ export const MEASURED: Record<string, Measure> = {
   recJIKYF3A1cqKzEn: (_ev, f) => {
     const t = f.network?.text
     if (!t || t.total < 5) return null
-    const share = t.compressed / t.total
     const how = t.br ? 'Brotli or gzip' : 'gzip'
-    if (share >= 0.95) return { answer: 'pass', evidence: `${t.compressed} of ${t.total} text files (the page, scripts and styles) are sent compressed (${how}).` }
-    if (share < 0.8) return { answer: 'fail', evidence: `${t.total - t.compressed} of ${t.total} text files are sent uncompressed, so phones download more than they need. For example: ${t.plain.slice(0, 3).join(', ')}.` }
-    return null
+    const plainKiB = Math.round(t.plainKiB || 0)
+    // what matters is the weight sent uncompressed, not the share: a few tiny files cost nothing
+    if ((t.plainBig || 0) >= 2 || plainKiB >= 50) return { answer: 'fail', evidence: `${t.total - t.compressed} of ${t.total} text files are sent uncompressed (about ${plainKiB} KB), so phones download more than they need. For example: ${t.plain.slice(0, 3).join(', ')}.` }
+    if (plainKiB < 20 && (t.plainBig || 0) === 0) return { answer: 'pass', evidence: `${t.compressed} of ${t.total} text files (the page, scripts and styles) are sent compressed (${how})${t.compressed < t.total ? `; the few that are not weigh about ${plainKiB} KB in all` : ''}.` }
+    return { answer: 'unknown', evidence: `${t.total - t.compressed} of ${t.total} text files are sent uncompressed (about ${plainKiB} KB): borderline, worth a look.` }
   },
 
   rec26fX1nyMt7UkTa: (_ev, f) => {
