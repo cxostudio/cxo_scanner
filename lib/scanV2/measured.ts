@@ -331,6 +331,17 @@ export const MEASURED: Record<string, Measure> = {
   },
 
   // Is Instant.page or a similar preloading technology implemented to speed up navigation between pages?
+  // Are text files served compressed? Read from the response headers of the page, its scripts and styles
+  recJIKYF3A1cqKzEn: (_ev, f) => {
+    const t = f.network?.text
+    if (!t || t.total < 5) return null
+    const share = t.compressed / t.total
+    const how = t.br ? 'Brotli or gzip' : 'gzip'
+    if (share >= 0.95) return { answer: 'pass', evidence: `${t.compressed} of ${t.total} text files (the page, scripts and styles) are sent compressed (${how}).` }
+    if (share < 0.8) return { answer: 'fail', evidence: `${t.total - t.compressed} of ${t.total} text files are sent uncompressed, so phones download more than they need. For example: ${t.plain.slice(0, 3).join(', ')}.` }
+    return null
+  },
+
   rec26fX1nyMt7UkTa: (_ev, f) => {
     const p = f.preloading
     if (!p) return null

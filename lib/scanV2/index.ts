@@ -132,7 +132,7 @@ async function galleryTiles(ev: Evidence): Promise<Tile[]> {
 }
 
 /** Minified files and browser caching: Shopify handles its own, apps often do not. */
-const APP_CAUSED = new Set(['rec18dg644AXcffV0', 'receyw3XXgQfA6ylx'])
+const APP_CAUSED = new Set(['rec18dg644AXcffV0', 'receyw3XXgQfA6ylx', 'recJIKYF3A1cqKzEn'])
 
 export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean; gallery?: boolean } = {}) {
   if (opts.gallery) (ev as { useGallery?: boolean }).useGallery = true

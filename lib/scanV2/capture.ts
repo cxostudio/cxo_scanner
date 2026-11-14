@@ -1340,7 +1340,7 @@ const BLOCK_HOSTS = /(googletagmanager|google-analytics|doubleclick|googleadserv
 
 /** What the page actually downloaded: image formats (by content type, since Shopify serves WebP
  *  without saying so in the URL) and whether images come through a CDN (response headers). */
-type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number; thirdPartyScripts?: string[]; fontFiles?: string[] }
+type NetStats = { images: Record<string, number>; cdnImages: number; imageResponses: number; thirdPartyScripts?: string[]; fontFiles?: string[]; text?: { total: number; compressed: number; br: number; plain: string[] } }
 const NET = new WeakMap<Page, NetStats>()
 const CDN_HEADERS = /^(cf-ray|cf-cache-status|x-amz-cf-id|x-served-by|x-cache|x-fastly-request-id|akamai-cache-status|x-akamai|server-timing|x-cdn|cdn-cache|x-shopid|x-shardid)$/i
 
@@ -1349,11 +1349,28 @@ export function netStats(page: Page): NetStats | null {
 }
 
 async function prepare(page: Page) {
-  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [] }
+  const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [], text: { total: 0, compressed: 0, br: 0, plain: [] } }
   NET.set(page, stats)
   page.on('response', (res) => {
     try {
-      if (res.request().resourceType() !== 'image') return
+      const rtype = res.request().resourceType()
+      // text files (the page, scripts, styles): are they sent compressed? Small files (<1 KB) and
+      // redirects or cached 304s are left out, since compressing them gains nothing or shows no header
+      if (rtype === 'document' || rtype === 'script' || rtype === 'stylesheet') {
+        const h = res.headers()
+        const len = Number(h['content-length'] || 0)
+        const st = res.status()
+        if (st >= 200 && st < 300 && !(len && len < 1024) && !res.fromCache()) {
+          const enc = (h['content-encoding'] || '').toLowerCase()
+          stats.text!.total++
+          if (/br|gzip|zstd|deflate/.test(enc)) {
+            stats.text!.compressed++
+            if (/br|zstd/.test(enc)) stats.text!.br++
+          } else if (stats.text!.plain.length < 8) stats.text!.plain.push(res.url().split('?')[0].slice(-90))
+        }
+        return
+      }
+      if (rtype !== 'image') return
       const headers = res.headers()
       const type = (headers['content-type'] || '').split(';')[0].replace('image/', '').trim() || 'unknown'
       stats.images[type] = (stats.images[type] || 0) + 1
