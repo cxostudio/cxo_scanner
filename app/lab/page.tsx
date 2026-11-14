@@ -140,6 +140,9 @@ export default function LabHome() {
               <Link href={`/lab/queue${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
                 Label by checkpoint →
               </Link>
+              <Link href={`/lab/drafts${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
+                Review drafts →
+              </Link>
               <Link href={`/lab/review${key ? `?key=${encodeURIComponent(key)}` : ''}`} className="normal-case tracking-normal underline">
                 Review rewrites →
               </Link>
