@@ -11,13 +11,14 @@ import { HINTS, NO_CAPTURE, PARKED } from './hints'
 type Decision = 'Promote' | 'Fix' | 'Keep draft' | 'Drop'
 type Item = { id: string; title: string; page: string; area: string; method: string; device: string; pass: string; fail: string; na: string; free: boolean; decision: string; note: string }
 type Acc = { id: string; labelled: number; agree: number; unknown: number; flips: number; mismatches: { scan: string; url: string; ai: string; louis: string }[] }
-type Group = 'ready' | 'under' | 'labels' | 'capture' | 'parked'
+type Group = 'ready' | 'under' | 'labels' | 'capture' | 'manual' | 'parked'
 
 const GROUPS: { key: Group; title: string; intro: string }[] = [
   { key: 'ready', title: 'Ready to promote', intro: 'At 90% or more against your labels, with enough labels. Promote unless the definition itself is wrong.' },
   { key: 'under', title: 'Under 90%', intro: 'The scanner and you disagree too often. Open the mismatches: either the definition needs a fix, or the label does.' },
   { key: 'labels', title: 'Needs labels', intro: 'Not enough labels to judge yet. Label in the grid, or drop it if it is not worth it.' },
   { key: 'capture', title: 'Missing a capture step', intro: 'The scanner does not collect what this needs yet. Decide if it is worth building.' },
+  { key: 'manual', title: 'Not scannable by design', intro: 'Marked Manual (audit only) or Customer upload: they need a real order, a typing test or a person. Keep them for the paid audit, or drop them.' },
   { key: 'parked', title: 'Parked', intro: 'Being rebuilt or kept back on purpose.' },
 ]
 const DECISIONS: { v: Decision; tone: { bg: string; fg: string } }[] = [
@@ -63,6 +64,7 @@ export default function DraftsReview() {
     (it: Item): Group => {
       if (NO_CAPTURE.has(it.id)) return 'capture'
       if (PARKED.has(it.id)) return 'parked'
+      if (/^(Manual|Customer upload)/i.test(it.method)) return 'manual'
       const a = acc.get(it.id)
       const judged = a ? a.labelled : 0
       if (judged < minFor(it.method)) return 'labels'
@@ -72,7 +74,7 @@ export default function DraftsReview() {
   )
 
   const grouped = useMemo(() => {
-    const out: Record<Group, Item[]> = { ready: [], under: [], labels: [], capture: [], parked: [] }
+    const out: Record<Group, Item[]> = { ready: [], under: [], labels: [], capture: [], manual: [], parked: [] }
     for (const it of items || []) out[groupOf(it)].push(it)
     for (const g of Object.keys(out) as Group[]) out[g].sort((a, b) => a.page.localeCompare(b.page) || a.title.localeCompare(b.title))
     return out
