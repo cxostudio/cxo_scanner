@@ -1495,6 +1495,9 @@ async function readCookieBanner(page: Page) {
       const cs = getComputedStyle(el)
       const r = el.getBoundingClientRect()
       if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.1) return false
+      // the page itself is not a banner (cookie apps put classes on <html> or <body>), nor is a box
+      // taller than the screen that scrolls with the page
+      if (el === document.documentElement || el === document.body || r.height > vh * 1.2) return false
       if (!(r.width > vw * 0.5 && r.height > 40 && r.bottom > 0 && r.top < vh)) return false
       if (!/cookie|consent|traceur|privacy|confidentialit/i.test((el as HTMLElement).innerText || '')) return false
       // really on screen: what a shopper would touch at the box's visible middle belongs to it
