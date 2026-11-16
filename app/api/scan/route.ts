@@ -1057,6 +1057,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine } = validationResult.data
+    // the paid full report (set later by the order flow, after Stripe confirms the payment)
+    const paidScan = false
 
     // Per-email daily scan limit — CHECK ONLY here (block if already at the
     // limit) so we don't do expensive work for a user who's out of scans.
@@ -1159,6 +1161,12 @@ export async function POST(request: NextRequest) {
           includeDrafts: isTestEmail(email),
         })
         if (selected.rules.length) v2Rules = selected.rules
+        // free scan (real leads): only the checkpoints ticked "Free scan", so it stays fast and cheap.
+        // The paid report and lab scans (test emails) judge everything Live (and Draft in the lab).
+        if (!isTestEmail(email) && !paidScan) {
+          const free = v2Rules.filter((r) => (r as { freeScan?: boolean }).freeScan)
+          if (free.length) v2Rules = free
+        }
         // Chunked scans (NEXT_PUBLIC_SCAN_BATCH_RULES): each request judges only its own slice.
         if (parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10) > 0) {
           const sent = new Set(rules.map((r) => r.id))
