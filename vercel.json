@@ -43,5 +43,6 @@
   ],
   "regions": [
     "fra1"
-  ]
+  ],
+  "fluid": false
 }
