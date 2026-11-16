@@ -558,7 +558,12 @@ export const MEASURED: Record<string, Measure> = {
 
   // Is the hero a single message, not an auto-rotating slider? Motion seen, or the slider's own
   // autoplay setting, decides; a hero seen standing still with no autoplay setting passes.
-  recdhqkebQtRAqP4l: (_ev, f) => {
+  recdhqkebQtRAqP4l: (ev, f) => {
+    // desktop and phone: a hero that rotates on either device fails
+    const mob = (ev.mobileFacts as Record<string, any> | undefined)?.heroMotion
+    if (mob?.changedByItself) return { answer: 'fail', evidence: 'On a phone, the hero changes by itself: without any scroll or click, it moved to another slide while we watched.' }
+    if (mob?.autoplaySetting?.on && (mob.autoplaySetting.delayMs ?? 0) > 0 && mob.autoplaySetting.delayMs <= 10000)
+      return { answer: 'fail', evidence: `On a phone, the hero is a slider set to move to the next slide every ${Math.round(mob.autoplaySetting.delayMs / 100) / 10} seconds on its own.` }
     const m = f.heroMotion as { changedByItself: boolean; autoplaySetting?: { on: boolean; delayMs: number | null; how: string } | null } | undefined
     if (!m) return null
     // what the shopper sees decides: the hero changed slide by itself while we watched (up to 13 s)

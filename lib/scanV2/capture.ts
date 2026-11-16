@@ -2579,6 +2579,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       if (bannerShot) mobileTiles.push({ label: 'mobile first screen as it opens, with the cookie banner (only for the cookie banner check)', dataUrl: `data:image/jpeg;base64,${bannerShot}` })
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
+      // the hero can be a slider on phones only (some themes show one slide on desktop)
+      if (homePath) mobileFacts.heroMotion = await heroMotion(mobile).catch(() => undefined)
       // a chat widget (live or AI) in the page code: it often only draws its bubble after a delay or a scroll
       mobileFacts.chatWidget = await mobile
         .evaluate(() => {
