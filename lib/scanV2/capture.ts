@@ -429,8 +429,11 @@ async function desktopProbes(page: Page, entryRedirects: number) {
       const code = /(EUR|USD|GBP|CAD|AUD|DKK|SEK|NOK|PLN|CHF|JPY|NZD)/
       const btn = Array.from(document.querySelectorAll('button, a, [role="button"], select, summary')).find((el) => {
         const t = ((el as HTMLElement).innerText || '').trim()
-        const a = (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('class') || '')
-        return (t.length <= 24 && code.test(t)) || /country|currency|region|language|locale/i.test(a)
+        // the label says so ('Choose country'), or a selector-type element is named for it; plain links
+        // are only judged by their label, so a 'Rustic & Country' category link does not count
+        const label = el.getAttribute('aria-label') || ''
+        const cls = el.tagName === 'A' ? '' : el.getAttribute('class') || ''
+        return (t.length <= 24 && code.test(t)) || /\b(country|currency|region|language|locale)\b/i.test(label) || /(^|[\s_-])(country|currency|region|language|locale)([\s_-]|$)/i.test(cls)
       })
       if (btn) found.push(`switcher: "${(((btn as HTMLElement).innerText || btn.getAttribute('aria-label') || '').trim()).slice(0, 30)}"`)
       const langs = Array.from(new Set(Array.from(document.querySelectorAll('link[rel="alternate"][hreflang]')).map((l) => l.getAttribute('hreflang')).filter((h) => h && h !== 'x-default')))
