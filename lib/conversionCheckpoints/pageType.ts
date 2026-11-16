@@ -28,6 +28,10 @@ export function detectPageTypeFromUrl(url: string): UrlPageType {
     const hasProductKeyword = segments.some((segment) => productPatterns.includes(segment))
     const hasAmazonASIN = segments.some((segment) => /^[a-z0-9]{10}$/i.test(segment))
     if (hasProductKeyword || hasAmazonASIN) return 'product'
+    // non-Shopify product URLs end in an .html slug carrying an article number
+    // (espacemode.be/femme/111278-579067-veste-….html, zalando.nl/polo-…-pot22s026-k11.html)
+    const last = segments[segments.length - 1] || ''
+    if (/\.html?$/.test(last) && /\d{3,}/.test(last) && last.split('-').length >= 3) return 'product'
 
     const categoryPatterns = [
       'category',
