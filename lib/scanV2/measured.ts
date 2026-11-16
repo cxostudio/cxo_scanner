@@ -348,7 +348,7 @@ export const MEASURED: Record<string, Measure> = {
   recyDWQ5MaZKgdzY1: (_ev, f) => {
     const l = f.probes?.locale as { found: string[]; hreflang: number } | null | undefined
     if (!l || !l.found.length) return null
-    return { answer: 'pass', evidence: `The store lets shoppers pick their country, currency or language (${l.found.slice(0, 2).join(', ')}${l.hreflang > 1 ? `, ${l.hreflang} language versions` : ''}).` }
+    return { answer: 'pass', evidence: `The store lets shoppers pick their country, currency or language (${l.found.slice(0, 2).join(', ')}${l.hreflang > 1 ? `, ${l.hreflang} country and language versions of the site` : ''}).` }
   },
 
   recJIKYF3A1cqKzEn: (_ev, f) => {
