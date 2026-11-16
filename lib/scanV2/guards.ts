@@ -63,7 +63,7 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>, catalogSi
       continue
     }
     // installments: the model sometimes says 'below the threshold' and still fails it; under the threshold is not relevant
-    if (v && r.id === 'recFZamcrQRJpUsaE' && v.answer === 'fail' && /below (the |a )?(typical |usual )?(price )?threshold|too (low|cheap)|under (about |around )?[€$£]\s?\d/i.test(v.evidence)) {
+    if (v && r.id === 'recFZamcrQRJpUsaE' && v.answer === 'fail' && /below[^.]{0,25}threshold|too (low|cheap)|under (about |around )?[€$£]\s?\d/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'na', evidence: 'The product costs less than about €75, where paying in installments matters little.', seen: v.seen, by: 'Code check' })
       continue
     }
