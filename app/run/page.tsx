@@ -1279,7 +1279,12 @@ export default function Home() {
       // Main scan: POST /api/scan per batch, then /api/scan/combine. Fires
       // immediately — in parallel with the preview stream and screenshot capture
       // above — instead of waiting for the website preview to be ready first.
-      const batches = prepareBatches(validUrl, rulesToUse);
+      // free scan (real leads): only the checkpoints ticked "Free scan" are judged, so it stays fast;
+      // the page's other Live checks are counted for the results page teaser. Lab scans judge everything.
+      const freeRules = rulesToUse.filter((r) => r.freeScan);
+      const scanRules = !isTestEmail(emailTrimmed) && freeRules.length ? freeRules : rulesToUse;
+      try { localStorage.setItem("scanPageChecks", String(rulesToUse.length)); } catch {}
+      const batches = prepareBatches(validUrl, scanRules);
       await processBatches(batches, { email: emailTrimmed, scanId });
 
       // The preview capture ran alongside the scan; make sure its gate has settled

@@ -85,9 +85,34 @@ export function LockedRow({ r, variant, open, onToggle, buyUrl, price }: { r: Sc
 }
 
 
+/** A finding the free scan did not run: no title, no area, only a blurred line and the way to unlock it. */
+export function TeaserRow({ i, buyUrl, price }: { i: number; buyUrl: string; price: string }) {
+  const [open, setOpen] = useState(false)
+  const widths = ['72%', '58%', '84%', '64%', '77%', '52%']
+  return (
+    <div className={`rounded-[16px] border px-4 transition-colors ${open ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-dashed border-[var(--border-strong)] bg-[var(--surface)] hover:bg-[var(--bg-subtle)]'}`}>
+      <button type="button" className="flex w-full items-center gap-3 py-4 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label="Another issue, in the full report">
+        <LockBadge />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5" aria-hidden="true">
+          <span className="h-3.5 rounded-full bg-[var(--surface-muted)] blur-[2px]" style={{ width: widths[i % widths.length] }} />
+          <span className="h-2.5 rounded-full bg-[var(--surface-muted)] blur-[2px]" style={{ width: `calc(${widths[(i + 2) % widths.length]} - 20%)` }} />
+        </span>
+      </button>
+      {open && (
+        <div className="flex flex-col items-start gap-3 border-t border-[var(--border)] pb-4 pt-4">
+          <p className="text-sm leading-relaxed text-[var(--text-muted)]">The free scan checked the essentials. The full report runs every check on this page and the rest of your store, with every fix and examples.</p>
+          <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-4 !py-1.5 text-sm">
+            Unlock the full report, {price} <Arrow />
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
+
 type Coverage = { total: number; stores: number; pages: { key: string; label: string; checks: number; expectedIssues: number }[] }
 
-export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCount, qualified, buyUrl, callUrl, price }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string }) {
+export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCount, qualified, buyUrl, callUrl, price, estimated = false }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean }) {
   const [cov, setCov] = useState<Coverage | null>(null)
   useEffect(() => {
     fetch(api('/report-coverage'))
@@ -122,7 +147,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
               {remaining ? `About ${remaining} issues still to fix on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              You have seen the fix for {fixesShown} of the {toFix} issues on this page. The full report covers {cov ? `all ${cov.total} checks` : 'every check'} across your store, with every fix, examples, and a PDF to share with your developer.
+              {estimated ? `You have seen the fix for the ${fixesShown} issues our free check found. We expect about ${lockedCount} more on this page.` : `You have seen the fix for ${fixesShown} of the ${toFix} issues on this page.`} The full report covers {cov ? `all ${cov.total} checks` : 'every check'} across your store, with every fix, examples, and a PDF to share with your developer.
             </p>
             {cov && (
               <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
@@ -131,7 +156,15 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
                   <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
                   <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{here?.label || 'This page'}{pageKey === 'product' ? ' and cart' : ''} <span className="font-normal text-[var(--text-muted)]">· this scan</span></span>
                   <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                    <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
+                    {estimated ? (
+                      <>
+                        <b className="text-[var(--result-fail-fg)]">{fixesShown} found</b> · about {lockedCount} more
+                      </>
+                    ) : (
+                      <>
+                        <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
+                      </>
+                    )}
                   </span>
                   </span>
                 </li>
