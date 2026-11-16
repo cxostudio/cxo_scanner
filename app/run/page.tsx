@@ -1283,7 +1283,12 @@ export default function Home() {
       // the page's other Live checks are counted for the results page teaser. Lab scans judge everything.
       const freeRules = rulesToUse.filter((r) => r.freeScan);
       const scanRules = !isTestEmail(emailTrimmed) && freeRules.length ? freeRules : rulesToUse;
-      try { localStorage.setItem("scanPageChecks", String(rulesToUse.length)); } catch {}
+      // the page's own checks: for a product page, the product page and site-wide ones (header, footer),
+      // not the cart's, which have their own row in the full report
+      const CART = "recdyiscpsbfrbbha";
+      const raw = (Array.isArray(cpData.rules) ? cpData.rules : []) as { pageTypeIds?: string[] }[];
+      const pageOnly = raw.filter((r) => { const ids = (r.pageTypeIds || []).map((x) => x.toLowerCase()); return !(ids.length && ids.every((x) => x === CART)); }).length;
+      try { localStorage.setItem("scanPageChecks", String(pageOnly || rulesToUse.length)); } catch {}
       const batches = prepareBatches(validUrl, scanRules);
       await processBatches(batches, { email: emailTrimmed, scanId });
 

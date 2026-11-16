@@ -494,8 +494,8 @@ export default function ResultsPage() {
           <YourPath
             money={numbers}
             qualified={qualified}
-            checked={report?.checked ?? 0}
-            toFix={report?.toFix ?? 0}
+            checked={report ? (report.freeOnly ? report.pageChecks - report.hidden - report.estimated : report.checked) : 0}
+            toFix={report ? (report.freeOnly ? report.failed.length : report.toFix) : 0}
             eur={eur}
             shortEur={shortEur}
             callUrl={CALL_URL}
