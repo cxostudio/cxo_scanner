@@ -1494,7 +1494,14 @@ async function readCookieBanner(page: Page) {
     const boxes = Array.from(document.querySelectorAll(KNOWN)).filter((el) => {
       const cs = getComputedStyle(el)
       const r = el.getBoundingClientRect()
-      return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > vw * 0.5 && r.height > 40 && r.bottom > 0 && r.top < vh && /cookie|consent|traceur|privacy|confidentialit/i.test((el as HTMLElement).innerText || '')
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.1) return false
+      if (!(r.width > vw * 0.5 && r.height > 40 && r.bottom > 0 && r.top < vh)) return false
+      if (!/cookie|consent|traceur|privacy|confidentialit/i.test((el as HTMLElement).innerText || '')) return false
+      // really on screen: what a shopper would touch at the box's visible middle belongs to it
+      // (a banner already accepted or parked off-screen still has a size, and read as 100%)
+      const y = (Math.max(r.top, 0) + Math.min(r.bottom, vh)) / 2
+      const hit = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 1), vw - 1), y)
+      return !!hit && (el === hit || el.contains(hit) || hit.contains(el))
     })
     if (!boxes.length) return { found: false }
     const ACCEPT = /accept|allow|agree|ok|got it|accepter|j'accepte|akkoord|akzeptieren|aceptar|accetta/
