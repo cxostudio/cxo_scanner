@@ -128,24 +128,75 @@ async function heroMotion(page: Page) {
         const r = v.getBoundingClientRect()
         return inZone(r) && shown(v)
       })
-      return { seen: [...new Set(seen)].sort(), lib: lib ? lib[1].toLowerCase() : null, pause, video }
+      // the slider's own settings: themes and slider libraries say in the code whether they rotate
+      // (some only move after 8-10 seconds, longer than our wait)
+      let autoplay: { on: boolean; delayMs: number | null; how: string } | null = null
+      for (const el of zone) {
+        const a = (n: string) => el.getAttribute(n)
+        const yes = (v: string | null) => v !== null && v !== 'false' && v !== '0'
+        const delay = Number(a('data-autoplay-speed') || a('data-speed') || a('data-autoplay-delay') || a('data-interval') || a('data-autoplay-interval') || 0) || null
+        const anyEl = el as any
+        if (yes(a('data-autoplay')) || yes(a('data-auto-rotate')) || yes(a('data-autorotate')) || (el.tagName.includes('-') && yes(a('autoplay')) && el.tagName !== 'VIDEO') || yes(a('data-slider-autoplay'))) {
+          autoplay = { on: true, delayMs: delay && delay < 100 ? delay * 1000 : delay, how: 'theme setting' }
+          break
+        }
+        const sw = anyEl.swiper
+        if (sw?.params?.autoplay && (sw.autoplay?.running || sw.params.autoplay.enabled !== false)) {
+          autoplay = { on: true, delayMs: Number(sw.params.autoplay.delay) || null, how: 'swiper' }
+          break
+        }
+        for (const [attr, key] of [['data-flickity', 'autoPlay'], ['data-splide', 'autoplay'], ['data-slick', 'autoplay'], ['data-options', 'autoplay']] as const) {
+          const raw = a(attr)
+          if (!raw) continue
+          try {
+            const o = JSON.parse(raw)
+            if (o[key]) {
+              autoplay = { on: true, delayMs: typeof o[key] === 'number' ? o[key] : Number(o.interval || o.autoplaySpeed) || null, how: attr.replace('data-', '') }
+              break
+            }
+          } catch {}
+        }
+        if (autoplay) break
+        const jq = (window as any).jQuery
+        const slick = jq && jq(el).hasClass?.('slick-initialized') ? jq(el).slick?.('getSlick') : null
+        if (slick?.options?.autoplay) {
+          autoplay = { on: true, delayMs: Number(slick.options.autoplaySpeed) || null, how: 'slick' }
+          break
+        }
+      }
+      return { seen: [...new Set(seen)].sort(), lib: lib ? lib[1].toLowerCase() : null, pause, video, autoplay }
     })
   const a = await read().catch(() => null)
   if (!a) return undefined
   await new Promise((r) => setTimeout(r, 7000))
-  const b = await read().catch(() => null)
+  let b = await read().catch(() => null)
   if (!b) return undefined
-  const before = new Set(a.seen)
-  const after = new Set(b.seen)
-  const appeared = [...after].filter((x) => !before.has(x))
-  const gone = [...before].filter((x) => !after.has(x))
-  const changed = appeared.length + gone.length >= 2 && appeared.length > 0 && gone.length > 0
+  const diff = (x: typeof a, y: typeof a) => {
+    const before = new Set(x.seen)
+    const after = new Set(y.seen)
+    const appeared = [...after].filter((v) => !before.has(v))
+    const gone = [...before].filter((v) => !after.has(v))
+    return { appeared, gone, changed: appeared.length + gone.length >= 2 && appeared.length > 0 && gone.length > 0 }
+  }
+  let d = diff(a, b)
+  // set to rotate but nothing moved yet: wait one slide interval more (at most 8 s) and look again
+  if (!d.changed && a.autoplay?.on) {
+    await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(3000, (a.autoplay?.delayMs || 5000) - 5000))))
+    const c = await read().catch(() => null)
+    if (c) {
+      b = c
+      d = diff(a, c)
+    }
+  }
+  const { appeared, gone } = d
+  const changed = d.changed
   return {
     changedByItself: changed,
     note: changed
       ? 'Between two readings 7 seconds apart, without any scroll or click, the hero showed different images or text: it rotates on its own.'
       : 'Between two readings 7 seconds apart, without any scroll or click, the hero stayed the same: it does not rotate on its own within 7 seconds.',
     sliderLibrary: a.lib,
+    autoplaySetting: a.autoplay,
     pauseButton: a.pause,
     heroVideo: a.video,
     examples: changed ? { before: gone.slice(0, 3), after: appeared.slice(0, 3) } : undefined,

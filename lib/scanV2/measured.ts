@@ -554,6 +554,19 @@ export const MEASURED: Record<string, Measure> = {
     return null
   },
 
+  // Is the hero a single message, not an auto-rotating slider? Motion seen, or the slider's own
+  // autoplay setting, decides; a hero seen standing still with no autoplay setting passes.
+  recdhqkebQtRAqP4l: (_ev, f) => {
+    const m = f.heroMotion as { changedByItself: boolean; autoplaySetting?: { on: boolean; delayMs: number | null; how: string } | null; heroVideo?: boolean } | undefined
+    if (!m) return null
+    if (m.changedByItself) return { answer: 'fail', evidence: 'The hero changes by itself: without any scroll or click, it showed different slides a few seconds apart.' }
+    if (m.autoplaySetting?.on) {
+      const sec = m.autoplaySetting.delayMs ? ` every ${Math.round(m.autoplaySetting.delayMs / 100) / 10} seconds` : ''
+      return { answer: 'fail', evidence: `The hero slider is set to rotate on its own${sec} (${m.autoplaySetting.how}).` }
+    }
+    return { answer: 'pass', evidence: 'The hero stayed the same for over 7 seconds without any scroll or click, and no autoplay is set: it does not rotate on its own.' }
+  },
+
   // Does the product page have an option for potential customers to ask questions? (a chat widget in the page code)
   recRbVoxG8qjJlszm: (ev: Evidence) => {
     const chat = (ev as { mobileFacts?: { chatWidget?: string | null } }).mobileFacts?.chatWidget

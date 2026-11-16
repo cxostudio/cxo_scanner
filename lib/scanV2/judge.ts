@@ -243,12 +243,25 @@ function describe(r: Rule): string {
     .join('\n')
 }
 
+/** Checkpoints judged twice (see judge()): the first pass too often ignores their written rule. */
+export const DOUBLE_CHECK = new Set([
+  'recbtnaZ7nEchnx8O', // promotion at the top of the homepage
+  'recFTSjmOpDrdWa3D', // two shopping benefits
+  'reccIylOl4dPLCjBO', // store rating with its review count
+  'recUSgWqCEq0anlm2', // three customer reviews on the homepage
+  'rectD6TJn7mRRSS4N', // price per unit
+  'rec0vpX5Qe3QWLYwv', // body types, each model labelled
+  'recA6jcYW44Wz72CR', // payment logos in the cart itself
+  'recyjfTDztnJgcdtY', // one line on what you sell
+])
+export const VERIFY_MODEL = () => process.env.SCAN_VERIFY_MODEL || 'anthropic/claude-sonnet-4.5'
+
 /** Recent model-call failures, for the lab's dry run (no keys, messages only). */
 export const judgeErrors: string[] = []
 
 export type Usage = { calls: number; inputTokens: number; outputTokens: number; costUsd: number }
 
-async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }, usage?: Usage): Promise<{ niche?: string; verdicts: Verdict[] }> {
+async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], shared: { text: string; imgs: ReturnType<typeof images> }, usage?: Usage, model = V2_MODEL()): Promise<{ niche?: string; verdicts: Verdict[] }> {
   const list = group.map(describe).join('\n')
   const content = [
     { type: 'text' as const, text: shared.text },
@@ -259,7 +272,7 @@ async function judgeGroup(client: OpenRouter, ev: Evidence, group: Rule[], share
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res: any = await client.chat.send({
-        model: V2_MODEL(),
+        model,
         messages: [
           { role: 'system', content: systemFor(pageKindOf(ev)) },
           { role: 'user', content: content as any },
@@ -350,6 +363,20 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
     for (const v of verdicts) if (v.evidence === MISSING) Object.assign(v, retry.get(v.id))
   }
   for (const v of verdicts) if (v.evidence === MISSING) v.evidence = 'We could not check this one.'
+  // double check: rule-heavy checkpoints where the first pass often ignores a written rule get a second,
+  // independent look, one checkpoint per call (all the model's attention on that one rule) with a stronger
+  // model. When the two disagree, the focused answer wins.
+  const toVerify = rules.filter((r) => DOUBLE_CHECK.has(r.id) && ['pass', 'fail'].includes(verdicts.find((v) => v.id === r.id)?.answer || ''))
+  if (toVerify.length && process.env.SCAN_DOUBLE_CHECK !== 'off') {
+    const second = await Promise.all(
+      toVerify.map((r) => judgeGroup(client, ev, [r], { text: evidenceText(ev, scopeFor(r)), imgs: images(ev, scopeFor(r), deviceOf(r)) }, usage, VERIFY_MODEL()).then((o) => o.verdicts[0])),
+    )
+    for (const v2 of second) {
+      if (!v2 || v2.evidence === MISSING || v2.answer === 'unknown') continue
+      const v = verdicts.find((x) => x.id === v2.id)
+      if (v && v.answer !== v2.answer) Object.assign(v, { answer: v2.answer, evidence: v2.evidence, seen: v2.seen, rule: v2.rule, doubleChecked: true })
+    }
+  }
   const known = (ev as { knownNiche?: string }).knownNiche
   return { niche: known ? majorityNiche([known]) : majorityNiche(out.map((o) => o.niche)), verdicts, usage }
 }

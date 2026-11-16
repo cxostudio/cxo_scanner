@@ -67,6 +67,11 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>, catalogSi
       byId.set(r.id, { answer: 'na', evidence: 'The product costs less than about €75, where paying in installments matters little.', seen: v.seen, by: 'Code check' })
       continue
     }
+    // body types: shoes are not apparel here (the definition says so; the model still fails them)
+    if (v && r.id === 'rec0vpX5Qe3QWLYwv' && v.answer === 'fail' && /\b(shoes?|sneakers?|trainers?|footwear|boots?|sandals?|slippers?|loafers?)\b/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'na', evidence: 'Footwear: showing it on different body types does not apply.', seen: v.seen, by: 'Code check' })
+      continue
+    }
     // login: fail only when the way in is a footer link; no entry point at all means the store does not promote accounts
     if (v && r.id === LOGIN && v.answer === 'fail' && !/(only|just|solely)[^.]{0,40}(footer|pied de page|voettekst)|(footer|pied de page)[^.]{0,30}(link|lien)[^.]{0,30}(only|seul)|in the footer(?! either)(?![^.]*\bno\b)/i.test(v.evidence.replace(/no [^.]{0,60}(found )?in the footer/gi, ''))) {
       byId.set(r.id, { answer: 'na', evidence: 'There is no account entry point on the page, so the store does not promote customer accounts.', seen: v.seen, by: 'Code check' })
