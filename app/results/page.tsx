@@ -185,15 +185,20 @@ export default function ResultsPage() {
     const base = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
     const lockedIds = new Set(locked.map((r) => r.ruleId))
     const rank = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
+    const fails = base.filter((r) => !r.passed).sort((a, b) => rank(a) - rank(b))
+    // free-only scan: the blurred rows sit after the first three findings, where they are seen
     const listed =
       free && gate
-        ? [...[...base.filter((r) => !r.passed), ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
+        ? freeOnly
+          ? [...fails.slice(0, 3), ...locked, ...fails.slice(3), ...base.filter((r) => r.passed)]
+          : [...[...fails, ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
         : base
     const areas = LEVERS.map((l) => {
       const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
-    const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
+    // one number per finding, in the order the list shows them
+    const num = new Map(listed.filter((r) => !r.passed && !r.ruleId.startsWith('teaser-') && !locked.includes(r)).map((r, i) => [r.ruleId, i + 1]))
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
     const extra = free && gate ? (freeOnly ? estimated : locked.length) : 0
     // one set of numbers everywhere: every check run on this page, the free ones explained,
@@ -366,7 +371,7 @@ export default function ResultsPage() {
                 <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
-                    {report.toFix} to fix
+                    {report.freeOnly ? report.failed.length : report.toFix} to fix
                   </span>{' '}
                   ·{' '}
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
