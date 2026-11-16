@@ -2524,7 +2524,12 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
       const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
       // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
-      const cookieBanner = await readCookieBanner(mobile).catch(() => null)
+      // consent apps often draw the banner 2 to 5 seconds after load: look again for up to 5 seconds
+      let cookieBanner = await readCookieBanner(mobile).catch(() => null)
+      for (let i = 0; i < 10 && !cookieBanner?.found; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        cookieBanner = await readCookieBanner(mobile).catch(() => null)
+      }
       // one screenshot of the phone's first screen WITH the banner, so the banner can be checked by eye
       const bannerShot = cookieBanner?.found
         ? await mobile.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
