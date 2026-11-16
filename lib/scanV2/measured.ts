@@ -463,6 +463,7 @@ export const MEASURED: Record<string, Measure> = {
   recqdZbBbXoGLLZYV: (ev) => {
     const c = (ev.mobileFacts as Record<string, any>)?.cookieBanner
     if (!c?.found) return { answer: 'unknown', evidence: 'No cookie banner was shown to our visit (stores often show it only to EU visitors), so we could not check it.' }
+    if (c.wall) return { answer: 'fail', evidence: 'The cookie banner blocks the whole phone screen until the shopper answers it (a cookie wall).' }
     if (c.coversPct >= 60) return { answer: 'fail', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen.` }
     if (!c.reject) return { answer: 'fail', evidence: 'The cookie banner has no one-tap reject option next to accept.' }
     return { answer: 'pass', evidence: `The cookie banner covers about ${c.coversPct}% of a phone screen and can be accepted or rejected in one tap.` }

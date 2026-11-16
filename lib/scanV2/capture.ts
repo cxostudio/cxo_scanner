@@ -1497,14 +1497,30 @@ async function readCookieBanner(page: Page) {
       return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > vw * 0.5 && r.height > 40 && r.bottom > 0 && r.top < vh && /cookie|consent|traceur|privacy|confidentialit/i.test((el as HTMLElement).innerText || '')
     })
     if (!boxes.length) return { found: false }
-    const el = boxes.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0]
-    const r = el.getBoundingClientRect()
-    const covered = (Math.min(r.bottom, vh) - Math.max(r.top, 0)) / vh
-    const buttons = Array.from(el.querySelectorAll('button, a, [role="button"]')).map((b) => ((b as HTMLElement).innerText || '').trim().toLowerCase()).filter(Boolean)
     const ACCEPT = /accept|allow|agree|ok|got it|accepter|j'accepte|akkoord|akzeptieren|aceptar|accetta/
     const REJECT = /reject|decline|refuse|deny|refuser|continuer sans|necessary only|only necessary|nécessaires|weigeren|ablehnen|rechazar|rifiuta/
+    const texts = (e: Element) => Array.from(e.querySelectorAll('button, a, [role="button"]')).map((b) => ((b as HTMLElement).innerText || '').trim().toLowerCase()).filter(Boolean)
+    const shown = (e: Element) => {
+      const r = e.getBoundingClientRect()
+      return (Math.min(r.bottom, vh) - Math.max(r.top, 0)) / vh
+    }
+    // the banner itself is the smallest box that holds the accept button; the biggest is often an
+    // invisible full-screen wrapper, which made every banner read as 100% of the screen
+    const withButton = boxes.filter((e) => texts(e).some((t) => ACCEPT.test(t)))
+    const el = (withButton.length ? withButton : boxes).sort((a, b) => shown(a) - shown(b))[0]
+    // a cookie wall: a box over (nearly) the whole screen with a visible background or a blur
+    const wall = boxes.some((e) => {
+      if (shown(e) < 0.9) return false
+      const cs = getComputedStyle(e)
+      const m = cs.backgroundColor.match(/rgba?\(([^)]+)\)/)
+      const alpha = m ? Number(m[1].split(',')[3] ?? 1) : 0
+      return alpha >= 0.3 || (cs.backdropFilter && cs.backdropFilter !== 'none')
+    })
+    const covered = wall ? 1 : shown(el)
+    const buttons = texts(el)
     return {
       found: true,
+      wall,
       coversPct: Math.round(covered * 100),
       accept: buttons.some((t) => ACCEPT.test(t)),
       reject: buttons.some((t) => REJECT.test(t)),
@@ -2445,6 +2461,10 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
       // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
       const cookieBanner = await readCookieBanner(mobile).catch(() => null)
+      // one screenshot of the phone's first screen WITH the banner, so the banner can be checked by eye
+      const bannerShot = cookieBanner?.found
+        ? await mobile.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
+        : null
       const popup = await readPopup(mobile).catch(() => null)
       await cleanPage(mobile)
       await scrollForLazyContent(mobile)
@@ -2476,6 +2496,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
       const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * desktopShare) / MOBILE.height)))
       mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
+      if (bannerShot) mobileTiles.push({ label: 'mobile first screen as it opens, with the cookie banner (only for the cookie banner check)', dataUrl: `data:image/jpeg;base64,${bannerShot}` })
       if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
       mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
       // a chat widget (live or AI) in the page code: it often only draws its bubble after a delay or a scroll
