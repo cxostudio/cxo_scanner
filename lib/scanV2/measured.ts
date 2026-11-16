@@ -347,8 +347,10 @@ export const MEASURED: Record<string, Measure> = {
 
   recyDWQ5MaZKgdzY1: (_ev, f) => {
     const l = f.probes?.locale as { found: string[]; hreflang: number } | null | undefined
-    if (!l || !l.found.length) return null
-    return { answer: 'pass', evidence: `The store lets shoppers pick their country, currency or language (${l.found.slice(0, 2).join(', ')}${l.hreflang > 1 ? `, ${l.hreflang} country and language versions of the site` : ''}).` }
+    if (!l) return null
+    if (l.found.length || l.hreflang >= 2)
+      return { answer: 'pass', evidence: `The store lets shoppers pick their country, currency or language (${[...l.found.slice(0, 2), ...(l.hreflang >= 2 ? [`${l.hreflang} country and language versions of the site`] : [])].join(', ')}).` }
+    return null
   },
 
   recJIKYF3A1cqKzEn: (_ev, f) => {
@@ -557,14 +559,14 @@ export const MEASURED: Record<string, Measure> = {
   // Is the hero a single message, not an auto-rotating slider? Motion seen, or the slider's own
   // autoplay setting, decides; a hero seen standing still with no autoplay setting passes.
   recdhqkebQtRAqP4l: (_ev, f) => {
-    const m = f.heroMotion as { changedByItself: boolean; autoplaySetting?: { on: boolean; delayMs: number | null; how: string } | null; heroVideo?: boolean } | undefined
+    const m = f.heroMotion as { changedByItself: boolean; autoplaySetting?: { on: boolean; delayMs: number | null; how: string } | null } | undefined
     if (!m) return null
-    if (m.changedByItself) return { answer: 'fail', evidence: 'The hero changes by itself: without any scroll or click, it showed different slides a few seconds apart.' }
-    if (m.autoplaySetting?.on) {
-      const sec = m.autoplaySetting.delayMs ? ` every ${Math.round(m.autoplaySetting.delayMs / 100) / 10} seconds` : ''
-      return { answer: 'fail', evidence: `The hero slider is set to rotate on its own${sec} (${m.autoplaySetting.how}).` }
-    }
-    return { answer: 'pass', evidence: 'The hero stayed the same for over 7 seconds without any scroll or click, and no autoplay is set: it does not rotate on its own.' }
+    // what the shopper sees decides: the hero changed slide by itself while we watched (up to 13 s)
+    if (m.changedByItself) return { answer: 'fail', evidence: 'The hero changes by itself: without any scroll or click, it moved to another slide while we watched.' }
+    // a multi-slide hero set to rotate every 10 s or less, even if it had not moved yet
+    if (m.autoplaySetting?.on && (m.autoplaySetting.delayMs ?? 0) > 0 && (m.autoplaySetting.delayMs ?? 0) <= 10000)
+      return { answer: 'fail', evidence: `The hero is a slider set to move to the next slide every ${Math.round((m.autoplaySetting.delayMs ?? 0) / 100) / 10} seconds on its own.` }
+    return { answer: 'pass', evidence: 'The hero did not change slide on its own while we watched, so shoppers see one message.' }
   },
 
   // Does the product page have an option for potential customers to ask questions? (a chat widget in the page code)

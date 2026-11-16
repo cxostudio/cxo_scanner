@@ -136,7 +136,12 @@ async function heroMotion(page: Page) {
         const yes = (v: string | null) => v !== null && v !== 'false' && v !== '0'
         const delay = Number(a('data-autoplay-speed') || a('data-speed') || a('data-autoplay-delay') || a('data-interval') || a('data-autoplay-interval') || 0) || null
         const anyEl = el as any
-        if (yes(a('data-autoplay')) || yes(a('data-auto-rotate')) || yes(a('data-autorotate')) || (el.tagName.includes('-') && yes(a('autoplay')) && el.tagName !== 'VIDEO') || yes(a('data-slider-autoplay'))) {
+        // only the hero itself (starting near the top), only a slider with 2+ slides, never a video player
+        const er = el.getBoundingClientRect()
+        if (er.top > 320 || /video/i.test(el.tagName) || (el.querySelector('video') && el.querySelectorAll('img').length < 2)) continue
+        const SLIDE = '.swiper-slide:not(.swiper-slide-duplicate), .slick-slide:not(.slick-cloned), .flickity-cell, .splide__slide:not(.is-clone), [class*="slider__slide"], [class*="slideshow__slide"], [class*="slideshow_item"], [class*="slideshow-slide"], [class*="slide-item"]'
+        if (el.querySelectorAll(SLIDE).length < 2) continue
+        if (yes(a('data-autoplay')) || yes(a('data-auto-rotate')) || yes(a('data-autorotate')) || (el.tagName.includes('-') && yes(a('autoplay'))) || yes(a('data-slider-autoplay'))) {
           autoplay = { on: true, delayMs: delay && delay < 100 ? delay * 1000 : delay, how: 'theme setting' }
           break
         }
@@ -164,15 +169,6 @@ async function heroMotion(page: Page) {
           break
         }
       }
-      // a slider with a single slide has nothing to rotate, whatever its autoplay setting says
-      if (autoplay) {
-        const slides = Array.from(document.querySelectorAll('.swiper-slide:not(.swiper-slide-duplicate), .slick-slide:not(.slick-cloned), .flickity-cell, .splide__slide:not(.is-clone), [class*="slider__slide"], [class*="slideshow__slide"], [class*="slideshow_item"], [class*="slideshow-slide"]')).filter((e) => {
-          const r = e.getBoundingClientRect()
-          return r.top < vh && r.bottom > top && r.height > 100
-        })
-        const single = zone.some((e) => /(^|\s)[\w-]*slides-1(\s|$)/.test(typeof e.className === 'string' ? e.className : ''))
-        if (single || (slides.length > 0 && slides.length < 2)) autoplay = null
-      }
       return { seen: [...new Set(seen)].sort(), lib: lib ? lib[1].toLowerCase() : null, pause, video, autoplay }
     })
   const a = await read().catch(() => null)
@@ -190,7 +186,7 @@ async function heroMotion(page: Page) {
   let d = diff(a, b)
   // set to rotate but nothing moved yet: wait one slide interval more (at most 8 s) and look again
   if (!d.changed && a.autoplay?.on) {
-    await new Promise((r) => setTimeout(r, Math.min(8000, Math.max(3000, (a.autoplay?.delayMs || 5000) - 5000))))
+    await new Promise((r) => setTimeout(r, Math.min(6000, Math.max(3000, (a.autoplay?.delayMs || 5000) - 5000))))
     const c = await read().catch(() => null)
     if (c) {
       b = c
@@ -423,7 +419,13 @@ async function desktopProbes(page: Page, entryRedirects: number) {
   out.locale = await page
     .evaluate(() => {
       const found: string[] = []
-      if (document.querySelector('form[action*="/localization"], localization-form, [name="country_code"], [name="locale_code"], [data-localization], country-selector, [class*="localization" i]')) found.push('Shopify country/language selector')
+      // Shopify's selector only counts when it offers a real choice: 2+ countries or 2+ languages (a
+      // one-country store often still ships the form, with a single entry)
+      const forms = Array.from(document.querySelectorAll('form[action*="/localization"], localization-form'))
+      const choices = (sel: string) => new Set(forms.flatMap((f) => Array.from(f.querySelectorAll(sel)).map((o) => o.getAttribute('value') || o.getAttribute('data-value') || (o as HTMLElement).innerText?.trim() || ''))).size
+      const nCountries = choices('[name="country_code"] option, [data-country-code], a[data-value][href*="country"], li[data-value], button[data-value], input[name="country_code"][type="radio"]')
+      const nLangs = choices('[name="locale_code"] option, [data-locale], input[name="locale_code"][type="radio"], a[hreflang]')
+      if (nCountries >= 2 || nLangs >= 2) found.push(`Shopify selector with ${nCountries >= 2 ? `${nCountries} countries` : ''}${nCountries >= 2 && nLangs >= 2 ? ' and ' : ''}${nLangs >= 2 ? `${nLangs} languages` : ''}`)
       const w = window as unknown as Record<string, unknown>
       const apps: [string, boolean][] = [
         ['Global-e', !!(w.GlobalE || w.gle || document.querySelector('script[src*="global-e"]'))],
@@ -444,9 +446,9 @@ async function desktopProbes(page: Page, entryRedirects: number) {
         const cls = el.tagName === 'A' ? '' : el.getAttribute('class') || ''
         return (t.length <= 24 && code.test(t)) || /\b(country|currency|region|language|locale)\b/i.test(label) || /(^|[\s_-])(country|currency|region|language|locale)([\s_-]|$)/i.test(cls)
       })
-      if (btn) found.push(`switcher: "${(((btn as HTMLElement).innerText || btn.getAttribute('aria-label') || '').trim()).slice(0, 30)}"`)
       const langs = Array.from(new Set(Array.from(document.querySelectorAll('link[rel="alternate"][hreflang]')).map((l) => l.getAttribute('hreflang')).filter((h) => h && h !== 'x-default')))
-      return { found, hreflang: langs.length }
+      // a button that looks like a switcher is a weaker sign: kept apart, it never decides on its own
+      return { found, hreflang: langs.length, maybe: btn ? (((btn as HTMLElement).innerText || btn.getAttribute('aria-label') || '').trim()).slice(0, 30) : null }
     })
     .catch(() => null)
   out.dropdowns = await dropdownProbe(page).catch(() => null)
