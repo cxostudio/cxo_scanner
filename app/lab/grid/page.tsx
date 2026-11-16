@@ -215,9 +215,32 @@ export default function GridLabelling() {
                 )
               })}
             </div>
-            <button type="button" onClick={() => load(cp, key)} className="cxo-btn cxo-btn-ghost self-center">
-              Next stores
-            </button>
+            {/* confirm mode: after looking at every card, one click labels the untouched ones with the
+                scanner's answer. Only answers the scanner actually gave (pass, fail, not relevant). */}
+            {(() => {
+              const todo = data.stores.filter((s) => !s.label && ['pass', 'fail', 'na'].includes(s.answer?.coveredByShopify ? 'pass' : s.answer?.answer || ''))
+              return (
+                <div className="flex flex-col items-center gap-2">
+                  {todo.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        for (const s of todo) await setLabel(s, (s.answer?.coveredByShopify ? 'pass' : s.answer?.answer) as Label)
+                      }}
+                      className="cxo-btn cxo-btn-primary"
+                    >
+                      Scanner is right on the other {todo.length}: label them
+                    </button>
+                  )}
+                  <p className="max-w-[520px] text-center text-[12px] text-[var(--text-muted)]">
+                    Fix the cards where the scanner is wrong first, then use this for the rest. Cards it couldn’t check stay unlabelled.
+                  </p>
+                  <button type="button" onClick={() => load(cp, key)} className="cxo-btn cxo-btn-ghost">
+                    Next stores
+                  </button>
+                </div>
+              )
+            })()}
           </>
         )}
       </div>
