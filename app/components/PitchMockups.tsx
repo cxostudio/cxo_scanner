@@ -85,34 +85,37 @@ export function LockedRow({ r, variant, open, onToggle, buyUrl, price }: { r: Sc
 }
 
 
-/** A finding the free scan did not run: no title, no area, only a blurred line and the way to unlock it. */
-export function TeaserRow({ i, buyUrl, price }: { i: number; buyUrl: string; price: string }) {
-  const [open, setOpen] = useState(false)
-  const widths = ['72%', '58%', '84%', '64%', '77%', '52%']
+/** After the free findings: the issues the free scan did not run, blurred, with the way to unlock them. */
+export function LockedBlock({ count, pageName, buyUrl, price }: { count: number; pageName: string; buyUrl: string; price: string }) {
+  const widths = ['72%', '58%', '84%']
   return (
-    <div className={`rounded-[16px] border px-4 transition-colors ${open ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-dashed border-[var(--border-strong)] bg-[var(--surface)] hover:bg-[var(--bg-subtle)]'}`}>
-      <button type="button" className="flex w-full items-center gap-3 py-4 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label="Another issue, in the full report">
-        <LockBadge />
-        <span className="flex min-w-0 flex-1 flex-col gap-1.5" aria-hidden="true">
-          <span className="h-3.5 rounded-full bg-[var(--surface-muted)] blur-[2px]" style={{ width: widths[i % widths.length] }} />
-          <span className="h-2.5 rounded-full bg-[var(--surface-muted)] blur-[2px]" style={{ width: `calc(${widths[(i + 2) % widths.length]} - 20%)` }} />
-        </span>
-      </button>
-      {open && (
-        <div className="flex flex-col items-start gap-3 border-t border-[var(--border)] pb-4 pt-4">
-          <p className="text-sm leading-relaxed text-[var(--text-muted)]">The free scan checked the essentials. The full report runs every check on this page and the rest of your store, with every fix and examples.</p>
-          <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-4 !py-1.5 text-sm">
-            Unlock the full report, {price} <Arrow />
-          </a>
-        </div>
-      )}
+    <div className="relative overflow-hidden rounded-[16px] border border-dashed border-[var(--border-strong)] bg-[var(--surface)]">
+      <div className="flex flex-col gap-3 px-4 py-4 blur-[2px]" aria-hidden="true">
+        {widths.map((w, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <span className="h-[26px] w-[26px] shrink-0 rounded-full bg-[var(--surface-muted)]" />
+            <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <span className="h-3.5 rounded-full bg-[var(--surface-muted)]" style={{ width: w }} />
+              <span className="h-2.5 w-1/2 rounded-full bg-[var(--surface-muted)]" />
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--surface)]/70 px-5 text-center">
+        <p className="inline-flex items-center gap-2 font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--text)]">
+          <LockIcon /> About {count} more issues on this {pageName.toLowerCase()}
+        </p>
+        <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-5 !py-2 text-sm">
+          Unlock the full report, {price} <Arrow />
+        </a>
+      </div>
     </div>
   )
 }
 
 type Coverage = { total: number; stores: number; pages: { key: string; label: string; checks: number; expectedIssues: number }[] }
 
-export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCount, qualified, buyUrl, callUrl, price, estimated = false }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean }) {
+export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, freeRun = 0 }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number }) {
   const [cov, setCov] = useState<Coverage | null>(null)
   useEffect(() => {
     fetch(api('/report-coverage'))
@@ -121,7 +124,8 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
       .catch(() => {})
   }, [])
   // the pages this scan did not cover (a product scan also covers the cart); pages with no live check are left out
-  const covered = pageKey === 'product' ? ['product', 'cart'] : [pageKey]
+  // one row per page: the scanned one first, then the five pages of the full report in shopping order
+  const covered = [pageKey]
   const here = cov?.pages.find((p) => p.key === pageKey)
   const others = (cov?.pages || []).filter((p) => !covered.includes(p.key) && p.checks > 0)
   const remaining = cov ? lockedCount + others.reduce((n, p) => n + p.expectedIssues, 0) : 0
@@ -151,34 +155,38 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
             </p>
             {cov && (
               <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
-                <li className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
-                  <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
-                  <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{here?.label || 'This page'}{pageKey === 'product' ? ' and cart' : ''} <span className="font-normal text-[var(--text-muted)]">· this scan</span></span>
-                  <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                    {estimated ? (
-                      <>
-                        <b className="text-[var(--result-fail-fg)]">{fixesShown} found</b> · about {lockedCount} more
-                      </>
-                    ) : (
-                      <>
-                        <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
-                      </>
-                    )}
-                  </span>
-                  </span>
-                </li>
-                {others.map((p) => (
-                  <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
-                    <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
-                    <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
-                    <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                      {p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b>
-                    </span>
-                    </span>
-                  </li>
-                ))}
+                {/* the five pages of the full report, in shopping order; the scanned page in its place */}
+                {cov.pages.filter((p) => p.checks > 0 || p.key === pageKey).map((p) =>
+                  p.key === pageKey ? (
+                    <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
+                      <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                        <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· free scan</span></span>
+                        <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
+                          {estimated ? (
+                            <>
+                              <b className="text-[var(--result-fail-fg)]">{fixesShown} issues</b> in {freeRun} free checks · {p.checks} in the full report
+                            </>
+                          ) : (
+                            <>
+                              <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
+                            </>
+                          )}
+                        </span>
+                      </span>
+                    </li>
+                  ) : (
+                    <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
+                      <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                        <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
+                        <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
+                          {p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b>
+                        </span>
+                      </span>
+                    </li>
+                  ),
+                )}
               </ul>
             )}
             {cov && cov.stores > 0 && <p className="text-[12px] text-[var(--text-muted)]">Expected issues: how often each check fails across the {cov.stores} stores we have scanned.</p>}

@@ -2537,7 +2537,8 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
       // consent apps often draw the banner 2 to 5 seconds after load: look again for up to 5 seconds
       let cookieBanner = await readCookieBanner(mobile).catch(() => null)
-      for (let i = 0; i < 10 && !cookieBanner?.found; i++) {
+      // (full reports and lab scans only: the free scan does not judge the banner and skips the wait)
+      for (let i = 0; opts.extended && i < 10 && !cookieBanner?.found; i++) {
         await new Promise((r) => setTimeout(r, 500))
         cookieBanner = await readCookieBanner(mobile).catch(() => null)
       }

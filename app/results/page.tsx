@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
 import { LockedFindings } from '../components/LockedFindings'
-import { LockedRow, FullStoreOffer, TeaserRow } from '../components/PitchMockups'
+import { LockedRow, FullStoreOffer, LockedBlock } from '../components/PitchMockups'
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
@@ -172,7 +172,8 @@ export default function ResultsPage() {
     const shownScored = shown.filter((r) => r.status !== 'unknown' && r.status !== 'na' && !r.coveredByShopify)
     const failRate = shownScored.length ? shownScored.filter((r) => !r.passed).length / shownScored.length : 0.3
     const estimated = freeOnly ? Math.max(2, Math.round((pageTotal - results.length) * failRate)) : 0
-    const teaser: ScanResult[] = Array.from({ length: Math.min(6, estimated) }, (_, i) => ({ ruleId: `teaser-${i}`, ruleTitle: '', passed: false, reason: '', status: 'fail' }) as unknown as ScanResult)
+    // one locked block, right after the free findings (before the passed checks)
+    const teaser: ScanResult[] = estimated ? [{ ruleId: 'teaser-block', ruleTitle: '', passed: false, reason: '', status: 'fail' } as unknown as ScanResult] : []
     const locked = free ? (freeOnly ? teaser : results.filter((r) => !r.freeScan && r.status === 'fail')) : []
     const lockedIssues = locked.length
     // "couldn't check" answers are never shown as failures or counted in the score
@@ -190,7 +191,7 @@ export default function ResultsPage() {
     const listed =
       free && gate
         ? freeOnly
-          ? [...fails.slice(0, 3), ...locked, ...fails.slice(3), ...base.filter((r) => r.passed)]
+          ? [...fails, ...locked, ...base.filter((r) => r.passed)]
           : [...[...fails, ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
         : base
     const areas = LEVERS.map((l) => {
@@ -419,7 +420,7 @@ export default function ResultsPage() {
                 <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
-                    if (r.ruleId.startsWith('teaser-') && gate) return <TeaserRow key={r.ruleId} i={Number(r.ruleId.slice(7))} buyUrl={buyUrl} price="€49" />
+                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.estimated} pageName={pageName} buyUrl={buyUrl} price="€49" />
                     if (report.lockedIds.has(r.ruleId) && gate)
                       return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price="€49" />
                     const isOpen = open.has(r.ruleId)
@@ -473,7 +474,7 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.estimated : report.locked.length} estimated={report.freeOnly} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.estimated : report.locked.length} estimated={report.freeOnly} freeRun={report.pageChecks - report.hidden - report.estimated} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
