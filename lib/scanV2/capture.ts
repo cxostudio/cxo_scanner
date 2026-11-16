@@ -145,7 +145,7 @@ async function heroMotion(page: Page) {
           autoplay = { on: true, delayMs: Number(sw.params.autoplay.delay) || null, how: 'swiper' }
           break
         }
-        for (const [attr, key] of [['data-flickity', 'autoPlay'], ['data-splide', 'autoplay'], ['data-slick', 'autoplay'], ['data-options', 'autoplay']] as const) {
+        for (const [attr, key] of [['data-flickity', 'autoPlay'], ['data-splide', 'autoplay'], ['data-slick', 'autoplay'], ['data-options', 'autoplay'], ['config', 'autoPlay'], ['data-config', 'autoplay']] as const) {
           const raw = a(attr)
           if (!raw) continue
           try {
@@ -163,6 +163,15 @@ async function heroMotion(page: Page) {
           autoplay = { on: true, delayMs: Number(slick.options.autoplaySpeed) || null, how: 'slick' }
           break
         }
+      }
+      // a slider with a single slide has nothing to rotate, whatever its autoplay setting says
+      if (autoplay) {
+        const slides = Array.from(document.querySelectorAll('.swiper-slide:not(.swiper-slide-duplicate), .slick-slide:not(.slick-cloned), .flickity-cell, .splide__slide:not(.is-clone), [class*="slider__slide"], [class*="slideshow__slide"], [class*="slideshow_item"], [class*="slideshow-slide"]')).filter((e) => {
+          const r = e.getBoundingClientRect()
+          return r.top < vh && r.bottom > top && r.height > 100
+        })
+        const single = zone.some((e) => /(^|\s)[\w-]*slides-1(\s|$)/.test(typeof e.className === 'string' ? e.className : ''))
+        if (single || (slides.length > 0 && slides.length < 2)) autoplay = null
       }
       return { seen: [...new Set(seen)].sort(), lib: lib ? lib[1].toLowerCase() : null, pause, video, autoplay }
     })
