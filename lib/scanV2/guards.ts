@@ -67,6 +67,11 @@ export function applyGuards(rules: Rule[], byId: Map<string, Verdict>, catalogSi
       byId.set(r.id, { answer: 'na', evidence: 'The product costs less than about €75, where paying in installments matters little.', seen: v.seen, by: 'Code check' })
       continue
     }
+    // payment logos in the cart: a pay-later sentence ('Payez en 3x ou 4x') is not a payment button or logo
+    if (v && r.id === 'recA6jcYW44Wz72CR' && v.answer === 'pass' && /\b(3x|4x|3 x|4 x|installments?|instalments?|pay later|payez en|en \d+ fois)\b/i.test(v.evidence) && !/(shop ?pay|apple ?pay|google ?pay|paypal|visa|mastercard|amex|bancontact|ideal|klarna|logo|icon|express)/i.test(v.evidence)) {
+      byId.set(r.id, { answer: 'fail', evidence: 'The cart only mentions paying in installments; there are no payment buttons or logos next to the checkout button.', seen: v.seen, by: 'Code check' })
+      continue
+    }
     // body types: shoes are not apparel here (the definition says so; the model still fails them)
     if (v && r.id === 'rec0vpX5Qe3QWLYwv' && v.answer === 'fail' && /\b(shoes?|sneakers?|trainers?|footwear|boots?|sandals?|slippers?|loafers?)\b/i.test(v.evidence)) {
       byId.set(r.id, { answer: 'na', evidence: 'Footwear: showing it on different body types does not apply.', seen: v.seen, by: 'Code check' })

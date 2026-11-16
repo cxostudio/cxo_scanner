@@ -245,14 +245,12 @@ function describe(r: Rule): string {
 
 /** Checkpoints judged twice (see judge()): the first pass too often ignores their written rule. */
 export const DOUBLE_CHECK = new Set([
-  'recbtnaZ7nEchnx8O', // promotion at the top of the homepage
-  'recFTSjmOpDrdWa3D', // two shopping benefits
-  'reccIylOl4dPLCjBO', // store rating with its review count
-  'recUSgWqCEq0anlm2', // three customer reviews on the homepage
-  'rectD6TJn7mRRSS4N', // price per unit
-  'rec0vpX5Qe3QWLYwv', // body types, each model labelled
-  'recA6jcYW44Wz72CR', // payment logos in the cart itself
-  'recyjfTDztnJgcdtY', // one line on what you sell
+  // kept only where the second look agreed with Louis's labels more often (dry run, 16 Nov): on
+  // promotion, two benefits, homepage reviews, one line and cart logos the stronger model read the
+  // rules more strictly than Louis does, and accuracy dropped
+  'reccIylOl4dPLCjBO', // store rating with its review count (14 → 15 of 15)
+  'rectD6TJn7mRRSS4N', // price per unit (23 → 24 of 25)
+  'rec0vpX5Qe3QWLYwv', // body types, each model labelled (2 → 4 of 4)
 ])
 export const VERIFY_MODEL = () => process.env.SCAN_VERIFY_MODEL || 'anthropic/claude-sonnet-4.5'
 
