@@ -358,6 +358,34 @@ async function desktopProbes(page: Page, entryRedirects: number) {
     })
     .catch(() => null)
   // last: it hovers and opens menus
+  // country / currency / language switcher, read from the code: Shopify's localization form, the
+  // switcher apps, buttons showing a currency code, and the alternate-language links
+  out.locale = await page
+    .evaluate(() => {
+      const found: string[] = []
+      if (document.querySelector('form[action*="/localization"], localization-form, [name="country_code"], [name="locale_code"], [data-localization], country-selector, [class*="localization" i]')) found.push('Shopify country/language selector')
+      const w = window as unknown as Record<string, unknown>
+      const apps: [string, boolean][] = [
+        ['Global-e', !!(w.GlobalE || w.gle || document.querySelector('script[src*="global-e"]'))],
+        ['Weglot', !!(w.Weglot || document.querySelector('script[src*="weglot"]'))],
+        ['GTranslate', !!document.querySelector('script[src*="gtranslate"], .gtranslate_wrapper')],
+        ['Langify', !!document.querySelector('script[src*="langify"]')],
+        ['LangShop', !!document.querySelector('script[src*="langshop"]')],
+        ['Transcy', !!document.querySelector('script[src*="transcy"]')],
+        ['Geolocation app', !!document.querySelector('script[src*="geolocation"], [class*="geolocation" i]')],
+      ]
+      for (const [n, ok] of apps) if (ok) found.push(n)
+      const code = /(EUR|USD|GBP|CAD|AUD|DKK|SEK|NOK|PLN|CHF|JPY|NZD)/
+      const btn = Array.from(document.querySelectorAll('button, a, [role="button"], select, summary')).find((el) => {
+        const t = ((el as HTMLElement).innerText || '').trim()
+        const a = (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('class') || '')
+        return (t.length <= 24 && code.test(t)) || /country|currency|region|language|locale/i.test(a)
+      })
+      if (btn) found.push(`switcher: "${(((btn as HTMLElement).innerText || btn.getAttribute('aria-label') || '').trim()).slice(0, 30)}"`)
+      const langs = Array.from(new Set(Array.from(document.querySelectorAll('link[rel="alternate"][hreflang]')).map((l) => l.getAttribute('hreflang')).filter((h) => h && h !== 'x-default')))
+      return { found, hreflang: langs.length }
+    })
+    .catch(() => null)
   out.dropdowns = await dropdownProbe(page).catch(() => null)
   return out
 }
@@ -826,7 +854,32 @@ function readFacts(page: Page) {
     }
     const buyForm = document.querySelector('form[action*="/cart/add"]')
     const buyBox = buyForm?.closest('section, [class*="product__info" i], [class*="product-info" i], [class*="product-form" i], [class*="product__meta" i]') || buyForm?.parentElement?.parentElement || null
+    // the product price, for rules that depend on it (installments): structured data, then the meta tags
+    // Shopify themes write, then Shopify's own analytics object (in cents)
+    const productPrice = (() => {
+      for (const sc of Array.from(document.querySelectorAll('script[type="application/ld+json"]'))) {
+        try {
+          const items = ([] as any[]).concat(JSON.parse(sc.textContent || '')).flatMap((x) => [x, ...(x['@graph'] || [])])
+          for (const it of items) {
+            const types = ([] as string[]).concat(it['@type'] || [])
+            if (!types.some((t) => /Product/i.test(t))) continue
+            const offer = ([] as any[]).concat(it.offers || [])[0]
+            const o = offer && (offer.price !== undefined ? offer : ([] as any[]).concat(offer.offers || [])[0] || offer)
+            const v = Number(o?.price ?? o?.lowPrice)
+            if (v > 0) return { amount: v, currency: String(o.priceCurrency || '') }
+          }
+        } catch {}
+      }
+      const m = document.querySelector('meta[property="product:price:amount"], meta[property="og:price:amount"]')
+      const c = document.querySelector('meta[property="product:price:currency"], meta[property="og:price:currency"]')
+      const mv = Number((m?.getAttribute('content') || '').replace(',', '.'))
+      if (mv > 0) return { amount: mv, currency: c?.getAttribute('content') || '' }
+      const sa = (window as any).ShopifyAnalytics?.meta?.product?.variants?.[0]?.price
+      if (Number(sa) > 0) return { amount: Number(sa) / 100, currency: (window as any).ShopifyAnalytics?.meta?.currency || '' }
+      return null
+    })()
     return {
+      productPrice,
       pageTitle: document.title,
       language: document.documentElement.lang,
       h1: Array.from(document.querySelectorAll('h1')).filter(vis).map((h) => (h as HTMLElement).innerText.trim()).slice(0, 3),

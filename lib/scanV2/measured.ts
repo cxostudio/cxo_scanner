@@ -332,6 +332,25 @@ export const MEASURED: Record<string, Measure> = {
 
   // Is Instant.page or a similar preloading technology implemented to speed up navigation between pages?
   // Are text files served compressed? Read from the response headers of the page, its scripts and styles
+  // Currency and language: a switcher found in the code settles it as a pass; without one the AI
+  // still decides (a store selling in one country is not relevant, which code cannot know)
+  // Installments near the price: under about €50 (or the same in another currency) it is not relevant,
+  // whatever the page shows. Above that the AI decides, with the stricter rule (an amount per payment).
+  recFZamcrQRJpUsaE: (_ev, f) => {
+    const p = f.productPrice as { amount: number; currency: string } | null | undefined
+    if (!p) return null
+    const rate: Record<string, number> = { DKK: 7.5, SEK: 11, NOK: 11.5, PLN: 4.3, CZK: 25, HUF: 390, JPY: 160, CHF: 0.95 }
+    const eur = p.amount / (rate[(p.currency || '').toUpperCase()] || 1)
+    if (eur < 50) return { answer: 'na', evidence: `The product costs ${p.amount} ${p.currency}: below the price where paying in installments matters.` }
+    return null
+  },
+
+  recyDWQ5MaZKgdzY1: (_ev, f) => {
+    const l = f.probes?.locale as { found: string[]; hreflang: number } | null | undefined
+    if (!l || !l.found.length) return null
+    return { answer: 'pass', evidence: `The store lets shoppers pick their country, currency or language (${l.found.slice(0, 2).join(', ')}${l.hreflang > 1 ? `, ${l.hreflang} language versions` : ''}).` }
+  },
+
   recJIKYF3A1cqKzEn: (_ev, f) => {
     const t = f.network?.text
     if (!t || t.total < 5) return null
