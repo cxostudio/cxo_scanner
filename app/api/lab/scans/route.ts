@@ -5,12 +5,26 @@ import { getLabels, getModes, getNotes, getTestScan, labAllowed, labelQueue, lis
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
+export const maxDuration = 120
 
 export async function GET(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
   try {
     const list = await listTestScans()
-    const loaded = await Promise.all(list.map(async (s) => ({ scan: await getTestScan(s.id), labels: await getLabels(s.id), notes: await getNotes(s.id), modes: await getModes(s.id) })))
+    // read a few scans at a time, with one retry: 100+ scans read all at once made the storage drop
+    // some reads, and those scans silently left the totals
+    const readOne = async (id: string) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const scan = await getTestScan(id)
+          if (scan) return { scan, labels: await getLabels(id), notes: await getNotes(id), modes: await getModes(id) }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
+      }
+      return { scan: null, labels: {}, notes: {}, modes: {} }
+    }
+    const loaded: Awaited<ReturnType<typeof readOne>>[] = []
+    for (let i = 0; i < list.length; i += 12) loaded.push(...(await Promise.all(list.slice(i, i + 12).map((s) => readOne(s.id)))))
     const scans = loaded.filter((x): x is { scan: LabScan; labels: Record<string, LabLabel>; notes: Record<string, string>; modes: Record<string, 'blind' | 'review'> } => !!x.scan)
     scans.sort((a, b) => b.scan.createdAt.localeCompare(a.scan.createdAt))
 
