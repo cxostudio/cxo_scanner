@@ -18,7 +18,6 @@ import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } fro
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
 // the paid full report (a payment link); until it exists, the full-scan page
-const FULL_REPORT_URL = process.env.NEXT_PUBLIC_FULL_REPORT_URL || CHECKLIST_URL
 const FULL_REPORT_PRICE = process.env.NEXT_PUBLIC_FULL_REPORT_PRICE || ''
 
 const ResultSchema = z.array(
@@ -77,6 +76,7 @@ const Arrow = () => (
 export default function ResultsPage() {
   const [results, setResults] = useState<ScanResult[] | null>(null)
   const [url, setUrl] = useState('')
+  const [email, setEmail] = useState('')
   const [numbers, setNumbers] = useState<Estimate | null>(null)
   const [revenueBand, setRevenueBand] = useState('')
   const [preview, setPreview] = useState<{ desktop: string | null; mobile: string | null }>({ desktop: null, mobile: null })
@@ -96,6 +96,7 @@ export default function ResultsPage() {
       setRevenueBand(rev)
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
+      setEmail(localStorage.getItem('scanEmail') || '')
       setLabId(localStorage.getItem('scanLabId'))
       const g = new URLSearchParams(window.location.search).get('gate')
       if (g === 'b' || g === 'cd') setGate(g)
@@ -194,6 +195,7 @@ export default function ResultsPage() {
   }, [results, labId, gate])
 
   const host = hostOf(url)
+  const buyUrl = api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '' })}`)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
   const qualified = isQualified(revenueBand)
   const view = located[device]
@@ -402,7 +404,7 @@ export default function ResultsPage() {
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
                     if (report.lockedIds.has(r.ruleId) && gate)
-                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={FULL_REPORT_URL} price="€49" />
+                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price="€49" />
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -454,14 +456,14 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.locked.length} qualified={qualified} buyUrl={FULL_REPORT_URL} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.locked.length} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
                   qualified={qualified}
                   monthlyAtStake={numbers ? numbers.lift10 : null}
                   shortEur={shortEur}
-                  buyUrl={FULL_REPORT_URL}
+                  buyUrl={buyUrl}
                   callUrl={CALL_URL}
                   price={FULL_REPORT_PRICE}
                 />
@@ -479,7 +481,7 @@ export default function ResultsPage() {
             eur={eur}
             shortEur={shortEur}
             callUrl={CALL_URL}
-            fullScanUrl={FULL_REPORT_URL}
+            fullScanUrl={buyUrl}
             host={host}
           />
         </div>

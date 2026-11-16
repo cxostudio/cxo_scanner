@@ -822,6 +822,8 @@ export default function Home() {
 
         localStorage.setItem("scanResults", JSON.stringify(validatedResults));
         localStorage.setItem("scanUrl", batches[0]?.url || websiteUrl);
+        // for the full report checkout (prefills Stripe's email field)
+        try { if (email) localStorage.setItem("scanEmail", email); } catch {}
         if (websiteScreenshot) {
           try {
             sessionStorage.setItem("lastScreenshot", websiteScreenshot);
