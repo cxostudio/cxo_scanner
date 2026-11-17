@@ -97,10 +97,12 @@ const ClockIcon = () => (
 // brands whose stores we scanned and labelled to build the checkpoints. A brand shows its logo once its
 // file is in public/brands/ (set `logo` to the file name); until then its name, set in our own type.
 const STUDIED: { name: string; logo?: string }[] = [
-  { name: 'Allbirds' }, { name: 'Brooklinen' }, { name: 'ColourPop' }, { name: 'Dr. Squatch' }, { name: 'Graza' },
-  { name: 'IKEA' }, { name: 'Zalando' }, { name: 'Kylie Cosmetics' }, { name: 'Loop' }, { name: 'Nomad' },
-  { name: 'Olipop' }, { name: 'Wild One' }, { name: 'Momentous' }, { name: 'Spacegoods' }, { name: 'Scandinavian Biolabs' },
-  { name: 'Photowall' }, { name: 'Doré & Rose' }, { name: 'Tiptoe' }, { name: 'Icon Amsterdam' },
+  { name: 'Allbirds', logo: 'allbirds.svg' }, { name: 'Brooklinen', logo: 'brooklinen.svg' }, { name: 'ColourPop', logo: 'colourpop.svg' },
+  { name: 'Dr. Squatch', logo: 'drsquatch.png' }, { name: 'Graza', logo: 'graza.png' }, { name: 'IKEA', logo: 'ikea.svg' },
+  { name: 'Zalando' }, { name: 'Kylie Cosmetics' }, { name: 'Loop', logo: 'loop.svg' }, { name: 'Nomad', logo: 'nomad.svg' },
+  { name: 'Olipop', logo: 'olipop.png' }, { name: 'Momentous', logo: 'momentous.svg' }, { name: 'Spacegoods', logo: 'spacegoods.svg' },
+  { name: 'Scandinavian Biolabs', logo: 'scandinavianbiolabs.svg' }, { name: 'Photowall', logo: 'photowall.svg' },
+  { name: 'Doré & Rose', logo: 'doreandrose.png' }, { name: 'Tiptoe', logo: 'tiptoe.svg' }, { name: 'Icon Amsterdam', logo: 'icon.png' },
 ]
 function BrandMarquee() {
   const row = (hidden?: boolean) => (
