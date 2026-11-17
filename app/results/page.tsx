@@ -354,7 +354,9 @@ export default function ResultsPage() {
                 ? <>
                     <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checkpoints on your whole store, from the homepage to the checkout.`}</span>
                     {/* phone: three lines at most */}
-                    <span className="hidden max-[560px]:inline">{`We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}. The full report runs ${report.remaining} more on your whole store.`}</span>
+                    <span className="hidden max-[560px]:inline">{numbers
+                      ? `That's what a 10% lift is worth to you. We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}.`
+                      : `We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}. The full report runs ${report.remaining} more on your whole store.`}</span>
                   </>
                 : `${report.toFix} of ${report.checked} checkpoints failed`}
               {report.freeOnly ? '' : report.free
@@ -363,8 +365,7 @@ export default function ResultsPage() {
               {numbers && <span className="max-[560px]:hidden"> That figure is what a 10% lift in conversion is worth to you.</span>}
             </p>
 
-            {/* desktop: the score sits next to the page; tablet and phone: under it, on white */}
-            <div className="hidden lg:block">{scoreBlock}</div>
+            {scoreBlock}
 
           </div>
 
@@ -376,12 +377,11 @@ export default function ResultsPage() {
       <div className="relative mt-6 bg-[var(--surface)]">
         <div aria-hidden="true" className="absolute inset-x-0 -top-24 h-24 bg-gradient-to-b from-transparent to-[var(--surface)]" />
         <div className="relative mx-auto flex max-w-[calc(1280px+2*var(--gutter))] flex-col gap-[var(--space-20)] px-[var(--gutter)] pb-[var(--section-y)] pt-8 max-[560px]:gap-14">
-          <div className="lg:hidden">{scoreBlock}</div>
           {/* every check, next to the page it was checked on */}
-          <section id="checks" className="scroll-mt-6" aria-label="Every checkpoint on your page">
+          <section id="checks" className="scroll-mt-6" aria-label="Your page, check by check">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Every checkpoint on your page</h2>
+                <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
                     {report.freeOnly ? report.failed.length : report.toFix} to fix
