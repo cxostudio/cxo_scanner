@@ -199,7 +199,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
         {variant === 'cd' ? (
           <>
             <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
-              {estimated && cov ? `${left} more checkpoints are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
+              {estimated ? `${cov ? left : lockedCount} more checkpoints are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
               The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
