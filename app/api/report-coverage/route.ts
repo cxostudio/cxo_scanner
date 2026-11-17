@@ -10,7 +10,10 @@ import { ruleIsScannable } from '@/lib/conversionCheckpoints/filterByUrlPageType
 import { getLabels, getTestScan, listTestScans } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
+// cached at Vercel's edge too: every new instance would otherwise re-read all the labels (slow) before
+// the results page can show the offer
+const EDGE = { headers: { 'Cache-Control': 'public, s-maxage=21600, stale-while-revalidate=86400' } }
 
 // the six areas of the full report, in shopping order; checks that apply on every page (header, menu,
 // footer, speed) have their own row instead of being folded into the page that was scanned
@@ -37,7 +40,7 @@ let cache: { at: number; data: Coverage } | null = null
 const TTL = 6 * 60 * 60 * 1000
 
 export async function GET() {
-  if (cache && Date.now() - cache.at < TTL) return NextResponse.json(cache.data)
+  if (cache && Date.now() - cache.at < TTL) return NextResponse.json(cache.data, EDGE)
   const res = await getConversionCheckpointRules()
   if (!res.ok) return NextResponse.json({ error: 'Checkpoints unavailable' }, { status: 502 })
   const live = res.rules.filter((r) => ruleIsScannable(r))
@@ -111,5 +114,5 @@ export async function GET() {
     pages: pages.map((p) => (p.key === 'site' ? { ...p, hint: 'header, menu, footer, speed' } : p)),
   }
   cache = { at: Date.now(), data }
-  return NextResponse.json(data)
+  return NextResponse.json(data, EDGE)
 }
