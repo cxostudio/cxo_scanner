@@ -346,7 +346,7 @@ export default function ResultsPage() {
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
                 <>
-                  Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
+                  Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} per month</span> on the table
                 </>
               ) : (
                 <>Your {pageName.toLowerCase()} has {report.toFix} things to fix</>
@@ -355,7 +355,7 @@ export default function ResultsPage() {
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
               {report.freeOnly
                 ? <>
-                    <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checkpoints on your whole store, from the homepage to the checkout.`}</span>
+                    <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. Start with these. For the full picture, the full report runs all ${report.pageChecks} checkpoints on your store, from the homepage to the checkout.`}</span>
                     {/* phone: three lines at most */}
                     <span className="hidden max-[560px]:inline">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below.`}</span>
                   </>
@@ -363,7 +363,7 @@ export default function ResultsPage() {
               {report.freeOnly ? '' : report.free
                 ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
                 : report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
-              {numbers && <span className="max-[560px]:hidden"> That figure is what a 10% lift in conversion is worth to you.</span>}
+              
             </p>
 
             {scoreBlock}
