@@ -255,7 +255,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
               ))}
             </ul>
             {/* the bonus: the real-store screenshots attached to the checkpoints */}
-            <div className="flex items-start gap-3 rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4">
+            <div className="flex items-start gap-3 rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4 max-[560px]:flex-col max-[560px]:gap-2">
               <span className="shrink-0 rounded-full bg-[var(--text)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--text-inverse)]">Bonus</span>
               <p className="text-[14px] leading-snug text-[var(--text)]">
                 <b>{cov && cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : 'Hundreds of'} real-store screenshots</b>
