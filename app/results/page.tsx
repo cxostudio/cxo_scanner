@@ -99,6 +99,8 @@ export default function ResultsPage() {
       setUrl(localStorage.getItem('scanUrl') || '')
       setEmail(localStorage.getItem('scanEmail') || '')
       setPageTotal(Number(localStorage.getItem('scanPageChecks') || 0))
+      // the free scan is counted against every Live check on the store (the full report), never per page
+      fetch(api('/report-coverage')).then((r) => r.json()).then((c: { total?: number }) => c?.total && setPageTotal(c.total)).catch(() => {})
       setLabId(localStorage.getItem('scanLabId'))
       const g = new URLSearchParams(window.location.search).get('gate')
       if (g === 'b' || g === 'cd') setGate(g)
@@ -295,7 +297,7 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} checks run` : `${report.pageChecks} checks`}
+              {host} · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} store checks run` : `${report.pageChecks} checks`}
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -308,7 +310,7 @@ export default function ResultsPage() {
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
               {report.freeOnly
-                ? `We ran ${report.freeRun} of the ${report.pageChecks} checks for this page and found ${report.failed.length} issues, with the fix for each below. The full report runs the other ${report.remaining}, plus every check on the rest of your store.`
+                ? `We ran ${report.freeRun} checks on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checks on your whole store, from the homepage to the checkout.`
                 : `${report.toFix} of ${report.checked} checks failed`}
               {report.freeOnly ? '' : report.free
                 ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
@@ -493,6 +495,7 @@ export default function ResultsPage() {
             money={numbers}
             qualified={qualified}
             checked={report ? (report.freeOnly ? report.freeRun : report.checked) : 0}
+            total={report?.freeOnly ? report.pageChecks : 0}
             toFix={report ? (report.freeOnly ? report.failed.length : report.toFix) : 0}
             eur={eur}
             shortEur={shortEur}

@@ -54,6 +54,7 @@ export function YourPath({
   callUrl,
   fullScanUrl,
   host = '',
+  total = 0,
 }: {
   money: Money | null
   qualified: boolean
@@ -64,6 +65,7 @@ export function YourPath({
   callUrl: string
   fullScanUrl: string
   host?: string
+  total?: number
 }) {
   const [lift, setLift] = useState(0.1)
   const ref = useRef<HTMLElement | null>(null)
@@ -162,7 +164,7 @@ export function YourPath({
           <p className="text-sm font-semibold text-[var(--text-muted)]">What’s next</p>
           <p className="mt-2 font-[family-name:var(--font-display)] text-[22px] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)] sm:text-[26px]">One page scanned. Your whole store is next.</p>
           <p className="mt-3 text-[15px] leading-[1.6] text-[var(--text-muted)]">
-            This was a snapshot: one product page, {checked} checkpoints. If the findings ring true, the full scan does the same on every page your shoppers go through.
+            This was a snapshot: {checked}{total ? ` of our ${total}` : ''} checks, on one page. If the findings ring true, the full report runs {total ? `all ${total}` : 'every check'} on every page your shoppers go through.
           </p>
         </div>
         <ol className="flex min-w-0 flex-col">
@@ -189,7 +191,7 @@ export function YourPath({
             <div className="min-w-0">
               <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">Today: your product page scan</p>
               <p className="mt-1 text-[15px] leading-[1.6] text-[var(--text-muted)]">
-                {checked} checkpoints checked, <strong className="text-[var(--text)]">{toFix} to fix</strong>. Start with the high-impact, easy ones above.
+                {checked} checks run, <strong className="text-[var(--text)]">{toFix} to fix</strong>. Start with the high-impact, easy ones above.
               </p>
             </div>
           </li>
@@ -213,9 +215,9 @@ export function YourPath({
               className="flex min-w-0 flex-col gap-3"
               style={{ opacity: on ? 1 : 0.55, transform: on ? 'none' : 'translateY(6px)', transition: `opacity .5s ${ease} 1.35s, transform .5s ${ease} 1.35s` }}
             >
-              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">Next: your whole store, home to checkout</p>
+              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">{total ? `Next: all ${total} checks, home to checkout` : 'Next: your whole store, home to checkout'}</p>
               <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
-              <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart']} />
+              <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'On every page: header, menu, footer, speed']} />
               <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
                 Get the full report, €49 <Arrow />
               </a>

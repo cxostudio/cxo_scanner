@@ -86,7 +86,7 @@ export function LockedRow({ r, variant, open, onToggle, buyUrl, price }: { r: Sc
 
 
 /** After the free findings: the issues the free scan did not run, blurred, with the way to unlock them. */
-export function LockedBlock({ count, pageName, buyUrl, price }: { count: number; pageName: string; buyUrl: string; price: string }) {
+export function LockedBlock({ count, buyUrl, price }: { count: number; pageName?: string; buyUrl: string; price: string }) {
   const widths = ['72%', '58%', '84%']
   return (
     <div className="relative overflow-hidden rounded-[16px] border border-dashed border-[var(--border-strong)] bg-[var(--surface)]">
@@ -103,7 +103,7 @@ export function LockedBlock({ count, pageName, buyUrl, price }: { count: number;
       </div>
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--surface)]/70 px-5 text-center">
         <p className="inline-flex items-center gap-2 font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--text)]">
-          <LockIcon /> {count} more checks on this {pageName.toLowerCase()}
+          <LockIcon /> {count} more checks on your whole store
         </p>
         <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-5 !py-2 text-sm">
           Unlock the full report, {price} <Arrow />
@@ -160,7 +160,8 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
     if (r.failed) a.found++
     scanned.set(k, a)
   }
-  const left = cov ? cov.pages.reduce((n, p) => n + Math.max(0, p.checks - (scanned.get(p.key)?.run || 0)), 0) : 0
+  // one count everywhere: every Live check on the store, minus the ones the free scan ran
+  const left = cov ? Math.max(0, cov.total - ran.length) : 0
   const buy = (
     <a key="buy" href={buyUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'}`}>
       Get the full report, {price} <Arrow />
@@ -183,7 +184,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
               {estimated && cov ? `${left} more checks are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              The free scan looked at {ran.length || 'a few'} checks on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
+              The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checks, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
             </p>
             {cov && (
               <div className="grid grid-cols-4 gap-2 max-[810px]:grid-cols-2">
@@ -209,14 +210,10 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
                           <span className="min-w-0 text-sm font-semibold text-[var(--text)]">
                             {p.label}{' '}
-                            <span className="font-normal text-[var(--text-muted)]">· {sc ? 'free scan, partly' : p.hint || 'not scanned'}</span>
+                            <span className="font-normal text-[var(--text-muted)]">· {sc && estimated ? <span className="text-[var(--result-fail-fg)]">{sc.found} {sc.found === 1 ? 'issue' : 'issues'} in the free scan</span> : p.hint || 'not scanned yet'}</span>
                           </span>
                           <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                            {sc && estimated ? (
-                              <>
-                                <b className="text-[var(--result-fail-fg)]">{sc.found} {sc.found === 1 ? "issue" : "issues"} found</b> · {sc.run} of {p.checks} checks run
-                              </>
-                            ) : sc ? (
+                            {sc && !estimated ? (
                               <>
                                 <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
                               </>
