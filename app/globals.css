@@ -447,7 +447,7 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 .cxo-laptop-bar { display: flex; gap: 4px; padding: 4px 6px; background: var(--surface-muted); border-radius: 4px 4px 0 0; }
 .cxo-laptop-bar i { width: 5px; height: 5px; border-radius: 50%; background: var(--border-strong); }
 .cxo-laptop-view { position: relative; aspect-ratio: 16 / 10; background: var(--surface); overflow: hidden; border-radius: 0 0 2px 2px; }
-.cxo-laptop-page { position: absolute; inset: 0 36% 0 0; background-color: var(--surface); background-size: 100% auto; background-position: top center; background-repeat: no-repeat; overflow: hidden; }
+.cxo-laptop-page { position: absolute; inset: 0 36% 0 0; background-color: var(--surface); background-size: 100% auto; background-position: top center; background-repeat: no-repeat; overflow: hidden; container-type: inline-size; }
 .cxo-laptop-page::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--surface) 30%, transparent); }
 .cxo-laptop-band { position: absolute; top: 0; bottom: 0; left: 0; width: 22%; z-index: 1; background: color-mix(in srgb, var(--accent) 22%, transparent); border-right: 2px solid var(--accent); animation: cxo-laptop-scan 4.5s var(--ease, ease-in-out) infinite alternate; }
 @keyframes cxo-laptop-scan { from { transform: translateX(-100%); } to { transform: translateX(460%); } }
