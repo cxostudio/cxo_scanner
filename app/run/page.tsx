@@ -479,6 +479,10 @@ export default function Home() {
 
   const BATCH_MAX_ATTEMPTS = 2; // initial run + one repeat if any error occurs
 
+  // streamed progress: what the scan is doing now, and the checkpoints already judged (titles only)
+  const [liveStage, setLiveStage] = useState<string | null>(null);
+  const [liveChecked, setLiveChecked] = useState<{ id: string; title: string }[]>([]);
+
   const processBatches = async (
     batches: BatchData[],
     scanMeta: { email: string; scanId: string },
@@ -578,7 +582,9 @@ export default function Home() {
             });
           }, pulseMs);
 
-          const response = await fetch(api("/scan"), {
+          setLiveChecked([]);
+          setLiveStage(null);
+          const response = await fetch(api("/scan?stream=1"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -606,7 +612,39 @@ export default function Home() {
             throw new Error(message);
           }
 
-          const data = await response.json();
+          // streamed scan: one JSON line per event (stages, checks done), the last one carries the results
+          let data: { results?: unknown; labId?: string; screenshot?: string | null } = {};
+          if ((response.headers.get("content-type") || "").includes("ndjson") && response.body) {
+            const reader = response.body.getReader();
+            const dec = new TextDecoder();
+            let buf = "";
+            let doneCount = 0;
+            const total = Math.max(1, batch.rules.length);
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let nl: number;
+              while ((nl = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, nl).trim();
+                buf = buf.slice(nl + 1);
+                if (!line) continue;
+                let ev: { type: string; stage?: string; items?: { id: string; title: string }[]; payload?: typeof data; error?: string; code?: string };
+                try { ev = JSON.parse(line); } catch { continue; }
+                if (ev.type === "stage" && ev.stage) setLiveStage(ev.stage);
+                else if (ev.type === "checked" && ev.items) {
+                  doneCount += ev.items.length;
+                  setLiveChecked((prev) => [...prev, ...ev.items!]);
+                  const frac = Math.min(1, doneCount / total);
+                  setProgress((prev) => (prev ? { current: Math.max(prev.current, segmentStart + Math.floor(frac * (SCAN_PROGRESS_UNITS_PER_BATCH - 1))), total: prev.total } : prev));
+                } else if (ev.type === "done" && ev.payload) data = ev.payload;
+                else if (ev.type === "error") throw Object.assign(new Error(ev.error || "The scan failed."), { final: ev.code !== "failed" });
+              }
+            }
+            if (!data.results) throw new Error("The scan ended without results.");
+          } else {
+            data = await response.json();
+          }
           const batchResults = ScanResultsSchema.parse(data.results);
           // test scans are saved to the lab (app/lab): the results page links there
           if (data.labId) {
@@ -1496,6 +1534,23 @@ export default function Home() {
                 );
               })}
             </div>
+            {/* live: the checks as they are judged, newest first (titles only, the verdicts come with the results) */}
+            {(liveStage || liveChecked.length > 0) && (
+              <div className="mt-[var(--space-6)] border-t border-[var(--border)] pt-[var(--space-4)]" aria-live="polite">
+                <p className="mb-2 flex items-center justify-between text-[13px] font-semibold text-[var(--text)]">
+                  <span>{liveChecked.length ? "Checked just now" : LIVE_STAGE[liveStage || ""] || "Working on your page"}</span>
+                  {liveChecked.length > 0 && <span className="tabular-nums text-[var(--text-muted)]">{liveChecked.length} done</span>}
+                </p>
+                <ul className="flex flex-col gap-1.5">
+                  {liveChecked.slice(-5).reverse().map((c, i) => (
+                    <li key={c.id} className="cxo-live-item flex items-start gap-2 text-[13px] leading-snug text-[var(--text-muted)]" style={{ opacity: 1 - i * 0.16 }}>
+                      <span className="mt-[2px] shrink-0 text-[var(--result-pass-fg)]"><CheckMark /></span>
+                      <span className="min-w-0">{c.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </aside>
         </div>
       )}
@@ -1507,6 +1562,14 @@ export default function Home() {
 const Line = ({ d }: { d: string }) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: d }} />
 );
+// what the scan reports while the page is captured (before the first checks come back)
+const LIVE_STAGE: Record<string, string> = {
+  opened: "Your page is open",
+  desktop: "Desktop screenshots taken",
+  phone: "Phone screenshots taken",
+  cart: "Add to cart tested",
+  captured: "Page captured, running the checks",
+};
 // what happens under the hood, in five short lines; step 3 carries the real checkpoint count
 const stepLabels = (rules: number) => [
   "Loading your page",

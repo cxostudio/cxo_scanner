@@ -1188,6 +1188,36 @@ export async function POST(request: NextRequest) {
 
     // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
     if (useV2) {
+      // streaming (?stream=1): one JSON line per event while the scan runs (the page opened, the first
+      // screenshots, which checkpoints are done), then the same final payload as the plain call
+      if (request.nextUrl.searchParams.get('stream') === '1') {
+        const enc = new TextEncoder()
+        const stream = new ReadableStream({
+          async start(controller) {
+            const send = (o: unknown) => {
+              try {
+                controller.enqueue(enc.encode(`${JSON.stringify(o)}\n`))
+              } catch {}
+            }
+            try {
+              const v2 = await runScanV2(validUrl, v2Rules, apiKey, {
+                onStage: (e) => send({ type: 'stage', ...e }),
+                onChecked: (ids) => send({ type: 'checked', items: ids.map((id) => ({ id, title: v2Rules.find((r) => r.id === id)?.title || '' })) }),
+              })
+              if (email && scanId) await registerScan(email, scanId).catch(() => {})
+              if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
+              let labId: string | undefined
+              if (email && isTestEmail(email))
+                labId = await saveTestScan({ id: scanId || `scan-${Date.now()}`, url: validUrl, email, niche: v2.niche, model: v2.model, rules: v2Rules, results: v2.results, evidence: v2.evidence }).catch(() => undefined)
+              send({ type: 'done', payload: { results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId } })
+            } catch (e) {
+              send({ type: 'error', error: e instanceof PageCheckError ? e.message : 'The scan failed. Please try again.', code: e instanceof PageCheckError ? e.code : 'failed' })
+            }
+            controller.close()
+          },
+        })
+        return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } })
+      }
       try {
         const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})

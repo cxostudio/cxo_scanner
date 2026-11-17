@@ -425,3 +425,10 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 @media (prefers-reduced-motion: reduce) {
   .ux-ray-scan-line { animation: none; top: 40%; }
 }
+
+/* streamed scan: each judged check slides in */
+@keyframes cxo-live-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+.cxo-live-item { animation: cxo-live-in var(--duration-base, 240ms) var(--ease, ease-out); }
+@media (prefers-reduced-motion: reduce) { .cxo-live-item { animation: none; } }

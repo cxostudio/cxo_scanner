@@ -322,7 +322,7 @@ function majorityNiche(answers: (string | undefined)[]): Niche {
   return best
 }
 
-export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promise<{ niche: Niche; verdicts: Verdict[]; usage: Usage }> {
+export async function judge(ev: Evidence, rules: Rule[], apiKey: string, onGroup?: (ids: string[]) => void): Promise<{ niche: Niche; verdicts: Verdict[]; usage: Usage }> {
   const client = new OpenRouter({ apiKey })
   const usage: Usage = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
   // one set of requests per part of the page, each with only that part's images; a stable order
@@ -339,7 +339,7 @@ export async function judge(ev: Evidence, rules: Rule[], apiKey: string): Promis
     const shared = { text: evidenceText(ev, sc), imgs: images(ev, sc, dev) }
     for (let i = 0; i < list.length; i += GROUP_SIZE) jobs.push({ group: list.slice(i, i + GROUP_SIZE), shared })
   }
-  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage)))
+  const out = await Promise.all(jobs.map((j) => judgeGroup(client, ev, j.group, j.shared, usage).then((o) => (onGroup?.(j.group.map((r) => r.id)), o))))
   const verdicts = out.flatMap((o) => o.verdicts)
   // checkpoints the model skipped get one more try, together
   // checkpoints the model skipped get one more try, each with ITS OWN part of the page: a skipped checkout

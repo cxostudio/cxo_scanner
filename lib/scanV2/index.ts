@@ -4,7 +4,7 @@
 import { applyGuards } from './guards'
 
 const EMPTY_CART = 'rec53BnzEh3jbjz4O'
-import { captureEvidence, PageCheckError, type Evidence, type Tile } from './capture'
+import { captureEvidence, PageCheckError, type Evidence, type Tile, type StageEvent } from './capture'
 import { judge, V2_MODEL, type Niche, type Rule, type Verdict } from './judge'
 import { MEASURED } from './measured'
 
@@ -134,7 +134,7 @@ async function galleryTiles(ev: Evidence): Promise<Tile[]> {
 /** Minified files and browser caching: Shopify handles its own, apps often do not. */
 const APP_CAUSED = new Set(['rec18dg644AXcffV0', 'receyw3XXgQfA6ylx', 'recJIKYF3A1cqKzEn'])
 
-export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean; gallery?: boolean } = {}) {
+export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string, opts: { guards?: boolean; gallery?: boolean; onChecked?: (ids: string[]) => void } = {}) {
   if (opts.gallery) (ev as { useGallery?: boolean }).useGallery = true
   ev.sellsOnline = sellsOnline(ev)
   await backfillDiscounts(ev)
@@ -170,7 +170,9 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
     if (r.status === 'Draft' && r.method === 'Measured') settled.set(r.id, { answer: 'unknown', evidence: UNMEASURED })
   }
   const measured = settled.size
-  const { niche, verdicts, usage } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey)
+  // measured checks are done before any model call: report them at once
+  if (settled.size) opts.onChecked?.(Array.from(settled.keys()))
+  const { niche, verdicts, usage } = await judge(ev, rules.filter((r) => !settled.has(r.id)), apiKey, opts.onChecked)
   const byId = new Map<string, Answer & { coveredByShopify?: boolean }>(verdicts.map((v) => [v.id, v]))
   for (const [id, m] of Array.from(settled)) byId.set(id, m)
   // a page that does not sell online: buying checkpoints are not relevant, whatever the model said
@@ -221,12 +223,13 @@ export async function judgeEvidence(ev: Evidence, rules: Rule[], apiKey: string,
   return { results, niche, measured, usage }
 }
 
-export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean } = {}) {
+export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts: { extended?: boolean; onStage?: (e: StageEvent) => void; onChecked?: (ids: string[]) => void } = {}) {
   const t0 = Date.now()
   // the extra capture steps run when a checkpoint needs them: always in test mode
-  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft') })
+  const ev = await captureEvidence(url, { extended: opts.extended || rules.some((r) => r.status === 'Draft'), onStage: opts.onStage })
+  opts.onStage?.({ stage: 'captured' })
   const t1 = Date.now()
-  const { results, niche, measured, usage } = await judgeEvidence(ev, rules, apiKey)
+  const { results, niche, measured, usage } = await judgeEvidence(ev, rules, apiKey, { onChecked: opts.onChecked })
   const screenshot = ev.desktopTiles[0]?.dataUrl ?? null
   console.log(`[scanV2] ${url} ${rules.length} checkpoints, niche ${niche}, capture ${t1 - t0}ms judge ${Date.now() - t1}ms model ${V2_MODEL()} tiles ${ev.desktopTiles.length}+${ev.mobileTiles.length}`)
   const diag = {

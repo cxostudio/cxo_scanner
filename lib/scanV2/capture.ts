@@ -2361,7 +2361,8 @@ function sweepStaleProfiles() {
  * add-to-cart, hover measurement, mobile menu), about 20 to 45 seconds. On for test scans; the free scan turns
  * them on once such a checkpoint is Live.
  */
-export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
+export type StageEvent = { stage: 'opened' | 'desktop' | 'phone' | 'cart' | 'captured'; image?: string }
+export async function captureEvidence(rawUrl: string, opts: { extended?: boolean; onStage?: (e: StageEvent) => void } = {}): Promise<Evidence> {
   const t0 = Date.now()
   // where the time goes, per step (kept in the facts, shown in the lab diagnostics)
   const stages: Record<string, number> = {}
@@ -2387,6 +2388,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       throw new PageCheckError('unreachable', `We couldn't open this page (${String(e?.message || e).slice(0, 80)}).`)
     })
     mark('desktopOpen')
+    opts.onStage?.({ stage: 'opened' })
 
     // page check: is this really the product page?
     const status = res?.status() ?? 200
@@ -2480,6 +2482,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
         const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * (await shareP)) / MOBILE.height)))
         mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
+        opts.onStage?.({ stage: 'phone', image: mobileTiles[0]?.dataUrl })
         if (bannerShot) mobileTiles.push({ label: 'mobile first screen as it opens, with the cookie banner (only for the cookie banner check)', dataUrl: `data:image/jpeg;base64,${bannerShot}` })
         if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
         mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
@@ -2555,6 +2558,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       if (text.trim().length > 200 && desktopTiles.length) break
     }
     resolveShare(desktopShare)
+    opts.onStage?.({ stage: 'desktop', image: desktopTiles[0]?.dataUrl })
     // product tabs: opened after the page screenshots, so those show the page as a shopper lands on it
     if (detectPageTypeFromUrl(finalUrl) === 'product') {
       // off by default: on the 10 labelled product pages it did not beat the screenshots (image checkpoints
@@ -2636,6 +2640,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         : undefined
     await desktop.close().catch(() => {})
     mark('desktopCart')
+    opts.onStage?.({ stage: 'cart' })
 
     await (mobileP ?? runMobile())
     if (remoteP) {
