@@ -25,8 +25,10 @@ export function ScanLaptop({ shot, fallback, passed }: { shot: LaptopShot | null
     })
     .slice(0, 2)
     .map((p) => ({ x: ((p.box.x + p.box.w / 2) / shot!.width) * 100, y: ((p.box.y + p.box.h / 2 - top) / viewH) * 100, n: p.n, fail: true }))
+  // until the findings are pinned (or if pinning failed): two generic findings near the title and the buy box
+  const shown = pins.length ? pins : [{ x: 70, y: 28, n: undefined, fail: true }, { x: 74, y: 62, n: undefined, fail: true }]
   // plus one passed checkpoint, on the header (the checks that run on every page)
-  const cards = [...pins, ...(passed > 0 ? [{ x: 55, y: 7, n: undefined, fail: false }] : [])].sort((a, b) => a.y - b.y).slice(0, 3)
+  const cards = [...shown, ...(passed > 0 ? [{ x: 55, y: 7, n: undefined, fail: false }] : [])].sort((a, b) => a.y - b.y).slice(0, 3)
   const rows = cards.map((c, i) => ({ ...c, cy: 12 + i * 30 }))
   const pos = shot ? `center ${-((top / shot.width) * 100).toFixed(2)}cqw` : 'top center'
 
@@ -48,7 +50,7 @@ export function ScanLaptop({ shot, fallback, passed }: { shot: LaptopShot | null
               {rows.map((c, i) => (
                 <div key={i} className="cxo-laptop-card" style={{ top: `${c.cy}%`, borderTopColor: c.fail ? 'var(--result-fail-fg)' : 'var(--result-pass-fg)' }}>
                   <b>
-                    {c.fail ? `Checkpoint ${c.n ?? i + 1}` : 'Checkpoint'}
+                    {c.fail && c.n ? `Checkpoint ${c.n}` : 'Checkpoint'}
                     <span style={{ color: c.fail ? 'var(--result-fail-fg)' : 'var(--result-pass-fg)' }}>{c.fail ? '✕' : '✓'}</span>
                   </b>
                   <em />
