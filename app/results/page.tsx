@@ -491,7 +491,8 @@ export default function ResultsPage() {
                 )}
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
-                {gate ? (
+                {/* free scan: this section only gives the findings; the report is pitched in "What's next" */}
+                {gate && report.freeOnly ? null : gate ? (
                   <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
                 ) : (
                 <LockedFindings
@@ -521,6 +522,20 @@ export default function ResultsPage() {
             fullScanUrl={buyUrl}
             price={offer.price}
             host={host}
+            offerSlot={
+              gate && report?.freeOnly ? (
+                <FullStoreOffer embedded variant="cd" pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} lockedCount={report.remaining} estimated freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
+              ) : undefined
+            }
+            laptop={
+              report?.freeOnly
+                ? {
+                    shot: located.desktop && typeof located.desktop === 'object' ? { ...located.desktop, pins: located.desktop.pins.map((p) => ({ box: p.box, n: report.num.get(p.findingId) })) } : null,
+                    fallback: deskImg || '',
+                    passed: results.filter((r) => r.status === 'pass').length,
+                  }
+                : undefined
+            }
           />
         </div>
       </div>
