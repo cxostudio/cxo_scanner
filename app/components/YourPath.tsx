@@ -55,6 +55,7 @@ export function YourPath({
   fullScanUrl,
   host = '',
   total = 0,
+  price = '€49',
 }: {
   money: Money | null
   qualified: boolean
@@ -66,6 +67,7 @@ export function YourPath({
   fullScanUrl: string
   host?: string
   total?: number
+  price?: string
 }) {
   const [lift, setLift] = useState(0.1)
   const ref = useRef<HTMLElement | null>(null)
@@ -219,7 +221,7 @@ export function YourPath({
               <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
               <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'On every page: header, menu, footer, speed']} />
               <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
-                Get the full report, €49 <Arrow />
+                Get the full report, {price} <Arrow />
               </a>
             </div>
           </li>

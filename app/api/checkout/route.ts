@@ -3,7 +3,8 @@
 // After paying, Stripe sends them to /scan/order?session_id=…; a cancel goes back to the results.
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
-import { reportPrice, safeOrigin, stripe } from '@/lib/stripe'
+import { offerPrice, reportPrice, safeOrigin, stripe } from '@/lib/stripe'
+import { offerFor } from '@/lib/offer'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +16,9 @@ export async function GET(req: NextRequest) {
   const origin = safeOrigin(q.get('back'), req.nextUrl.origin)
   const results = `${origin}/scan/results`
   try {
-    const price = await reportPrice()
+    // within 48 hours of the email's first free scan: the offer price, checked here, not trusted from the page
+    const offer = await offerFor(email)
+    const price = offer.active ? await offerPrice() : await reportPrice()
     const params: Stripe.Checkout.SessionCreateParams = {
       mode: 'payment',
       line_items: [{ price: price.id, quantity: 1 }],
@@ -29,7 +32,7 @@ export async function GET(req: NextRequest) {
       },
       allow_promotion_codes: true,
       automatic_tax: { enabled: true },
-      metadata: { storeUrl, email, lab, product: 'full_report' },
+      metadata: { storeUrl, email, lab, product: 'full_report', offer: offer.active ? '48h' : '' },
       payment_intent_data: { description: storeUrl ? `Full conversion report: ${storeUrl}` : 'Full conversion report', metadata: { storeUrl } },
       success_url: `${origin}/scan/order?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: results,

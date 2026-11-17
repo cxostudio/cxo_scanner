@@ -134,3 +134,19 @@ export async function updateLead(id: string, patch: { status?: LeadStatus; notes
   const { error } = await supabase().from('leads').update(row).eq('id', id)
   if (error) throw new Error(error.message)
 }
+
+/** When this email ran its first free scan (the start of its 48-hour offer), or null if unknown. */
+export async function firstScanAt(email: string): Promise<Date | null> {
+  try {
+    const { data, error } = await supabase()
+      .from('lead_scans')
+      .select('created_at')
+      .eq('email', email.trim().toLowerCase())
+      .order('created_at', { ascending: true })
+      .limit(1)
+    if (error || !data?.[0]) return null
+    return new Date(data[0].created_at as string)
+  } catch {
+    return null
+  }
+}
