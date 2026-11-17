@@ -277,6 +277,45 @@ export default function ResultsPage() {
   const deskImg = (located.desktop && typeof located.desktop === 'object' ? located.desktop.screenshot : null) || preview.desktop
   const phoneImg = (located.mobile && typeof located.mobile === 'object' ? located.mobile.screenshot : null) || preview.mobile
 
+  // score + the four areas, compact
+  const scoreBlock = (
+    <div className="flex flex-wrap items-center gap-6 border-y border-[var(--border)] py-5">
+      <div className="flex items-center gap-4">
+        <Ring score={report.score} color={scoreTone.fg} />
+        <div>
+          <p className="text-[13px] font-semibold text-[var(--text-muted)]">Conversion score</p>
+          <p className="font-[family-name:var(--font-display)] text-[20px] font-bold" style={{ color: scoreTone.fg }}>
+            {scoreTone.word}
+          </p>
+        </div>
+      </div>
+      <div className="grid min-w-[240px] flex-1 grid-cols-2 gap-x-5 gap-y-3">
+        {report.areas.map((a) => {
+          const t = TONE[tone(a.passed / a.total)]
+          return (
+            <div key={a.id} className="min-w-0">
+              <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                <span className="truncate font-semibold text-[var(--text)]" title={a.label}>{a.short}</span>
+                <span className="tabular-nums font-semibold" style={{ color: t.fg }}>
+                  {a.passed}/{a.total}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: t.fg }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(a.passed / a.total) * 100}%` }}
+                  transition={{ duration: 1.2, ease: [0.4, 0, 0.2, 1] }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <main className="min-h-screen">
       {/* test scans only (CXO Studio and +test emails): label this scan blind in the lab */}
@@ -297,7 +336,9 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} store checks run` : `${report.pageChecks} checks`}
+              {host}
+              {/* phone: the domain only, to save room */}
+              <span className="max-[560px]:hidden"> · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} store checkpoints run` : `${report.pageChecks} checkpoints`}</span>
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -310,50 +351,20 @@ export default function ResultsPage() {
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
               {report.freeOnly
-                ? `We ran ${report.freeRun} checks on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checks on your whole store, from the homepage to the checkout.`
-                : `${report.toFix} of ${report.checked} checks failed`}
+                ? <>
+                    <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checkpoints on your whole store, from the homepage to the checkout.`}</span>
+                    {/* phone: three lines at most */}
+                    <span className="hidden max-[560px]:inline">{`We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}. The full report runs ${report.remaining} more on your whole store.`}</span>
+                  </>
+                : `${report.toFix} of ${report.checked} checkpoints failed`}
               {report.freeOnly ? '' : report.free
                 ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
                 : report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
-              {numbers && ' That figure is what a 10% lift in conversion is worth to you.'}
+              {numbers && <span className="max-[560px]:hidden"> That figure is what a 10% lift in conversion is worth to you.</span>}
             </p>
 
-            {/* score + the four areas, compact */}
-            <div className="flex flex-wrap items-center gap-6 border-y border-[var(--border)] py-5">
-              <div className="flex items-center gap-4">
-                <Ring score={report.score} color={scoreTone.fg} />
-                <div>
-                  <p className="text-[13px] font-semibold text-[var(--text-muted)]">Conversion score</p>
-                  <p className="font-[family-name:var(--font-display)] text-[20px] font-bold" style={{ color: scoreTone.fg }}>
-                    {scoreTone.word}
-                  </p>
-                </div>
-              </div>
-              <div className="grid min-w-[240px] flex-1 grid-cols-2 gap-x-5 gap-y-3">
-                {report.areas.map((a) => {
-                  const t = TONE[tone(a.passed / a.total)]
-                  return (
-                    <div key={a.id} className="min-w-0">
-                      <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                        <span className="truncate font-semibold text-[var(--text)]" title={a.label}>{a.short}</span>
-                        <span className="tabular-nums font-semibold" style={{ color: t.fg }}>
-                          {a.passed}/{a.total}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
-                        <motion.div
-                          className="h-full rounded-full"
-                          style={{ background: t.fg }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(a.passed / a.total) * 100}%` }}
-                          transition={{ duration: 1.2, ease: [0.4, 0, 0.2, 1] }}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            {/* desktop: the score sits next to the page; tablet and phone: under it, on white */}
+            <div className="hidden lg:block">{scoreBlock}</div>
 
           </div>
 
@@ -365,11 +376,12 @@ export default function ResultsPage() {
       <div className="relative mt-6 bg-[var(--surface)]">
         <div aria-hidden="true" className="absolute inset-x-0 -top-24 h-24 bg-gradient-to-b from-transparent to-[var(--surface)]" />
         <div className="relative mx-auto flex max-w-[calc(1280px+2*var(--gutter))] flex-col gap-[var(--space-20)] px-[var(--gutter)] pb-[var(--section-y)] pt-8 max-[560px]:gap-14">
+          <div className="lg:hidden">{scoreBlock}</div>
           {/* every check, next to the page it was checked on */}
-          <section id="checks" className="scroll-mt-6" aria-label="Your page, check by check">
+          <section id="checks" className="scroll-mt-6" aria-label="Every checkpoint on your page">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
+                <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Every checkpoint on your page</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
                     {report.freeOnly ? report.failed.length : report.toFix} to fix
@@ -381,18 +393,21 @@ export default function ResultsPage() {
                   {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
                   {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
-                  {report.freeOnly ? ` · ${report.remaining} more checks in the full report` : report.hidden > 0 && ` · ${report.hidden} more in the full report`}
-                  {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
+                  {/* phone: what was found only */}
+                  <span className="max-[560px]:hidden">
+                    {report.freeOnly ? ` · ${report.remaining} more checkpoints in the full report` : report.hidden > 0 && ` · ${report.hidden} more in the full report`}
+                    {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
+                  </span>
                 </p>
               </div>
-              <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px]">
+              <div role="group" aria-label="Device" className="inline-flex gap-0.5 max-[560px]:flex max-[560px]:w-full rounded-full bg-[var(--surface-muted)] p-[3px]">
                 {(['desktop', 'mobile'] as Device[]).map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setDevice(d)}
                     aria-pressed={device === d}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 max-[560px]:flex-1 max-[560px]:py-2 text-[13px] font-semibold transition-colors ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}
                   >
                     {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}
                     {d === 'desktop' ? 'Desktop' : 'Mobile'}

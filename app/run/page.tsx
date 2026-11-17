@@ -1511,7 +1511,7 @@ const Line = ({ d }: { d: string }) => (
 const stepLabels = (rules: number) => [
   "Loading your page",
   "Scanning every element",
-  `Running ${rules || 40} checks`,
+  `Running ${rules || 50} checkpoints`,
   "Calculating lost revenue",
   "Building your action plan",
 ];
