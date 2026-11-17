@@ -7,14 +7,19 @@ import { ChevronDown } from 'lucide-react'
 import { z } from 'zod'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { YourPath } from '../components/YourPath'
+import { LockedFindings } from '../components/LockedFindings'
+import { LockedRow, FullStoreOffer, LockedBlock } from '../components/PitchMockups'
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
+import { useOffer } from '../components/useOffer'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
 
 // Calendly once available; until then the existing booking form (same as YourPath)
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
+// the paid full report (a payment link); until it exists, the full-scan page
+const FULL_REPORT_PRICE = process.env.NEXT_PUBLIC_FULL_REPORT_PRICE || ''
 
 const ResultSchema = z.array(
   z.object({
@@ -24,6 +29,7 @@ const ResultSchema = z.array(
     reason: z.string(),
     status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
     coveredByShopify: z.boolean().optional(),
+    freeScan: z.boolean().optional(),
     checkpoint: z
       .object({
         requiredActions: z.string(),
@@ -71,6 +77,8 @@ const Arrow = () => (
 export default function ResultsPage() {
   const [results, setResults] = useState<ScanResult[] | null>(null)
   const [url, setUrl] = useState('')
+  const [email, setEmail] = useState('')
+  const [pageTotal, setPageTotal] = useState(0)
   const [numbers, setNumbers] = useState<Estimate | null>(null)
   const [revenueBand, setRevenueBand] = useState('')
   const [preview, setPreview] = useState<{ desktop: string | null; mobile: string | null }>({ desktop: null, mobile: null })
@@ -79,7 +87,11 @@ export default function ResultsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
+  // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
+  const [gate, setGate] = useState<'' | 'b' | 'cd'>('cd')
   const [labId, setLabId] = useState<string | null>(null)
+  // the 48-hour offer after the first free scan (server-side; lab scans see the regular price)
+  const offer = useOffer(email, !labId)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -88,7 +100,14 @@ export default function ResultsPage() {
       setRevenueBand(rev)
       setNumbers(estimate(rev, localStorage.getItem('scanAov') || '', localStorage.getItem('scanCr') || ''))
       setUrl(localStorage.getItem('scanUrl') || '')
+      setEmail(localStorage.getItem('scanEmail') || '')
+      setPageTotal(Number(localStorage.getItem('scanPageChecks') || 0))
+      // the free scan is counted against every Live check on the store (the full report), never per page
+      fetch(api('/report-coverage?lite=1')).then((r) => r.json()).then((c: { total?: number }) => c?.total && setPageTotal(c.total)).catch(() => {})
       setLabId(localStorage.getItem('scanLabId'))
+      const g = new URLSearchParams(window.location.search).get('gate')
+      if (g === 'b' || g === 'cd') setGate(g)
+      else if (g === 'a') setGate('')
       const raw = localStorage.getItem('scanResults')
       if (raw) {
         const parsed = ResultSchema.parse(JSON.parse(raw))
@@ -113,10 +132,12 @@ export default function ResultsPage() {
     if (!failed.length) return
     const ctrls: AbortController[] = []
     ;(['desktop', 'mobile'] as Device[]).forEach((d) => {
-      const key = `scanLocate:${d}`
+      // v3: drops copies saved before the full-page capture fix. Each new scan clears these too
+      // (app/run), so a saved copy only serves reloads of the same results.
+      const key = `scanLocate:v3:${d}`
       try {
         const cached = JSON.parse(localStorage.getItem(key) || 'null') as { url: string; data: Located } | null
-        if (cached?.url === url && cached.data?.screenshot) {
+        if (cached?.url === url && cached.data?.screenshot && cached.data.pins?.length) {
           setLocated((p) => ({ ...p, [d]: cached.data }))
           return
         }
@@ -146,24 +167,53 @@ export default function ResultsPage() {
 
   const report = useMemo(() => {
     if (!results) return null
+    // free scan: only the checkpoints ticked "Free scan" are shown; the other findings are counted and locked
+    // (test scans from the lab show everything)
+    const free = !labId && results.some((r) => r.freeScan)
+    const shown = free ? results.filter((r) => r.freeScan) : results
+    // a free scan judges only the free checks: the page's other Live checks were not run. Their issues
+    // are counted (never named, never guessed as issues) and shown as one locked block.
+    const freeOnly = free && results.every((r) => r.freeScan) && pageTotal > results.length
+    const remaining = freeOnly ? pageTotal - results.length : 0
+    // one locked block, right after the free findings (before the passed checks)
+    const teaser: ScanResult[] = remaining > 0 ? [{ ruleId: 'teaser-block', ruleTitle: '', passed: false, reason: '', status: 'fail' } as unknown as ScanResult] : []
+    const locked = free ? (freeOnly ? teaser : results.filter((r) => !r.freeScan && r.status === 'fail')) : []
+    const lockedIssues = locked.length
     // "couldn't check" answers are never shown as failures or counted in the score
-    const unknown = results.filter((r) => r.status === 'unknown').length
-    const scored = results.filter((r) => r.status !== 'unknown')
+    const unknown = shown.filter((r) => r.status === 'unknown').length
+    const scored = shown.filter((r) => r.status !== 'unknown')
     const failed = scored.filter((r) => !r.passed)
     // shown apart from real passes: "not relevant for your store" and "covered by Shopify"
     const notRelevant = scored.filter((r) => r.status === 'na').length
     const byShopify = scored.filter((r) => r.coveredByShopify).length
-    const listed = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const base = scored.filter((r) => r.status !== 'na' && !r.coveredByShopify)
+    const lockedIds = new Set(locked.map((r) => r.ruleId))
+    const rank = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
+    const fails = base.filter((r) => !r.passed).sort((a, b) => rank(a) - rank(b))
+    // free-only scan: the blurred rows sit after the first three findings, where they are seen
+    const listed =
+      free && gate
+        ? freeOnly
+          ? [...fails, ...locked, ...base.filter((r) => r.passed)]
+          : [...[...fails, ...locked].sort((a, b) => rank(a) - rank(b)), ...base.filter((r) => r.passed)]
+        : base
     const areas = LEVERS.map((l) => {
       const items = scored.filter((r) => lever(r) === l.id)
       return { ...l, total: items.length, passed: items.filter((r) => r.passed).length }
     }).filter((l) => l.total > 0)
-    const num = new Map(failed.map((r, i) => [r.ruleId, i + 1])) // one number per finding, in list order
+    // one number per finding, in the order the list shows them
+    const num = new Map(listed.filter((r) => !r.passed && !r.ruleId.startsWith('teaser-') && !locked.includes(r)).map((r, i) => [r.ruleId, i + 1]))
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    return { rows: listed, failed, passed: listed.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh }
-  }, [results])
+    const extra = free && gate ? (freeOnly ? 0 : locked.length) : 0
+    // one set of numbers everywhere: every check run on this page, the free ones explained,
+    // the locked findings counted, and the rest (passed or not relevant) waiting in the full report
+    const pageChecks = free && gate ? (freeOnly ? pageTotal : results.length) : scored.length + unknown
+    const hidden = free && gate ? (freeOnly ? remaining : results.length - shown.length - locked.length) : 0
+    return { free: free && Boolean(gate), freeOnly, remaining, freeRun: results.length, pageChecks, hidden, toFix: failed.length + extra, checked: pageChecks, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+  }, [results, labId, gate, pageTotal])
 
   const host = hostOf(url)
+  const buyUrl = api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '' })}`)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
   const qualified = isQualified(revenueBand)
   const view = located[device]
@@ -230,6 +280,45 @@ export default function ResultsPage() {
   const deskImg = (located.desktop && typeof located.desktop === 'object' ? located.desktop.screenshot : null) || preview.desktop
   const phoneImg = (located.mobile && typeof located.mobile === 'object' ? located.mobile.screenshot : null) || preview.mobile
 
+  // score + the four areas, compact
+  const scoreBlock = (
+    <div className="flex flex-wrap items-center gap-6 border-y border-[var(--border)] py-5">
+      <div className="flex items-center gap-4">
+        <Ring score={report.score} color={scoreTone.fg} />
+        <div>
+          <p className="text-[13px] font-semibold text-[var(--text-muted)]">Conversion score</p>
+          <p className="font-[family-name:var(--font-display)] text-[20px] font-bold" style={{ color: scoreTone.fg }}>
+            {scoreTone.word}
+          </p>
+        </div>
+      </div>
+      <div className="grid min-w-[240px] flex-1 grid-cols-2 gap-x-5 gap-y-3">
+        {report.areas.map((a) => {
+          const t = TONE[tone(a.passed / a.total)]
+          return (
+            <div key={a.id} className="min-w-0">
+              <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                <span className="truncate font-semibold text-[var(--text)]" title={a.label}>{a.short}</span>
+                <span className="tabular-nums font-semibold" style={{ color: t.fg }}>
+                  {a.passed}/{a.total}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: t.fg }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(a.passed / a.total) * 100}%` }}
+                  transition={{ duration: 1.2, ease: [0.4, 0, 0.2, 1] }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <main className="min-h-screen">
       {/* test scans only (CXO Studio and +test emails): label this scan blind in the lab */}
@@ -250,7 +339,9 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.total} checkpoints
+              {host}
+              {/* phone: the domain only, to save room */}
+              <span className="max-[560px]:hidden"> · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} store checkpoints run` : `${report.pageChecks} checkpoints`}</span>
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -258,51 +349,24 @@ export default function ResultsPage() {
                   Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
                 </>
               ) : (
-                <>Your {pageName.toLowerCase()} has {report.failed.length} things to fix</>
+                <>Your {pageName.toLowerCase()} has {report.toFix} things to fix</>
               )}
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
-              {report.failed.length} of {report.total} checks failed
-              {report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
-              {numbers && ' That figure is what a 10% lift in conversion is worth to you.'}
+              {report.freeOnly
+                ? <>
+                    <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checkpoints on your whole store, from the homepage to the checkout.`}</span>
+                    {/* phone: three lines at most */}
+                    <span className="hidden max-[560px]:inline">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below.`}</span>
+                  </>
+                : `${report.toFix} of ${report.checked} checkpoints failed`}
+              {report.freeOnly ? '' : report.free
+                ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
+                : report.easyHigh > 0 ? `, ${report.easyHigh} of them high-impact and easy. Start there.` : '.'}
+              {numbers && <span className="max-[560px]:hidden"> That figure is what a 10% lift in conversion is worth to you.</span>}
             </p>
 
-            {/* score + the four areas, compact */}
-            <div className="flex flex-wrap items-center gap-6 border-y border-[var(--border)] py-5">
-              <div className="flex items-center gap-4">
-                <Ring score={report.score} color={scoreTone.fg} />
-                <div>
-                  <p className="text-[13px] font-semibold text-[var(--text-muted)]">Conversion score</p>
-                  <p className="font-[family-name:var(--font-display)] text-[20px] font-bold" style={{ color: scoreTone.fg }}>
-                    {scoreTone.word}
-                  </p>
-                </div>
-              </div>
-              <div className="grid min-w-[240px] flex-1 grid-cols-2 gap-x-5 gap-y-3">
-                {report.areas.map((a) => {
-                  const t = TONE[tone(a.passed / a.total)]
-                  return (
-                    <div key={a.id} className="min-w-0">
-                      <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                        <span className="truncate font-semibold text-[var(--text)]" title={a.label}>{a.short}</span>
-                        <span className="tabular-nums font-semibold" style={{ color: t.fg }}>
-                          {a.passed}/{a.total}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
-                        <motion.div
-                          className="h-full rounded-full"
-                          style={{ background: t.fg }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(a.passed / a.total) * 100}%` }}
-                          transition={{ duration: 1.2, ease: [0.4, 0, 0.2, 1] }}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            {scoreBlock}
 
           </div>
 
@@ -321,7 +385,7 @@ export default function ResultsPage() {
                 <h2 className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[-0.03em] text-[var(--text)]">Your page, check by check</h2>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   <span className="font-semibold" style={{ color: 'var(--result-fail-fg)' }}>
-                    {report.failed.length} to fix
+                    {report.freeOnly ? report.failed.length : report.toFix} to fix
                   </span>{' '}
                   ·{' '}
                   <span className="font-semibold" style={{ color: 'var(--result-pass-fg)' }}>
@@ -330,17 +394,21 @@ export default function ResultsPage() {
                   {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
                   {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
-                  {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
+                  {/* phone: what was found only */}
+                  <span className="max-[560px]:hidden">
+                    {report.freeOnly ? ` · ${report.remaining} more checkpoints in the full report` : report.hidden > 0 && ` · ${report.hidden} more in the full report`}
+                    {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
+                  </span>
                 </p>
               </div>
-              <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px]">
+              <div role="group" aria-label="Device" className="inline-flex gap-0.5 max-[560px]:flex max-[560px]:w-full rounded-full bg-[var(--surface-muted)] p-[3px]">
                 {(['desktop', 'mobile'] as Device[]).map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setDevice(d)}
                     aria-pressed={device === d}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 max-[560px]:flex-1 max-[560px]:py-2 text-[13px] font-semibold transition-colors ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}
                   >
                     {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}
                     {d === 'desktop' ? 'Desktop' : 'Mobile'}
@@ -364,9 +432,13 @@ export default function ResultsPage() {
                 />
               </div>
 
-              <div className="relative min-w-0 lg:order-1">
+              <div className="min-w-0 lg:order-1">
+                <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
+                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.remaining} pageName={pageName} buyUrl={buyUrl} price={offer.price} offer={offer} />
+                    if (report.lockedIds.has(r.ruleId) && gate)
+                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price={offer.price} />
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -415,6 +487,22 @@ export default function ResultsPage() {
                     </button>
                   </div>
                 )}
+                </div>
+                {/* free scan: the other findings exist but stay in the full report */}
+                {/* free scan: this section only gives the findings; the report is pitched in "What's next" */}
+                {gate && report.freeOnly ? null : gate ? (
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
+                ) : (
+                <LockedFindings
+                  locked={report.locked}
+                  qualified={qualified}
+                  monthlyAtStake={numbers ? numbers.lift10 : null}
+                  shortEur={shortEur}
+                  buyUrl={buyUrl}
+                  callUrl={CALL_URL}
+                  price={FULL_REPORT_PRICE}
+                />
+                )}
               </div>
             </div>
           </section>
@@ -423,13 +511,29 @@ export default function ResultsPage() {
           <YourPath
             money={numbers}
             qualified={qualified}
-            checked={report?.total ?? 0}
-            toFix={report?.failed.length ?? 0}
+            checked={report ? (report.freeOnly ? report.freeRun : report.checked) : 0}
+            total={report?.freeOnly ? report.pageChecks : 0}
+            toFix={report ? (report.freeOnly ? report.failed.length : report.toFix) : 0}
             eur={eur}
             shortEur={shortEur}
             callUrl={CALL_URL}
-            fullScanUrl={CHECKLIST_URL}
+            fullScanUrl={buyUrl}
+            price={offer.price}
             host={host}
+            offerSlot={
+              gate && report?.freeOnly ? (
+                <FullStoreOffer embedded variant="cd" pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} lockedCount={report.remaining} estimated freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
+              ) : undefined
+            }
+            laptop={
+              report?.freeOnly
+                ? {
+                    shot: located.desktop && typeof located.desktop === 'object' ? { ...located.desktop, pins: located.desktop.pins.map((p) => ({ box: p.box, n: report.num.get(p.findingId) })) } : null,
+                    fallback: deskImg || '',
+                    passed: results.filter((r) => r.status === 'pass').length,
+                  }
+                : undefined
+            }
           />
         </div>
       </div>

@@ -11,6 +11,8 @@ export type ScanResult = {
   status?: 'pass' | 'fail' | 'na' | 'unknown'
   /** Shopify does it by default: counted as passed, shown as one grouped line */
   coveredByShopify?: boolean
+  /** shown in the free scan (Airtable "Free scan"); the others are counted and locked */
+  freeScan?: boolean
   checkpoint?: {
     requiredActions: string
     justificationsBenefits: string

@@ -11,13 +11,14 @@ const ACTIONS: Record<string, Record<string, unknown>> = {
   live: { 'Scanner status': 'Live' },
   draft: { 'Scanner status': 'Draft' },
   audit: { 'Scanner status': 'Draft', 'Check method': 'Manual (audit only)' },
+  off: { 'Scanner status': 'Off' },
 }
 
 export async function POST(req: NextRequest) {
   if (!labAllowed(req.nextUrl.searchParams.get('key'))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
   const body = (await req.json().catch(() => ({}))) as { id?: string; action?: string; title?: string; score?: string }
   const fields = ACTIONS[body.action || '']
-  if (!body.id || !/^rec[A-Za-z0-9]{14}$/.test(body.id) || !fields) return NextResponse.json({ error: 'Need a checkpoint id and an action (live, draft, audit).' }, { status: 400 })
+  if (!body.id || !/^rec[A-Za-z0-9]{14}$/.test(body.id) || !fields) return NextResponse.json({ error: 'Need a checkpoint id and an action (live, draft, audit, off).' }, { status: 400 })
   const apiUrl = process.env.API_URL ?? 'https://api.airtable.com/v0/app1HP8C17pAMjacf/Conversion%20Checkpoints'
   const apiKey = process.env.API_KEY
   if (!apiKey) return NextResponse.json({ error: 'API_KEY missing on this deployment.' }, { status: 500 })

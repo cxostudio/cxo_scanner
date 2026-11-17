@@ -23,7 +23,8 @@ const CombineRequestSchema = z.object({
       status: z.enum(['pass', 'fail', 'na', 'unknown']).optional(),
       coveredByShopify: z.boolean().optional(),
       checkpoint: checkpointSchema.optional(),
-    }),
+      // keep freeScan, by, seen…: the results page needs freeScan for the free-scan gate
+    }).passthrough(),
   ),
 })
 

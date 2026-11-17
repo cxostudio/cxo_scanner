@@ -16,8 +16,8 @@ import type { V2Row } from '@/lib/scanV2'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 
 /** Which part of the evidence each saved image is, so it can be rebuilt for a re-judge. */
-type ImageRole = 'desktop' | 'mobile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'
-type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage'>
+type ImageRole = 'desktop' | 'mobile' | 'tab' | 'gallery' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage' | 'checkout' | 'mobileCheckout'
+type StoredEvidence = Omit<Evidence, 'desktopTiles' | 'mobileTiles' | 'tabTiles' | 'galleryTile' | 'mobileMenu' | 'cartHeader' | 'emptyCart' | 'cartView' | 'cartPage' | 'mobileCartView' | 'mobileCartPage' | 'checkout' | 'mobileCheckout'>
 
 const BUCKET = 'test-scans'
 
@@ -49,7 +49,7 @@ export type LabScan = {
   cartKind?: string
   shopify: boolean
   checkpoints: LabCheckpoint[]
-  answers: { id: string; answer: LabAnswer; reason: string; coveredByShopify?: boolean }[]
+  answers: { id: string; answer: LabAnswer; reason: string; coveredByShopify?: boolean; rule?: string; seen?: string[]; by?: string }[]
   images: { label: string; file: string; role?: ImageRole }[]
   /** The checkpoints as judged (full definitions), for re-judging when Airtable is unreachable. */
   rules?: ScanRule[]
@@ -60,13 +60,15 @@ export type LabScan = {
   history?: { judgedAt: string; model?: string; answers: LabScan['answers'] }[]
 }
 
-const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage'] as const
+const IMAGE_KEYS = ['desktopTiles', 'mobileTiles', 'tabTiles', 'galleryTile', 'mobileMenu', 'cartHeader', 'emptyCart', 'cartView', 'cartPage', 'mobileCartView', 'mobileCartPage', 'checkout', 'mobileCheckout'] as const
 
 function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   const out: { role: ImageRole; tile: Tile }[] = []
   const add = (role: ImageRole, t?: Tile | Tile[]) => (Array.isArray(t) ? t : t ? [t] : []).forEach((tile) => out.push({ role, tile }))
   add('desktop', ev.desktopTiles)
   add('mobile', ev.mobileTiles)
+  add('tab', ev.tabTiles)
+  add('gallery', ev.galleryTile)
   add('mobileMenu', ev.mobileMenu)
   add('cartHeader', ev.cartHeader)
   add('emptyCart', ev.emptyCart)
@@ -74,6 +76,8 @@ function roleTiles(ev: Evidence): { role: ImageRole; tile: Tile }[] {
   add('cartPage', ev.cartPage)
   add('mobileCartView', ev.mobileCartView)
   add('mobileCartPage', ev.mobileCartPage)
+  add('checkout', ev.checkout)
+  add('mobileCheckout', ev.mobileCheckout)
   return out
 }
 
@@ -129,6 +133,8 @@ export async function saveTestScan(input: { id: string; url: string; email: stri
   // everything but the images (saved above as files)
   const stored: Record<string, unknown> = { ...ev }
   for (const k of IMAGE_KEYS) delete stored[k]
+  // fetched from Shopify again at each judge: never stored
+  delete stored.galleryTiles
   await upload(store, `scans/${id}/evidence.json`, stored as StoredEvidence)
   const meta: LabScan = {
     id,
@@ -167,7 +173,7 @@ const toCheckpoint = (r: ScanRule): LabCheckpoint => ({
   area: r.area,
   method: r.method,
 })
-const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify }))
+const toAnswers = (results: V2Row[]): LabScan['answers'] => results.map((r) => ({ id: r.ruleId, answer: r.status, reason: r.reason, coveredByShopify: r.coveredByShopify, rule: r.rule, seen: r.seen, by: r.by }))
 
 async function upload(store: Awaited<ReturnType<typeof bucket>>, path: string, data: unknown) {
   const { error } = await store.upload(path, JSON.stringify(data), { contentType: 'application/json', upsert: true, cacheControl: '0' })
@@ -220,6 +226,8 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
     ...stored,
     desktopTiles: of('desktop'),
     mobileTiles: of('mobile'),
+    tabTiles: of('tab'),
+    galleryTile: of('gallery')[0],
     mobileMenu: of('mobileMenu')[0],
     cartHeader: of('cartHeader')[0],
     emptyCart: of('emptyCart')[0],
@@ -227,6 +235,8 @@ export async function loadEvidence(scan: LabScan): Promise<Evidence | null> {
     cartPage: of('cartPage'),
     mobileCartView: of('mobileCartView')[0],
     mobileCartPage: of('mobileCartPage'),
+    checkout: of('checkout'),
+    mobileCheckout: of('mobileCheckout'),
   }
 }
 
@@ -286,7 +296,7 @@ export async function saveLabels(id: string, labels: Record<string, LabLabel>) {
 export async function imageUrls(scan: LabScan): Promise<string[]> {
   if (!scan.images?.length) return []
   const store = await bucket()
-  const { data, error } = await store.createSignedUrls(scan.images.map((i) => i.file), 60 * 60 * 6)
+  const { data, error } = await store.createSignedUrls(scan.images.map((i) => i.file), 60 * 60 * 24)
   if (error) throw error
   return (data || []).map((d) => d.signedUrl || '')
 }
@@ -303,7 +313,7 @@ export async function deleteTestScan(id: string) {
   const store = await bucket()
   const safe = safeId(id)
   const files: string[] = []
-  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`]) {
+  for (const folder of [`scans/${safe}`, `scans/${safe}/meta`, `labels/${safe}`, `modes/${safe}`]) {
     const { data } = await store.list(folder, { limit: 1000 })
     for (const f of data || []) if (f.id) files.push(`${folder}/${f.name}`)
   }
@@ -346,10 +356,41 @@ export async function getNotes(id: string): Promise<Record<string, string>> {
   return (await readLatest<Record<string, string>>(`notes/${safeId(id)}`)) || {}
 }
 
+/** A cropped screenshot saved as a good example of a checkpoint; returns a link Airtable can fetch. */
+export async function saveExample(checkpointId: string, jpeg: Buffer): Promise<string> {
+  const store = await bucket()
+  const file = `examples/${checkpointId.replace(/[^a-zA-Z0-9]/g, '')}/${Date.now().toString(36)}.jpg`
+  const { error } = await store.upload(file, jpeg, { contentType: 'image/jpeg', upsert: true })
+  if (error) throw new Error(`could not save the example: ${error.message}`)
+  const { data, error: e2 } = await store.createSignedUrl(file, 60 * 60 * 24 * 7)
+  if (e2 || !data?.signedUrl) throw new Error('could not sign the example link')
+  return data.signedUrl
+}
+
 /** A status change made from the lab (who promoted what, at which score), kept for the record. */
 export async function logPromotion(entry: Record<string, unknown>) {
   const store = await bucket()
   await upload(store, `promotions/${Date.now().toString(36)}.json`, { ...entry, at: new Date().toISOString() })
+}
+
+/**
+ * How each label was made: 'review' = the scanner's answer was on screen, 'blind' = it was hidden.
+ * Labels without an entry predate review mode and were all blind. Lets the lab check that seeing
+ * the answer does not inflate agreement.
+ */
+export type LabelMode = 'blind' | 'review'
+export async function getModes(id: string): Promise<Record<string, LabelMode>> {
+  return (await readLatest<Record<string, LabelMode>>(`modes/${safeId(id)}`)) || {}
+}
+export async function saveModes(id: string, modes: Record<string, LabelMode>) {
+  await writeVersion(await bucket(), `modes/${safeId(id)}`, modes)
+}
+
+/** Review mode hides the scanner's answer on about 1 checkpoint in 5, the same ones every time. */
+export function isBlindCheck(scanId: string, checkpointId: string) {
+  let h = 2166136261
+  for (const c of `${scanId}:${checkpointId}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619)
+  return (h >>> 0) % 5 === 0
 }
 
 export async function saveNotes(id: string, notes: Record<string, string>) {
@@ -360,4 +401,13 @@ export async function saveNotes(id: string, notes: Record<string, string>) {
 export async function getHiddenText(id: string): Promise<string> {
   const ev = await readJson<{ hiddenText?: string }>(`scans/${safeId(id)}/evidence.json`)
   return ev?.hiddenText || ''
+}
+
+/** Suggested labels for the grid (a second model's opinion), per scan: checkpoint id → suggestion. */
+export type LabSuggestion = { label: LabLabel; why: string; model: string; at: string }
+export async function getSuggestions(id: string): Promise<Record<string, LabSuggestion>> {
+  return (await readLatest<Record<string, LabSuggestion>>(`suggestions/${safeId(id)}`)) || {}
+}
+export async function saveSuggestions(id: string, data: Record<string, LabSuggestion>) {
+  await writeVersion(await bucket(), `suggestions/${safeId(id)}`, data)
 }

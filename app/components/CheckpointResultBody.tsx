@@ -20,6 +20,9 @@ export type CheckpointPresentation = {
   examples: Array<{ url: string; filename: string; thumbnailUrl: string }>
 }
 
+/** A bold label alone on its line ("**Done when**") stays a heading above its text, not glued to it. */
+const md = (s: string) => s.replace(/^(\*\*[^*\n]+\*\*)[ \t]*\n(?!\n)/gm, '$1\n\n')
+
 const mdClass =
   'flex flex-col gap-2 text-sm text-[var(--text)] leading-relaxed [&_a]:font-medium [&_a]:text-[var(--link)] [&_a]:underline [&_strong]:font-semibold custom-list'
 
@@ -57,7 +60,7 @@ export function CheckpointResultBody({
           </p>
           <div className={mdClass}>
             <ReactMarkdown components={markdownOpenLinksInNewTab}>
-              {checkpoint.requiredActions}
+              {md(checkpoint.requiredActions)}
             </ReactMarkdown>
           </div>
         </div>
@@ -70,7 +73,7 @@ export function CheckpointResultBody({
           </p>
           <div className={mdClass}>
             <ReactMarkdown components={markdownOpenLinksInNewTab}>
-              {checkpoint.justificationsBenefits}
+              {md(checkpoint.justificationsBenefits)}
             </ReactMarkdown>
           </div>
         </div>

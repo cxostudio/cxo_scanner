@@ -45,7 +45,7 @@ import {
 } from '@/lib/rules/ratingNearTitle'
 import { buildRulePrompt } from '../../../lib/ai/promptBuilder'
 import { formatUserFriendlyRuleResult } from '@/lib/scan/userFriendlyReason'
-import { getConversionCheckpointRules, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { getConversionCheckpointRules, refreshCheckpointRulesCache, type ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { filterCheckpointsByUrl, isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import {
   buildCheckpointPresentationMap,
@@ -54,6 +54,7 @@ import {
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
 import { saveTestScan } from '@/lib/lab/store'
+import { saveLeadScan } from '@/lib/leads/store'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -1056,6 +1057,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine } = validationResult.data
+    // the paid full report (set later by the order flow, after Stripe confirms the payment)
+    const paidScan = false
 
     // Per-email daily scan limit — CHECK ONLY here (block if already at the
     // limit) so we don't do expensive work for a user who's out of scans.
@@ -1149,13 +1152,21 @@ export async function POST(request: NextRequest) {
     // with their definitions. The list the browser sent is only a fallback.
     let v2Rules: ScanRule[] = rules
     try {
-      const cpRes = await getConversionCheckpointRules()
+      // lab scans (test emails) always use today's definitions: Louis edits and re-scans in one go
+      const fresh = isTestEmail(email) ? await refreshCheckpointRulesCache().catch(() => null) : null
+      const cpRes = fresh?.ok ? fresh.data : await getConversionCheckpointRules()
       if (cpRes.ok) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
         const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {
           includeDrafts: isTestEmail(email),
         })
         if (selected.rules.length) v2Rules = selected.rules
+        // free scan (real leads): only the checkpoints ticked "Free scan", so it stays fast and cheap.
+        // The paid report and lab scans (test emails) judge everything Live (and Draft in the lab).
+        if (!isTestEmail(email) && !paidScan) {
+          const free = v2Rules.filter((r) => (r as { freeScan?: boolean }).freeScan)
+          if (free.length) v2Rules = free
+        }
         // Chunked scans (NEXT_PUBLIC_SCAN_BATCH_RULES): each request judges only its own slice.
         if (parseInt(process.env.NEXT_PUBLIC_SCAN_BATCH_RULES ?? '', 10) > 0) {
           const sent = new Set(rules.map((r) => r.id))
@@ -1180,6 +1191,8 @@ export async function POST(request: NextRequest) {
       try {
         const v2 = await runScanV2(validUrl, v2Rules, apiKey)
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
+        // lead dashboard (/admin/leads): score, counts and answers only, no screenshots or page text
+        if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
         // test scans are kept for blind labelling (lib/lab); customer scans never are
         let labId: string | undefined
         if (email && isTestEmail(email)) {
