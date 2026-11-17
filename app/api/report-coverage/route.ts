@@ -5,21 +5,34 @@
 // Store-wide checks run on every page; they are counted once, with the product page.
 import { NextResponse } from 'next/server'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { buildCheckpointPresentationMap } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { ruleIsScannable } from '@/lib/conversionCheckpoints/filterByUrlPageType'
-import { getTestScan, listTestScans } from '@/lib/lab/store'
+import { getLabels, getTestScan, listTestScans } from '@/lib/lab/store'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+// the six areas of the full report, in shopping order; checks that apply on every page (header, menu,
+// footer, speed) have their own row instead of being folded into the page that was scanned
 const PAGES = [
   { key: 'homepage', label: 'Homepage', ids: ['rectbairzlgei24hg'] },
-  { key: 'category', label: 'Collections', ids: ['recpwt9mnrffkte9i'] },
-  { key: 'product', label: 'Product page', ids: ['recq3oalwwoefg2x5', 'reclgdsv5ric0dkku'] },
-  { key: 'cart', label: 'Cart', ids: ['recdyiscpsbfrbbha'] },
+  { key: 'category', label: 'Collection pages', ids: ['recpwt9mnrffkte9i'] },
+  { key: 'product', label: 'Product pages', ids: ['recq3oalwwoefg2x5'] },
+  { key: 'cart', label: 'Cart (page or drawer)', ids: ['recdyiscpsbfrbbha'] },
   { key: 'checkout', label: 'Checkout', ids: ['recokhtzh3nxsqnmb'] },
+  { key: 'site', label: 'On every page', ids: ['reclgdsv5ric0dkku'] },
 ] as const
 
-type Coverage = { total: number; stores: number; pages: { key: string; label: string; checks: number; expectedIssues: number }[] }
+type Coverage = {
+  total: number
+  stores: number
+  /** agreement with expert labels on the Live checks, in % (lab) */
+  accuracy: number | null
+  /** example screenshots attached to the Live checks */
+  examples: number
+  siteIds: string[]
+  pages: { key: string; label: string; hint?: string; checks: number; expectedIssues: number }[]
+}
 let cache: { at: number; data: Coverage } | null = null
 const TTL = 6 * 60 * 60 * 1000
 
@@ -36,12 +49,37 @@ export async function GET() {
     if (p) pageOf.set(r.id, p.key)
   }
 
-  // failure share per page, over the lab stores (judged answers only)
+  // failure share per page, over the lab stores (judged answers only), and agreement with the labels
   const tally = new Map<string, { fail: number; judged: number }>()
+  const liveIds = new Set(live.map((r) => r.id))
+  let agree = 0
+  let labelled = 0
+  const hosts = new Set<string>()
   let stores = 0
   try {
     const list = await listTestScans()
-    const scans = await Promise.all(list.map((s) => getTestScan(s.id).catch(() => null)))
+    const scans: (Awaited<ReturnType<typeof getTestScan>> | null)[] = []
+    const labelSets: Awaited<ReturnType<typeof getLabels>>[] = []
+    for (let i = 0; i < list.length; i += 12) {
+      const part = list.slice(i, i + 12)
+      scans.push(...(await Promise.all(part.map((s) => getTestScan(s.id).catch(() => null)))))
+      labelSets.push(...(await Promise.all(part.map((s) => getLabels(s.id).catch(() => ({}) as Awaited<ReturnType<typeof getLabels>>)))))
+    }
+    scans.forEach((scan, i) => {
+      if (!scan) return
+      try {
+        hosts.add(new URL(scan.url).host.replace(/^www\./, ''))
+      } catch {}
+      const labels = labelSets[i] as Record<string, unknown>
+      for (const a of scan.answers) {
+        const raw = labels?.[a.id] as unknown
+        const l = typeof raw === 'string' ? raw : (raw as { label?: string } | undefined)?.label
+        if (!liveIds.has(a.id) || !l || !['pass', 'fail', 'na'].includes(l) || a.answer === 'unknown') continue
+        labelled++
+        const ai = a.coveredByShopify ? 'pass' : a.answer
+        if (ai === l) agree++
+      }
+    })
     for (const scan of scans) {
       if (!scan) continue
       stores++
@@ -62,7 +100,16 @@ export async function GET() {
     const rate = t && t.judged >= 20 ? t.fail / t.judged : 0.3
     return { key: p.key, label: p.label, checks, expectedIssues: Math.round(checks * rate) }
   })
-  const data: Coverage = { total: pages.reduce((n, p) => n + p.checks, 0), stores, pages }
+  const presentation = buildCheckpointPresentationMap(res.records)
+  const examples = live.reduce((n, r) => n + (presentation.get(r.id)?.examples?.length || 0), 0)
+  const data: Coverage = {
+    total: pages.reduce((n, p) => n + p.checks, 0),
+    stores: hosts.size || stores,
+    accuracy: labelled >= 200 ? Math.round((1000 * agree) / labelled) / 10 : null,
+    examples,
+    siteIds: live.filter((r) => pageOf.get(r.id) === 'site').map((r) => r.id),
+    pages: pages.map((p) => (p.key === 'site' ? { ...p, hint: 'header, menu, footer, speed' } : p)),
+  }
   cache = { at: Date.now(), data }
   return NextResponse.json(data)
 }

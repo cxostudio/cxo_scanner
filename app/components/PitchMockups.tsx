@@ -113,9 +113,35 @@ export function LockedBlock({ count, pageName, buyUrl, price }: { count: number;
   )
 }
 
-type Coverage = { total: number; stores: number; pages: { key: string; label: string; checks: number; expectedIssues: number }[] }
+type Coverage = {
+  total: number
+  stores: number
+  accuracy: number | null
+  examples: number
+  siteIds: string[]
+  pages: { key: string; label: string; hint?: string; checks: number; expectedIssues: number }[]
+}
 
-export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, freeRun = 0 }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number }) {
+const Stat = ({ value, label }: { value: string; label: string }) => (
+  <div className="flex min-w-0 flex-col gap-0.5 rounded-[12px] bg-[var(--surface-muted)] px-3 py-3">
+    <span className="font-[family-name:var(--font-display)] text-[length:var(--text-xl)] font-bold leading-none tracking-[-0.02em] text-[var(--text)]">{value}</span>
+    <span className="text-[12px] leading-snug text-[var(--text-muted)]">{label}</span>
+  </div>
+)
+
+const WHAT_YOU_GET = [
+  'Every check on your homepage, collections, product pages, cart and checkout',
+  'Each issue ranked by its impact on revenue, so you know what to fix first',
+  'The fix, step by step, and why it matters, backed by research and A/B tests',
+  'Real examples from stores that get it right',
+  'A PDF to hand to your developer or agency',
+]
+
+/**
+ * The full report offer under the free results. A free scan runs only some checks of the page it scanned:
+ * the scanned areas show issues found and checks run; the others show their number of checks (never guessed issues).
+ */
+export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, ran = [] }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown?: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number; ran?: { id: string; failed: boolean }[] }) {
   const [cov, setCov] = useState<Coverage | null>(null)
   useEffect(() => {
     fetch(api('/report-coverage'))
@@ -123,13 +149,18 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
       .then((d: Coverage | null) => d && Array.isArray(d.pages) && setCov(d))
       .catch(() => {})
   }, [])
-  // the pages this scan did not cover (a product scan also covers the cart); pages with no live check are left out
-  // one row per page: the scanned one first, then the five pages of the full report in shopping order
-  const covered = [pageKey]
-  const here = cov?.pages.find((p) => p.key === pageKey)
-  const others = (cov?.pages || []).filter((p) => !covered.includes(p.key) && p.checks > 0)
-  // free scan: count what is left to run (checks), never guessed issues
-  const remaining = cov ? lockedCount + others.reduce((n, p) => n + (estimated ? p.checks : p.expectedIssues), 0) : 0
+  // which areas the free scan touched: the scanned page and, with it, the checks that apply on every page
+  const site = new Set(cov?.siteIds || [])
+  const areaOf = (id: string) => (site.has(id) ? 'site' : pageKey)
+  const scanned = new Map<string, { run: number; found: number }>()
+  for (const r of ran) {
+    const k = areaOf(r.id)
+    const a = scanned.get(k) || { run: 0, found: 0 }
+    a.run++
+    if (r.failed) a.found++
+    scanned.set(k, a)
+  }
+  const left = cov ? cov.pages.reduce((n, p) => n + Math.max(0, p.checks - (scanned.get(p.key)?.run || 0)), 0) : 0
   const buy = (
     <a key="buy" href={buyUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'}`}>
       Get the full report, {price} <Arrow />
@@ -142,55 +173,71 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
   )
   return (
     <section className="mt-6 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]" aria-label="Full report">
-      <div className="flex flex-col gap-3 p-[var(--card-padding)]">
+      <div className="flex flex-col gap-4 p-[var(--card-padding)]">
         <p className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-muted)]">
           <LockIcon /> Full report, {price} one-off
         </p>
         {variant === 'cd' ? (
           <>
-            <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-xl)] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)]">
-              {estimated && remaining ? `${remaining} checks still to run on your store` : remaining ? `About ${remaining} issues still to fix on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
+            <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
+              {estimated && cov ? `${left} more checks are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              {estimated ? `You have seen the fix for the ${fixesShown} issues our free check found.` : `You have seen the fix for ${fixesShown} of the ${toFix} issues on this page.`} The full report covers {cov ? `all ${cov.total} checks` : 'every check'} across your store, with every fix, examples, and a PDF to share with your developer.
+              The free scan looked at {ran.length || 'a few'} checks on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
             </p>
             {cov && (
+              <div className="grid grid-cols-4 gap-2 max-[810px]:grid-cols-2">
+                <Stat value={String(cov.total)} label="conversion checks" />
+                <Stat value={`${cov.stores}`} label="stores benchmarked" />
+                {cov.accuracy ? <Stat value={`${Math.floor(cov.accuracy)}%`} label="match with our experts' review" /> : <Stat value="6" label="areas of your store" />}
+                <Stat value={cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : String(cov.examples)} label="example screenshots" />
+              </div>
+            )}
+            {cov && (
               <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
-                {/* the five pages of the full report, in shopping order; the scanned page in its place */}
-                {cov.pages.filter((p) => p.checks > 0 || p.key === pageKey).map((p) =>
-                  p.key === pageKey ? (
-                    <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
-                      <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
-                        <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· free scan</span></span>
-                        <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                          {estimated ? (
-                            <>
-                              <b className="text-[var(--result-fail-fg)]">{fixesShown} issues found</b> · {freeRun} of {p.checks} checks run
-                            </>
-                          ) : (
-                            <>
-                              <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
-                            </>
-                          )}
+                {cov.pages
+                  .filter((p) => p.checks > 0)
+                  .map((p) => {
+                    const sc = estimated ? scanned.get(p.key) : p.key === pageKey ? { run: 0, found: toFix } : undefined
+                    return (
+                      <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
+                        {sc ? (
+                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
+                        ) : (
+                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
+                        )}
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                          <span className="min-w-0 text-sm font-semibold text-[var(--text)]">
+                            {p.label}{' '}
+                            <span className="font-normal text-[var(--text-muted)]">· {sc ? 'free scan, partly' : p.hint || 'not scanned'}</span>
+                          </span>
+                          <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
+                            {sc && estimated ? (
+                              <>
+                                <b className="text-[var(--result-fail-fg)]">{sc.found} {sc.found === 1 ? "issue" : "issues"} found</b> · {sc.run} of {p.checks} checks run
+                              </>
+                            ) : sc ? (
+                              <>
+                                <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
+                              </>
+                            ) : (
+                              <b className="text-[var(--text)]">{p.checks} checks</b>
+                            )}
+                          </span>
                         </span>
-                      </span>
-                    </li>
-                  ) : (
-                    <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
-                      <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
-                        <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
-                        <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                          {estimated ? <b className="text-[var(--text)]">{p.checks} checks</b> : <>{p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b></>}
-                        </span>
-                      </span>
-                    </li>
-                  ),
-                )}
+                      </li>
+                    )
+                  })}
               </ul>
             )}
-            {cov && cov.stores > 0 && !estimated && <p className="text-[12px] text-[var(--text-muted)]">Expected issues: how often each check fails across the {cov.stores} stores we have scanned.</p>}
+            <ul className="flex flex-col gap-2 text-[14px] leading-snug text-[var(--text)]">
+              {WHAT_YOU_GET.map((w) => (
+                <li key={w} className="flex items-start gap-2">
+                  <span className="mt-[3px] shrink-0 text-[var(--result-pass-fg)]"><Check /></span>
+                  {w}
+                </li>
+              ))}
+            </ul>
           </>
         ) : (
           <>
