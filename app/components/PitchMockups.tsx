@@ -99,7 +99,7 @@ const ClockIcon = () => (
 const STUDIED: { name: string; logo?: string }[] = [
   { name: 'Allbirds', logo: 'allbirds.svg' }, { name: 'Brooklinen', logo: 'brooklinen.svg' }, { name: 'ColourPop', logo: 'colourpop.svg' },
   { name: 'Dr. Squatch', logo: 'drsquatch.png' }, { name: 'Graza', logo: 'graza.png' }, { name: 'IKEA', logo: 'ikea.svg' },
-  { name: 'Zalando' }, { name: 'Kylie Cosmetics' }, { name: 'Loop', logo: 'loop.svg' }, { name: 'Nomad', logo: 'nomad.svg' },
+  { name: 'Zalando', logo: 'zalando.png' }, { name: 'Kylie Cosmetics', logo: 'kylie.png' }, { name: 'Loop', logo: 'loop.svg' }, { name: 'Nomad', logo: 'nomad.svg' },
   { name: 'Olipop', logo: 'olipop.png' }, { name: 'Momentous', logo: 'momentous.svg' }, { name: 'Spacegoods', logo: 'spacegoods.svg' },
   { name: 'Scandinavian Biolabs', logo: 'scandinavianbiolabs.svg' }, { name: 'Photowall', logo: 'photowall.svg' },
   { name: 'Doré & Rose', logo: 'doreandrose.png' }, { name: 'Tiptoe', logo: 'tiptoe.svg' }, { name: 'Icon Amsterdam', logo: 'icon.png' },
