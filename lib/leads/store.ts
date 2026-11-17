@@ -136,6 +136,7 @@ export async function updateLead(id: string, patch: { status?: LeadStatus; notes
 }
 
 /** When this email ran its first free scan (the start of its 48-hour offer), or null if unknown. */
+export let lastOfferLookupError = ''
 export async function firstScanAt(email: string): Promise<Date | null> {
   try {
     const { data, error } = await supabase()
@@ -144,9 +145,13 @@ export async function firstScanAt(email: string): Promise<Date | null> {
       .eq('email', email.trim().toLowerCase())
       .order('created_at', { ascending: true })
       .limit(1)
+    lastOfferLookupError = error?.message || (data?.[0] ? '' : 'no scan stored for this email')
+    if (error) console.warn('[offer] first scan lookup failed:', error.message)
     if (error || !data?.[0]) return null
     return new Date(data[0].created_at as string)
-  } catch {
+  } catch (e) {
+    lastOfferLookupError = String((e as Error)?.message || e)
+    console.warn('[offer] first scan lookup failed:', e)
     return null
   }
 }
