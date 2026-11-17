@@ -136,17 +136,27 @@ export async function updateLead(id: string, patch: { status?: LeadStatus; notes
 }
 
 /** When this email ran its first free scan (the start of its 48-hour offer), or null if unknown. */
+export let lastOfferLookupError = ''
+/**
+ * When this email ran its first free scan (the start of its 48-hour offer), or null if unknown.
+ * Earliest of the scan summaries (lead_scans) and the daily scan counter (scan_limit, one row per
+ * email per day, created at that day's first scan), so it works while either table is missing.
+ */
 export async function firstScanAt(email: string): Promise<Date | null> {
-  try {
-    const { data, error } = await supabase()
-      .from('lead_scans')
-      .select('created_at')
-      .eq('email', email.trim().toLowerCase())
-      .order('created_at', { ascending: true })
-      .limit(1)
-    if (error || !data?.[0]) return null
-    return new Date(data[0].created_at as string)
-  } catch {
-    return null
+  const e = email.trim().toLowerCase()
+  const errors: string[] = []
+  const earliest = async (table: string) => {
+    try {
+      const { data, error } = await supabase().from(table).select('created_at').eq('email', e).order('created_at', { ascending: true }).limit(1)
+      if (error) errors.push(`${table}: ${error.message}`)
+      return data?.[0]?.created_at ? new Date(data[0].created_at as string).getTime() : null
+    } catch (x) {
+      errors.push(`${table}: ${String((x as Error)?.message || x)}`)
+      return null
+    }
   }
+  const found = (await Promise.all([earliest('lead_scans'), earliest('scan_limit')])).filter((t): t is number => t != null)
+  lastOfferLookupError = found.length ? '' : errors.join('; ') || 'no scan stored for this email'
+  if (errors.length) console.warn('[offer] first scan lookup:', errors.join('; '))
+  return found.length ? new Date(Math.min(...found)) : null
 }
