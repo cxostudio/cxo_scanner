@@ -178,6 +178,7 @@ export default function Home() {
   const [analyzedUrl, setAnalyzedUrl] = useState<string | null>(null);
   const [redirectWarning, setRedirectWarning] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaderMsgIndex, setLoaderMsgIndex] = useState(0);
   const [previewDesktop, setPreviewDesktop] = useState<string | null>(null);
@@ -1300,6 +1301,9 @@ export default function Home() {
       await new Promise<void>((r) =>
         window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS),
       );
+      // fade the scan screen out, then the results fade in (see .cxo-page-in)
+      setLeaving(true);
+      await new Promise<void>((r) => window.setTimeout(r, 380));
       router.replace("/results");
 
       setTimeout(() => {
@@ -1408,7 +1412,7 @@ export default function Home() {
   const blocking = urlError || emailError;
 
   return (
-    <main className={`cxo-page ${showAnalyze ? "lg:!pb-8" : ""}`} ref={analyzeTopRef}>
+    <main className={`cxo-page ${showAnalyze ? "lg:!pb-8" : ""} ${leaving ? "cxo-page-out" : ""}`} ref={analyzeTopRef}>
       <a className={`cxo-logo ${showAnalyze ? "lg:!mb-8" : ""}`} href="https://cxo.studio" aria-label="CXO studio">
         <img src={asset("/cxo-logo.png")} alt="CXO studio" />
       </a>
@@ -1447,7 +1451,7 @@ export default function Home() {
           )}
         </div>
       ) : (
-        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center lg:gap-10">
+        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-10">
           {/* live preview of the page being scanned; on phones it comes first, with a compact
               progress line on top so the visitor still sees the scan moving */}
           <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
@@ -1462,18 +1466,21 @@ export default function Home() {
               scanning
               status={pct < 25 ? "Capturing your page…" : pct < 75 ? "Scanning every section…" : "Almost there…"}
             />
+            {/* desktop: room for the thumbnails is kept from the start, so nothing jumps when they arrive */}
+            <div className="mt-6 hidden min-h-[180px] w-full min-w-0 lg:block">
             {quadrants.length > 0 && previewDesktop && (
-              <div className="mt-6 hidden w-full min-w-0 lg:block">
+              <div className="cxo-fade-in w-full min-w-0">
                 {redirectWarning && (
                   <div className="mb-4 rounded-[var(--radius-md)] bg-[var(--status-finding-bg)] p-3 text-sm text-[var(--status-finding-fg)]">{redirectWarning}</div>
                 )}
                 <QuadrantScanSequence quadrants={quadrants} quadrantLabels={quadrantLabels} previewDesktop={previewDesktop} previewMobile={previewMobile} />
               </div>
             )}
+            </div>
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-scan-aside cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-6" aria-label="Scan progress">
+          <aside className="cxo-card cxo-scan-aside cxo-reveal cxo-reveal-1 relative z-10 min-w-0 lg:sticky lg:top-8 lg:mt-6 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${barPct}%`, transition: 'none' }} />

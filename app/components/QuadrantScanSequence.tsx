@@ -98,18 +98,13 @@ export function QuadrantScanSequence({
                 <motion.figure
                   key={item.key}
                   layout
-                  initial={{ opacity: 0, scale: 0.45, y: 24 }}
+                  initial={{ opacity: 0, scale: 0.92, y: 12 }}
                   animate={{
                     opacity: 1,
                     scale: 1,
                     y: 0,
                   }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 380,
-                    damping: 26,
-                    mass: 0.55,
-                  }}
+                  transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                   className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-zinc-200/90 bg-white shadow-md ring-1 ring-black/5 sm:h-32 sm:w-32"
                   title={item.label}
                 >

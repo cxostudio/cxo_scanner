@@ -479,3 +479,12 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 /* logos in the brands strip: one height, greyed to sit quietly with the text */
 .cxo-brands-row li { display: flex; align-items: center; }
 .cxo-brands-logo { height: 22px; width: auto; max-width: 120px; object-fit: contain; filter: grayscale(1); opacity: 0.7; }
+
+/* smooth hand-offs: scan screen fades out, results fade in; new images and blocks fade in */
+@keyframes cxo-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cxo-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.cxo-fade-in { animation: cxo-fade var(--duration-base, 0.4s) var(--ease) both; }
+.cxo-page-in { animation: cxo-fade-up 0.5s var(--ease) both; }
+.cxo-page-out { opacity: 0; transform: translateY(-6px); transition: opacity 0.35s var(--ease), transform 0.35s var(--ease); }
+.cxo-scan-aside .cxo-row { transition: border-color var(--duration-base) var(--ease), background var(--duration-base) var(--ease), color var(--duration-base) var(--ease), opacity var(--duration-base) var(--ease); }
+@media (prefers-reduced-motion: reduce) { .cxo-fade-in, .cxo-page-in { animation: none; } .cxo-page-out { transition: none; } }
