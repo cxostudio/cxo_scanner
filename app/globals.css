@@ -463,3 +463,16 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 @media (prefers-reduced-motion: reduce) { .cxo-laptop-band { animation: none; transform: translateX(150%); } }
 @media (max-width: 1024px) { .cxo-laptop { max-width: 340px; } }
 @media (max-width: 560px) { .cxo-laptop { display: none; } }
+
+/* brands we studied, inside the report bonus: a slow marquee of names in our own type */
+.cxo-brands { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.cxo-brands-track { display: flex; width: max-content; animation: cxo-brands-scroll 40s linear infinite; }
+.cxo-brands-row { display: flex; gap: 28px; padding-right: 28px; margin: 0; list-style: none; }
+.cxo-brands-row li { font: 700 15px/1 var(--font-display); letter-spacing: -0.02em; color: var(--text-muted); white-space: nowrap; }
+@keyframes cxo-brands-scroll { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .cxo-brands { -webkit-mask-image: none; mask-image: none; }
+  .cxo-brands-track { animation: none; width: auto; }
+  .cxo-brands-row { flex-wrap: wrap; row-gap: 8px; }
+  .cxo-brands-row[aria-hidden] { display: none; }
+}

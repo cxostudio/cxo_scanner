@@ -23,7 +23,7 @@ const PAGES = [
   { key: 'product', label: 'Product pages', ids: ['recq3oalwwoefg2x5'] },
   { key: 'cart', label: 'Cart (page or drawer)', ids: ['recdyiscpsbfrbbha'] },
   { key: 'checkout', label: 'Checkout', ids: ['recokhtzh3nxsqnmb'] },
-  { key: 'site', label: 'On every page', ids: ['reclgdsv5ric0dkku'] },
+  { key: 'site', label: 'General elements', ids: ['reclgdsv5ric0dkku'] },
 ] as const
 
 type Coverage = {
