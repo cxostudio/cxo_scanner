@@ -174,7 +174,7 @@ export function YourPath({
           <p className="text-sm font-semibold text-[var(--text-muted)]">What’s next</p>
           <p className="mt-2 font-[family-name:var(--font-display)] text-[22px] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)] sm:text-[26px]">One page scanned. Your whole store is next.</p>
           <p className="mt-3 text-[15px] leading-[1.6] text-[var(--text-muted)]">
-            This was a snapshot: {checked}{total ? ` of our ${total}` : ''} checkpoints, on one page. If the findings ring true, the full report runs {total ? `all ${total}` : 'every checkpoint'} on every page your shoppers go through.
+            This was a snapshot: {checked}{total ? ` of our ${total}` : ''} checkpoints, on one page.
           </p>
           {laptop && <ScanLaptop shot={laptop.shot} fallback={laptop.fallback} passed={laptop.passed} />}
         </div>
@@ -226,11 +226,11 @@ export function YourPath({
               className="flex min-w-0 flex-col gap-3"
               style={{ opacity: on ? 1 : 0.55, transform: on ? 'none' : 'translateY(6px)', transition: `opacity .5s ${ease} 1.35s, transform .5s ${ease} 1.35s` }}
             >
-              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">{total ? `Next: all ${total} checkpoints, home to checkout` : 'Next: your whole store, home to checkout'}</p>
+              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">{total ? `Next: all ${total} checkpoints, from homepage to checkout` : 'Next: your whole store, home to checkout'}</p>
               {offerSlot ?? (
                 <>
                   <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
-                  <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'On every page: header, menu, footer, speed']} />
+                  <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'General elements: header, menu, footer, speed']} />
                   <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
                     Get the full report, {price} <Arrow />
                   </a>

@@ -357,9 +357,7 @@ export default function ResultsPage() {
                 ? <>
                     <span className="max-[560px]:hidden">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below. The full report runs the other ${report.remaining} checkpoints on your whole store, from the homepage to the checkout.`}</span>
                     {/* phone: three lines at most */}
-                    <span className="hidden max-[560px]:inline">{numbers
-                      ? `That's what a 10% lift is worth to you. We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}.`
-                      : `We ran ${report.freeRun} checkpoints and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}. The full report runs ${report.remaining} more on your whole store.`}</span>
+                    <span className="hidden max-[560px]:inline">{`We ran ${report.freeRun} checkpoints on your ${pageName.toLowerCase()} and found ${report.failed.length} ${report.failed.length === 1 ? 'issue' : 'issues'}, with the fix for each below.`}</span>
                   </>
                 : `${report.toFix} of ${report.checked} checkpoints failed`}
               {report.freeOnly ? '' : report.free

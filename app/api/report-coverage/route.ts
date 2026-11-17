@@ -23,12 +23,13 @@ const PAGES = [
   { key: 'product', label: 'Product pages', ids: ['recq3oalwwoefg2x5'] },
   { key: 'cart', label: 'Cart (page or drawer)', ids: ['recdyiscpsbfrbbha'] },
   { key: 'checkout', label: 'Checkout', ids: ['recokhtzh3nxsqnmb'] },
-  { key: 'site', label: 'On every page', ids: ['reclgdsv5ric0dkku'] },
+  { key: 'site', label: 'General elements', ids: ['reclgdsv5ric0dkku'] },
 ] as const
 
 type Coverage = {
   total: number
   stores: number
+  hosts?: string[]
   /** agreement with expert labels on the Live checks, in % (lab) */
   accuracy: number | null
   /** example screenshots attached to the Live checks */
@@ -111,6 +112,7 @@ export async function GET(req: Request) {
   const data: Coverage = {
     total: pages.reduce((n, p) => n + p.checks, 0),
     stores: hosts.size || stores,
+    hosts: [...hosts].sort(),
     accuracy: labelled >= 200 ? Math.round((1000 * agree) / labelled) / 10 : null,
     examples,
     siteIds: live.filter((r) => pageOf.get(r.id) === 'site').map((r) => r.id),
