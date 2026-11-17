@@ -425,3 +425,12 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 @media (prefers-reduced-motion: reduce) {
   .ux-ray-scan-line { animation: none; top: 40%; }
 }
+
+/* scanning screen, desktop: a lighter progress column (smaller rows and title, less padding) */
+@media (min-width: 1025px) {
+  .cxo-scan-aside .cxo-q { font-size: var(--text-lg); margin-bottom: var(--space-4); }
+  .cxo-scan-aside .cxo-rows { gap: 6px; }
+  .cxo-scan-aside .cxo-row { padding: 9px 12px 9px 10px; gap: 12px; }
+  .cxo-scan-aside .cxo-row .cxo-icon { width: 34px; height: 34px; }
+  .cxo-scan-aside .cxo-row-label { font-size: 14px !important; }
+}

@@ -472,7 +472,7 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
                 ) : (
                 <LockedFindings
                   locked={report.locked}

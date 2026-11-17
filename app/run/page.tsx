@@ -1447,7 +1447,7 @@ export default function Home() {
           )}
         </div>
       ) : (
-        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center lg:gap-14">
+        <div className="mx-auto grid w-full min-w-0 max-w-[1280px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center lg:gap-10">
           {/* live preview of the page being scanned; on phones it comes first, with a compact
               progress line on top so the visitor still sees the scan moving */}
           <section className="cxo-reveal cxo-reveal-2 min-w-0" aria-label="Live preview">
@@ -1473,7 +1473,7 @@ export default function Home() {
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-8" aria-label="Scan progress">
+          <aside className="cxo-card cxo-scan-aside cxo-reveal cxo-reveal-1 relative z-10 min-w-0 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${barPct}%`, transition: 'none' }} />
