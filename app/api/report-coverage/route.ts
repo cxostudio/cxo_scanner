@@ -18,12 +18,12 @@ const EDGE = { headers: { 'Cache-Control': 'public, s-maxage=21600, stale-while-
 // the six areas of the full report, in shopping order; checks that apply on every page (header, menu,
 // footer, speed) have their own row instead of being folded into the page that was scanned
 const PAGES = [
+  { key: 'site', label: 'General elements', ids: ['reclgdsv5ric0dkku'] },
   { key: 'homepage', label: 'Homepage', ids: ['rectbairzlgei24hg'] },
   { key: 'category', label: 'Collection pages', ids: ['recpwt9mnrffkte9i'] },
   { key: 'product', label: 'Product pages', ids: ['recq3oalwwoefg2x5'] },
   { key: 'cart', label: 'Cart (page or drawer)', ids: ['recdyiscpsbfrbbha'] },
   { key: 'checkout', label: 'Checkout', ids: ['recokhtzh3nxsqnmb'] },
-  { key: 'site', label: 'General elements', ids: ['reclgdsv5ric0dkku'] },
 ] as const
 
 type Coverage = {
