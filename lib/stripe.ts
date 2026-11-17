@@ -4,6 +4,8 @@ import Stripe from 'stripe'
 
 export const REPORT_LOOKUP_KEY = 'cxo_full_report_eur49'
 export const REPORT_PRICE_CENTS = 4900
+/** the 48-hour offer after a free scan, same product */
+export const OFFER_LOOKUP_KEY = 'cxo_full_report_eur39_48h'
 
 let client: Stripe | null = null
 export function stripe(): Stripe {
@@ -33,6 +35,23 @@ export async function reportPrice(): Promise<Stripe.Price> {
     tax_behavior: 'inclusive',
     lookup_key: REPORT_LOOKUP_KEY,
     transfer_lookup_key: true,
+  })
+}
+
+/** The 48-hour offer price (€39, VAT included) on the same product, created on first use. */
+export async function offerPrice(): Promise<Stripe.Price> {
+  const s = stripe()
+  const found = await s.prices.list({ lookup_keys: [OFFER_LOOKUP_KEY], active: true, limit: 1 })
+  if (found.data[0]) return found.data[0]
+  const regular = await reportPrice()
+  return s.prices.create({
+    product: typeof regular.product === 'string' ? regular.product : regular.product.id,
+    currency: 'eur',
+    unit_amount: 3900,
+    tax_behavior: 'inclusive',
+    lookup_key: OFFER_LOOKUP_KEY,
+    transfer_lookup_key: true,
+    nickname: '48-hour offer after the free scan',
   })
 }
 

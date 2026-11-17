@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/base'
 import { LEVERS, lever, type ScanResult } from '@/lib/report'
+import type { OfferView } from './useOffer'
 
 const LockIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -86,7 +87,14 @@ export function LockedRow({ r, variant, open, onToggle, buyUrl, price }: { r: Sc
 
 
 /** After the free findings: the issues the free scan did not run, blurred, with the way to unlock them. */
-export function LockedBlock({ count, buyUrl, price }: { count: number; pageName?: string; buyUrl: string; price: string }) {
+const ClockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+)
+
+export function LockedBlock({ count, buyUrl, price, offer }: { count: number; pageName?: string; buyUrl: string; price: string; offer?: OfferView }) {
   const widths = ['72%', '58%', '84%']
   return (
     <div className="relative overflow-hidden rounded-[16px] border border-dashed border-[var(--border-strong)] bg-[var(--surface)]">
@@ -108,6 +116,11 @@ export function LockedBlock({ count, buyUrl, price }: { count: number; pageName?
         <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-5 !py-2 text-sm">
           Unlock the full report, {price} <Arrow />
         </a>
+        {offer?.active && (
+          <p className="text-[13px] text-[var(--text-muted)]">
+            <s>{offer.regular}</s> <b className="text-[var(--text)]">{offer.price}</b> for the next {offer.left}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -133,7 +146,6 @@ const WHAT_YOU_GET = [
   'Every checkpoint on your homepage, collections, product pages, cart and checkout',
   'Each issue ranked by its impact on revenue, so you know what to fix first',
   'The fix, step by step, and why it matters, backed by research and A/B tests',
-  'Real examples from stores that get it right',
   'A PDF to hand to your developer or agency',
 ]
 
@@ -141,7 +153,7 @@ const WHAT_YOU_GET = [
  * The full report offer under the free results. A free scan runs only some checks of the page it scanned:
  * the scanned areas show issues found and checks run; the others show their number of checks (never guessed issues).
  */
-export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, ran = [] }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown?: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number; ran?: { id: string; failed: boolean }[] }) {
+export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, ran = [], offer }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown?: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number; ran?: { id: string; failed: boolean }[]; offer?: OfferView }) {
   const [cov, setCov] = useState<Coverage | null>(null)
   useEffect(() => {
     fetch(api('/report-coverage'))
@@ -175,9 +187,15 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
   return (
     <section className="mt-6 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]" aria-label="Full report">
       <div className="flex flex-col gap-4 p-[var(--card-padding)]">
-        <p className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-muted)]">
-          <LockIcon /> Full report, {price} one-off
-        </p>
+        {offer?.active ? (
+          <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 self-start rounded-full bg-[var(--status-finding-bg)] px-3 py-1 text-sm font-semibold text-[var(--status-finding-fg)]">
+            <ClockIcon /> Your price: {offer.price} instead of {offer.regular}, for the next {offer.left}
+          </p>
+        ) : (
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-muted)]">
+            <LockIcon /> Full report, {price} one-off
+          </p>
+        )}
         {variant === 'cd' ? (
           <>
             <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
@@ -235,6 +253,14 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                 </li>
               ))}
             </ul>
+            {/* the bonus: the real-store screenshots attached to the checkpoints */}
+            <div className="flex items-start gap-3 rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4">
+              <span className="shrink-0 rounded-full bg-[var(--text)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--text-inverse)]">Bonus</span>
+              <p className="text-[14px] leading-snug text-[var(--text)]">
+                <b>{cov && cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : 'Hundreds of'} real-store screenshots</b>
+                <span className="text-[var(--text-muted)]">, the UX examples behind every checkpoint: see how leading stores solve each issue before you brief your developer.</span>
+              </p>
+            </div>
           </>
         ) : (
           <>
@@ -249,6 +275,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
         <div className="flex flex-wrap items-center gap-3">{qualified ? [call, buy] : [buy, call]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
           {qualified ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
+          {offer?.active && ` ${offer.price} until the offer ends, then ${offer.regular}.`}
         </p>
       </div>
     </section>

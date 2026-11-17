@@ -12,6 +12,7 @@ import { LockedRow, FullStoreOffer, LockedBlock } from '../components/PitchMocku
 import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
+import { useOffer } from '../components/useOffer'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
 
 // Calendly once available; until then the existing booking form (same as YourPath)
@@ -89,6 +90,8 @@ export default function ResultsPage() {
   // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
   const [gate, setGate] = useState<'' | 'b' | 'cd'>('cd')
   const [labId, setLabId] = useState<string | null>(null)
+  // the 48-hour offer after the first free scan (server-side; lab scans see the regular price)
+  const offer = useOffer(email, !labId)
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -435,9 +438,9 @@ export default function ResultsPage() {
                 <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
-                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.remaining} pageName={pageName} buyUrl={buyUrl} price="€49" />
+                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.remaining} pageName={pageName} buyUrl={buyUrl} price={offer.price} offer={offer} />
                     if (report.lockedIds.has(r.ruleId) && gate)
-                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price="€49" />
+                      return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price={offer.price} />
                     const isOpen = open.has(r.ruleId)
                     const t = r.passed ? 'pass' : 'fail'
                     const n = report.num.get(r.ruleId)
@@ -489,7 +492,7 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
@@ -516,6 +519,7 @@ export default function ResultsPage() {
             shortEur={shortEur}
             callUrl={CALL_URL}
             fullScanUrl={buyUrl}
+            price={offer.price}
             host={host}
           />
         </div>
