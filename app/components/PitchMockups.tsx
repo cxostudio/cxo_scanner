@@ -103,7 +103,7 @@ export function LockedBlock({ count, pageName, buyUrl, price }: { count: number;
       </div>
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--surface)]/70 px-5 text-center">
         <p className="inline-flex items-center gap-2 font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--text)]">
-          <LockIcon /> About {count} more issues on this {pageName.toLowerCase()}
+          <LockIcon /> {count} more checks on this {pageName.toLowerCase()}
         </p>
         <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-5 !py-2 text-sm">
           Unlock the full report, {price} <Arrow />
@@ -128,7 +128,8 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
   const covered = [pageKey]
   const here = cov?.pages.find((p) => p.key === pageKey)
   const others = (cov?.pages || []).filter((p) => !covered.includes(p.key) && p.checks > 0)
-  const remaining = cov ? lockedCount + others.reduce((n, p) => n + p.expectedIssues, 0) : 0
+  // free scan: count what is left to run (checks), never guessed issues
+  const remaining = cov ? lockedCount + others.reduce((n, p) => n + (estimated ? p.checks : p.expectedIssues), 0) : 0
   const buy = (
     <a key="buy" href={buyUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'}`}>
       Get the full report, {price} <Arrow />
@@ -148,10 +149,10 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
         {variant === 'cd' ? (
           <>
             <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-xl)] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)]">
-              {remaining ? `About ${remaining} issues still to fix on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
+              {estimated && remaining ? `${remaining} checks still to run on your store` : remaining ? `About ${remaining} issues still to fix on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              {estimated ? `You have seen the fix for the ${fixesShown} issues our free check found. We expect about ${lockedCount} more on this page.` : `You have seen the fix for ${fixesShown} of the ${toFix} issues on this page.`} The full report covers {cov ? `all ${cov.total} checks` : 'every check'} across your store, with every fix, examples, and a PDF to share with your developer.
+              {estimated ? `You have seen the fix for the ${fixesShown} issues our free check found.` : `You have seen the fix for ${fixesShown} of the ${toFix} issues on this page.`} The full report covers {cov ? `all ${cov.total} checks` : 'every check'} across your store, with every fix, examples, and a PDF to share with your developer.
             </p>
             {cov && (
               <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
@@ -165,7 +166,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
                         <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
                           {estimated ? (
                             <>
-                              <b className="text-[var(--result-fail-fg)]">{fixesShown} issues</b> in {freeRun} free checks · {p.checks} in the full report
+                              <b className="text-[var(--result-fail-fg)]">{fixesShown} issues found</b> · {freeRun} of {p.checks} checks run
                             </>
                           ) : (
                             <>
@@ -181,7 +182,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
                       <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
                         <span className="min-w-0 text-sm font-semibold text-[var(--text)]">{p.label} <span className="font-normal text-[var(--text-muted)]">· not scanned</span></span>
                         <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
-                          {p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b>
+                          {estimated ? <b className="text-[var(--text)]">{p.checks} checks</b> : <>{p.checks} checks · <b className="text-[var(--text)]">about {p.expectedIssues} issues</b></>}
                         </span>
                       </span>
                     </li>
@@ -189,7 +190,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, fixesShown, lockedCoun
                 )}
               </ul>
             )}
-            {cov && cov.stores > 0 && <p className="text-[12px] text-[var(--text-muted)]">Expected issues: how often each check fails across the {cov.stores} stores we have scanned.</p>}
+            {cov && cov.stores > 0 && !estimated && <p className="text-[12px] text-[var(--text-muted)]">Expected issues: how often each check fails across the {cov.stores} stores we have scanned.</p>}
           </>
         ) : (
           <>

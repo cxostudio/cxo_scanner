@@ -167,13 +167,11 @@ export default function ResultsPage() {
     const free = !labId && results.some((r) => r.freeScan)
     const shown = free ? results.filter((r) => r.freeScan) : results
     // a free scan judges only the free checks: the page's other Live checks were not run. Their issues
-    // are estimated from this page's own failure rate and shown as blurred rows, never with titles.
+    // are counted (never named, never guessed as issues) and shown as one locked block.
     const freeOnly = free && results.every((r) => r.freeScan) && pageTotal > results.length
-    const shownScored = shown.filter((r) => r.status !== 'unknown' && r.status !== 'na' && !r.coveredByShopify)
-    const failRate = shownScored.length ? shownScored.filter((r) => !r.passed).length / shownScored.length : 0.3
-    const estimated = freeOnly ? Math.max(2, Math.round((pageTotal - results.length) * failRate)) : 0
+    const remaining = freeOnly ? pageTotal - results.length : 0
     // one locked block, right after the free findings (before the passed checks)
-    const teaser: ScanResult[] = estimated ? [{ ruleId: 'teaser-block', ruleTitle: '', passed: false, reason: '', status: 'fail' } as unknown as ScanResult] : []
+    const teaser: ScanResult[] = remaining > 0 ? [{ ruleId: 'teaser-block', ruleTitle: '', passed: false, reason: '', status: 'fail' } as unknown as ScanResult] : []
     const locked = free ? (freeOnly ? teaser : results.filter((r) => !r.freeScan && r.status === 'fail')) : []
     const lockedIssues = locked.length
     // "couldn't check" answers are never shown as failures or counted in the score
@@ -201,12 +199,12 @@ export default function ResultsPage() {
     // one number per finding, in the order the list shows them
     const num = new Map(listed.filter((r) => !r.passed && !r.ruleId.startsWith('teaser-') && !locked.includes(r)).map((r, i) => [r.ruleId, i + 1]))
     const easyHigh = failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
-    const extra = free && gate ? (freeOnly ? estimated : locked.length) : 0
+    const extra = free && gate ? (freeOnly ? 0 : locked.length) : 0
     // one set of numbers everywhere: every check run on this page, the free ones explained,
     // the locked findings counted, and the rest (passed or not relevant) waiting in the full report
     const pageChecks = free && gate ? (freeOnly ? pageTotal : results.length) : scored.length + unknown
-    const hidden = free && gate ? (freeOnly ? pageTotal - results.length - estimated : results.length - shown.length - locked.length) : 0
-    return { free: free && Boolean(gate), freeOnly, estimated, pageChecks, hidden, toFix: failed.length + extra, checked: pageChecks, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
+    const hidden = free && gate ? (freeOnly ? remaining : results.length - shown.length - locked.length) : 0
+    return { free: free && Boolean(gate), freeOnly, remaining, freeRun: results.length, pageChecks, hidden, toFix: failed.length + extra, checked: pageChecks, lockedIds, rows: listed, failed, passed: base.length - failed.length, total: scored.length + unknown, unknown, notRelevant, byShopify, score: scoreOf(scored), areas, num, easyHigh, lockedIssues, locked }
   }, [results, labId, gate, pageTotal])
 
   const host = hostOf(url)
@@ -297,7 +295,7 @@ export default function ResultsPage() {
         <section className="mx-auto grid w-full max-w-[1280px] items-stretch gap-10 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:pb-6" aria-label="Verdict">
           <div className="cxo-reveal flex min-w-0 flex-col justify-center gap-6">
             <p className="text-sm font-semibold text-[var(--text-muted)]">
-              {host} · {pageName} · {report.freeOnly ? `${report.pageChecks - report.hidden - report.estimated} of ${report.pageChecks} checks run` : `${report.pageChecks} checks`}
+              {host} · {pageName} · {report.freeOnly ? `${report.freeRun} of ${report.pageChecks} checks run` : `${report.pageChecks} checks`}
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-[clamp(30px,4.2vw,48px)] font-bold leading-[1.1] tracking-[-0.035em] text-[var(--text)]">
               {numbers ? (
@@ -305,12 +303,12 @@ export default function ResultsPage() {
                   Your {pageName.toLowerCase()} leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(numbers.lift10)} a month</span> on the table
                 </>
               ) : (
-                <>Your {pageName.toLowerCase()} has {report.freeOnly ? 'about ' : ''}{report.toFix} things to fix</>
+                <>Your {pageName.toLowerCase()} has {report.toFix} things to fix</>
               )}
             </h1>
             <p className="text-[17px] leading-[1.6] text-[var(--text-muted)]">
               {report.freeOnly
-                ? `Our free check found ${report.failed.length} issues, with the fix for each below. The full report runs all ${report.pageChecks} checks on this page, where we expect about ${report.estimated} more.`
+                ? `We ran ${report.freeRun} of the ${report.pageChecks} checks for this page and found ${report.failed.length} issues, with the fix for each below. The full report runs the other ${report.remaining}, plus every check on the rest of your store.`
                 : `${report.toFix} of ${report.checked} checks failed`}
               {report.freeOnly ? '' : report.free
                 ? `. The fix for ${report.failed.length} of them is below${report.easyHigh > 0 ? `, ${report.easyHigh} high-impact and easy: start there` : ''}.`
@@ -381,7 +379,7 @@ export default function ResultsPage() {
                   {report.byShopify > 0 && ` · ${report.byShopify} covered by Shopify`}
                   {report.notRelevant > 0 && ` · ${report.notRelevant} not relevant for your store`}
                   {report.unknown > 0 && ` · ${report.unknown} we couldn’t check`}
-                  {report.freeOnly ? ` · about ${report.estimated} more issues in the full report` : report.hidden > 0 && ` · ${report.hidden} more in the full report`}
+                  {report.freeOnly ? ` · ${report.remaining} more checks in the full report` : report.hidden > 0 && ` · ${report.hidden} more in the full report`}
                   {shot && shot.pins.length > 0 && ` · ${shot.pins.length} pinned on your page`}
                 </p>
               </div>
@@ -420,7 +418,7 @@ export default function ResultsPage() {
                 <div className="relative">
                 <div className="flex flex-col gap-3">
                   {report.rows.slice(0, visible).map((r) => {
-                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.estimated} pageName={pageName} buyUrl={buyUrl} price="€49" />
+                    if (r.ruleId === 'teaser-block' && gate) return <LockedBlock key={r.ruleId} count={report.remaining} pageName={pageName} buyUrl={buyUrl} price="€49" />
                     if (report.lockedIds.has(r.ruleId) && gate)
                       return <LockedRow key={r.ruleId} r={r} variant={gate} open={open.has(r.ruleId)} onToggle={() => toggle(r.ruleId)} buyUrl={buyUrl} price="€49" />
                     const isOpen = open.has(r.ruleId)
@@ -474,7 +472,7 @@ export default function ResultsPage() {
                 </div>
                 {/* free scan: the other findings exist but stay in the full report */}
                 {gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.estimated : report.locked.length} estimated={report.freeOnly} freeRun={report.pageChecks - report.hidden - report.estimated} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price="€49" />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
@@ -494,7 +492,7 @@ export default function ResultsPage() {
           <YourPath
             money={numbers}
             qualified={qualified}
-            checked={report ? (report.freeOnly ? report.pageChecks - report.hidden - report.estimated : report.checked) : 0}
+            checked={report ? (report.freeOnly ? report.freeRun : report.checked) : 0}
             toFix={report ? (report.freeOnly ? report.failed.length : report.toFix) : 0}
             eur={eur}
             shortEur={shortEur}
