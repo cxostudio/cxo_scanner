@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { SalesProjection, projection } from './SalesProjection'
+import { ScanLaptop, type LaptopShot } from './ScanLaptop'
 
 /**
  * End of the results page: what fixing the leaks is worth, and the path from today's scan.
@@ -56,6 +58,8 @@ export function YourPath({
   host = '',
   total = 0,
   price = '€49',
+  offerSlot,
+  laptop,
 }: {
   money: Money | null
   qualified: boolean
@@ -68,6 +72,10 @@ export function YourPath({
   host?: string
   total?: number
   price?: string
+  /** the full-report offer, shown as step 2 */
+  offerSlot?: ReactNode
+  /** the shopper's page for the laptop illustration */
+  laptop?: { shot: LaptopShot | null; fallback: string; passed: number }
 }) {
   const [lift, setLift] = useState(0.1)
   const ref = useRef<HTMLElement | null>(null)
@@ -161,13 +169,14 @@ export function YourPath({
       })()}
 
       {/* the path */}
-      <div className={`grid gap-6 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-10 ${money ? 'pt-8' : ''}`}>
-        <div className="min-w-0">
+      <div className={`grid gap-6 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)] lg:gap-12 ${money ? 'pt-8' : ''}`}>
+        <div className="min-w-0 lg:sticky lg:top-6 lg:self-start">
           <p className="text-sm font-semibold text-[var(--text-muted)]">What’s next</p>
           <p className="mt-2 font-[family-name:var(--font-display)] text-[22px] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)] sm:text-[26px]">One page scanned. Your whole store is next.</p>
           <p className="mt-3 text-[15px] leading-[1.6] text-[var(--text-muted)]">
             This was a snapshot: {checked}{total ? ` of our ${total}` : ''} checkpoints, on one page. If the findings ring true, the full report runs {total ? `all ${total}` : 'every checkpoint'} on every page your shoppers go through.
           </p>
+          {laptop && <ScanLaptop shot={laptop.shot} fallback={laptop.fallback} passed={laptop.passed} />}
         </div>
         <ol className="flex min-w-0 flex-col">
           {/* 1. today */}
@@ -218,11 +227,15 @@ export function YourPath({
               style={{ opacity: on ? 1 : 0.55, transform: on ? 'none' : 'translateY(6px)', transition: `opacity .5s ${ease} 1.35s, transform .5s ${ease} 1.35s` }}
             >
               <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">{total ? `Next: all ${total} checkpoints, home to checkout` : 'Next: your whole store, home to checkout'}</p>
-              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
-              <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'On every page: header, menu, footer, speed']} />
-              <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
-                Get the full report, {price} <Arrow />
-              </a>
+              {offerSlot ?? (
+                <>
+                  <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">The full report checks every step the same way, with every fix and examples:</p>
+                  <List items={['Homepage', 'Collection pages', 'Product pages', 'Cart (page or drawer)', 'Checkout', 'On every page: header, menu, footer, speed']} />
+                  <a href={fullScanUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'} self-start`}>
+                    Get the full report, {price} <Arrow />
+                  </a>
+                </>
+              )}
             </div>
           </li>
 

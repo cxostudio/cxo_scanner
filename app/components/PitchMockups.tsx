@@ -153,7 +153,7 @@ const WHAT_YOU_GET = [
  * The full report offer under the free results. A free scan runs only some checks of the page it scanned:
  * the scanned areas show issues found and checks run; the others show their number of checks (never guessed issues).
  */
-export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, ran = [], offer }: { variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown?: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number; ran?: { id: string; failed: boolean }[]; offer?: OfferView }) {
+export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified, buyUrl, callUrl, price, estimated = false, ran = [], offer, embedded = false }: { embedded?: boolean; variant: 'b' | 'cd'; pageKey: string; toFix: number; fixesShown?: number; lockedCount: number; qualified: boolean; buyUrl: string; callUrl: string; price: string; estimated?: boolean; freeRun?: number; ran?: { id: string; failed: boolean }[]; offer?: OfferView }) {
   const [cov, setCov] = useState<Coverage | null>(null)
   useEffect(() => {
     fetch(api('/report-coverage'))
@@ -185,8 +185,9 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
     </a>
   )
   return (
-    <section className="mt-6 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]" aria-label="Full report">
-      <div className="flex flex-col gap-4 p-[var(--card-padding)]">
+    // embedded: inside "What's next" (step 2 gives the title), no card around it, no call button (step 3)
+    <section className={embedded ? 'flex flex-col gap-5' : 'mt-6 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]'} aria-label="Full report">
+      <div className={embedded ? 'flex flex-col gap-4' : 'flex flex-col gap-4 p-[var(--card-padding)]'}>
         {offer?.active ? (
           <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 self-start rounded-full bg-[var(--status-finding-bg)] px-3 py-1 text-sm font-semibold text-[var(--status-finding-fg)]">
             <ClockIcon /> Your price: {offer.price} instead of {offer.regular}, for the next {offer.left}
@@ -198,11 +199,11 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
         )}
         {variant === 'cd' ? (
           <>
-            <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
+            {!embedded && <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
               {estimated ? `${cov ? left : lockedCount} more checkpoints are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
-            </h3>
+            </h3>}
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
+              {!embedded && <>The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. </>}The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
             </p>
             {cov && (
               <div className="grid grid-cols-4 gap-2 max-[810px]:grid-cols-2">
@@ -254,7 +255,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
               ))}
             </ul>
             {/* the bonus: the real-store screenshots attached to the checkpoints */}
-            <div className="flex items-start gap-3 rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4">
+            <div className="flex items-start gap-3 rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4 max-[560px]:flex-col max-[560px]:gap-2">
               <span className="shrink-0 rounded-full bg-[var(--text)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--text-inverse)]">Bonus</span>
               <p className="text-[14px] leading-snug text-[var(--text)]">
                 <b>{cov && cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : 'Hundreds of'} real-store screenshots</b>
@@ -271,10 +272,10 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
           </>
         )}
       </div>
-      <div className="flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
-        <div className="flex flex-wrap items-center gap-3">{qualified ? [call, buy] : [buy, call]}</div>
+      <div className={embedded ? 'flex flex-col gap-2' : 'flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]'}>
+        <div className="flex flex-wrap items-center gap-3">{embedded ? [buy] : qualified ? [call, buy] : [buy, call]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
-          {qualified ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
+          {qualified && !embedded ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
           {offer?.active && ` ${offer.price} until the offer ends, then ${offer.regular}.`}
         </p>
       </div>
