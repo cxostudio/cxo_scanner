@@ -7,7 +7,7 @@
  *       is in the full report, and the full report is sold as the rest of the store.
  */
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/base'
+import { api, asset } from '@/lib/base'
 import { LEVERS, lever, type ScanResult } from '@/lib/report'
 import type { OfferView } from './useOffer'
 
@@ -94,13 +94,22 @@ const ClockIcon = () => (
   </svg>
 )
 
-// brands whose stores we scanned and labelled to build the checkpoints (names only, set in our own type)
-const STUDIED = ['Allbirds', 'Brooklinen', 'ColourPop', 'Dr. Squatch', 'Graza', 'IKEA', 'Zalando', 'Kylie Cosmetics', 'Loop', 'Nomad', 'Olipop', 'Wild One', 'Momentous', 'Spacegoods', 'Scandinavian Biolabs', 'Photowall', 'Doré & Rose', 'Tiptoe', 'Icon Amsterdam']
+// brands whose stores we scanned and labelled to build the checkpoints. A brand shows its logo once its
+// file is in public/brands/ (set `logo` to the file name); until then its name, set in our own type.
+const STUDIED: { name: string; logo?: string }[] = [
+  { name: 'Allbirds' }, { name: 'Brooklinen' }, { name: 'ColourPop' }, { name: 'Dr. Squatch' }, { name: 'Graza' },
+  { name: 'IKEA' }, { name: 'Zalando' }, { name: 'Kylie Cosmetics' }, { name: 'Loop' }, { name: 'Nomad' },
+  { name: 'Olipop' }, { name: 'Wild One' }, { name: 'Momentous' }, { name: 'Spacegoods' }, { name: 'Scandinavian Biolabs' },
+  { name: 'Photowall' }, { name: 'Doré & Rose' }, { name: 'Tiptoe' }, { name: 'Icon Amsterdam' },
+]
 function BrandMarquee() {
   const row = (hidden?: boolean) => (
     <ul className="cxo-brands-row" aria-hidden={hidden || undefined}>
       {STUDIED.map((b) => (
-        <li key={b}>{b}</li>
+        <li key={b.name}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {b.logo ? <img src={asset(`/brands/${b.logo}`)} alt={hidden ? '' : b.name} className="cxo-brands-logo" loading="lazy" /> : b.name}
+        </li>
       ))}
     </ul>
   )

@@ -476,3 +476,6 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
   .cxo-brands-row { flex-wrap: wrap; row-gap: 8px; }
   .cxo-brands-row[aria-hidden] { display: none; }
 }
+/* logos in the brands strip: one height, greyed to sit quietly with the text */
+.cxo-brands-row li { display: flex; align-items: center; }
+.cxo-brands-logo { height: 18px; width: auto; max-width: 110px; object-fit: contain; filter: grayscale(1); opacity: 0.7; }
