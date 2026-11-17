@@ -2406,6 +2406,121 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     // homepages only: does the hero rotate by itself (screenshots cannot show it)
     const homePath = /^\/([a-z]{2}([-_][a-z]{2})?\/?)?$/i.test(new URL(finalUrl).pathname)
     const motion = homePath ? await heroMotion(desktop).catch(() => undefined) : undefined
+    let resolveShare: (n: number) => void = () => {}
+    const shareP = new Promise<number>((r) => (resolveShare = r))
+    let mobileTiles: Tile[] = []
+    let mobileFacts: Record<string, unknown> = {}
+    let mobileCartView: Tile | undefined
+    let mobileCartPage: Tile[] = []
+    let mobileCheckout: Tile[] = []
+    let menuTile: Tile | undefined
+    // the phone visit: on free scans it starts right after the desktop page opens and runs alongside it
+    // (a second tab: about 10 s saved); full reports keep the original order, because their phone visit
+    // follows the desktop cart (same cart cookie)
+    const runMobile = async () => {
+      try {
+        const mobile = await browser.newPage()
+        await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+        await mobile.setUserAgent(MOBILE_UA)
+        await prepare(mobile)
+        await open(mobile, rawUrl)
+        // a bot wall on the phone visit only (Cloudflare ties its pass to the browser it gave it to):
+        // wait for the challenge to clear, then retry with the desktop browser's identity on a phone screen
+        // (themes lay out by screen width, not by browser name). Never judge a challenge page.
+        if (await walled(mobile)) {
+          await mobile.waitForFunction(() => !/verify you are human|needs to be verified|checking your browser|just a moment/i.test(document.body?.innerText || ''), { timeout: 10000 }).catch(() => {})
+          if (await walled(mobile)) {
+            await mobile.setUserAgent(DESKTOP_UA)
+            await open(mobile, rawUrl)
+          }
+          if (await walled(mobile)) throw new Error('mobile visit blocked by a bot check')
+        }
+        await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
+        const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
+        // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
+        // consent apps often draw the banner 2 to 5 seconds after load: look again for up to 5 seconds
+        let cookieBanner = await readCookieBanner(mobile).catch(() => null)
+        // (full reports and lab scans only: the free scan does not judge the banner and skips the wait)
+        for (let i = 0; opts.extended && i < 10 && !cookieBanner?.found; i++) {
+          await new Promise((r) => setTimeout(r, 500))
+          cookieBanner = await readCookieBanner(mobile).catch(() => null)
+        }
+        // one screenshot of the phone's first screen WITH the banner, so the banner can be checked by eye
+        const bannerShot = cookieBanner?.found
+          ? await mobile.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
+          : null
+        const popup = await readPopup(mobile).catch(() => null)
+        await cleanPage(mobile)
+        await scrollForLazyContent(mobile)
+        await cleanPage(mobile)
+        mobileFacts = await mobile
+          .evaluate(async () => {
+            // body text size: median font size of visible paragraphs and list items
+            const sizes = Array.from(document.querySelectorAll('p, li, td, dd, span'))
+              .filter((el) => !el.closest('footer, header, nav, [role="contentinfo"], [role="banner"], [class*="footer" i], [class*="announcement" i]'))
+              .filter((el) => {
+                const r = el.getBoundingClientRect()
+                return r.width > 0 && r.height > 0 && Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent || '').trim().length > 20)
+              })
+              .map((el) => parseFloat(getComputedStyle(el).fontSize))
+              .filter((n) => n > 0)
+              .sort((a, b) => a - b)
+            return {
+              viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null,
+              horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5,
+              bodyFontPx: sizes.length ? sizes[Math.floor(sizes.length / 2)] : null,
+              textBlocks: sizes.length,
+            }
+          })
+          .catch(() => ({}))
+        mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
+        if (opts.extended) mobileFacts.probes = await mobileProbes(mobile).catch(() => null)
+        // phone pages run 1.5 to 2 times longer than desktop: take as many tiles as it takes to reach the
+        // same point of the page as the desktop tiles (at most MOBILE_MAX), so both devices can be compared
+        const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
+        const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * (await shareP)) / MOBILE.height)))
+        mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
+        if (bannerShot) mobileTiles.push({ label: 'mobile first screen as it opens, with the cookie banner (only for the cookie banner check)', dataUrl: `data:image/jpeg;base64,${bannerShot}` })
+        if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
+        mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
+        // the hero can be a slider on phones only (some themes show one slide on desktop)
+        if (homePath) mobileFacts.heroMotion = await heroMotion(mobile).catch(() => undefined)
+        // a chat widget (live or AI) in the page code: it often only draws its bubble after a delay or a scroll
+        mobileFacts.chatWidget = await mobile
+          .evaluate(() => {
+            const CHAT = /gorgias|tidio|zendesk|zdassets|intercom|crisp\.chat|livechat|shopify[-_ ]?inbox|shopifychat|inbox\.shopify|richpanel|reamaze|freshchat|kustomer|trengo|helpscout|chatra|tawk\.to|drift|hubspot.*conversations|siena|alby|rep\.ai|manifest\.ai|chatty|willdesk|helpcenter.*chat/i
+            const srcs = Array.from(document.querySelectorAll('script[src], iframe[src]')).map((e) => e.getAttribute('src') || '')
+            const ids = Array.from(document.querySelectorAll('[id], [class]')).slice(0, 4000).map((e) => `${e.id} ${typeof e.className === 'string' ? e.className : ''}`)
+            const hit = [...srcs, ...ids].find((x) => CHAT.test(x) || /(^|[\s_-])(chat-?widget|chat-?bubble|live-?chat|chat-?launcher)([\s_-]|$)/i.test(x))
+            return hit ? hit.slice(0, 80) : null
+          })
+          .catch(() => null)
+        mobileFacts.cookieBanner = cookieBanner
+        mobileFacts.popup = popup
+        mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
+        mobileFacts.videos = await readVideos(mobile).catch(() => null)
+        if (opts.extended) {
+          menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
+          // back to a clean page before the cart (the open menu would sit over the cart icon)
+          if (menuTile && itemInCart) {
+            await mobile.goto(rawUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+        await runDelayedScripts(mobile)
+            await mobile.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
+            await cleanPage(mobile)
+          }
+        }
+        // same browser, same cart cookie: the item added on desktop is in the cart here too
+        if (opts.extended && itemInCart) {
+          mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
+          if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
+          if (!remoteP && desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
+        }
+        await mobile.close().catch(() => {})
+      } catch (e) {
+        console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
+      }
+    }
+    const mobileP = opts.extended ? null : runMobile()
     await scrollForLazyContent(desktop)
     await cleanPage(desktop)
     let facts: Record<string, unknown> = {}
@@ -2439,6 +2554,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       desktopShare = await pageHeight(desktop).then((h) => Math.min(1, (DESKTOP.height * DESKTOP.tiles) / Math.max(h, 1))).catch(() => 1)
       if (text.trim().length > 200 && desktopTiles.length) break
     }
+    resolveShare(desktopShare)
     // product tabs: opened after the page screenshots, so those show the page as a shopper lands on it
     if (detectPageTypeFromUrl(finalUrl) === 'product') {
       // off by default: on the 10 labelled product pages it did not beat the screenshots (image checkpoints
@@ -2521,113 +2637,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     await desktop.close().catch(() => {})
     mark('desktopCart')
 
-    let mobileTiles: Tile[] = []
-    let mobileFacts: Record<string, unknown> = {}
-    let mobileCartView: Tile | undefined
-    let mobileCartPage: Tile[] = []
-    let mobileCheckout: Tile[] = []
-    let menuTile: Tile | undefined
-    try {
-      const mobile = await browser.newPage()
-      await mobile.setViewport({ width: MOBILE.width, height: MOBILE.height, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
-      await mobile.setUserAgent(MOBILE_UA)
-      await prepare(mobile)
-      await open(mobile, rawUrl)
-      // a bot wall on the phone visit only (Cloudflare ties its pass to the browser it gave it to):
-      // wait for the challenge to clear, then retry with the desktop browser's identity on a phone screen
-      // (themes lay out by screen width, not by browser name). Never judge a challenge page.
-      if (await walled(mobile)) {
-        await mobile.waitForFunction(() => !/verify you are human|needs to be verified|checking your browser|just a moment/i.test(document.body?.innerText || ''), { timeout: 10000 }).catch(() => {})
-        if (await walled(mobile)) {
-          await mobile.setUserAgent(DESKTOP_UA)
-          await open(mobile, rawUrl)
-        }
-        if (await walled(mobile)) throw new Error('mobile visit blocked by a bot check')
-      }
-      await new Promise((r) => setTimeout(r, 1500)) // late shifts: fonts, banners, images
-      const layoutShift = await mobile.evaluate(() => (window as any).__cxoCls as number | null).catch(() => null)
-      // read the cookie banner before cleanPage accepts and hides it: screenshots never show it
-      // consent apps often draw the banner 2 to 5 seconds after load: look again for up to 5 seconds
-      let cookieBanner = await readCookieBanner(mobile).catch(() => null)
-      // (full reports and lab scans only: the free scan does not judge the banner and skips the wait)
-      for (let i = 0; opts.extended && i < 10 && !cookieBanner?.found; i++) {
-        await new Promise((r) => setTimeout(r, 500))
-        cookieBanner = await readCookieBanner(mobile).catch(() => null)
-      }
-      // one screenshot of the phone's first screen WITH the banner, so the banner can be checked by eye
-      const bannerShot = cookieBanner?.found
-        ? await mobile.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
-        : null
-      const popup = await readPopup(mobile).catch(() => null)
-      await cleanPage(mobile)
-      await scrollForLazyContent(mobile)
-      await cleanPage(mobile)
-      mobileFacts = await mobile
-        .evaluate(async () => {
-          // body text size: median font size of visible paragraphs and list items
-          const sizes = Array.from(document.querySelectorAll('p, li, td, dd, span'))
-            .filter((el) => !el.closest('footer, header, nav, [role="contentinfo"], [role="banner"], [class*="footer" i], [class*="announcement" i]'))
-            .filter((el) => {
-              const r = el.getBoundingClientRect()
-              return r.width > 0 && r.height > 0 && Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent || '').trim().length > 20)
-            })
-            .map((el) => parseFloat(getComputedStyle(el).fontSize))
-            .filter((n) => n > 0)
-            .sort((a, b) => a - b)
-          return {
-            viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || null,
-            horizontalScroll: document.documentElement.scrollWidth > window.innerWidth + 5,
-            bodyFontPx: sizes.length ? sizes[Math.floor(sizes.length / 2)] : null,
-            textBlocks: sizes.length,
-          }
-        })
-        .catch(() => ({}))
-      mobileFacts.layoutShift = typeof layoutShift === 'number' ? Math.round(layoutShift * 1000) / 1000 : null
-      if (opts.extended) mobileFacts.probes = await mobileProbes(mobile).catch(() => null)
-      // phone pages run 1.5 to 2 times longer than desktop: take as many tiles as it takes to reach the
-      // same point of the page as the desktop tiles (at most MOBILE_MAX), so both devices can be compared
-      const mobileH = await pageHeight(mobile).catch(() => MOBILE.height * MOBILE.tiles)
-      const mobileMax = Math.min(MOBILE_MAX, Math.max(MOBILE.tiles, Math.ceil((mobileH * desktopShare) / MOBILE.height)))
-      mobileTiles = await tiles(mobile, 'mobile', MOBILE.width, MOBILE.height, mobileMax)
-      if (bannerShot) mobileTiles.push({ label: 'mobile first screen as it opens, with the cookie banner (only for the cookie banner check)', dataUrl: `data:image/jpeg;base64,${bannerShot}` })
-      if (opts.extended && detectPageTypeFromUrl(finalUrl) === 'product') mobileFacts.stickyAtc = await measureStickyAtc(mobile).catch(() => null)
-      mobileFacts.headerSearch = await measureHeaderSearch(mobile).catch(() => null)
-      // the hero can be a slider on phones only (some themes show one slide on desktop)
-      if (homePath) mobileFacts.heroMotion = await heroMotion(mobile).catch(() => undefined)
-      // a chat widget (live or AI) in the page code: it often only draws its bubble after a delay or a scroll
-      mobileFacts.chatWidget = await mobile
-        .evaluate(() => {
-          const CHAT = /gorgias|tidio|zendesk|zdassets|intercom|crisp\.chat|livechat|shopify[-_ ]?inbox|shopifychat|inbox\.shopify|richpanel|reamaze|freshchat|kustomer|trengo|helpscout|chatra|tawk\.to|drift|hubspot.*conversations|siena|alby|rep\.ai|manifest\.ai|chatty|willdesk|helpcenter.*chat/i
-          const srcs = Array.from(document.querySelectorAll('script[src], iframe[src]')).map((e) => e.getAttribute('src') || '')
-          const ids = Array.from(document.querySelectorAll('[id], [class]')).slice(0, 4000).map((e) => `${e.id} ${typeof e.className === 'string' ? e.className : ''}`)
-          const hit = [...srcs, ...ids].find((x) => CHAT.test(x) || /(^|[\s_-])(chat-?widget|chat-?bubble|live-?chat|chat-?launcher)([\s_-]|$)/i.test(x))
-          return hit ? hit.slice(0, 80) : null
-        })
-        .catch(() => null)
-      mobileFacts.cookieBanner = cookieBanner
-      mobileFacts.popup = popup
-      mobileFacts.footerTargets = await measureFooterTargets(mobile).catch(() => null)
-      mobileFacts.videos = await readVideos(mobile).catch(() => null)
-      if (opts.extended) {
-        menuTile = await mobileMenu(mobile, MOBILE.width, MOBILE.height).catch(() => undefined)
-        // back to a clean page before the cart (the open menu would sit over the cart icon)
-        if (menuTile && itemInCart) {
-          await mobile.goto(rawUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
-      await runDelayedScripts(mobile)
-          await mobile.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
-          await cleanPage(mobile)
-        }
-      }
-      // same browser, same cart cookie: the item added on desktop is in the cart here too
-      if (itemInCart && opts.extended) {
-        mobileCartView = await cartView(mobile, 'mobile', MOBILE.width, MOBILE.height).catch(() => undefined)
-        if (kindOf(mobileCartView) !== 'page') mobileCartPage = await cartPage(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => [])
-        if (!remoteP && desktopCheckout?.tiles.length) mobileCheckout = (await checkoutStep(mobile, 'mobile', MOBILE.width, MOBILE.height, 2).catch(() => ({ tiles: [] as Tile[] }))).tiles
-      }
-      await mobile.close().catch(() => {})
-    } catch (e) {
-      console.warn('[scanV2] mobile capture failed', String(e).slice(0, 200))
-    }
+    await (mobileP ?? runMobile())
     if (remoteP) {
       const r = await remoteP
       desktopCheckout = r.desktop
