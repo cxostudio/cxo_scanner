@@ -214,7 +214,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                           <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
                             {sc && estimated ? (
                               <>
-                                <b className="text-[var(--result-fail-fg)]">{sc.found} issues found</b> · {sc.run} of {p.checks} checks run
+                                <b className="text-[var(--result-fail-fg)]">{sc.found} {sc.found === 1 ? "issue" : "issues"} found</b> · {sc.run} of {p.checks} checks run
                               </>
                             ) : sc ? (
                               <>
