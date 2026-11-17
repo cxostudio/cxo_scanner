@@ -103,7 +103,7 @@ export function LockedBlock({ count, buyUrl, price }: { count: number; pageName?
       </div>
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--surface)]/70 px-5 text-center">
         <p className="inline-flex items-center gap-2 font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--text)]">
-          <LockIcon /> {count} more checks on your whole store
+          <LockIcon /> {count} more checkpoints on your whole store
         </p>
         <a href={buyUrl} className="cxo-btn cxo-btn-primary !px-5 !py-2 text-sm">
           Unlock the full report, {price} <Arrow />
@@ -130,7 +130,7 @@ const Stat = ({ value, label }: { value: string; label: string }) => (
 )
 
 const WHAT_YOU_GET = [
-  'Every check on your homepage, collections, product pages, cart and checkout',
+  'Every checkpoint on your homepage, collections, product pages, cart and checkout',
   'Each issue ranked by its impact on revenue, so you know what to fix first',
   'The fix, step by step, and why it matters, backed by research and A/B tests',
   'Real examples from stores that get it right',
@@ -181,14 +181,14 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
         {variant === 'cd' ? (
           <>
             <h3 className="font-[family-name:var(--font-display)] text-[length:var(--text-2xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">
-              {estimated && cov ? `${left} more checks are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
+              {estimated && cov ? `${left} more checkpoints are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checks, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
+              The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.
             </p>
             {cov && (
               <div className="grid grid-cols-4 gap-2 max-[810px]:grid-cols-2">
-                <Stat value={String(cov.total)} label="conversion checks" />
+                <Stat value={String(cov.total)} label="conversion checkpoints" />
                 <Stat value={`${cov.stores}`} label="stores benchmarked" />
                 {cov.accuracy ? <Stat value={`${Math.floor(cov.accuracy)}%`} label="match with our experts' review" /> : <Stat value="6" label="areas of your store" />}
                 <Stat value={cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : String(cov.examples)} label="example screenshots" />
@@ -218,7 +218,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                                 <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
                               </>
                             ) : (
-                              <b className="text-[var(--text)]">{p.checks} checks</b>
+                              <b className="text-[var(--text)]">{p.checks} checkpoints</b>
                             )}
                           </span>
                         </span>
