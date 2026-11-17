@@ -245,6 +245,7 @@ export async function runScanV2(url: string, rules: Rule[], apiKey: string, opts
     checkpoints: rules.length,
     usage,
     images: evidenceImages(ev).length,
+    stageMs: ev.facts.stageMs,
   }
   return { results, screenshot, niche, evidence: ev, timings: { captureMs: t1 - t0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag }
 }

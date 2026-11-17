@@ -2363,6 +2363,14 @@ function sweepStaleProfiles() {
  */
 export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
   const t0 = Date.now()
+  // where the time goes, per step (kept in the facts, shown in the lab diagnostics)
+  const stages: Record<string, number> = {}
+  let tPrev = t0
+  const mark = (name: string) => {
+    const now = Date.now()
+    stages[name] = now - tPrev
+    tPrev = now
+  }
   sweepStaleProfiles()
   // Google's speed data takes 20 to 50 seconds: ask now, read it at the end
   const psiP = opts.extended ? pageSpeed(rawUrl).catch((e) => ({ error: String((e as Error)?.message || e).slice(0, 80) })) : null
@@ -2374,9 +2382,11 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
     await desktop.setUserAgent(DESKTOP_UA)
     await desktop.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' })
     await prepare(desktop)
+    mark('launch')
     const res = await open(desktop, rawUrl).catch((e) => {
       throw new PageCheckError('unreachable', `We couldn't open this page (${String(e?.message || e).slice(0, 80)}).`)
     })
+    mark('desktopOpen')
 
     // page check: is this really the product page?
     const status = res?.status() ?? 200
@@ -2465,6 +2475,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       await desktop.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
       await cleanPage(desktop)
     }
+    mark('desktopCapture')
     let cart = await cartTest(desktop)
     // the page can still be settling after the empty-cart visit: one more try before giving up on the cart
     if (!cart.note.startsWith('one item')) {
@@ -2508,6 +2519,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
         ? await checkoutStep(desktop, 'desktop', DESKTOP.width, DESKTOP.height, 2).then((r) => (r.note ? { ...r, note: `our browser: ${r.note}` } : r)).catch(() => ({ tiles: [] as Tile[], note: 'checkout capture failed', text: undefined as string | undefined }))
         : undefined
     await desktop.close().catch(() => {})
+    mark('desktopCart')
 
     let mobileTiles: Tile[] = []
     let mobileFacts: Record<string, unknown> = {}
@@ -2651,7 +2663,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
       isShopify,
       text: text.slice(0, 14000),
       hiddenText,
-      facts: facts as Record<string, unknown>,
+      facts: (mark('mobileAndRest'), Object.assign(facts as Record<string, unknown>, { stageMs: stages })),
       mobileFacts: mobileFacts as Record<string, unknown>,
       loadMs: Date.now() - t0,
     }
