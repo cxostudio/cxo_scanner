@@ -100,7 +100,7 @@ export default function ResultsPage() {
       setEmail(localStorage.getItem('scanEmail') || '')
       setPageTotal(Number(localStorage.getItem('scanPageChecks') || 0))
       // the free scan is counted against every Live check on the store (the full report), never per page
-      fetch(api('/report-coverage')).then((r) => r.json()).then((c: { total?: number }) => c?.total && setPageTotal(c.total)).catch(() => {})
+      fetch(api('/report-coverage?lite=1')).then((r) => r.json()).then((c: { total?: number }) => c?.total && setPageTotal(c.total)).catch(() => {})
       setLabId(localStorage.getItem('scanLabId'))
       const g = new URLSearchParams(window.location.search).get('gate')
       if (g === 'b' || g === 'cd') setGate(g)

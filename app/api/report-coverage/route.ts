@@ -39,7 +39,8 @@ type Coverage = {
 let cache: { at: number; data: Coverage } | null = null
 const TTL = 6 * 60 * 60 * 1000
 
-export async function GET() {
+export async function GET(req: Request) {
+  const lite = new URL(req.url).searchParams.get('lite') === '1'
   if (cache && Date.now() - cache.at < TTL) return NextResponse.json(cache.data, EDGE)
   const res = await getConversionCheckpointRules()
   if (!res.ok) return NextResponse.json({ error: 'Checkpoints unavailable' }, { status: 502 })
@@ -51,6 +52,8 @@ export async function GET() {
     const p = PAGES.find((pg) => pg.ids.some((id) => ids.includes(id)))
     if (p) pageOf.set(r.id, p.key)
   }
+  // lite: just the number of checkpoints in the full report (fast: no lab reads), for the results header
+  if (lite) return NextResponse.json({ total: live.filter((r) => pageOf.has(r.id)).length }, EDGE)
 
   // failure share per page, over the lab stores (judged answers only), and agreement with the labels
   const tally = new Map<string, { fail: number; judged: number }>()
