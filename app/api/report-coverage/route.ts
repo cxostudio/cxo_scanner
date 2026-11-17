@@ -29,6 +29,7 @@ const PAGES = [
 type Coverage = {
   total: number
   stores: number
+  hosts?: string[]
   /** agreement with expert labels on the Live checks, in % (lab) */
   accuracy: number | null
   /** example screenshots attached to the Live checks */
@@ -111,6 +112,7 @@ export async function GET(req: Request) {
   const data: Coverage = {
     total: pages.reduce((n, p) => n + p.checks, 0),
     stores: hosts.size || stores,
+    hosts: [...hosts].sort(),
     accuracy: labelled >= 200 ? Math.round((1000 * agree) / labelled) / 10 : null,
     examples,
     siteIds: live.filter((r) => pageOf.get(r.id) === 'site').map((r) => r.id),
