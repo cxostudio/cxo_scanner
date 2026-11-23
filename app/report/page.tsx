@@ -5,7 +5,7 @@
 // read from /api/report/[id]. A top bar (store, desktop/mobile, next page) and one tab per part of
 // the store; each tab lists its findings next to the page with the findings pinned on it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, CreditCard, ExternalLink, Globe, Home, LayoutGrid, Package, ShoppingCart, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AppWindow, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
@@ -287,17 +287,29 @@ function thumbOf(a: AreaSummary): string | null {
   return a.page?.located?.desktop?.screenshot || a.page?.preview?.desktop || null
 }
 
-const AREA_ICON: Record<Area, LucideIcon> = { homepage: Home, category: LayoutGrid, product: Package, cart: ShoppingCart, checkout: CreditCard, site: Globe }
-
-/** Where, how much it matters, how much work: one small icon each. */
-function Meta({ r, area }: { r: Row; area?: string }) {
-  const AreaIcon = AREA_ICON[r.area]
-  const high = r.checkpoint?.priority === 'High'
+/** Three bars, like a signal: how many are filled says the level (1 low, 3 high). */
+function Bars({ level, label }: { level: number; label: string }) {
   return (
-    <span className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] font-medium text-[var(--text-muted)]">
-      {area && <span className="inline-flex items-center gap-1"><AreaIcon className="h-3.5 w-3.5" aria-hidden />{area}</span>}
-      {high && <span className="inline-flex items-center gap-1" style={{ color: 'var(--result-fail-fg)' }}><Zap className="h-3.5 w-3.5" aria-hidden />High impact</span>}
-      <span className="inline-flex items-center gap-1"><Wrench className="h-3.5 w-3.5" aria-hidden />{effortLabel(r)}</span>
+    <svg width="13" height="12" viewBox="0 0 13 12" role="img" aria-label={label} className="shrink-0">
+      {[0, 1, 2].map((i) => (
+        <rect key={i} x={i * 4.5} y={8 - i * 4} width="3.5" height={4 + i * 4} rx="1" style={{ fill: i < level ? 'currentColor' : 'var(--border-strong)' }} />
+      ))}
+    </svg>
+  )
+}
+
+const IMPACT: Record<string, { level: number; word: string }> = { High: { level: 3, word: 'High impact' }, Medium: { level: 2, word: 'Medium impact' }, Low: { level: 1, word: 'Low impact' } }
+const EFFORT: Record<string, number> = { Easy: 1, Moderate: 2, Difficult: 3 }
+
+/** Where it is, how much it matters, how much work it takes. */
+function Meta({ r, area }: { r: Row; area?: string }) {
+  const impact = IMPACT[r.checkpoint?.priority || '']
+  const effort = EFFORT[r.checkpoint?.difficulty || '']
+  return (
+    <span className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] font-medium text-[var(--text-muted)]">
+      {area && <span className="inline-flex items-center gap-1.5"><AppWindow className="h-3.5 w-3.5" aria-hidden />{area}</span>}
+      {impact && <span className="inline-flex items-center gap-1.5" style={impact.level === 3 ? { color: 'var(--result-fail-fg)' } : undefined}><Bars level={impact.level} label={impact.word} />{impact.word}</span>}
+      {effort && <span className="inline-flex items-center gap-1.5"><Bars level={effort} label={effortLabel(r)} />{effortLabel(r)}</span>}
     </span>
   )
 }
