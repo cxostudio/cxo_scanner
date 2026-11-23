@@ -8,7 +8,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppWindow, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
-import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
+import { BuildSteps, LogoSpinner, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
 import { scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
@@ -69,15 +69,8 @@ export default function ReportPage() {
   }, [id])
 
   if (missing) return <Shell><p className="text-[var(--text-muted)]">We can't find this report. Check the link in your email, or reply to it and we'll sort it out.</p></Shell>
-  // the first load: just a centred spinner (the report itself appears in a second)
-  if (!data) return (
-    <main className="grid min-h-dvh place-items-center bg-[var(--surface)]" aria-busy="true">
-      <span className="relative grid h-[88px] w-[88px] place-items-center" role="status" aria-label="Loading your report">
-        <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-[var(--surface-muted)] border-t-[var(--text)]" aria-hidden />
-        <img src={asset('/cxo-mark.png')} alt="" className="h-11 w-11 object-contain" />
-      </span>
-    </main>
-  )
+  // the first load: just the logo spinner (the report itself appears in a second)
+  if (!data) return <LogoSpinner label="Loading your report" />
   if (data.status === 'failed') return <Shell><h1 className="h1">We couldn't finish your report</h1><p className="mt-3 text-[var(--text-muted)]">Something on {hostOf(data.url)} stopped our scan. We've been notified and will get back to you by email.</p></Shell>
   if (data.status !== 'done') return <Progress data={data} />
   return <ReportView data={data} id={id!} />

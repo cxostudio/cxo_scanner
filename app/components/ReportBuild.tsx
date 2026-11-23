@@ -3,6 +3,7 @@
 // While a full report is being built: one line per tab of the report, and the order with its invoice.
 // Shared by the thank-you page (app/order) and the report's loading screen (app/report).
 import { Pass } from './PinnedPage'
+import { asset } from '@/lib/base'
 
 export type BuildPage = { key: string; status: string; url?: string }
 export type OrderInfo = { amount: number | null; currency: string | null; tax: number | null; invoiceUrl: string | null; invoicePdf: string | null; storeUrl?: string | null }
@@ -65,5 +66,17 @@ export function OrderCard({ order }: { order: OrderInfo }) {
         <p className="text-[13px] text-[var(--text-muted)]">Your invoice is being prepared. It also comes by email with your receipt.</p>
       )}
     </section>
+  )
+}
+
+/** Full-screen loading: the CXO Studio mark inside a turning ring (report and thank-you page). */
+export function LogoSpinner({ label }: { label: string }) {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-[var(--surface)]" aria-busy="true">
+      <span className="relative grid h-[88px] w-[88px] place-items-center" role="status" aria-label={label}>
+        <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-[var(--surface-muted)] border-t-[var(--text)]" aria-hidden />
+        <img src={asset('/cxo-mark.png')} alt="" className="h-11 w-11 object-contain" />
+      </span>
+    </main>
   )
 }

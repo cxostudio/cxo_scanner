@@ -4,7 +4,7 @@
 // The page checks the payment with our server (never trusts the URL alone) and says what happens next.
 import { useEffect, useState } from 'react'
 import { api, asset } from '@/lib/base'
-import { BuildSteps, OrderCard } from '../components/ReportBuild'
+import { BuildSteps, LogoSpinner, OrderCard } from '../components/ReportBuild'
 
 type Order = { paid: boolean; status: string; email: string | null; storeUrl: string | null; amount: number | null; currency: string | null; tax: number | null; invoiceUrl: string | null; invoicePdf: string | null }
 
@@ -72,11 +72,13 @@ export default function OrderPage() {
   }, [])
   const reportUrl = report ? `/scan/report?id=${report.id}` : null
 
+  // checking the payment with Stripe: the logo spinner, then the page
+  if (!order && !error) return <LogoSpinner label="Checking your payment" />
+
   return (
     <main className="min-h-dvh bg-[var(--bg)]">
       <div className="mx-auto flex max-w-[640px] flex-col gap-6 px-[var(--gutter)] pb-16 pt-[34px] max-[560px]:pb-10">
         <a className="cxo-logo !mb-4" href="https://cxo.studio" aria-label="CXO studio"><img src={asset('/cxo-logo.png')} alt="CXO studio" /></a>
-        {!order && !error && <p className="text-[var(--text-muted)]">Checking your payment…</p>}
 
         {error && (
           <div className="flex flex-col gap-3">
