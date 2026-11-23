@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { prepare as prepareForScan, open as openLikeScan } from '@/lib/scanV2/capture'
 
 /**
  * POST /api/locate: pins scan findings on the page.
@@ -57,11 +58,11 @@ export async function POST(request: NextRequest) {
     const page = await browser.newPage()
     await page.setViewport({ width: WIDTH, height: D.height, deviceScaleFactor: 1, isMobile: D.mobile, hasTouch: D.mobile })
     await page.setUserAgent(D.mobile ? MOBILE_UA : DESKTOP_UA)
-    try {
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 45_000 })
-    } catch {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    }
+    // load it exactly as the scan does (language header, heavy third-party scripts blocked, delayed
+    // scripts run): some stores render a blank page to a plain headless load (deathwishcoffee.com)
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' })
+    await prepareForScan(page)
+    await openLikeScan(page, url)
     await new Promise((r) => setTimeout(r, 800))
 
     // close the cookie banner so it doesn't cover the page we pin on

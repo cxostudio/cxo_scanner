@@ -1466,7 +1466,7 @@ export function netStats(page: Page): NetStats | null {
   return NET.get(page) || null
 }
 
-async function prepare(page: Page) {
+export async function prepare(page: Page) {
   const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [], text: { total: 0, compressed: 0, br: 0, plain: [], plainKiB: 0, plainBig: 0 } }
   NET.set(page, stats)
   page.on('response', (res) => {
@@ -1771,7 +1771,7 @@ async function runDelayedScripts(page: Page) {
   await page.waitForNetworkIdle({ idleTime: 600, timeout: 5000 }).catch(() => {})
 }
 
-async function open(page: Page, url: string) {
+export async function open(page: Page, url: string) {
   let res = null
   try {
     res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 })
