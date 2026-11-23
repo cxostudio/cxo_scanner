@@ -194,7 +194,7 @@ function ReportView({ data, id }: { data: Report; id: string }) {
       </header>
 
       {tab === 'overview' ? (
-        <Overview host={host} total={all.length} fails={fails} est={est ? est.lift10 : null} score={scoreOf(judged)} areas={areas} go={go} />
+        <Overview host={host} total={new Set(all.map((r) => r.ruleId)).size} fails={fails} est={est ? est.lift10 : null} score={scoreOf(judged)} areas={areas} go={go} />
       ) : current ? (
         <AreaView key={current.id} area={current} device={device} setDevice={setDevice} focus={focus} />
       ) : null}
