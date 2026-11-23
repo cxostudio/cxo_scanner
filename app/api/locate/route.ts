@@ -124,13 +124,21 @@ export async function POST(request: NextRequest) {
       .addStyleTag({
         content: `
           html::before, html::after, body::before, body::after { display: none !important; }
-          [aria-modal="true"], dialog[open], [class*="modal-backdrop" i], [class*="modal__overlay" i], [class*="popup-overlay" i],
-          [id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i], [id*="onetrust" i],
-          [id*="didomi" i], [class*="klaviyo-form" i], [class*="needsclick" i][role="dialog"], [id*="usercentrics" i] {
-            display: none !important;
-          }
           html, body, main, #MainContent { filter: none !important; opacity: 1 !important; }
         `,
+      })
+      .catch(() => undefined)
+    // cookie and popup layers by name, but never the page itself: some stores put a "cookie" class on
+    // <html> (deathwishcoffee.com: "csm-cookie-embed"), which once blanked the whole screenshot
+    await page
+      .evaluate(() => {
+        const SEL = '[aria-modal="true"], dialog[open], [class*="modal-backdrop" i], [class*="modal__overlay" i], [class*="popup-overlay" i], [id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i], [id*="onetrust" i], [id*="didomi" i], [class*="klaviyo-form" i], [class*="needsclick" i][role="dialog"], [id*="usercentrics" i]'
+        const total = document.body ? document.body.querySelectorAll('*').length : 0
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>(SEL))) {
+          if (el === document.documentElement || el === document.body || el.tagName === 'MAIN' || el.id === 'MainContent') continue
+          if (el.querySelector('main, #MainContent, h1') || el.querySelectorAll('*').length > Math.max(400, total * 0.3)) continue
+          el.style.setProperty('display', 'none', 'important')
+        }
       })
       .catch(() => undefined)
     await page
