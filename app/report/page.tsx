@@ -117,7 +117,9 @@ function ReportView({ data }: { data: Report }) {
     const rows = all.filter((r) => r.area === a.id)
     const j = rows.filter((r) => !isUnknown(r))
     const s = j.filter((r) => r.status !== 'na' && !r.coveredByShopify)
-    return { ...a, rows, fails: s.filter((r) => !r.passed).sort(byImpact), passed: j.filter((r) => r.passed), unknown: rows.filter(isUnknown), score: j.length ? scoreOf(j) : null, page: data.pages.find((p) => p.key === a.page) }
+    // an area where we could check less than half is not scored: a 100 there would mean nothing
+    const blind = rows.length > 0 && j.length < rows.length / 2
+    return { ...a, rows, blind, fails: s.filter((r) => !r.passed).sort(byImpact), passed: j.filter((r) => r.passed), unknown: rows.filter(isUnknown), score: j.length && !blind ? scoreOf(j) : null, page: data.pages.find((p) => p.key === a.page) }
   }).filter((a) => a.rows.length)
 
   return (
@@ -148,7 +150,7 @@ function ReportView({ data }: { data: Report }) {
                     <div className="h-full rounded-full" style={{ width: `${a.score ?? 0}%`, background: `var(--result-${t === 'pass' ? 'pass' : 'fail'}-fg)`, opacity: t === 'mid' ? 0.6 : 1 }} />
                   </div>
                   <p className="mt-2 text-[13px] text-[var(--text-muted)]">
-                    {a.fails.length ? `${a.fails.length} to fix` : 'Nothing to fix'}{a.unknown.length ? ` · ${a.unknown.length} not checked` : ''}
+                    {a.blind ? `Couldn't open it from our scan · ${a.unknown.length} not checked` : <>{a.fails.length ? `${a.fails.length} to fix` : 'Nothing to fix'}{a.unknown.length ? ` · ${a.unknown.length} not checked` : ''}</>}
                   </p>
                 </a>
               )
@@ -159,7 +161,7 @@ function ReportView({ data }: { data: Report }) {
       </div>
 
       {/* ── fix these first ── */}
-      <section className="mx-auto mt-16 w-full max-w-[1080px] px-[var(--gutter)]" aria-labelledby="first">
+      <section className="mx-auto mt-16 max-w-[1080px] box-content px-[var(--gutter)]" aria-labelledby="first">
         <h2 id="first" className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">Fix these first</h2>
         <p className="mt-2 text-[15px] text-[var(--text-muted)]">The ten issues with the most impact for the least work, across the whole store.</p>
         <div className="mt-6 flex flex-col gap-3">
@@ -169,7 +171,7 @@ function ReportView({ data }: { data: Report }) {
 
       {/* ── area by area ── */}
       {areas.map((a) => (
-        <section key={a.id} id={`area-${a.id}`} className="mx-auto mt-16 w-full max-w-[1080px] scroll-mt-6 px-[var(--gutter)]">
+        <section key={a.id} id={`area-${a.id}`} className="mx-auto mt-16 max-w-[1080px] box-content scroll-mt-6 px-[var(--gutter)]">
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-[var(--border)] pb-4">
             <div className="min-w-0">
               <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">{a.label}</h2>
@@ -182,9 +184,10 @@ function ReportView({ data }: { data: Report }) {
 
           <div className={`mt-6 grid gap-8 ${a.page?.previewDesktop && (a.id === 'homepage' || a.id === 'category' || a.id === 'product') ? 'lg:grid-cols-[minmax(0,1fr)_300px]' : ''}`}>
             <div className="flex min-w-0 flex-col gap-3">
-              {a.fails.length === 0 && <p className="rounded-[14px] bg-[var(--result-pass-bg)] px-4 py-3.5 text-[15px] font-semibold text-[var(--result-pass-fg)]">Nothing to fix here. Well done.</p>}
+              {a.fails.length === 0 && !a.blind && <p className="rounded-[14px] bg-[var(--result-pass-bg)] px-4 py-3.5 text-[15px] font-semibold text-[var(--result-pass-fg)]">Nothing to fix here. Well done.</p>}
               {a.fails.map((r, i) => <Finding key={r.ruleId} r={r} n={i + 1} />)}
               {a.passed.length > 0 && <Group title={`${a.passed.length} checkpoints passed`} rows={a.passed} kind="pass" />}
+              {a.blind && <p className="rounded-[14px] border border-dashed border-[var(--border-strong)] px-4 py-3.5 text-[15px] text-[var(--text-muted)]">{unknownNote(a.id, a.unknown)}</p>}
               {a.unknown.length > 0 && <Group title={`${a.unknown.length} we couldn't check`} note={unknownNote(a.id, a.unknown)} rows={a.unknown} kind="unknown" />}
             </div>
             {a.page?.previewDesktop && (a.id === 'homepage' || a.id === 'category' || a.id === 'product') && (
@@ -199,7 +202,7 @@ function ReportView({ data }: { data: Report }) {
       ))}
 
       {/* ── next ── */}
-      <section className="mx-auto mt-20 w-full max-w-[1080px] px-[var(--gutter)]">
+      <section className="mx-auto mt-20 max-w-[1080px] box-content px-[var(--gutter)]">
         <div className="rounded-[20px] bg-[var(--bg-subtle)] p-8 max-[560px]:p-6">
           {qualified ? (
             <>
