@@ -166,7 +166,7 @@ function ReportView({ data, id }: { data: Report; id: string }) {
             </a>
           </div>
           {tab === 'overview' && nextLabel && (
-            <button type="button" onClick={() => go(next!)} className="cxo-btn cxo-btn-primary ml-auto !h-auto !px-4 !py-2 text-[13px] max-[810px]:hidden">
+            <button type="button" onClick={() => go(next!)} className="cxo-btn cxo-btn-primary ml-auto !h-11 !px-5 !py-0 text-[14px] max-[810px]:hidden">
               {`Start with the ${nextLabel.toLowerCase()}`} <ChevronRight className="h-4 w-4" aria-hidden />
             </button>
           )}
