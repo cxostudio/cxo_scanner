@@ -186,7 +186,7 @@ function ReportView({ data }: { data: Report }) {
             <div className="flex min-w-0 flex-col gap-3">
               {a.fails.length === 0 && !a.blind && <p className="rounded-[14px] bg-[var(--result-pass-bg)] px-4 py-3.5 text-[15px] font-semibold text-[var(--result-pass-fg)]">Nothing to fix here. Well done.</p>}
               {a.fails.map((r, i) => <Finding key={r.ruleId} r={r} n={i + 1} />)}
-              {a.passed.length > 0 && <Group title={`${a.passed.length} checkpoints passed`} rows={a.passed} kind="pass" />}
+              {a.passed.length > 0 && <Group title={`${a.passed.length} ${a.passed.length === 1 ? 'checkpoint' : 'checkpoints'} passed`} rows={a.passed} kind="pass" />}
               {a.blind && <p className="rounded-[14px] border border-dashed border-[var(--border-strong)] px-4 py-3.5 text-[15px] text-[var(--text-muted)]">{unknownNote(a.id, a.unknown)}</p>}
               {a.unknown.length > 0 && <Group title={`${a.unknown.length} we couldn't check`} note={unknownNote(a.id, a.unknown)} rows={a.unknown} kind="unknown" />}
             </div>
