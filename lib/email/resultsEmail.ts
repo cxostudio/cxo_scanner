@@ -23,12 +23,12 @@ export type ResultsEmailInput = {
 }
 
 // token values (app/tokens.css): text, muted, border, canvas, surface, fail, gain, finding
-const C = {
+export const C = {
   text: '#09090b', muted: '#71717a', subtle: '#a1a1aa', border: '#e4e4e7', canvas: '#fafafa', surface: '#ffffff',
   fail: '#d92d20', failBg: '#fdeceb', gain: '#22a06b', gainBg: '#e8f7ef', finding: '#c2620f', findingBg: '#fff3e8', cta: '#09090b',
 }
-const DISPLAY = "'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif"
-const BODY = "'Inter Tight', 'Inter', 'Helvetica Neue', Arial, sans-serif"
+export const DISPLAY = "'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif"
+export const BODY = "'Inter Tight', 'Inter', 'Helvetica Neue', Arial, sans-serif"
 
 const COPY = {
   en: {
@@ -69,7 +69,7 @@ const COPY = {
   },
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // the paid full report reuses the same email, with its own words
 const REPORT_COPY = {

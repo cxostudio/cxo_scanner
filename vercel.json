@@ -7,6 +7,10 @@
     {
       "path": "/scan/api/keep-alive",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/scan/api/followups/run",
+      "schedule": "*/5 * * * *"
     }
   ],
   "rewrites": [

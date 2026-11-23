@@ -15,7 +15,7 @@ const shortEur = (n: number, fr: boolean) => {
   const k = (Math.round(n / 100) / 10).toString().replace(/\.0$/, '')
   return fr ? `${k.replace('.', ',')} k€` : `€${k}k`
 }
-const firstSentence = (s: string, max = 120) => {
+export const firstSentence = (s: string, max = 120) => {
   const t = (s || '').replace(/\*\*/g, '').split('\n').map((l) => l.trim()).find(Boolean) || ''
   const one = (t.match(/^.*?[.!?](\s|$)/)?.[0] || t).trim()
   return one.length > max ? `${one.slice(0, max - 1).trimEnd()}…` : one
