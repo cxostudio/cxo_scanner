@@ -74,7 +74,65 @@ const Arrow = () => (
   </svg>
 )
 
+/** Put a stored scan (opened from the email link, on any device) where this page reads it. */
+function hydrate(snap: Record<string, unknown>) {
+  const ls = localStorage, ss = sessionStorage
+  const put = (k: string, v: unknown) => { try { if (v === null || v === undefined || v === '') ls.removeItem(k); else ls.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)) } catch { /* full */ } }
+  // pins and captures belong to whichever scan this browser ran last
+  try { Object.keys(ls).filter((k) => k.startsWith('scanLocate')).forEach((k) => ls.removeItem(k)) } catch { /* ignore */ }
+  put('scanResults', snap.results); put('scanUrl', snap.scanUrl)
+  put('scanRevenue', snap.revenue); put('scanAov', snap.aov); put('scanCr', snap.cr); put('scanLocale', snap.locale)
+  put('scanPageChecks', snap.pageChecks ? String(snap.pageChecks) : ''); put('scanResolvedFrom', snap.resolvedFrom); put('scanResolvedHow', snap.resolvedHow); put('scanLabId', snap.labId)
+  for (const [k, v] of [['scanPreviewDesktop', snap.previewDesktop], ['scanPreviewMobile', snap.previewMobile], ['lastScreenshot', snap.previewDesktop]] as const) {
+    try { if (typeof v === 'string' && v) ss.setItem(k, v); else ss.removeItem(k) } catch { /* ignore */ }
+  }
+}
+
+/**
+ * /results?id=… opens a stored scan (the link in the results email), on any device. While the scan
+ * is still finishing on the server, it waits and updates by itself. Without an id, the scan this
+ * browser just ran (local storage), as before.
+ */
 export default function ResultsPage() {
+  const [state, setState] = useState<'checking' | 'ready' | 'waiting' | 'missing' | 'failed'>('checking')
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id')
+    if (!id) { setState('ready'); return }
+    let stop = false
+    let tries = 0
+    const load = async () => {
+      const r = await fetch(api(`/scan/job/${id}`), { cache: 'no-store' }).catch(() => null)
+      if (stop) return
+      if (!r || r.status === 404) return setState('missing')
+      const d = (await r.json().catch(() => ({}))) as { status?: string; snapshot?: Record<string, unknown> | null }
+      if (d.status === 'done' && d.snapshot) { hydrate(d.snapshot); return setState('ready') }
+      if (d.status === 'failed') return setState('failed')
+      setState('waiting')
+      if (tries++ < 72) window.setTimeout(load, 5000) // up to 6 minutes
+    }
+    void load()
+    return () => { stop = true }
+  }, [])
+  if (state === 'ready') return <ResultsView />
+  if (state === 'checking') return <main className="min-h-screen bg-[var(--bg-subtle)]" />
+  const msg = {
+    waiting: { h: 'Your results are almost ready', p: 'We are finishing the scan of your page. This page updates by itself, it usually takes about a minute.' },
+    missing: { h: 'This link has expired', p: 'Scan results are kept for 12 months. Run a new free scan to see where your page leaks revenue today.' },
+    failed: { h: 'We couldn’t finish this scan', p: 'Some pages block automated visits or take too long to load. Run a new scan, or try another product page.' },
+  }[state]
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[var(--bg-subtle)] px-4">
+      <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-[var(--shadow-raised)]">
+        {state === 'waiting' && <div className="mx-auto mb-5 h-8 w-8 animate-spin rounded-full border-[3px] border-[var(--border)] border-t-[var(--text)]" aria-hidden="true" />}
+        <h1 className="font-[var(--font-display)] text-xl font-bold text-[var(--text)]">{msg.h}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--text-muted)]">{msg.p}</p>
+        {state !== 'waiting' && <a href="https://cxo.studio/start" className="cxo-btn cxo-btn-primary mt-6 inline-flex">Run a free scan</a>}
+      </div>
+    </main>
+  )
+}
+
+function ResultsView() {
   const [results, setResults] = useState<ScanResult[] | null>(null)
   const [url, setUrl] = useState('')
   const [email, setEmail] = useState('')

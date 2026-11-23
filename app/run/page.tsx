@@ -14,6 +14,7 @@ import {
 import { api, asset, START_URL } from "@/lib/base";
 import { detectPageTypeFromUrl, isTestEmail } from "@/lib/conversionCheckpoints/pageType";
 import { QuadrantScanSequence } from "../components/QuadrantScanSequence";
+import { startScanJob, type ScanJobHandle } from "@/lib/scanJobs/client";
 
 interface Rule {
   id: string;
@@ -201,6 +202,8 @@ export default function Home() {
 
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([]);
+  // the server-side copy of this scan: finishes it if the tab closes, then emails the results
+  const scanJobRef = useRef<ScanJobHandle | null>(null);
   const analysisStepRemovalScheduledRef = useRef<Set<number>>(new Set());
   const analyzeTopRef = useRef<HTMLElement | null>(null);
   const totalSteps = 3;
@@ -1106,6 +1109,10 @@ export default function Home() {
       console.warn("Scan limit check failed, allowing scan:", limitErr);
     }
 
+    // register the scan: if this tab closes or goes quiet, the server finishes it and emails the results
+    scanJobRef.current?.stop();
+    scanJobRef.current = startScanJob({ scanId, email: emailTrimmed, url: urlResult.data! });
+
     try {
       setIsStartingScan(true);
 
@@ -1296,6 +1303,8 @@ export default function Home() {
       // The preview capture ran alongside the scan; make sure its gate has settled
       // (bounded by the 35s timeout) before finishing the analyze UI and redirecting.
       await previewReadyPromise;
+      // hand the finished scan over: stored for any device, and the results email goes out
+      void scanJobRef.current?.done();
       await waitForAnalyzeUiCompletion();
 
       await new Promise<void>((r) =>
