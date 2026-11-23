@@ -151,7 +151,7 @@ function ReportView({ data, id }: { data: Report; id: string }) {
     <Feedback.Provider value={{ reportId: id, tab, device }}>
     <main className="min-h-screen bg-[var(--surface)] pb-24">
       {/* ── top bar ── */}
-      <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--surface)]">
+      <header className="border-b border-[var(--border)] bg-[var(--surface)]">
         <div className={`mx-auto flex max-w-[1280px] items-center gap-4 px-[var(--gutter)] py-3`}>
           <a href="https://cxo.studio" aria-label="CXO studio" className="shrink-0"><img src={asset('/cxo-logo.png')} alt="CXO studio" className="block h-[22px] w-auto max-[560px]:h-[18px]" /></a>
           <span className="h-8 w-px shrink-0 bg-[var(--border)]" aria-hidden />
@@ -174,7 +174,7 @@ function ReportView({ data, id }: { data: Report; id: string }) {
             const on = t === tab
             return (
               <button key={t} type="button" onClick={() => go(t)} aria-current={on ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-[14px] font-medium transition-colors ${on ? 'bg-[var(--surface-muted)] text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>
+                className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-[14px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-strong)] ${on ? 'bg-[var(--surface-muted)] text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>
                 {t === 'overview' ? 'Overview' : a!.tab}
                 {a && (a.blind
                   ? <span className="text-[12px] text-[var(--text-muted)]">?</span>
@@ -369,7 +369,7 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
 
       <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* the page, pinned */}
-        <div className="min-w-0 lg:sticky lg:top-[132px] lg:order-2 lg:self-start">
+        <div className="min-w-0 lg:sticky lg:top-6 lg:order-2 lg:self-start">
           {/* the switch changes the screenshot only, so it sits on it (as in the free scan) */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px] max-[560px]:flex max-[560px]:w-full">
@@ -426,7 +426,7 @@ function FlowShots({ shots, device, wanted, label }: { shots: Shot[]; device: De
     <div>
       {device !== wanted && <p className="mb-2 text-[13px] text-[var(--text-muted)]">Only captured on {device}.</p>}
       <div className={`overflow-hidden bg-[var(--surface)] ${frame}`}>
-        <div className={`overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-160px)]' : 'h-[min(680px,calc(100vh-160px))]'} max-[560px]:max-h-[460px]`}>
+        <div className={`overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-80px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
           {shots.map((s, i) => <img key={i} src={s.url} alt={`Your ${label.toLowerCase()} on ${device}`} className="block w-full border-b border-[var(--border)] last:border-0" />)}
         </div>
       </div>
@@ -437,7 +437,7 @@ function FlowShots({ shots, device, wanted, label }: { shots: Shot[]; device: De
 function Finding({ r, n, kind, open, active, onToggle }: { r: Row; n?: number; kind: 'fail' | 'pass' | 'unknown'; open: boolean; active: boolean; onToggle: () => void }) {
   const t = kind === 'pass' ? 'pass' : 'fail'
   return (
-    <div id={`f-${r.ruleId}`} className={`scroll-mt-[150px] rounded-[16px] border px-4 transition-colors ${active || open ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
+    <div id={`f-${r.ruleId}`} className={`scroll-mt-6 rounded-[16px] border px-4 transition-colors ${active || open ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
       style={{ ['--result-fg' as string]: `var(--result-${t}-fg)`, ['--result-bg' as string]: kind === 'unknown' ? 'var(--surface-muted)' : `var(--result-${t}-bg)` }}>
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 py-4 text-left">
         {kind === 'fail' ? <Num n={n!} /> : kind === 'pass' ? <Pass /> : <Unknown />}
