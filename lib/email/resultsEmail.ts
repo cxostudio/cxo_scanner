@@ -83,6 +83,7 @@ const REPORT_COPY = {
       `We ran ${i.checked} checkpoints on your homepage, a collection, your best seller, the cart and checkout. ${i.toFix} need fixing${i.easyHigh ? `, ${i.easyHigh} of them high-impact and easy` : ''}. Start with these.`,
     cta: () => 'Open your full report',
     ctaNote: 'Your report opens on any device. Share the link with your developer or agency.',
+    call: 'Want us to fix it with you?', callLink: 'Book a call with us',
     footer: 'You get this email because you ordered the full conversion report on cxo.studio.',
   },
   fr: {
@@ -94,6 +95,7 @@ const REPORT_COPY = {
     intro: (i: ResultsEmailInput) =>
       `Nous avons passé ${i.checked} points de contrôle sur votre accueil, une collection, votre meilleure vente, le panier et le paiement. ${i.toFix} sont à corriger${i.easyHigh ? `, dont ${i.easyHigh} à fort impact et faciles` : ''}. Commencez par ceux-ci.`,
     cta: () => 'Ouvrir votre rapport complet',
+    call: 'Vous voulez qu’on le corrige avec vous ?', callLink: 'Réservez un appel avec nous',
     ctaNote: 'Votre rapport s’ouvre sur n’importe quel appareil. Partagez le lien avec votre développeur ou votre agence.',
     footer: 'Vous recevez cet email car vous avez commandé le rapport de conversion complet sur cxo.studio.',
   },
@@ -102,8 +104,9 @@ const REPORT_COPY = {
 export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html: string; text: string } {
   const base = COPY[i.locale] ?? COPY.en
   const t = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
-  // after the full report: a call for stores that qualify, nothing to sell to the others
-  const nextLine = i.report && !i.qualified ? '' : i.qualified ? 'call' : 'report'
+  // free scan: a call for stores that qualify, the report for the others. Full report: every buyer
+  // showed intent by paying, so all of them are offered a call
+  const nextLine = i.report || i.qualified ? 'call' : 'report'
   const tone = i.score >= 80 ? [C.gain, C.gainBg] : i.score >= 50 ? [C.finding, C.findingBg] : [C.fail, C.failBg]
   const top = i.top.slice(0, 3)
 

@@ -4,14 +4,14 @@
 // Built by lib/fullReport (homepage, a collection, the best seller with its cart and checkout),
 // read from /api/report/[id]. A top bar (store, desktop/mobile, next page) and one tab per part of
 // the store; each tab lists its findings next to the page with the findings pinned on it.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { AppWindow, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
-import { isQualified, scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
+import { scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
 
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 
@@ -72,7 +72,7 @@ export default function ReportPage() {
   if (!data) return <Shell><p className="text-[var(--text-muted)]">Loading your report…</p></Shell>
   if (data.status === 'failed') return <Shell><h1 className="h1">We couldn't finish your report</h1><p className="mt-3 text-[var(--text-muted)]">Something on {hostOf(data.url)} stopped our scan. We've been notified and will get back to you by email.</p></Shell>
   if (data.status !== 'done') return <Progress data={data} />
-  return <ReportView data={data} />
+  return <ReportView data={data} id={id!} />
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -100,13 +100,12 @@ function Progress({ data }: { data: Report }) {
 
 /* ── the report ─────────────────────────────────────────────────────────── */
 
-function ReportView({ data }: { data: Report }) {
+function ReportView({ data, id }: { data: Report; id: string }) {
   const host = hostOf(data.url)
   const all = useMemo(() => data.pages.flatMap((p) => p.results), [data])
   const judged = all.filter((r) => !isUnknown(r))
   const fails = judged.filter((r) => r.status !== 'na' && !r.coveredByShopify && !r.passed).sort(byImpact)
   const est = estimate(data.answers.revenue || '', data.answers.aov || '', data.answers.cr || '')
-  const qualified = isQualified(data.answers.revenue || '')
   const date = new Date(data.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
   const areas = useMemo(() => AREAS.map((a) => {
@@ -149,6 +148,7 @@ function ReportView({ data }: { data: Report }) {
   const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
 
   return (
+    <Feedback.Provider value={{ reportId: id, tab, device }}>
     <main className="min-h-screen bg-[var(--surface)] pb-24">
       {/* ── top bar ── */}
       <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -193,23 +193,17 @@ function ReportView({ data }: { data: Report }) {
 
       {/* ── next step ── */}
       <section className={`mx-auto mt-20 max-w-[1280px] px-[var(--gutter)]`}>
+        {/* every buyer showed intent by paying: offer the agency to all of them */}
         <div className="rounded-[20px] bg-[var(--bg-subtle)] p-8 max-[560px]:p-6">
-          {qualified ? (
-            <>
-              <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Want us to fix it with you?</h2>
-              <p className="mt-2 max-w-[620px] text-[15px] leading-[1.6] text-[var(--text-muted)]">On a 30-minute call we go through this report, tell you what to fix first for your numbers, and whether working together would pay off.</p>
-              <a href={CALL_URL} className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
-            </>
-          ) : (
-            <>
-              <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Share it with whoever builds your store</h2>
-              <p className="mt-2 max-w-[620px] text-[15px] leading-[1.6] text-[var(--text-muted)]">This link opens on any device. Each fix says what to change and why, so your developer or agency can work through it page by page.</p>
-            </>
-          )}
+          <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Want us to fix it with you?</h2>
+          <p className="mt-2 max-w-[640px] text-[15px] leading-[1.6] text-[var(--text-muted)]">CXO Studio turns reports like this one into more revenue: we prioritise the fixes for your numbers, design and build them, and A/B test the big ones. On a 30-minute call we go through your report and tell you honestly whether working together would pay off.</p>
+          <a href={CALL_URL} className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
+          <p className="mt-4 text-[13px] text-[var(--text-muted)]">Prefer to do it yourself? This link opens on any device: share it with your developer or agency.</p>
         </div>
-        <p className="mt-8 text-center text-[13px] leading-[1.6] text-[var(--text-muted)]">This report is done by AI against our CRO checklist and can get one wrong. Spot a mistake? Reply to the report email and we'll check it by hand.</p>
+        <FeedbackBox />
       </section>
     </main>
+    </Feedback.Provider>
   )
 }
 
@@ -461,6 +455,73 @@ function Finding({ r, n, kind, open, active, onToggle }: { r: Row; n?: number; k
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text)]">{r.reason}</p>
             </div>
             {r.checkpoint && kind !== 'unknown' && <CheckpointResultBody checkpoint={r.checkpoint} passed={kind === 'pass'} />}
+          </div>
+          <FlagWrong r={r} verdict={kind} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── feedback ───────────────────────────────────────────────────────────── */
+
+const Feedback = createContext<{ reportId: string; tab: string; device: string }>({ reportId: '', tab: '', device: '' })
+
+async function sendFeedback(body: Record<string, string>): Promise<boolean> {
+  const r = await fetch(api('/report/feedback'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null)
+  return !!r && r.ok
+}
+
+/** Under a checkpoint: the buyer thinks our verdict is wrong. One click, a comment if they want. */
+function FlagWrong({ r, verdict }: { r: Row; verdict: string }) {
+  const ctx = useContext(Feedback)
+  const [state, setState] = useState<'idle' | 'open' | 'sending' | 'sent' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+  if (state === 'sent') return <p className="mt-3 text-[13px] text-[var(--text-muted)]">Thanks. We'll check this one by hand and reply by email.</p>
+  if (state === 'idle') return (
+    <button type="button" onClick={() => setState('open')} className="mt-3 text-[13px] font-medium text-[var(--text-muted)] underline hover:text-[var(--text)]">Is this wrong? Tell us</button>
+  )
+  const send = async () => {
+    setState('sending')
+    const ok = await sendFeedback({ reportId: ctx.reportId, kind: 'wrong', message: msg, ruleId: r.ruleId, ruleTitle: r.ruleTitle, area: r.area, verdict, tab: ctx.tab, device: ctx.device })
+    setState(ok ? 'sent' : 'error')
+  }
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={2} maxLength={2000} placeholder="What did we get wrong? (optional)"
+        className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[14px] text-[var(--text)] outline-none focus:border-[var(--border-strong)]" />
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={send} disabled={state === 'sending'} className="cxo-btn cxo-btn-primary !h-auto !px-4 !py-2 text-[13px]">{state === 'sending' ? 'Sending…' : 'Send'}</button>
+        <button type="button" onClick={() => setState('idle')} className="text-[13px] text-[var(--text-muted)] underline">Cancel</button>
+        {state === 'error' && <span className="text-[13px]" style={{ color: 'var(--result-fail-fg)' }}>Not sent. Try again, or reply to the report email.</span>}
+      </div>
+    </div>
+  )
+}
+
+/** Bottom of every tab: a mistake, a bug, anything. */
+function FeedbackBox() {
+  const ctx = useContext(Feedback)
+  const [msg, setMsg] = useState('')
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const send = async () => {
+    if (!msg.trim()) return
+    setState('sending')
+    setState((await sendFeedback({ reportId: ctx.reportId, kind: 'bug', message: msg, tab: ctx.tab, device: ctx.device })) ? 'sent' : 'error')
+  }
+  return (
+    <div className="mt-6 rounded-[20px] border border-[var(--border)] p-8 max-[560px]:p-6">
+      <h2 className="font-[family-name:var(--font-display)] text-[20px] font-bold tracking-[-0.02em] text-[var(--text)]">Spot a mistake or a bug?</h2>
+      <p className="mt-2 max-w-[640px] text-[14px] leading-[1.6] text-[var(--text-muted)]">This report is done by AI against our CRO checklist and can get one wrong. Tell us what looks off: we check every message by hand and use it to make the scan better. For one checkpoint, open it and click "Is this wrong?".</p>
+      {state === 'sent' ? (
+        <p className="mt-4 text-[14px] font-semibold" style={{ color: 'var(--result-pass-fg)' }}>Thanks, we got it. We'll reply by email.</p>
+      ) : (
+        <div className="mt-4 flex flex-col gap-3">
+          <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} maxLength={2000} placeholder="What went wrong, and where?"
+            className="w-full max-w-[640px] rounded-[12px] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--text)] outline-none focus:border-[var(--border-strong)]" />
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={send} disabled={state === 'sending' || !msg.trim()} className="cxo-btn cxo-btn-ghost self-start disabled:opacity-50">{state === 'sending' ? 'Sending…' : 'Send feedback'}</button>
+            {state === 'error' && <span className="text-[13px]" style={{ color: 'var(--result-fail-fg)' }}>Not sent. Try again, or reply to the report email.</span>}
           </div>
         </div>
       )}

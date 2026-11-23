@@ -67,3 +67,9 @@ export async function signedUrls(paths: string[]): Promise<Map<string, string>> 
   for (const d of data || []) if (d.path && d.signedUrl) out.set(d.path, d.signedUrl)
   return out
 }
+
+/** Keep a small JSON file in the same private bucket (feedback). */
+export async function saveJson(path: string, data: unknown): Promise<void> {
+  const { error } = await (await bucket()).upload(path, Buffer.from(JSON.stringify(data, null, 2)), { contentType: 'application/json', upsert: true })
+  if (error) throw new Error(error.message)
+}
