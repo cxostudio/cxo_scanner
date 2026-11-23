@@ -171,7 +171,7 @@ const WHAT_YOU_GET = [
   'Every checkpoint on your homepage, collections, product pages, cart and checkout',
   'Each issue ranked by its impact on revenue, so you know what to fix first',
   'The fix, step by step, and why it matters, backed by research and A/B tests',
-  'A PDF to hand to your developer or agency',
+  'Online, ready to share with your developer or agency',
 ]
 
 /**

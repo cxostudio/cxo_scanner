@@ -32,7 +32,7 @@ export async function reportPrice(): Promise<Stripe.Price> {
   }
   const product = await s.products.create({
     name: 'Full conversion report',
-    description: 'Your whole store scanned, from the homepage to the checkout: every issue we find, how to fix it, with examples. Online report and PDF.',
+    description: 'Your whole store scanned, from the homepage to the checkout: every issue we find, how to fix it, with examples.',
     tax_code: 'txcd_10103001', // software as a service, business use
     metadata: { source: 'cxo-scanner' },
   })

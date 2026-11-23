@@ -75,7 +75,7 @@ export default function OrderPage() {
               </span>
               <h1 className="font-[family-name:var(--font-display)] text-[length:var(--text-3xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">Thank you, your full report is on its way</h1>
               <p className="text-[16px] leading-[1.6] text-[var(--text-muted)]">
-                We are scanning {order.storeUrl ? <b className="text-[var(--text)]">{host(order.storeUrl)}</b> : 'your store'} from the homepage to the checkout. You will get the report by email{order.email ? <> at <b className="text-[var(--text)]">{order.email}</b></> : ''} within 24 hours: every issue we find, how to fix it, with examples, online and as a PDF.
+                We are scanning {order.storeUrl ? <b className="text-[var(--text)]">{host(order.storeUrl)}</b> : 'your store'} from the homepage to the checkout. Your report lands in your inbox{order.email ? <> at <b className="text-[var(--text)]">{order.email}</b></> : ''} in a few minutes: every issue we find, how to fix it, with examples.
               </p>
             </div>
 
