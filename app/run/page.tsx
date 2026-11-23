@@ -245,7 +245,7 @@ export default function Home() {
   ] as const;
   const ANALYSIS_STEP_COUNT = analysisSteps.length;
   /** Virtual ticks per /api/scan batch so the bar & step rows keep moving during long requests (not stuck at 5/6). */
-  const SCAN_PROGRESS_UNITS_PER_BATCH = 40;
+  const SCAN_PROGRESS_UNITS_PER_BATCH = 400;
   /**
    * After /api/scan/combine, advance `current` in small steps so % and mounted don’t jump 66→100 on one frame
    * (slow main thread / Vercel). Total tail slots = 1 + SCAN_PROGRESS_TAIL_TICKS.
@@ -256,7 +256,7 @@ export default function Home() {
    * Use timestamp-based smoothing instead of timer chains so production/main-thread variance
    * (Vercel build, throttling, render batching) doesn't skip late-stage progress.
    */
-  const PROGRESS_MAX_PERCENT_PER_SEC = 14;
+  const PROGRESS_MAX_PERCENT_PER_SEC = 30;
   const PROGRESS_SNAP_EPSILON = 0.12;
   /** Ensure each row remains visible briefly before next step mounts. */
   const ANALYSIS_STEP_MIN_ADVANCE_MS = 380;
@@ -560,27 +560,24 @@ export default function Home() {
       let lastBatchError: unknown = null;
 
       for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
-        const pulseMs = Math.min(
-          6500,
-          Math.max(
-            700,
-            Math.floor(
-              (batch.rules.length * 3200) / SCAN_PROGRESS_UNITS_PER_BATCH,
-            ),
-          ),
-        );
+        // Ease-out over time: quick at first, slower as it goes, never stuck. tau ≈ 0.8 s per checkpoint
+        // (50 free checkpoints: ~11% after 5 s, ~30% after 15 s, ~50% at 30 s, ~70% at a minute);
+        // the rest fills smoothly when the answers arrive.
+        const tauMs = Math.max(20_000, batch.rules.length * 800);
+        const startedAt = performance.now();
         let pulseId: number | null = null;
         try {
           pulseId = window.setInterval(() => {
+            const share = 1 - Math.exp(-(performance.now() - startedAt) / tauMs);
             setProgress((prev) => {
               if (!prev) return prev;
-              const next = Math.min(prev.current + 1, segmentPulseCap);
+              const next = Math.min(segmentStart + Math.floor(share * SCAN_PROGRESS_UNITS_PER_BATCH * 0.95), segmentPulseCap);
               return {
                 current: Math.max(prev.current, next),
                 total: prev.total,
               };
             });
-          }, pulseMs);
+          }, 200);
 
           const response = await fetch(api("/scan"), {
             method: "POST",
