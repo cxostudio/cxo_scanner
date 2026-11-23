@@ -5,7 +5,7 @@
 // read from /api/report/[id]. A top bar (store, desktop/mobile, next page) and one tab per part of
 // the store; each tab lists its findings next to the page with the findings pinned on it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronRight, CreditCard, ExternalLink, Globe, Home, LayoutGrid, Package, ShoppingCart, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
@@ -161,18 +161,8 @@ function ReportView({ data }: { data: Report }) {
               Full conversion report · {date} <ExternalLink className="h-3 w-3" aria-hidden />
             </a>
           </div>
-          {tab !== 'overview' && (
-            <div className="mx-auto flex rounded-full border border-[var(--border)] bg-[var(--surface-muted)] p-1 max-[810px]:ml-auto max-[810px]:mr-0" role="group" aria-label="Device">
-              {(['desktop', 'mobile'] as const).map((d) => (
-                <button key={d} type="button" onClick={() => setDevice(d)} aria-pressed={device === d}
-                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors max-[560px]:px-2.5 ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-raised)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>
-                  {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}<span className="max-[560px]:hidden">{d === 'desktop' ? 'Desktop' : 'Mobile'}</span>
-                </button>
-              ))}
-            </div>
-          )}
           {nextLabel && (
-            <button type="button" onClick={() => go(next!)} className={`cxo-btn cxo-btn-primary !h-auto !px-4 !py-2 text-[13px] max-[810px]:hidden ${tab === 'overview' ? 'ml-auto' : ''}`}>
+            <button type="button" onClick={() => go(next!)} className="cxo-btn cxo-btn-primary ml-auto !h-auto !px-4 !py-2 text-[13px] max-[810px]:hidden">
               {tab === 'overview' ? `Start with the ${nextLabel.toLowerCase()}` : `Next: ${nextLabel}`} <ChevronRight className="h-4 w-4" aria-hidden />
             </button>
           )}
@@ -197,17 +187,11 @@ function ReportView({ data }: { data: Report }) {
       {tab === 'overview' ? (
         <Overview host={host} total={all.length} fails={fails} est={est ? est.lift10 : null} score={scoreOf(judged)} areas={areas} go={go} />
       ) : current ? (
-        <AreaView key={current.id} area={current} device={device} focus={focus} />
+        <AreaView key={current.id} area={current} device={device} setDevice={setDevice} focus={focus} />
       ) : null}
 
       {/* ── next step ── */}
       <section className={`mx-auto mt-20 ${W} px-[var(--gutter)]`}>
-        {nextLabel && (
-          <button type="button" onClick={() => go(next!)} className="mb-10 flex w-full items-center justify-between rounded-[16px] border border-[var(--border)] px-5 py-4 text-left hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]">
-            <span><span className="block text-[13px] text-[var(--text-muted)]">Next</span><span className="font-[family-name:var(--font-display)] text-[18px] font-bold text-[var(--text)]">{nextLabel}</span></span>
-            <ChevronRight className="h-5 w-5 text-[var(--text)]" aria-hidden />
-          </button>
-        )}
         <div className="rounded-[20px] bg-[var(--bg-subtle)] p-8 max-[560px]:p-6">
           {qualified ? (
             <>
@@ -302,12 +286,17 @@ function thumbOf(a: AreaSummary): string | null {
   return a.page?.located?.desktop?.screenshot || a.page?.preview?.desktop || null
 }
 
+const AREA_ICON: Record<Area, LucideIcon> = { homepage: Home, category: LayoutGrid, product: Package, cart: ShoppingCart, checkout: CreditCard, site: Globe }
+
+/** Where, how much it matters, how much work: one small icon each. */
 function Meta({ r, area }: { r: Row; area?: string }) {
+  const AreaIcon = AREA_ICON[r.area]
+  const high = r.checkpoint?.priority === 'High'
   return (
-    <span className="mt-1 flex flex-wrap gap-x-2 text-[12.5px] font-medium text-[var(--text-muted)]">
-      {area && <span>{area}</span>}
-      {r.checkpoint?.priority === 'High' && <span style={{ color: 'var(--result-fail-fg)' }}>High impact</span>}
-      <span>{effortLabel(r)}</span>
+    <span className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] font-medium text-[var(--text-muted)]">
+      {area && <span className="inline-flex items-center gap-1"><AreaIcon className="h-3.5 w-3.5" aria-hidden />{area}</span>}
+      {high && <span className="inline-flex items-center gap-1" style={{ color: 'var(--result-fail-fg)' }}><Zap className="h-3.5 w-3.5" aria-hidden />High impact</span>}
+      <span className="inline-flex items-center gap-1"><Wrench className="h-3.5 w-3.5" aria-hidden />{effortLabel(r)}</span>
     </span>
   )
 }
@@ -320,7 +309,7 @@ function Unknown() {
 
 /* ── one part of the store ──────────────────────────────────────────────── */
 
-function AreaView({ area, device, focus }: { area: AreaSummary; device: Device; focus: string | null }) {
+function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; device: Device; setDevice: (d: Device) => void; focus: string | null }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []))
   const [selected, setSelected] = useState<string | null>(focus)
   const shotRef = useRef<HTMLDivElement | null>(null)
@@ -369,12 +358,23 @@ function AreaView({ area, device, focus }: { area: AreaSummary; device: Device; 
             </p>
           )}
         </div>
-        {area.page && !flow && <a href={area.page.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 truncate text-[13px] font-medium text-[var(--text-muted)] underline">Page scanned: {pathOf(area.page.url)} <ExternalLink className="h-3 w-3 shrink-0" aria-hidden /></a>}
       </div>
 
       <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* the page, pinned */}
         <div className="min-w-0 lg:sticky lg:top-[132px] lg:order-2 lg:self-start">
+          {/* the switch changes the screenshot only, so it sits on it (as in the free scan) */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px] max-[560px]:flex max-[560px]:w-full">
+              {(['desktop', 'mobile'] as Device[]).map((d) => (
+                <button key={d} type="button" onClick={() => setDevice(d)} aria-pressed={device === d}
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors max-[560px]:flex-1 max-[560px]:py-2 ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}>
+                  {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}{d === 'desktop' ? 'Desktop' : 'Mobile'}
+                </button>
+              ))}
+            </div>
+            {area.page && !flow && <a href={area.page.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 truncate text-[13px] font-medium text-[var(--text-muted)] underline">Page scanned: {pathOf(area.page.url)} <ExternalLink className="h-3 w-3 shrink-0" aria-hidden /></a>}
+          </div>
           {flow ? (
             <FlowShots shots={shown} device={shownDevice} wanted={device} label={area.label} />
           ) : (
@@ -386,12 +386,18 @@ function AreaView({ area, device, focus }: { area: AreaSummary; device: Device; 
         <div className="flex min-w-0 flex-col gap-3 lg:order-1">
           {area.blind && <p className="rounded-[14px] border border-dashed border-[var(--border-strong)] px-4 py-3.5 text-[15px] text-[var(--text-muted)]">{unknownNote(area.id)}</p>}
           {area.fails.length === 0 && !area.blind && <p className="rounded-[14px] bg-[var(--result-pass-bg)] px-4 py-3.5 text-[15px] font-semibold text-[var(--result-pass-fg)]">Nothing to fix here. Well done.</p>}
+          {/* every checkpoint, as in the free scan: issues first (by impact), then what passed, then what we couldn't check */}
           {area.fails.map((r) => (
-            <Finding key={r.ruleId} r={r} n={num.get(r.ruleId)!} open={open.has(r.ruleId)} active={selected === r.ruleId}
+            <Finding key={r.ruleId} r={r} kind="fail" n={num.get(r.ruleId)!} open={open.has(r.ruleId)} active={selected === r.ruleId}
               onToggle={() => { toggle(r.ruleId); pick(r.ruleId, 'list') }} />
           ))}
-          {area.passed.length > 0 && <Group title={`${area.passed.length} ${area.passed.length === 1 ? 'checkpoint' : 'checkpoints'} passed`} rows={area.passed} kind="pass" />}
-          {area.unknown.length > 0 && <Group title={`${area.unknown.length} we couldn't check`} note={area.blind ? undefined : 'Our scan could not see enough to judge these. They are left out of your score.'} rows={area.unknown} kind="unknown" />}
+          {area.passed.map((r) => (
+            <Finding key={r.ruleId} r={r} kind="pass" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => toggle(r.ruleId)} />
+          ))}
+          {area.unknown.length > 0 && !area.blind && <p className="pt-2 text-[13px] text-[var(--text-muted)]">We couldn't check these: our scan could not see enough to judge them, so they are left out of your score.</p>}
+          {area.unknown.map((r) => (
+            <Finding key={r.ruleId} r={r} kind="unknown" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => toggle(r.ruleId)} />
+          ))}
         </div>
       </div>
     </div>
@@ -421,15 +427,16 @@ function FlowShots({ shots, device, wanted, label }: { shots: Shot[]; device: De
   )
 }
 
-function Finding({ r, n, open, active, onToggle }: { r: Row; n: number; open: boolean; active: boolean; onToggle: () => void }) {
+function Finding({ r, n, kind, open, active, onToggle }: { r: Row; n?: number; kind: 'fail' | 'pass' | 'unknown'; open: boolean; active: boolean; onToggle: () => void }) {
+  const t = kind === 'pass' ? 'pass' : 'fail'
   return (
     <div id={`f-${r.ruleId}`} className={`scroll-mt-[150px] rounded-[16px] border px-4 transition-colors ${active || open ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
-      style={{ ['--result-fg' as string]: 'var(--result-fail-fg)', ['--result-bg' as string]: 'var(--result-fail-bg)' }}>
+      style={{ ['--result-fg' as string]: `var(--result-${t}-fg)`, ['--result-bg' as string]: kind === 'unknown' ? 'var(--surface-muted)' : `var(--result-${t}-bg)` }}>
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 py-4 text-left">
-        <Num n={n} />
+        {kind === 'fail' ? <Num n={n!} /> : kind === 'pass' ? <Pass /> : <Unknown />}
         <span className="min-w-0 flex-1">
           <span className="block font-[family-name:var(--font-display)] text-[16px] font-bold leading-[1.35] tracking-[-0.01em] text-[var(--text)]">{r.ruleTitle}</span>
-          <Meta r={r} />
+          {kind === 'fail' && <Meta r={r} />}
         </span>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-[var(--border)]"><ChevronDown className={`h-[18px] w-[18px] text-[var(--text)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden /></span>
       </button>
@@ -437,37 +444,11 @@ function Finding({ r, n, open, active, onToggle }: { r: Row; n: number; open: bo
         <div className="border-t border-[var(--border)] pb-4 pt-4">
           <div className="flex flex-col gap-4 rounded-[12px] bg-[var(--result-bg)] p-5">
             <div className="flex flex-col gap-1.5">
-              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold text-[var(--result-fg)]">What we saw:</p>
+              <p className="font-[family-name:var(--font-display)] text-[17px] font-bold" style={{ color: kind === 'unknown' ? 'var(--text-muted)' : 'var(--result-fg)' }}>{kind === 'unknown' ? 'Why we could not check it:' : 'What we saw:'}</p>
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text)]">{r.reason}</p>
             </div>
-            {r.checkpoint && <CheckpointResultBody checkpoint={r.checkpoint} passed={false} />}
+            {r.checkpoint && kind !== 'unknown' && <CheckpointResultBody checkpoint={r.checkpoint} passed={kind === 'pass'} />}
           </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function Group({ title, note, rows, kind }: { title: string; note?: string; rows: Row[]; kind: 'pass' | 'unknown' }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-4">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-3 py-3.5 text-left">
-        {kind === 'pass' ? <Pass /> : <Unknown />}
-        <span className="flex-1 text-[15px] font-semibold text-[var(--text)]">{title}</span>
-        <ChevronDown className={`h-[18px] w-[18px] text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
-      </button>
-      {open && (
-        <div className="border-t border-[var(--border)] pb-3 pt-2">
-          {note && <p className="pb-2 text-[13px] text-[var(--text-muted)]">{note}</p>}
-          <ul className="flex flex-col">
-            {rows.map((r) => (
-              <li key={r.ruleId} className="border-b border-[var(--border)] py-2.5 last:border-0">
-                <p className="text-[14px] font-medium text-[var(--text)]">{r.ruleTitle}</p>
-                {r.reason && <p className="mt-0.5 text-[13px] text-[var(--text-muted)]">{r.reason}</p>}
-              </li>
-            ))}
-          </ul>
         </div>
       )}
     </div>
