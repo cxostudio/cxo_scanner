@@ -256,7 +256,7 @@ export default function Home() {
    * Use timestamp-based smoothing instead of timer chains so production/main-thread variance
    * (Vercel build, throttling, render batching) doesn't skip late-stage progress.
    */
-  const PROGRESS_MAX_PERCENT_PER_SEC = 30;
+  const PROGRESS_MAX_PERCENT_PER_SEC = 18;
   const PROGRESS_SNAP_EPSILON = 0.12;
   /** Ensure each row remains visible briefly before next step mounts. */
   const ANALYSIS_STEP_MIN_ADVANCE_MS = 380;
