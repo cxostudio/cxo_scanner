@@ -1212,7 +1212,7 @@ export async function POST(request: NextRequest) {
     // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
     if (useV2) {
       try {
-        const v2 = await runScanV2(validUrl, v2Rules, apiKey)
+        const v2 = await runScanV2(validUrl, v2Rules, apiKey, { extended: paidScan })
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
         // lead dashboard (/admin/leads): score, counts and answers only, no screenshots or page text
         if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
