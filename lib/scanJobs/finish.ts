@@ -46,6 +46,7 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot) {
     resultsUrl: `${origin}/scan/results?id=${job.id}`,
     callUrl: CALL_URL,
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
+    avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',
     privacyUrl: `${origin === 'https://cxo.studio' ? 'https://cxo.studio' : origin}${fr ? '/fr' : ''}/privacy`,
   })
 }

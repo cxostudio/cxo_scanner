@@ -16,6 +16,7 @@ export type ResultsEmailInput = {
   resultsUrl: string
   callUrl: string
   logoUrl: string
+  avatarUrl: string       // Louis, for the signature
   privacyUrl: string
 }
 
@@ -137,7 +138,16 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
           <p style="margin:28px 0 0;padding-top:20px;border-top:1px solid ${C.border};font:400 14px/1.6 ${BODY};color:${C.muted};">
             ${esc(t.call)} <a href="${esc(i.callUrl)}" style="color:${C.text};font-weight:600;text-decoration:underline;">${esc(t.callLink)}</a>
           </p>
-          <p style="margin:16px 0 0;font:400 14px/1.5 ${BODY};color:${C.text};">${esc(t.sign)}<br><span style="color:${C.muted};">${esc(t.signRole)}</span></p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 0;">
+            <tr>
+              <td valign="middle" style="padding-right:12px;">
+                <img src="${esc(i.avatarUrl)}" width="48" height="48" alt="${esc(t.sign)}" style="display:block;width:48px;height:48px;border-radius:24px;border:2px solid #ffffff;box-shadow:0 1px 4px rgba(9,9,11,0.14);">
+              </td>
+              <td valign="middle" style="font:400 14px/1.45 ${BODY};color:${C.text};">
+                <span style="font-weight:600;">${esc(t.sign)}</span><br><span style="color:${C.muted};">${esc(t.signRole)}</span>
+              </td>
+            </tr>
+          </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 12px 0;font:400 12px/1.6 ${BODY};color:${C.subtle};">
           ${esc(t.footer)}<br>CXO Studio · Amsterdam · <a href="${esc(i.privacyUrl)}" style="color:${C.subtle};">${esc(t.privacy)}</a>
