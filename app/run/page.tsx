@@ -1443,7 +1443,7 @@ export default function Home() {
               <div className="cxo-row is-active">
                 <span className="cxo-icon"><Spinner /></span>
                 <span className="cxo-row-text">
-                  <span className="cxo-row-label">Loading the checkpoints for your page</span>
+                  <span className="cxo-row-label">Loading your page</span>
                   <span className="cxo-row-hint">{host || "Your product page"}</span>
                 </span>
               </div>
