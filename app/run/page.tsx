@@ -1480,7 +1480,7 @@ export default function Home() {
           </section>
 
           {/* progress: the same bar and rows as the questions on /start */}
-          <aside className="cxo-card cxo-scan-aside cxo-reveal cxo-reveal-1 relative z-10 min-w-0 lg:sticky lg:top-8 lg:mt-6 max-[1023px]:-mt-16 max-[560px]:-mt-10 lg:!p-6" aria-label="Scan progress">
+          <aside className="cxo-card cxo-scan-aside cxo-reveal cxo-reveal-1 relative z-10 min-w-0 lg:sticky lg:top-8 lg:mt-6 max-[1023px]:-mt-24 max-[560px]:-mt-20 lg:!p-6" aria-label="Scan progress">
             <div className="mb-[var(--space-6)] flex items-center gap-[14px]">
               <div className="cxo-progress flex-1" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                 <span style={{ width: `${barPct}%`, transition: 'none' }} />
