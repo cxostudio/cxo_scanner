@@ -72,7 +72,10 @@ export default function ReportPage() {
   // the first load: just a centred spinner (the report itself appears in a second)
   if (!data) return (
     <main className="grid min-h-dvh place-items-center bg-[var(--surface)]" aria-busy="true">
-      <span className="h-9 w-9 animate-spin rounded-full border-[3px] border-[var(--surface-muted)] border-t-[var(--text)]" role="status" aria-label="Loading your report" />
+      <span className="relative grid h-[88px] w-[88px] place-items-center" role="status" aria-label="Loading your report">
+        <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-[var(--surface-muted)] border-t-[var(--text)]" aria-hidden />
+        <img src={asset('/cxo-mark.png')} alt="" className="h-11 w-11 object-contain" />
+      </span>
     </main>
   )
   if (data.status === 'failed') return <Shell><h1 className="h1">We couldn't finish your report</h1><p className="mt-3 text-[var(--text-muted)]">Something on {hostOf(data.url)} stopped our scan. We've been notified and will get back to you by email.</p></Shell>
