@@ -96,7 +96,7 @@ export default function OrderPage() {
 
         {order?.paid && (
           <>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col items-center gap-4 text-center">
               <span className="grid h-11 w-11 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]">
                 <Check />
               </span>

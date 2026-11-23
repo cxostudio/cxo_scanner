@@ -88,9 +88,11 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Progress({ data }: { data: Report }) {
   return (
     <Shell>
-      <p className="text-sm font-semibold text-[var(--text-muted)]">{hostOf(data.url)} · Full conversion report</p>
-      <h1 className="h1 mt-3">Your report is being built</h1>
-      <p className="mt-3 text-[17px] leading-[1.6] text-[var(--text-muted)]">We're scanning your store from the homepage to checkout, on desktop and mobile. It takes a few minutes. You can close this page: the report comes by email too.</p>
+      <div className="text-center">
+        <p className="text-sm font-semibold text-[var(--text-muted)]">{hostOf(data.url)} · Full conversion report</p>
+        <h1 className="h1 mt-3">Your report is being built</h1>
+        <p className="mt-3 text-[17px] leading-[1.6] text-[var(--text-muted)]">We're scanning your store from the homepage to checkout, on desktop and mobile. It takes a few minutes. You can close this page: the report comes by email too.</p>
+      </div>
       <div className="mt-8 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
         <BuildSteps pages={data.pages} />
       </div>
