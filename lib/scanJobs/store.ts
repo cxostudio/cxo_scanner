@@ -27,7 +27,7 @@ export type ScanJob = {
   email: string
   url: string
   locale: string
-  answers: { revenue?: string; aov?: string; cr?: string } | null
+  answers: { revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string } | null
   origin: string | null
   status: JobStatus
   heartbeat_at: string
@@ -94,4 +94,11 @@ export async function markEmailed(id: string): Promise<boolean> {
   const { data, error } = await db().from(T).update({ emailed_at: new Date().toISOString() }).eq('id', id).is('emailed_at', null).select('id').maybeSingle()
   if (error) throw new Error(error.message)
   return Boolean(data)
+}
+
+/** Every job whose scan_id starts with `prefix` (the pages of a full report), oldest first. */
+export async function listJobsByPrefix(prefix: string): Promise<ScanJob[]> {
+  const { data, error } = await db().from(T).select('*').like('scan_id', `${prefix}%`).order('created_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data as ScanJob[]) || []
 }

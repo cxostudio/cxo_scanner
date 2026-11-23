@@ -24,7 +24,8 @@ const CHECKOUT_PAGE_TYPE_ID = 'recokhtzh3nxsqnmb'
 const NOT_SCANNABLE_METHODS = new Set(['Manual (audit only)', 'Customer upload'])
 
 
-export type ScanSelectionOptions = { includeDrafts?: boolean }
+/** includeCheckout: the paid report opens checkout from the product page, so its Live checkout checkpoints run too. */
+export type ScanSelectionOptions = { includeDrafts?: boolean; includeCheckout?: boolean }
 
 /** Live always, Draft only in test mode. A rule without status comes from the legacy snapshot (live only). */
 export function ruleIsScannable(rule: ScanRule, opts: ScanSelectionOptions = {}): boolean {
@@ -44,7 +45,7 @@ export function getRequiredPageTypeIds(pageType: UrlPageType, opts: ScanSelectio
     pageType === 'homepage'
       ? [GENERAL_PAGE_TYPE_ID, HOME_PAGE_TYPE_ID]
       : pageType === 'product'
-        ? [GENERAL_PAGE_TYPE_ID, PRODUCT_PAGE_TYPE_ID, CART_PAGE_TYPE_ID, ...(opts.includeDrafts ? [CHECKOUT_PAGE_TYPE_ID] : [])]
+        ? [GENERAL_PAGE_TYPE_ID, PRODUCT_PAGE_TYPE_ID, CART_PAGE_TYPE_ID, ...(opts.includeDrafts || opts.includeCheckout ? [CHECKOUT_PAGE_TYPE_ID] : [])]
         : pageType === 'category'
           ? [GENERAL_PAGE_TYPE_ID, CATEGORY_PAGE_TYPE_ID]
           : [GENERAL_PAGE_TYPE_ID]

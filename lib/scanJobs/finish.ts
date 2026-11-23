@@ -21,7 +21,7 @@ const firstSentence = (s: string, max = 120) => {
   return one.length > max ? `${one.slice(0, max - 1).trimEnd()}…` : one
 }
 
-export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot) {
+export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot, opts: { report?: boolean; link?: string } = {}) {
   const fr = (snap.locale || job.locale) === 'fr'
   const rows = (snap.results || []) as (ScanResult & { status?: string; coveredByShopify?: boolean; reason?: string })[]
   const scored = rows.filter((r) => r.status !== 'unknown')
@@ -43,7 +43,8 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot) {
     score: scoreOf(scored), toFix: failed.length, checked: base.length,
     easyHigh: failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length,
     top,
-    resultsUrl: `${origin}/scan/results?id=${job.id}`,
+    resultsUrl: `${origin}${opts.link || `/scan/results?id=${job.id}`}`,
+    report: opts.report,
     callUrl: CALL_URL,
     qualified: isQualified(snap.revenue || ''),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',

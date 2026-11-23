@@ -1,3 +1,4 @@
+import { getJob } from '@/lib/scanJobs/store'
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
@@ -202,6 +203,7 @@ const ScanRequestSchema = z.object({
   email: z.string().optional(), // for the per-email daily scan limit
   scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
   engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2 (default); SCAN_ENGINE=v1 switches back
+  reportJob: z.string().uuid().optional(), // a page of a paid full report: its scan_jobs row id (checked below)
 })
 
 // Helper function to sleep/delay
@@ -1057,9 +1059,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine } = validationResult.data
-    // the paid full report (set later by the order flow, after Stripe confirms the payment)
-    const paidScan = false
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine, reportJob } = validationResult.data
+    // the paid full report: only a page job the server created for a report (lib/fullReport) unlocks it
+    let paidScan = false
+    let reportPage = ''
+    if (reportJob) {
+      const job = await getJob(reportJob).catch(() => null)
+      if (job && job.scan_id.startsWith('report_') && job.answers?.kind === 'report' && job.status !== 'done') {
+        paidScan = true
+        reportPage = job.answers?.page || ''
+      } else {
+        return NextResponse.json({ error: 'Unknown report' }, { status: 403 })
+      }
+    }
 
     // Per-email daily scan limit — CHECK ONLY here (block if already at the
     // limit) so we don't do expensive work for a user who's out of scans.
@@ -1164,8 +1176,14 @@ export async function POST(request: NextRequest) {
         checkpointByRuleId = buildCheckpointPresentationMap(cpRes.records)
         const selected = filterCheckpointsByUrl(cpRes.records, cpRes.rules, validUrl, {
           includeDrafts: isTestEmail(email),
+          includeCheckout: paidScan,
         })
         if (selected.rules.length) v2Rules = selected.rules
+        // full report: store-wide checks are judged once, on the product page (it also opens cart and checkout)
+        if (paidScan && reportPage && reportPage !== 'product') {
+          const own = v2Rules.filter((r) => { const ids = ((r as { pageTypeIds?: string[] }).pageTypeIds || []).map((x) => x.toLowerCase()); return !(ids.length && ids.every((x) => x === 'reclgdsv5ric0dkku')) })
+          if (own.length) v2Rules = own
+        }
         // free scan (real leads): only the checkpoints ticked "Free scan", so it stays fast and cheap.
         // The paid report and lab scans (test emails) judge everything Live (and Draft in the lab).
         if (!isTestEmail(email) && !paidScan) {

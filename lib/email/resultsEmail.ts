@@ -19,6 +19,7 @@ export type ResultsEmailInput = {
   logoUrl: string
   avatarUrl: string       // Louis, for the signature
   privacyUrl: string
+  report?: boolean        // the paid full report is ready (not the free scan)
 }
 
 // token values (app/tokens.css): text, muted, border, canvas, surface, fail, gain, finding
@@ -70,8 +71,39 @@ const COPY = {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+// the paid full report reuses the same email, with its own words
+const REPORT_COPY = {
+  en: {
+    subject: (i: ResultsEmailInput) => `Your full conversion report of ${i.host} is ready`,
+    h1Plain: (i: ResultsEmailInput) => `Your full conversion report of ${i.host} is ready`,
+    preheader: (i: ResultsEmailInput) => `${i.toFix} checkpoints to fix across ${i.host}, from the homepage to checkout.`,
+    eyebrow: (i: ResultsEmailInput) => `Full conversion report · ${i.host}`,
+    h1a: 'Your store leaves about', h1b: 'a month on the table',
+    intro: (i: ResultsEmailInput) =>
+      `We ran ${i.checked} checkpoints on your homepage, a collection, your best seller, the cart and checkout. ${i.toFix} need fixing${i.easyHigh ? `, ${i.easyHigh} of them high-impact and easy` : ''}. Start with these.`,
+    cta: () => 'Open your full report',
+    ctaNote: 'Your report opens on any device. Share the link with your developer or agency.',
+    footer: 'You get this email because you ordered the full conversion report on cxo.studio.',
+  },
+  fr: {
+    subject: (i: ResultsEmailInput) => `Votre rapport de conversion complet de ${i.host} est prêt`,
+    h1Plain: (i: ResultsEmailInput) => `Votre rapport de conversion complet de ${i.host} est prêt`,
+    preheader: (i: ResultsEmailInput) => `${i.toFix} points de contrôle à corriger sur ${i.host}, de l’accueil au paiement.`,
+    eyebrow: (i: ResultsEmailInput) => `Rapport de conversion complet · ${i.host}`,
+    h1a: 'Votre boutique laisse environ', h1b: 'par mois sur la table',
+    intro: (i: ResultsEmailInput) =>
+      `Nous avons passé ${i.checked} points de contrôle sur votre accueil, une collection, votre meilleure vente, le panier et le paiement. ${i.toFix} sont à corriger${i.easyHigh ? `, dont ${i.easyHigh} à fort impact et faciles` : ''}. Commencez par ceux-ci.`,
+    cta: () => 'Ouvrir votre rapport complet',
+    ctaNote: 'Votre rapport s’ouvre sur n’importe quel appareil. Partagez le lien avec votre développeur ou votre agence.',
+    footer: 'Vous recevez cet email car vous avez commandé le rapport de conversion complet sur cxo.studio.',
+  },
+}
+
 export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html: string; text: string } {
-  const t = COPY[i.locale] ?? COPY.en
+  const base = COPY[i.locale] ?? COPY.en
+  const t = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
+  // after the full report: a call for stores that qualify, nothing to sell to the others
+  const nextLine = i.report && !i.qualified ? '' : i.qualified ? 'call' : 'report'
   const tone = i.score >= 80 ? [C.gain, C.gainBg] : i.score >= 55 ? [C.finding, C.findingBg] : [C.fail, C.failBg]
   const top = i.top.slice(0, 3)
 
@@ -138,9 +170,9 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
           </table>
           <p style="margin:10px 0 0;font:400 13px/1.5 ${BODY};color:${C.muted};text-align:center;">${esc(t.ctaNote)}</p>
 
-          <p style="margin:28px 0 0;padding-top:20px;border-top:1px solid ${C.border};font:400 14px/1.6 ${BODY};color:${C.muted};">
+          ${nextLine ? `<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid ${C.border};font:400 14px/1.6 ${BODY};color:${C.muted};">
             ${i.qualified ? esc(t.call) : esc(t.report)} <a href="${esc(i.qualified ? i.callUrl : `${i.resultsUrl}#full-report`)}" style="color:${C.text};font-weight:600;text-decoration:underline;">${esc(i.qualified ? t.callLink : t.reportLink)}</a>
-          </p>
+          </p>` : ''}
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 0;">
             <tr>
               <td valign="middle" style="padding-right:12px;">
@@ -164,7 +196,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
   const text = [
     t.subject(i), '', t.intro(i), '', `${t.score}: ${i.score}/100 (${t.tone(i.score)})`, '', t.start,
     ...top.map((f, n) => `${n + 1}. ${f.title}\n   ${f.fix}`), '', `${t.cta(i)}: ${i.resultsUrl}`, '',
-    i.qualified ? `${t.call} ${t.callLink}: ${i.callUrl}` : `${t.report} ${t.reportLink}: ${i.resultsUrl}`, '', `${t.sign}, ${t.signRole}`, '', t.footer,
+    nextLine === 'call' ? `${t.call} ${t.callLink}: ${i.callUrl}` : nextLine === 'report' ? `${t.report} ${t.reportLink}: ${i.resultsUrl}` : '', '', `${t.sign}, ${t.signRole}`, '', t.footer,
   ].join('\n')
 
   return { subject: t.subject(i), html, text }

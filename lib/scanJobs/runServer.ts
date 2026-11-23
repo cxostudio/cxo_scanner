@@ -16,7 +16,7 @@ const CART = 'recdyiscpsbfrbbha'
 
 type Rule = { id: string; title: string; freeScan?: boolean; pageTypeIds?: string[] } & Record<string, unknown>
 
-async function previews(url: string): Promise<{ desktop: string | null; mobile: string | null }> {
+export async function previews(url: string): Promise<{ desktop: string | null; mobile: string | null }> {
   const out = { desktop: null as string | null, mobile: null as string | null }
   try {
     const res = await fetch(api('/preview_website'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
