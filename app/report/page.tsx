@@ -158,10 +158,11 @@ function ReportView({ data, id }: { data: Report; id: string }) {
         <div className={`mx-auto flex max-w-[1280px] items-center gap-4 px-[var(--gutter)] py-3`}>
           <a href="https://cxo.studio" aria-label="CXO studio" className="shrink-0"><img src={asset('/cxo-logo.png')} alt="CXO studio" className="block h-[22px] w-auto max-[560px]:h-[18px]" /></a>
           <span className="h-8 w-px shrink-0 bg-[var(--border)]" aria-hidden />
-          <img src={favicon} alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] object-contain p-1" />
-          <div className="min-w-0">
-            <p className="truncate font-[family-name:var(--font-display)] text-[16px] font-bold leading-tight text-[var(--text)]">{host}</p>
-            <a href={data.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] text-[var(--text-muted)] hover:text-[var(--text)]">
+          {/* favicon and the two lines are the same height: 40px (20 + 4 gap + 16) */}
+          <img src={favicon} alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] object-contain p-1.5" />
+          <div className="flex h-10 min-w-0 flex-col justify-between">
+            <p className="truncate font-[family-name:var(--font-display)] text-[16px] font-bold leading-[20px] text-[var(--text)]">{host}</p>
+            <a href={data.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] leading-[16px] text-[var(--text-muted)] hover:text-[var(--text)]">
               Full conversion report · {date} <ExternalLink className="h-3 w-3" aria-hidden />
             </a>
           </div>
