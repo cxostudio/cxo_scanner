@@ -145,29 +145,30 @@ function ReportView({ data }: { data: Report }) {
   const next = tabs[tabs.indexOf(tab) + 1]
   const nextLabel = next ? (next === 'overview' ? 'Overview' : AREAS.find((a) => a.id === next)!.tab) : null
   const current = areas.find((a) => a.id === tab)
-  // the bar, tabs and footer line up with the content: narrower on the overview, wide on the pinned pages
-  const W = tab === 'overview' ? 'max-w-[1080px]' : 'max-w-[1440px]'
+  // one width for the bar, the tabs, every tab's content and the footer
+  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
 
   return (
     <main className="min-h-screen bg-[var(--surface)] pb-24">
       {/* ── top bar ── */}
       <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className={`mx-auto flex ${W} items-center gap-4 px-[var(--gutter)] py-3`}>
+        <div className={`mx-auto flex max-w-[1280px] items-center gap-4 px-[var(--gutter)] py-3`}>
           <a href="https://cxo.studio" aria-label="CXO studio" className="shrink-0"><img src={asset('/cxo-logo.png')} alt="CXO studio" className="block h-[22px] w-auto max-[560px]:h-[18px]" /></a>
           <span className="h-8 w-px shrink-0 bg-[var(--border)]" aria-hidden />
+          <img src={favicon} alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] object-contain p-1" />
           <div className="min-w-0">
             <p className="truncate font-[family-name:var(--font-display)] text-[16px] font-bold leading-tight text-[var(--text)]">{host}</p>
             <a href={data.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] text-[var(--text-muted)] hover:text-[var(--text)]">
               Full conversion report · {date} <ExternalLink className="h-3 w-3" aria-hidden />
             </a>
           </div>
-          {nextLabel && (
+          {tab === 'overview' && nextLabel && (
             <button type="button" onClick={() => go(next!)} className="cxo-btn cxo-btn-primary ml-auto !h-auto !px-4 !py-2 text-[13px] max-[810px]:hidden">
-              {tab === 'overview' ? `Start with the ${nextLabel.toLowerCase()}` : `Next: ${nextLabel}`} <ChevronRight className="h-4 w-4" aria-hidden />
+              {`Start with the ${nextLabel.toLowerCase()}`} <ChevronRight className="h-4 w-4" aria-hidden />
             </button>
           )}
         </div>
-        <nav className={`mx-auto flex ${W} gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]`} aria-label="Report pages">
+        <nav className={`mx-auto flex max-w-[1280px] gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]`} aria-label="Report pages">
           {tabs.map((t) => {
             const a = areas.find((x) => x.id === t)
             const on = t === tab
@@ -191,7 +192,7 @@ function ReportView({ data }: { data: Report }) {
       ) : null}
 
       {/* ── next step ── */}
-      <section className={`mx-auto mt-20 ${W} px-[var(--gutter)]`}>
+      <section className={`mx-auto mt-20 max-w-[1280px] px-[var(--gutter)]`}>
         <div className="rounded-[20px] bg-[var(--bg-subtle)] p-8 max-[560px]:p-6">
           {qualified ? (
             <>
@@ -220,7 +221,7 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
   const quick = fails.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
   const top = fails.slice(0, 10)
   return (
-    <div className="mx-auto max-w-[1080px] px-[var(--gutter)] pt-12 max-[560px]:pt-8">
+    <div className="mx-auto max-w-[1280px] px-[var(--gutter)] pt-12 max-[560px]:pt-8">
       <h1 className="max-w-[860px] font-[family-name:var(--font-display)] text-[clamp(28px,3.6vw,42px)] font-bold leading-[1.12] tracking-[-0.035em] text-[var(--text)]">
         {est ? <>Your store leaves about <span style={{ color: 'var(--result-fail-fg)' }}>{shortEur(est)} per month</span> on the table</> : <>{fails.length} things to fix across {host}</>}
       </h1>
@@ -346,7 +347,7 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
   const shownDevice: Device = shotsHere.length ? device : shots[0]?.device || device
 
   return (
-    <div className="mx-auto max-w-[1440px] px-[var(--gutter)] pt-8">
+    <div className="mx-auto max-w-[1280px] px-[var(--gutter)] pt-8">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
           <h1 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">{area.label}</h1>
