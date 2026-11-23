@@ -3,11 +3,11 @@
 // After paying for the full report: Stripe sends the buyer here with ?session_id=.
 // The page checks the payment with our server (never trusts the URL alone) and says what happens next.
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/base'
+import { api, asset } from '@/lib/base'
+import { BuildSteps, OrderCard } from '../components/ReportBuild'
 
 type Order = { paid: boolean; status: string; email: string | null; storeUrl: string | null; amount: number | null; currency: string | null; tax: number | null; invoiceUrl: string | null; invoicePdf: string | null }
 
-const money = (cents: number | null, cur: string | null) => (cents == null ? '' : new Intl.NumberFormat('en-IE', { style: 'currency', currency: (cur || 'eur').toUpperCase() }).format(cents / 100))
 const host = (u: string | null) => {
   if (!u) return ''
   try {
@@ -27,7 +27,7 @@ export default function OrderPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [error, setError] = useState('')
   // the report this order starts, and how far it is
-  const [report, setReport] = useState<{ id: string; status: string; pages: { key: string; status: string }[] } | null>(null)
+  const [report, setReport] = useState<{ id: string; status: string; pages: { key: string; status: string; url?: string }[] } | null>(null)
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('session_id') || ''
@@ -44,9 +44,17 @@ export default function OrderPage() {
           if (o.error) return setError(o.error)
           if (!o.paid && tries++ < 5) return void setTimeout(ask, 2000)
           setOrder(o)
-          if (o.paid) start(id)
+          if (o.paid) { start(id); if (!o.invoiceUrl && !o.invoicePdf) invoiceLater(id) }
         })
         .catch(() => setError('network'))
+    // the invoice is finalised a few seconds after the payment: ask again until it is there (about a minute)
+    const invoiceLater = (sessionId: string, n = 0) => {
+      if (n > 12) return
+      setTimeout(() => fetch(api(`/checkout/session?id=${encodeURIComponent(sessionId)}`)).then((r) => r.json()).then((o: Order) => {
+        if (o.invoiceUrl || o.invoicePdf) setOrder(o)
+        else invoiceLater(sessionId, n + 1)
+      }).catch(() => invoiceLater(sessionId, n + 1)), 5000)
+    }
     // paid: start the report (once per order, however often this page loads), then follow it
     const start = async (sessionId: string) => {
       const r = await fetch(api('/report/order'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }).catch(() => null)
@@ -55,7 +63,7 @@ export default function OrderPage() {
       const follow = async () => {
         const x = await fetch(api(`/report/${d.id}`), { cache: 'no-store' }).then((y) => y.json()).catch(() => null)
         if (!x) return void setTimeout(follow, 5000)
-        setReport({ id: d.id!, status: x.status, pages: (x.pages || []).map((p: { key: string; status: string }) => ({ key: p.key, status: p.status })) })
+        setReport({ id: d.id!, status: x.status, pages: (x.pages || []).map((p: { key: string; status: string; url?: string }) => ({ key: p.key, status: p.status, url: p.url })) })
         if (x.status !== 'done' && x.status !== 'failed') setTimeout(follow, 5000)
       }
       follow()
@@ -66,7 +74,8 @@ export default function OrderPage() {
 
   return (
     <main className="min-h-dvh bg-[var(--bg)]">
-      <div className="mx-auto flex max-w-[640px] flex-col gap-6 px-[var(--gutter)] py-16 max-[560px]:py-10">
+      <div className="mx-auto flex max-w-[640px] flex-col gap-6 px-[var(--gutter)] pb-16 pt-[34px] max-[560px]:pb-10">
+        <a className="cxo-logo !mb-4" href="https://cxo.studio" aria-label="CXO studio"><img src={asset('/cxo-logo.png')} alt="CXO studio" /></a>
         {!order && !error && <p className="text-[var(--text-muted)]">Checking your payment…</p>}
 
         {error && (
@@ -97,23 +106,7 @@ export default function OrderPage() {
 
             <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
               <h2 className="text-sm font-semibold text-[var(--text)]">Your report</h2>
-              <ul className="flex flex-col gap-2.5">
-                {(['homepage', 'category', 'product'] as const).map((k) => {
-                  const p = report?.pages.find((x) => x.key === k)
-                  const done = p?.status === 'done' || report?.status === 'done'
-                  const label = k === 'homepage' ? 'Homepage' : k === 'category' ? 'Collection page' : 'Best seller, cart and checkout'
-                  return (
-                    <li key={k} className="flex items-center gap-3 text-[15px]">
-                      {done ? (
-                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full" style={{ background: 'var(--result-pass-fg)', color: 'var(--text-inverse)' }}><Check /></span>
-                      ) : (
-                        <span className="grid h-6 w-6 shrink-0 place-items-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--text-muted)] border-t-transparent" /></span>
-                      )}
-                      <span className={done ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}>{label}</span>
-                    </li>
-                  )
-                })}
-              </ul>
+              <BuildSteps pages={report?.pages || []} done={report?.status === 'done'} />
               {report?.status === 'done' && reportUrl ? (
                 <a href={reportUrl} className="cxo-btn cxo-btn-primary mt-2 self-start">Open your report</a>
               ) : report?.status === 'failed' ? (
@@ -123,24 +116,7 @@ export default function OrderPage() {
               ) : null}
             </section>
 
-            <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
-              <h2 className="text-sm font-semibold text-[var(--text)]">Your order</h2>
-              <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-sm">
-                <dt className="text-[var(--text-muted)]">Full conversion report{order.storeUrl ? `, ${host(order.storeUrl)}` : ''}</dt>
-                <dd className="text-right font-semibold text-[var(--text)]">{money(order.amount, order.currency)}</dd>
-                {order.tax ? (
-                  <>
-                    <dt className="text-[var(--text-muted)]">Of which VAT</dt>
-                    <dd className="text-right text-[var(--text-muted)]">{money(order.tax, order.currency)}</dd>
-                  </>
-                ) : null}
-              </dl>
-              {(order.invoicePdf || order.invoiceUrl) && (
-                <a href={order.invoicePdf || order.invoiceUrl || '#'} target="_blank" rel="noreferrer" className="self-start text-sm font-semibold text-[var(--text)] underline">
-                  Download your invoice
-                </a>
-              )}
-            </section>
+            <OrderCard order={order} />
 
           </>
         )}

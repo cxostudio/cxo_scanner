@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
+import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
 import { isQualified, scoreOf, effortLabel, type ScanResult } from '@/lib/report'
@@ -25,7 +26,7 @@ type Page = {
   images: Shot[]
   results: Row[]
 }
-type Report = { status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[] }
+type Report = { order?: OrderInfo | null; status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[] }
 
 // shopping order; store-wide checks last, they are seen on every page
 const AREAS: { id: Area; label: string; tab: string; page: Page['key']; blurb: string }[] = [
@@ -85,26 +86,15 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function Progress({ data }: { data: Report }) {
-  const order: Page['key'][] = ['homepage', 'category', 'product']
-  const label: Record<Page['key'], string> = { homepage: 'Homepage', category: 'Collection page', product: 'Best seller, cart and checkout' }
   return (
     <Shell>
       <p className="text-sm font-semibold text-[var(--text-muted)]">{hostOf(data.url)} · Full conversion report</p>
       <h1 className="h1 mt-3">Your report is being built</h1>
       <p className="mt-3 text-[17px] leading-[1.6] text-[var(--text-muted)]">We're scanning your store from the homepage to checkout, on desktop and mobile. It takes a few minutes. You can close this page: the report comes by email too.</p>
-      <ul className="mt-8 flex flex-col gap-3">
-        {order.map((k) => {
-          const p = data.pages.find((x) => x.key === k)
-          const st = p?.status === 'done' ? 'done' : p?.status === 'failed' ? 'failed' : 'running'
-          return (
-            <li key={k} className="flex items-center gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] px-4 py-3.5">
-              {st === 'done' ? <Pass /> : st === 'failed' ? <Unknown /> : <span className="grid h-[26px] w-[26px] shrink-0 place-items-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--text-muted)] border-t-transparent" /></span>}
-              <span className="font-semibold text-[var(--text)]">{label[k]}</span>
-              <span className="ml-auto truncate text-sm text-[var(--text-muted)]">{p ? pathOf(p.url) : 'finding the page…'}</span>
-            </li>
-          )
-        })}
-      </ul>
+      <div className="mt-8 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
+        <BuildSteps pages={data.pages} />
+      </div>
+      {data.order && <div className="mt-6"><OrderCard order={data.order} /></div>}
     </Shell>
   )
 }

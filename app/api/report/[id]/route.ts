@@ -4,6 +4,7 @@ import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getChe
 import { areaOf } from '@/lib/fullReport/areas'
 import { signedUrls } from '@/lib/fullReport/images'
 import type { ReportPageSnapshot } from '@/lib/fullReport/run'
+import { stripe } from '@/lib/stripe'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       results: done && s ? ((s.results || []) as { ruleId: string }[]).map((r) => ({ ...r, area: areaOf(page, tags.get(r.ruleId)) })) : [],
     }
   })
+  // a paid report (scan_id report_<Stripe session>): the order and its invoice, for the loading screen
+  let order = null
+  const session = parent.scan_id.slice('report_'.length)
+  if (!done && /^cs_(test|live)_[A-Za-z0-9]+$/.test(session)) {
+    try {
+      const s = await stripe().checkout.sessions.retrieve(session, { expand: ['invoice'] })
+      const inv = s.invoice && typeof s.invoice === 'object' ? s.invoice : null
+      order = { amount: s.amount_total, currency: s.currency, tax: s.total_details?.amount_tax ?? null, invoiceUrl: inv?.hosted_invoice_url || null, invoicePdf: inv?.invoice_pdf || null, storeUrl: parent.url }
+    } catch { /* no order card */ }
+  }
   return NextResponse.json({
+    order,
     status: parent.status, url: parent.url, locale: parent.locale, createdAt: parent.created_at,
     answers: { revenue: parent.answers?.revenue, aov: parent.answers?.aov, cr: parent.answers?.cr }, pages,
   }, { headers: { 'Cache-Control': 'no-store' } })
