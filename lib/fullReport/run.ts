@@ -5,7 +5,10 @@
 //   startReport() ─▶ kickoff (pick pages, create page jobs) ─▶ POST /api/report/page × 3
 //   runPage() ─▶ /api/scan (all Live checkpoints, paid mode) ─▶ combine ─▶ finalize()
 import { createHash, randomUUID } from 'crypto'
-import { completeJob, createJob, failJob, listJobsByPrefix, markEmailed, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
+import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
+import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
+import { saveImage, type ReportImage } from './images'
+import { areaOf } from './areas'
 import { previews, selfOrigin } from '@/lib/scanJobs/runServer'
 import { resultsEmailFor } from '@/lib/scanJobs/finish'
 import { sendEmail } from '@/lib/email/send'
@@ -14,7 +17,16 @@ import { pickReportPages, type ReportPageKey } from './pages'
 const api = (p: string) => `${selfOrigin()}/scan/api${p}`
 const AREA_ORDER: ReportPageKey[] = ['homepage', 'category', 'product']
 
-export type ReportPageSnapshot = ScanSnapshot & { page: ReportPageKey; how?: string }
+export type Located = { file: string; width: number; height: number; pins: { findingId: string; box: { x: number; y: number; w: number; h: number } }[] }
+export type ReportPageSnapshot = ScanSnapshot & {
+  page: ReportPageKey; how?: string
+  /** cart and checkout screenshots (product page only) */
+  images?: ReportImage[]
+  /** the page with the findings pinned, per device */
+  located?: { desktop?: Located | null; mobile?: Located | null }
+  /** plain screenshots when pinning failed */
+  previewFiles?: { desktop?: string | null; mobile?: string | null }
+}
 export type ReportSnapshot = ScanSnapshot & { kind: 'report'; pages: { key: ReportPageKey; id: string; status: string }[] }
 
 export async function startReport(input: { email: string; url: string; locale: string; answers?: ScanJob['answers']; origin?: string | null; orderId?: string }): Promise<ScanJob> {
@@ -58,11 +70,12 @@ export async function runPage(job: ScanJob): Promise<void> {
 
     const previewP = previews(job.url)
     let results: unknown[] = []
+    let images: ReportImage[] = []
     let lastErr = ''
     for (let attempt = 1; attempt <= 2 && !results.length; attempt++) {
       const res = await fetch(api('/scan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: job.url, rules, captureScreenshot: true, scanId: job.scan_id, reportJob: job.id }) })
-      const data = (await res.json().catch(() => ({}))) as { results?: unknown[]; error?: string }
-      if (res.ok && Array.isArray(data.results)) { results = data.results; break }
+      const data = (await res.json().catch(() => ({}))) as { results?: unknown[]; error?: string; reportImages?: ReportImage[] }
+      if (res.ok && Array.isArray(data.results)) { results = data.results; images = data.reportImages || []; break }
       lastErr = data.error || `scan ${res.status}`
       if (res.status === 422 || res.status === 403) break
     }
@@ -72,15 +85,60 @@ export async function runPage(job: ScanJob): Promise<void> {
       if (c.ok) { const d = (await c.json()) as { results?: unknown[] }; if (Array.isArray(d.results)) results = d.results }
     } catch { /* keep raw */ }
     const p = await previewP
+    const stamp = Date.now().toString(36)
+    const [pd, pm] = await Promise.all([
+      p.desktop ? saveImage(`${job.id}/${stamp}-preview-desktop.jpg`, p.desktop).catch(() => null) : null,
+      p.mobile ? saveImage(`${job.id}/${stamp}-preview-mobile.jpg`, p.mobile).catch(() => null) : null,
+    ])
     const snap: ReportPageSnapshot = {
       page: (job.answers?.page || 'product') as ReportPageKey, how: job.answers?.how, results, scanUrl: job.url,
       revenue: job.answers?.revenue, aov: job.answers?.aov, cr: job.answers?.cr, locale: job.locale,
-      previewDesktop: p.desktop, previewMobile: p.mobile,
+      images, previewFiles: { desktop: pd, mobile: pm },
     }
+    // next step in its own invocation: pin the findings on the page (desktop and mobile)
+    await saveSnapshot(job.id, snap)
+    const r = await fetch(api('/report/locate'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-report-key': internalKey() }, body: JSON.stringify({ id: job.id }) }).catch(() => null)
+    if (r && r.ok) return
     await completeJob(job.id, snap)
   } catch (e) {
     console.error('[report] page failed', job.scan_id, e)
     await failJob(job.id, e instanceof Error ? e.message : 'page failed')
+  }
+  await finalize(parentScanId)
+}
+
+type Row = { ruleId: string; ruleTitle: string; reason?: string; passed?: boolean; status?: string }
+
+/** Pin this page's findings on a desktop and a mobile screenshot, then close the page. */
+export async function locatePage(id: string): Promise<void> {
+  const job = await getJob(id)
+  if (!job || job.status === 'done' || !job.snapshot) return
+  const snap = job.snapshot as ReportPageSnapshot
+  const parentScanId = job.scan_id.split('__')[0]
+  try {
+    const cp = await getConversionCheckpointRules().catch(() => null)
+    const tags = new Map<string, string[]>()
+    if (cp && cp.ok) for (const r of cp.rules) tags.set(r.id, r.pageTypeIds || [])
+    // the findings that live on this page: not the cart or checkout ones (their own screenshots)
+    const rows = (snap.results as Row[]).filter((r) => r.status !== 'unknown' && r.status !== 'na' && !r.passed)
+      .filter((r) => { const a = areaOf(snap.page, tags.get(r.ruleId)); return a !== 'cart' && a !== 'checkout' })
+    const findings = rows.slice(0, 60).map((r) => ({ id: r.ruleId, title: r.ruleTitle, reason: r.reason }))
+    const one = async (device: 'desktop' | 'mobile'): Promise<Located | null> => {
+      if (!findings.length) return null
+      try {
+        const res = await fetch(api('/locate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: job.url, findings, device, limit: 60 }) })
+        if (!res.ok) return null
+        const d = (await res.json()) as { screenshot?: string; width?: number; height?: number; pins?: Located['pins'] }
+        if (!d.screenshot || !d.width || !d.height) return null
+        const file = await saveImage(`${job.id}/${Date.now().toString(36)}-located-${device}.jpg`, d.screenshot)
+        return { file, width: d.width, height: d.height, pins: d.pins || [] }
+      } catch (e) { console.warn('[report] locate failed', device, e); return null }
+    }
+    const [desktop, mobile] = await Promise.all([one('desktop'), one('mobile')])
+    await completeJob(job.id, { ...snap, located: { desktop, mobile } } as ReportPageSnapshot)
+  } catch (e) {
+    console.error('[report] locate step failed', job.scan_id, e)
+    await completeJob(job.id, snap)
   }
   await finalize(parentScanId)
 }

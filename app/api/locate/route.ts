@@ -36,7 +36,7 @@ type Finding = { id: string; title: string; reason?: string }
 const CONSENT_WORDS = ['accept', 'allow all', 'agree', 'aceptar', 'accepter', 'tout accepter', 'akzeptieren', 'accetta', 'aceitar', 'ok', 'got it', 'alle akzeptieren', 'accepteren']
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string; region?: string }
+  const body = (await request.json().catch(() => ({}))) as { url?: string; findings?: Finding[]; device?: string; region?: string; limit?: number }
   const device: Device = body.device === 'mobile' ? 'mobile' : 'desktop'
   const D = DEVICES[device]
   const WIDTH = D.width
@@ -44,7 +44,8 @@ export async function POST(request: NextRequest) {
   const raw = typeof body.url === 'string' ? body.url.trim() : ''
   const findings = (Array.isArray(body.findings) ? body.findings : [])
     .filter((f) => f && typeof f.id === 'string' && typeof f.title === 'string')
-    .slice(0, 30)
+    // the free results page pins up to 30; the full report's product page (product + store-wide findings) up to 60
+    .slice(0, Math.min(60, Math.max(1, Number(body.limit) || 30)))
   // lab: region 'bottom' returns only a capture of the end of the page (footer examples), no pins
   const bottomOnly = body.region === 'bottom'
   if (!raw || (!findings.length && !bottomOnly)) return NextResponse.json({ error: 'url and findings are required' }, { status: 400 })

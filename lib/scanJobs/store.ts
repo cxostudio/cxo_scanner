@@ -102,3 +102,9 @@ export async function listJobsByPrefix(prefix: string): Promise<ScanJob[]> {
   if (error) throw new Error(error.message)
   return (data as ScanJob[]) || []
 }
+
+/** Store a snapshot without finishing the job (a full-report page between its scan and its pins). */
+export async function saveSnapshot(id: string, snapshot: ScanSnapshot): Promise<void> {
+  const { error } = await db().from(T).update({ snapshot, status: 'server', updated_at: new Date().toISOString() }).eq('id', id).neq('status', 'done')
+  if (error) throw new Error(error.message)
+}

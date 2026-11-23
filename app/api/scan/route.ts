@@ -1,4 +1,5 @@
 import { getJob } from '@/lib/scanJobs/store'
+import { saveFlowImages } from '@/lib/fullReport/images'
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
 import { z } from 'zod'
@@ -1233,7 +1234,9 @@ export async function POST(request: NextRequest) {
             return undefined
           })
         }
-        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId })
+        // full report: keep the cart and checkout screenshots for the report page
+        const reportImages = paidScan && reportJob ? await saveFlowImages(reportJob, v2.evidence).catch((e) => { console.warn('[scan] report images not saved', e); return [] }) : undefined
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId, reportImages })
       } catch (e) {
         if (e instanceof PageCheckError) {
           return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })
