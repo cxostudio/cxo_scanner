@@ -86,4 +86,7 @@ export function effortLabel(r: ScanResult): string {
  * get the checklist instead. Unknown revenue (a direct link) keeps the call.
  */
 export const LOW_REVENUE = 'Under €10,000 / month'
-export const isQualified = (revenueBand: string) => revenueBand !== LOW_REVENUE
+/** Stores that can book a call: €50k/month and up (Le Charbon, Nov 2026). Below, the full report only.
+ *  Band labels must match lib/estimate.ts and the /start options on cxo.studio. */
+export const CALL_BANDS = ['€50,000–€100,000 / month', 'Over €100,000 / month']
+export const isQualified = (revenueBand: string) => CALL_BANDS.includes(revenueBand)

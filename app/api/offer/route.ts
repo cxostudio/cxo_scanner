@@ -1,4 +1,4 @@
-// GET /scan/api/offer?email= → the 48-hour offer for this email (price and end time).
+// GET /scan/api/offer?email= → the 1-hour offer for this email (price and end time).
 import { NextRequest, NextResponse } from 'next/server'
 import { offerFor } from '@/lib/offer'
 import { lastOfferLookupError } from '@/lib/leads/store'

@@ -55,6 +55,7 @@ import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
 import { saveTestScan } from '@/lib/lab/store'
 import { saveLeadScan } from '@/lib/leads/store'
+import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
 import { checkScanLimit, registerScan } from '@/lib/usage/scanLimit'
 
 export const runtime = 'nodejs'
@@ -1075,6 +1076,10 @@ export async function POST(request: NextRequest) {
           },
           { status: 429 },
         )
+      }
+      const store = await checkDomainLimit(email, url, scanId)
+      if (!store.allowed) {
+        return NextResponse.json({ error: domainLimitMessage(store.host), code: 'store_limit_reached' }, { status: 429 })
       }
     }
 

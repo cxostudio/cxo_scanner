@@ -148,7 +148,7 @@ function ResultsView() {
   // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
   const [gate, setGate] = useState<'' | 'b' | 'cd'>('cd')
   const [labId, setLabId] = useState<string | null>(null)
-  // the 48-hour offer after the first free scan (server-side; lab scans see the regular price)
+  // the 1-hour offer after the first free scan (server-side; lab scans see the regular price)
   const offer = useOffer(email, !labId)
   const shotRef = useRef<HTMLDivElement | null>(null)
 

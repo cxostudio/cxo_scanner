@@ -1,12 +1,12 @@
-// The 48-hour offer after a free scan: the full report at €39 instead of €49, for 48 hours from the
+// The 1-hour offer after a free scan: the full report at €69 instead of €89, for 1 hour from the
 // email's FIRST free scan. Decided on the server (the checkout uses it too), so a reload or a new scan
-// never restarts the clock. €49 is the regular price, charged to everyone after the window: no fake
+// never restarts the clock. €89 is the regular price, charged to everyone after the window: no fake
 // reference price (EU Omnibus rule).
 import { firstScanAt } from '@/lib/leads/store'
 
-export const OFFER_HOURS = 48
-export const REGULAR_CENTS = 4900
-export const OFFER_CENTS = 3900
+export const OFFER_HOURS = 1
+export const REGULAR_CENTS = 8900
+export const OFFER_CENTS = 6900
 
 export type Offer = { active: boolean; cents: number; regularCents: number; endsAt: string | null }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkScanLimit } from '@/lib/usage/scanLimit'
+import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
 
 /** Puppeteer-free, but keep on Node runtime for consistency with the other scan routes. */
 export const runtime = 'nodejs'
@@ -13,6 +14,8 @@ export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as {
     email?: string
+    url?: string
+    scanId?: string
   }
   const email = (body.email ?? '').trim().toLowerCase()
 
@@ -33,6 +36,14 @@ export async function POST(request: NextRequest) {
       },
       { status: 429 },
     )
+  }
+
+  // the same store, whatever the email: at most a couple of scans in any 24 hours
+  if (body.url) {
+    const d = await checkDomainLimit(email, body.url, body.scanId)
+    if (!d.allowed) {
+      return NextResponse.json({ allowed: false, code: 'store_limit_reached', error: domainLimitMessage(d.host) }, { status: 429 })
+    }
   }
 
   return NextResponse.json({

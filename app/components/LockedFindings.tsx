@@ -41,7 +41,7 @@ export function LockedFindings({
   shortEur: (n: number) => string
   buyUrl: string
   callUrl: string
-  /** shown under the buy button when set (e.g. "€49, one-off") */
+  /** shown under the buy button when set (e.g. "€89, one-off") */
   price?: string
 }) {
   if (!locked.length) return null
@@ -94,12 +94,13 @@ export function LockedFindings({
       </ul>
 
       <div className="flex flex-col gap-4 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
-        <div className="flex flex-wrap items-center gap-3">{qualified ? [call, buy] : [buy, call]}</div>
+        {/* one next step: the call from €50k/month, the report below it */}
+        <div className="flex flex-wrap items-center gap-3">{qualified ? [call] : [buy]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
-          {price ? <><strong className="text-[var(--text)]">Full report: {price}.</strong> </> : null}
+          {price && !qualified ? <><strong className="text-[var(--text)]">Full report: {price}.</strong> </> : null}
           {qualified
             ? 'On a call we go through your results and tell you honestly if working together is worth it.'
-            : 'Fix them yourself with the full report, or book a call if you want a hand.'}
+            : 'Fix them yourself with the full report: each issue, where it is and how to fix it.'}
         </p>
       </div>
     </section>

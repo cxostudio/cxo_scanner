@@ -293,7 +293,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
         )}
       </div>
       <div className={embedded ? 'flex flex-col gap-2' : 'flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]'}>
-        <div className="flex flex-wrap items-center gap-3">{embedded ? [buy] : qualified ? [call, buy] : [buy, call]}</div>
+        <div className="flex flex-wrap items-center gap-3">{embedded ? [buy] : qualified ? [call] : [buy]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
           {qualified && !embedded ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
           {offer?.active && ` ${offer.price} until the offer ends, then ${offer.regular}.`}

@@ -1094,7 +1094,7 @@ export default function Home() {
       const limitRes = await fetch(api("/scan/limit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailTrimmed, scanId }),
+        body: JSON.stringify({ email: emailTrimmed, scanId, url: urlResult.data }),
       });
       if (limitRes.status === 429) {
         const info = (await limitRes.json().catch(() => ({}))) as {

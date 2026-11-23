@@ -3,7 +3,7 @@ import { completeJob, markEmailed, type ScanJob, type ScanSnapshot } from './sto
 import { buildResultsEmail } from '@/lib/email/resultsEmail'
 import { sendEmail } from '@/lib/email/send'
 import { estimate, eur } from '@/lib/estimate'
-import { scoreOf, type ScanResult } from '@/lib/report'
+import { isQualified, scoreOf, type ScanResult } from '@/lib/report'
 
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 // links in the email may only point at our own sites
@@ -45,6 +45,7 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot) {
     top,
     resultsUrl: `${origin}/scan/results?id=${job.id}`,
     callUrl: CALL_URL,
+    qualified: isQualified(snap.revenue || ''),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
     avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',
     privacyUrl: `${origin === 'https://cxo.studio' ? 'https://cxo.studio' : origin}${fr ? '/fr' : ''}/privacy`,

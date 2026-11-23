@@ -15,6 +15,7 @@ export type ResultsEmailInput = {
   top: { title: string; fix: string }[]  // up to 3, highest impact first
   resultsUrl: string
   callUrl: string
+  qualified: boolean      // €50k/month and up: offer a call; below: the full report
   logoUrl: string
   avatarUrl: string       // Louis, for the signature
   privacyUrl: string
@@ -42,6 +43,7 @@ const COPY = {
     cta: (i: ResultsEmailInput) => `See all ${i.toFix} fixes`,
     ctaNote: 'Your results open on any device, with every issue pinned on your page.',
     call: 'Prefer to talk it through?', callLink: 'Book a call with us',
+    report: 'Want every page checked, from homepage to checkout?', reportLink: 'Get the full-store report',
     sign: 'Louis', signRole: 'Founder, CXO Studio',
     footer: 'You get this email because you ran a free conversion scan on cxo.studio.',
     privacy: 'Privacy policy',
@@ -59,6 +61,7 @@ const COPY = {
     cta: (i: ResultsEmailInput) => `Voir les ${i.toFix} corrections`,
     ctaNote: 'Vos résultats s’ouvrent sur n’importe quel appareil, chaque problème épinglé sur votre page.',
     call: 'Vous préférez en parler ?', callLink: 'Réservez un appel avec nous',
+    report: 'Vous voulez chaque page vérifiée, de l’accueil au paiement ?', reportLink: 'Obtenir le rapport complet',
     sign: 'Louis', signRole: 'Fondateur, CXO Studio',
     footer: 'Vous recevez cet e-mail parce que vous avez lancé un scan de conversion gratuit sur cxo.studio.',
     privacy: 'Politique de confidentialité',
@@ -136,7 +139,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
           <p style="margin:10px 0 0;font:400 13px/1.5 ${BODY};color:${C.muted};text-align:center;">${esc(t.ctaNote)}</p>
 
           <p style="margin:28px 0 0;padding-top:20px;border-top:1px solid ${C.border};font:400 14px/1.6 ${BODY};color:${C.muted};">
-            ${esc(t.call)} <a href="${esc(i.callUrl)}" style="color:${C.text};font-weight:600;text-decoration:underline;">${esc(t.callLink)}</a>
+            ${i.qualified ? esc(t.call) : esc(t.report)} <a href="${esc(i.qualified ? i.callUrl : `${i.resultsUrl}#full-report`)}" style="color:${C.text};font-weight:600;text-decoration:underline;">${esc(i.qualified ? t.callLink : t.reportLink)}</a>
           </p>
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 0;">
             <tr>
@@ -161,7 +164,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
   const text = [
     t.subject(i), '', t.intro(i), '', `${t.score}: ${i.score}/100 (${t.tone(i.score)})`, '', t.start,
     ...top.map((f, n) => `${n + 1}. ${f.title}\n   ${f.fix}`), '', `${t.cta(i)}: ${i.resultsUrl}`, '',
-    `${t.call} ${t.callLink}: ${i.callUrl}`, '', `${t.sign}, ${t.signRole}`, '', t.footer,
+    i.qualified ? `${t.call} ${t.callLink}: ${i.callUrl}` : `${t.report} ${t.reportLink}: ${i.resultsUrl}`, '', `${t.sign}, ${t.signRole}`, '', t.footer,
   ].join('\n')
 
   return { subject: t.subject(i), html, text }

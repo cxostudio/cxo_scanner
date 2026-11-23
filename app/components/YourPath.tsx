@@ -92,7 +92,7 @@ export function YourPath({
   fullScanUrl,
   host = "",
   total = 0,
-  price = "€49",
+  price = "€89",
   offerSlot,
   laptop,
 }: {
@@ -275,7 +275,7 @@ export function YourPath({
 
   return (
     <>
-      <section
+      <section id="full-report"
         ref={ref}
         className="rounded-[var(--radius-xl)] bg-[var(--bg-subtle)] p-6 sm:p-10"
         aria-label="What’s next"
@@ -342,12 +342,9 @@ export function YourPath({
               </div>
             </li>
 
-            {/* 2. next */}
+            {/* 2. next: one path only. From €50k/month the call, below it the full report (lib/report isQualified) */}
+            {!qualified && (
             <li className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-x-4 pb-8">
-              <span
-                aria-hidden="true"
-                className="absolute left-[13px] top-7 bottom-0 w-[2px] bg-[var(--border)]"
-              />
               <span
                 className="relative z-[1] grid h-7 w-7 place-items-center rounded-full border text-[13px] font-bold"
                 style={{
@@ -402,14 +399,15 @@ export function YourPath({
               </div>
             </li>
 
-            {/* 3. then */}
+            )}
+            {qualified && (
             <li className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-x-4">
-              <span className="relative z-[1] grid h-7 w-7 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]">
-                <Lock />
+              <span className="relative z-[1] grid h-7 w-7 place-items-center rounded-full border border-[var(--text)] bg-[var(--text)] text-[13px] font-bold text-[var(--text-inverse)]">
+                2
               </span>
               <div className="flex min-w-0 flex-col gap-3">
                 <p className="font-[family-name:var(--font-display)] text-[17px] font-bold leading-7 tracking-[-0.01em] text-[var(--text)]">
-                  Then: CRO Audit and continuous optimisation
+                  Next: CRO Audit and continuous optimisation
                 </p>
                 {qualified ? (
                   <>
@@ -455,6 +453,7 @@ export function YourPath({
                 )}
               </div>
             </li>
+            )}
           </ol>
         </div>
       </section>

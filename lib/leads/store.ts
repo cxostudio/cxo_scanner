@@ -135,10 +135,10 @@ export async function updateLead(id: string, patch: { status?: LeadStatus; notes
   if (error) throw new Error(error.message)
 }
 
-/** When this email ran its first free scan (the start of its 48-hour offer), or null if unknown. */
+/** When this email ran its first free scan (the start of its 1-hour offer), or null if unknown. */
 export let lastOfferLookupError = ''
 /**
- * When this email ran its first free scan (the start of its 48-hour offer), or null if unknown.
+ * When this email ran its first free scan (the start of its 1-hour offer), or null if unknown.
  * Earliest of the scan summaries (lead_scans) and the daily scan counter (scan_limit, one row per
  * email per day, created at that day's first scan), so it works while either table is missing.
  */

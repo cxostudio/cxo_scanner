@@ -1,4 +1,4 @@
-// Start the €49 full report purchase: GET /scan/api/checkout?url=&email=&lab=&back=<origin>
+// Start the full report purchase (€89, or €69 in the first hour): GET /scan/api/checkout?url=&email=&lab=&back=<origin>
 // Creates a Stripe Checkout session and sends the buyer to Stripe's payment page.
 // After paying, Stripe sends them to /scan/order?session_id=…; a cancel goes back to the results.
 import { NextRequest, NextResponse } from 'next/server'
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const origin = safeOrigin(q.get('back'), req.nextUrl.origin)
   const results = `${origin}/scan/results`
   try {
-    // within 48 hours of the email's first free scan: the offer price, checked here, not trusted from the page
+    // within 1 hour of the email's first free scan: the offer price, checked here, not trusted from the page
     const offer = await offerFor(email)
     const price = offer.active ? await offerPrice() : await reportPrice()
     const params: Stripe.Checkout.SessionCreateParams = {
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       },
       allow_promotion_codes: true,
       automatic_tax: { enabled: true },
-      metadata: { storeUrl, email, lab, product: 'full_report', offer: offer.active ? '48h' : '' },
+      metadata: { storeUrl, email, lab, product: 'full_report', offer: offer.active ? '1h' : '' },
       payment_intent_data: { description: storeUrl ? `Full conversion report: ${storeUrl}` : 'Full conversion report', metadata: { storeUrl } },
       success_url: `${origin}/scan/order?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: results,
