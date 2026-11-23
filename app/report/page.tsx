@@ -198,7 +198,6 @@ function ReportView({ data, id }: { data: Report; id: string }) {
           <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Want us to fix it with you?</h2>
           <p className="mt-2 max-w-[640px] text-[15px] leading-[1.6] text-[var(--text-muted)]">CXO Studio turns reports like this one into more revenue: we prioritise the fixes for your numbers, design and build them, and A/B test the big ones. On a 30-minute call we go through your report and tell you honestly whether working together would pay off.</p>
           <a href={CALL_URL} className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
-          <p className="mt-4 text-[13px] text-[var(--text-muted)]">Prefer to do it yourself? This link opens on any device: share it with your developer or agency.</p>
         </div>
         <FeedbackBox />
       </section>
