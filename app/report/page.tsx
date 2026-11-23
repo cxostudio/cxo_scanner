@@ -254,7 +254,8 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
         })}
       </div>
       <p className="mt-4 text-[13px] leading-[1.5] text-[var(--text-muted)]">
-        Overall conversion score: <b style={{ color: TONE[toneOf(score)].fg }}>{score}/100, {TONE[toneOf(score)].word.toLowerCase()}</b>. {SCORE_SCALE}
+        Overall conversion score: <b style={{ color: TONE[toneOf(score)].fg }}>{score}/100, {TONE[toneOf(score)].word.toLowerCase()}</b>.
+        <br />{SCORE_SCALE}
       </p>
 
       <h2 className="mt-14 font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Fix these first</h2>

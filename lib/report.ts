@@ -92,7 +92,7 @@ export const CALL_BANDS = ['€50,000–€100,000 / month', 'Over €100,000 / 
 export const isQualified = (revenueBand: string) => CALL_BANDS.includes(revenueBand)
 
 /** The score scale, the same everywhere (results page, full report, emails): green, orange, red. */
-export const SCORE_SCALE = 'Each score is the share of checkpoints passed, high-impact ones counting double. 80 and up: good. 50 to 79: room to grow. Under 50: leaking sales.'
+export const SCORE_SCALE = '80 and up: good. 50 to 79: room to grow. Under 50: leaking sales.'
 export type ScoreTone = 'good' | 'mid' | 'weak'
 export const toneOf = (score: number): ScoreTone => (score >= 80 ? 'good' : score >= 50 ? 'mid' : 'weak')
 export const TONE: Record<ScoreTone, { fg: string; bg: string; word: string }> = {
