@@ -14,7 +14,7 @@ const STEPS: { label: string; page: 'homepage' | 'category' | 'product'; hint?: 
   { label: 'Product page', page: 'product', path: true },
   { label: 'Cart', page: 'product', hint: 'with your best seller in it' },
   { label: 'Checkout', page: 'product', hint: 'first step, nothing typed' },
-  { label: 'Every page', page: 'product', hint: 'header, menu, footer, speed' },
+  { label: 'General elements', page: 'product', hint: 'header, menu, footer, speed' },
 ]
 
 const pathOf = (u?: string) => { try { return u ? new URL(u).pathname.replace(/\/$/, '') || '/' : '' } catch { return '' } }
