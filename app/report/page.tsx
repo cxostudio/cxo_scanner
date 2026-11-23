@@ -11,7 +11,7 @@ import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located 
 import { BuildSteps, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
-import { isQualified, scoreOf, effortLabel, type ScanResult } from '@/lib/report'
+import { isQualified, scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
 
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 
@@ -45,7 +45,6 @@ const isUnknown = (r: Row) => r.status === 'unknown'
 const hostOf = (u: string) => { try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, '') } catch { return u } }
 const pathOf = (u: string) => { try { return new URL(u).pathname.replace(/\/$/, '') || '/' } catch { return u } }
 const shortEur = (n: number) => (n >= 1000 ? `€${(Math.round(n / 100) / 10).toString().replace(/\.0$/, '')}k` : eur(n))
-const tone = (s: number) => (s >= 80 ? 'pass' : s >= 55 ? 'mid' : 'fail')
 
 export default function ReportPage() {
   const [id, setId] = useState<string | null>(null)
@@ -146,14 +145,16 @@ function ReportView({ data }: { data: Report }) {
   const next = tabs[tabs.indexOf(tab) + 1]
   const nextLabel = next ? (next === 'overview' ? 'Overview' : AREAS.find((a) => a.id === next)!.tab) : null
   const current = areas.find((a) => a.id === tab)
-  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
+  // the bar, tabs and footer line up with the content: narrower on the overview, wide on the pinned pages
+  const W = tab === 'overview' ? 'max-w-[1080px]' : 'max-w-[1440px]'
 
   return (
     <main className="min-h-screen bg-[var(--surface)] pb-24">
       {/* ── top bar ── */}
       <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-[var(--gutter)] py-3">
-          <img src={favicon} alt="" width={36} height={36} className="h-9 w-9 shrink-0 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] object-contain p-1.5" />
+        <div className={`mx-auto flex ${W} items-center gap-4 px-[var(--gutter)] py-3`}>
+          <a href="https://cxo.studio" aria-label="CXO studio" className="shrink-0"><img src={asset('/cxo-logo.png')} alt="CXO studio" className="block h-[22px] w-auto max-[560px]:h-[18px]" /></a>
+          <span className="h-8 w-px shrink-0 bg-[var(--border)]" aria-hidden />
           <div className="min-w-0">
             <p className="truncate font-[family-name:var(--font-display)] text-[16px] font-bold leading-tight text-[var(--text)]">{host}</p>
             <a href={data.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12.5px] text-[var(--text-muted)] hover:text-[var(--text)]">
@@ -176,7 +177,7 @@ function ReportView({ data }: { data: Report }) {
             </button>
           )}
         </div>
-        <nav className="mx-auto flex max-w-[1440px] gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]" aria-label="Report pages">
+        <nav className={`mx-auto flex ${W} gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]`} aria-label="Report pages">
           {tabs.map((t) => {
             const a = areas.find((x) => x.id === t)
             const on = t === tab
@@ -186,7 +187,7 @@ function ReportView({ data }: { data: Report }) {
                 {t === 'overview' ? 'Overview' : a!.tab}
                 {a && (a.blind
                   ? <span className="text-[12px] text-[var(--text-muted)]">?</span>
-                  : a.fails.length > 0 && <span className="rounded-full bg-[var(--result-fail-bg)] px-1.5 text-[12px] font-bold tabular-nums text-[var(--result-fail-fg)]">{a.fails.length}</span>)}
+                  : a.fails.length > 0 && <span className="rounded-full px-1.5 text-[12px] font-bold tabular-nums" style={{ background: TONE[toneOf(a.score ?? 0)].bg, color: TONE[toneOf(a.score ?? 0)].fg }} title={`${a.fails.length} issues`}>{a.fails.length}</span>)}
               </button>
             )
           })}
@@ -200,7 +201,7 @@ function ReportView({ data }: { data: Report }) {
       ) : null}
 
       {/* ── next step ── */}
-      <section className="mx-auto mt-20 max-w-[1440px] px-[var(--gutter)]">
+      <section className={`mx-auto mt-20 ${W} px-[var(--gutter)]`}>
         {nextLabel && (
           <button type="button" onClick={() => go(next!)} className="mb-10 flex w-full items-center justify-between rounded-[16px] border border-[var(--border)] px-5 py-4 text-left hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]">
             <span><span className="block text-[13px] text-[var(--text-muted)]">Next</span><span className="font-[family-name:var(--font-display)] text-[18px] font-bold text-[var(--text)]">{nextLabel}</span></span>
@@ -229,7 +230,7 @@ function ReportView({ data }: { data: Report }) {
 
 /* ── overview ───────────────────────────────────────────────────────────── */
 
-type AreaSummary = { id: Area; label: string; tab: string; blurb: string; blind: boolean; fails: Row[]; passed: Row[]; unknown: Row[]; score: number | null; page?: Page }
+type AreaSummary = { id: Area; label: string; tab: string; blurb: string; blind: boolean; rows: Row[]; fails: Row[]; passed: Row[]; unknown: Row[]; score: number | null; page?: Page }
 
 function Overview({ host, total, fails, est, score, areas, go }: { host: string; total: number; fails: Row[]; est: number | null; score: number; areas: AreaSummary[]; go: (t: Tab, id?: string) => void }) {
   const quick = fails.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
@@ -245,8 +246,9 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
 
       <div className="mt-8 grid grid-cols-3 gap-3 max-[810px]:grid-cols-2">
         {areas.map((a) => {
-          const t = a.score === null ? null : tone(a.score)
+          const t = a.score === null ? null : TONE[toneOf(a.score)]
           const thumb = thumbOf(a)
+          const checked = a.rows.length - a.unknown.length
           return (
             <button key={a.id} type="button" onClick={() => go(a.id)} className="group overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:border-[var(--border-strong)]">
               <div className="relative h-[120px] overflow-hidden border-b border-[var(--border)] bg-[var(--surface-muted)] max-[560px]:h-[90px]">
@@ -255,20 +257,27 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
               <div className="p-4">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="font-semibold text-[var(--text)]">{a.label}</span>
-                  {a.score !== null && <span className="font-[family-name:var(--font-display)] text-[18px] font-bold tabular-nums" style={{ color: `var(--result-${t === 'pass' ? 'pass' : 'fail'}-fg)` }}>{a.score}</span>}
+                  {t && a.score !== null && (
+                    <span className="font-[family-name:var(--font-display)] text-[18px] font-bold tabular-nums" style={{ color: t.fg }}>{a.score}<span className="text-[13px] font-semibold text-[var(--text-muted)]">/100</span></span>
+                  )}
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]">
-                  <div className="h-full rounded-full" style={{ width: `${a.score ?? 0}%`, background: `var(--result-${t === 'pass' ? 'pass' : 'fail'}-fg)` }} />
+                  {t && <div className="h-full rounded-full" style={{ width: `${a.score ?? 0}%`, background: t.fg }} />}
                 </div>
-                <p className="mt-2 text-[13px] text-[var(--text-muted)]">
-                  {a.blind ? `Couldn't open it from our scan` : `${a.fails.length ? `${a.fails.length} to fix` : 'Nothing to fix'}${a.unknown.length ? ` · ${a.unknown.length} not checked` : ''}`}
+                {t && <span className="mt-2.5 inline-block rounded-full px-2 py-0.5 text-[12px] font-semibold" style={{ background: t.bg, color: t.fg }}>{t.word}</span>}
+                <p className="mt-2 text-[13px] leading-[1.45] text-[var(--text-muted)]">
+                  {a.blind
+                    ? `We couldn't open it from our scan: ${a.unknown.length} checkpoints not checked`
+                    : <>{a.fails.length ? <><b className="text-[var(--text)]">{a.fails.length} {a.fails.length === 1 ? 'issue' : 'issues'}</b> found in {checked} checkpoints</> : <>All {checked} checkpoints passed</>}{a.unknown.length ? `, ${a.unknown.length} we couldn't check` : ''}</>}
                 </p>
               </div>
             </button>
           )
         })}
       </div>
-      <p className="mt-4 text-[13px] text-[var(--text-muted)]">Overall conversion score: <b className="text-[var(--text)]">{score}/100</b>. High-impact checkpoints count double.</p>
+      <p className="mt-4 text-[13px] leading-[1.5] text-[var(--text-muted)]">
+        Overall conversion score: <b style={{ color: TONE[toneOf(score)].fg }}>{score}/100, {TONE[toneOf(score)].word.toLowerCase()}</b>. {SCORE_SCALE}
+      </p>
 
       <h2 className="mt-14 font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Fix these first</h2>
       <p className="mt-2 text-[15px] text-[var(--text-muted)]">The ten issues with the most impact for the least work, across the whole store. Open one to see it pinned on the page.</p>
@@ -353,6 +362,12 @@ function AreaView({ area, device, focus }: { area: AreaSummary; device: Device; 
         <div className="min-w-0">
           <h1 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">{area.label}</h1>
           <p className="mt-1 max-w-[720px] text-[15px] text-[var(--text-muted)]">{area.blurb}</p>
+          {area.score !== null && (
+            <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-[var(--text-muted)]" title={SCORE_SCALE}>
+              <span className="rounded-full px-2.5 py-0.5 text-[13px] font-bold" style={{ background: TONE[toneOf(area.score)].bg, color: TONE[toneOf(area.score)].fg }}>{area.score}/100 · {TONE[toneOf(area.score)].word}</span>
+              <span>{area.fails.length ? `${area.fails.length} ${area.fails.length === 1 ? 'issue' : 'issues'} found in ${area.rows.length - area.unknown.length} checkpoints` : `All ${area.rows.length - area.unknown.length} checkpoints passed`}</span>
+            </p>
+          )}
         </div>
         {area.page && !flow && <a href={area.page.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 truncate text-[13px] font-medium text-[var(--text-muted)] underline">Page scanned: {pathOf(area.page.url)} <ExternalLink className="h-3 w-3 shrink-0" aria-hidden /></a>}
       </div>

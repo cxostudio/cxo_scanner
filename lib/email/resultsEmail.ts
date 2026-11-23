@@ -39,7 +39,7 @@ const COPY = {
     h1a: 'Your product page leaves about', h1b: 'a month on the table',
     intro: (i: ResultsEmailInput) =>
       `We ran ${i.checked} conversion checkpoints on your page. ${i.toFix} need fixing${i.easyHigh ? `, ${i.easyHigh} of them high-impact and easy` : ''}. Here is where to start.`,
-    score: 'Conversion score', tone: (s: number) => (s >= 80 ? 'Strong' : s >= 55 ? 'Room to grow' : 'Needs work'),
+    score: 'Conversion score', tone: (s: number) => (s >= 80 ? 'Good' : s >= 50 ? 'Room to grow' : 'Leaking sales'),
     start: 'Start with these 3',
     cta: (i: ResultsEmailInput) => `See all ${i.toFix} fixes`,
     ctaNote: 'Your results open on any device, with every issue pinned on your page.',
@@ -57,7 +57,7 @@ const COPY = {
     h1a: 'Votre page produit laisse environ', h1b: 'par mois sur la table',
     intro: (i: ResultsEmailInput) =>
       `Nous avons passé ${i.checked} points de contrôle sur votre page. ${i.toFix} sont à corriger${i.easyHigh ? `, dont ${i.easyHigh} à fort impact et faciles` : ''}. Voici par où commencer.`,
-    score: 'Score de conversion', tone: (s: number) => (s >= 80 ? 'Solide' : s >= 55 ? 'Marge de progression' : 'À retravailler'),
+    score: 'Score de conversion', tone: (s: number) => (s >= 80 ? 'Bon' : s >= 50 ? 'Marge de progression' : 'Ventes perdues'),
     start: 'Commencez par ces 3',
     cta: (i: ResultsEmailInput) => `Voir les ${i.toFix} corrections`,
     ctaNote: 'Vos résultats s’ouvrent sur n’importe quel appareil, chaque problème épinglé sur votre page.',
@@ -104,7 +104,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
   const t = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
   // after the full report: a call for stores that qualify, nothing to sell to the others
   const nextLine = i.report && !i.qualified ? '' : i.qualified ? 'call' : 'report'
-  const tone = i.score >= 80 ? [C.gain, C.gainBg] : i.score >= 55 ? [C.finding, C.findingBg] : [C.fail, C.failBg]
+  const tone = i.score >= 80 ? [C.gain, C.gainBg] : i.score >= 50 ? [C.finding, C.findingBg] : [C.fail, C.failBg]
   const top = i.top.slice(0, 3)
 
   const fixRows = top.map((f, n) => `

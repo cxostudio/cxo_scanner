@@ -14,7 +14,7 @@ import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpo
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { useOffer } from '../components/useOffer'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located, type LocateState } from '../components/PinnedPage'
-import { isQualified, lever, scoreOf, effortLabel, LEVERS, type ScanResult } from '@/lib/report'
+import { isQualified, lever, scoreOf, effortLabel, LEVERS, TONE, toneOf, type ScanResult } from '@/lib/report'
 
 // Calendly once available; until then the existing booking form (same as YourPath)
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
@@ -53,13 +53,8 @@ function hostOf(raw: string) {
   }
 }
 
-/** good / average / weak: green, orange, red. Used for the score and each area. */
-const tone = (ratio: number) => (ratio >= 0.8 ? 'good' : ratio >= 0.5 ? 'mid' : 'weak')
-const TONE = {
-  good: { fg: 'var(--result-pass-fg)', bg: 'var(--result-pass-bg)', word: 'Good' },
-  mid: { fg: 'var(--status-finding-fg)', bg: 'var(--status-finding-bg)', word: 'Room to grow' },
-  weak: { fg: 'var(--result-fail-fg)', bg: 'var(--result-fail-bg)', word: 'Leaking sales' },
-} as const
+/** good / average / weak: green, orange, red (lib/report.ts, shared with the full report and the emails). */
+const tone = (ratio: number) => toneOf(ratio * 100)
 
 const PAGE_NAME: Record<UrlPageType, string> = { product: 'Product page', homepage: 'Homepage', category: 'Collection page', other: 'Page' }
 
