@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import { kickoff, startReport } from '@/lib/fullReport/run'
+import { claimStart } from '@/lib/scanJobs/store'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -17,6 +18,6 @@ export async function POST(request: NextRequest) {
   if (!isTestEmail(email)) return NextResponse.json({ error: 'Test emails only' }, { status: 403 })
   if (!url) return NextResponse.json({ error: 'url is required' }, { status: 400 })
   const job = await startReport({ email, url, locale: b.locale || 'en', answers: { revenue: b.revenue, aov: b.aov, cr: b.cr }, origin: 'https://cxo.studio' })
-  waitUntil(kickoff(job))
+  if (await claimStart(job.id)) waitUntil(kickoff(job))
   return NextResponse.json({ id: job.id, link: `https://cxo.studio/scan/report?id=${job.id}` })
 }

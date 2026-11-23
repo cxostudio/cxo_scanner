@@ -7,7 +7,6 @@ import { api } from '@/lib/base'
 
 type Order = { paid: boolean; status: string; email: string | null; storeUrl: string | null; amount: number | null; currency: string | null; tax: number | null; invoiceUrl: string | null; invoicePdf: string | null }
 
-const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const money = (cents: number | null, cur: string | null) => (cents == null ? '' : new Intl.NumberFormat('en-IE', { style: 'currency', currency: (cur || 'eur').toUpperCase() }).format(cents / 100))
 const host = (u: string | null) => {
   if (!u) return ''
@@ -27,6 +26,8 @@ const Check = () => (
 export default function OrderPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [error, setError] = useState('')
+  // the report this order starts, and how far it is
+  const [report, setReport] = useState<{ id: string; status: string; pages: { key: string; status: string }[] } | null>(null)
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('session_id') || ''
@@ -43,10 +44,25 @@ export default function OrderPage() {
           if (o.error) return setError(o.error)
           if (!o.paid && tries++ < 5) return void setTimeout(ask, 2000)
           setOrder(o)
+          if (o.paid) start(id)
         })
         .catch(() => setError('network'))
+    // paid: start the report (once per order, however often this page loads), then follow it
+    const start = async (sessionId: string) => {
+      const r = await fetch(api('/report/order'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }).catch(() => null)
+      const d = r && r.ok ? ((await r.json()) as { id?: string }) : null
+      if (!d?.id) return
+      const follow = async () => {
+        const x = await fetch(api(`/report/${d.id}`), { cache: 'no-store' }).then((y) => y.json()).catch(() => null)
+        if (!x) return void setTimeout(follow, 5000)
+        setReport({ id: d.id!, status: x.status, pages: (x.pages || []).map((p: { key: string; status: string }) => ({ key: p.key, status: p.status })) })
+        if (x.status !== 'done' && x.status !== 'failed') setTimeout(follow, 5000)
+      }
+      follow()
+    }
     ask()
   }, [])
+  const reportUrl = report ? `/scan/report?id=${report.id}` : null
 
   return (
     <main className="min-h-dvh bg-[var(--bg)]">
@@ -73,11 +89,39 @@ export default function OrderPage() {
               <span className="grid h-11 w-11 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]">
                 <Check />
               </span>
-              <h1 className="font-[family-name:var(--font-display)] text-[length:var(--text-3xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">Thank you, your full report is on its way</h1>
+              <h1 className="font-[family-name:var(--font-display)] text-[length:var(--text-3xl)] font-bold leading-[1.15] tracking-[-0.02em] text-[var(--text)]">{report?.status === 'done' ? 'Thank you, your full report is ready' : 'Thank you, we are building your report'}</h1>
               <p className="text-[16px] leading-[1.6] text-[var(--text-muted)]">
-                We are scanning {order.storeUrl ? <b className="text-[var(--text)]">{host(order.storeUrl)}</b> : 'your store'} from the homepage to the checkout. Your report lands in your inbox{order.email ? <> at <b className="text-[var(--text)]">{order.email}</b></> : ''} in a few minutes: every issue we find, how to fix it, with examples.
+                We are scanning {order.storeUrl ? <b className="text-[var(--text)]">{host(order.storeUrl)}</b> : 'your store'} from the homepage to the checkout, on desktop and mobile. It takes a few minutes. You can stay here, or close this page: the link also comes by email{order.email ? <> to <b className="text-[var(--text)]">{order.email}</b></> : ''}.
               </p>
             </div>
+
+            <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
+              <h2 className="text-sm font-semibold text-[var(--text)]">Your report</h2>
+              <ul className="flex flex-col gap-2.5">
+                {(['homepage', 'category', 'product'] as const).map((k) => {
+                  const p = report?.pages.find((x) => x.key === k)
+                  const done = p?.status === 'done' || report?.status === 'done'
+                  const label = k === 'homepage' ? 'Homepage' : k === 'category' ? 'Collection page' : 'Best seller, cart and checkout'
+                  return (
+                    <li key={k} className="flex items-center gap-3 text-[15px]">
+                      {done ? (
+                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full" style={{ background: 'var(--result-pass-fg)', color: 'var(--text-inverse)' }}><Check /></span>
+                      ) : (
+                        <span className="grid h-6 w-6 shrink-0 place-items-center"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--text-muted)] border-t-transparent" /></span>
+                      )}
+                      <span className={done ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}>{label}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+              {report?.status === 'done' && reportUrl ? (
+                <a href={reportUrl} className="cxo-btn cxo-btn-primary mt-2 self-start">Open your report</a>
+              ) : report?.status === 'failed' ? (
+                <p className="text-[14px] text-[var(--text-muted)]">Something stopped our scan. We have been notified and will email you.</p>
+              ) : reportUrl ? (
+                <a href={reportUrl} className="mt-1 self-start text-sm font-semibold text-[var(--text)] underline">Follow it on the report page</a>
+              ) : null}
+            </section>
 
             <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)]">
               <h2 className="text-sm font-semibold text-[var(--text)]">Your order</h2>
@@ -98,13 +142,6 @@ export default function OrderPage() {
               )}
             </section>
 
-            <section className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]">
-              <h2 className="font-[family-name:var(--font-display)] text-[length:var(--text-lg)] font-bold text-[var(--text)]">Want us to go through it with you?</h2>
-              <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">On a 30-minute call we walk through your report, tell you what to fix first, and whether working together would pay off.</p>
-              <a href={CALL_URL} className="cxo-btn cxo-btn-ghost self-start">
-                Book a call
-              </a>
-            </section>
           </>
         )}
       </div>

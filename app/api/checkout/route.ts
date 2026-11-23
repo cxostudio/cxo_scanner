@@ -13,6 +13,8 @@ export async function GET(req: NextRequest) {
   const storeUrl = (q.get('url') || '').slice(0, 300)
   const email = (q.get('email') || '').trim().slice(0, 200)
   const lab = (q.get('lab') || '').slice(0, 80)
+  // the /start answers, so the report shows the money at stake and offers a call to stores that qualify
+  const answer = (k: string) => (q.get(k) || '').slice(0, 60)
   const origin = safeOrigin(q.get('back'), req.nextUrl.origin)
   const results = `${origin}/scan/results`
   try {
@@ -32,7 +34,7 @@ export async function GET(req: NextRequest) {
       },
       allow_promotion_codes: true,
       automatic_tax: { enabled: true },
-      metadata: { storeUrl, email, lab, product: 'full_report', offer: offer.active ? '1h' : '' },
+      metadata: { storeUrl, email, lab, product: 'full_report', offer: offer.active ? '1h' : '', revenue: answer('revenue'), aov: answer('aov'), cr: answer('cr'), locale: answer('locale') === 'fr' ? 'fr' : 'en' },
       payment_intent_data: { description: storeUrl ? `Full conversion report: ${storeUrl}` : 'Full conversion report', metadata: { storeUrl } },
       success_url: `${origin}/scan/order?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: results,

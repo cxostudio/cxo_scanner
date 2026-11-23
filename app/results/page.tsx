@@ -268,7 +268,8 @@ function ResultsView() {
   }, [results, labId, gate, pageTotal])
 
   const host = hostOf(url)
-  const buyUrl = api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '' })}`)
+  const ls = (k: string) => { try { return typeof window !== 'undefined' ? localStorage.getItem(k) || '' : '' } catch { return '' } }
+  const buyUrl = api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '', revenue: revenueBand, aov: ls('scanAov'), cr: ls('scanCr'), locale: ls('scanLocale') || 'en' })}`)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
   const qualified = isQualified(revenueBand)
   const view = located[device]
