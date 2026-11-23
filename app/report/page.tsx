@@ -356,7 +356,15 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
     <div className="mx-auto max-w-[1280px] px-[var(--gutter)] pt-8">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
-          <h1 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">{area.label}</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">{area.label}</h1>
+            {area.page && !flow && (
+              <a href={area.page.url} target="_blank" rel="noreferrer" title={`Open the page we scanned: ${pathOf(area.page.url)}`} aria-label="Open the page we scanned"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-[var(--border)] text-[var(--text-muted)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text)]">
+                <ExternalLink className="h-4 w-4" aria-hidden />
+              </a>
+            )}
+          </div>
           <p className="mt-1 max-w-[720px] text-[15px] text-[var(--text-muted)]">{area.blurb}</p>
           {area.score !== null && (
             <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-[var(--text-muted)]" title={SCORE_SCALE}>
@@ -371,7 +379,7 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
         {/* the page, pinned */}
         <div className="min-w-0 lg:sticky lg:top-6 lg:order-2 lg:self-start">
           {/* the switch changes the screenshot only, so it sits on it (as in the free scan) */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-3 flex justify-end">
             <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px] max-[560px]:flex max-[560px]:w-full">
               {(['desktop', 'mobile'] as Device[]).map((d) => (
                 <button key={d} type="button" onClick={() => setDevice(d)} aria-pressed={device === d}
@@ -380,7 +388,6 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
                 </button>
               ))}
             </div>
-            {area.page && !flow && <a href={area.page.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 truncate text-[13px] font-medium text-[var(--text-muted)] underline">Page scanned: {pathOf(area.page.url)} <ExternalLink className="h-3 w-3 shrink-0" aria-hidden /></a>}
           </div>
           {flow ? (
             <FlowShots shots={shown} device={shownDevice} wanted={device} label={area.label} />
