@@ -115,9 +115,8 @@ export function CheckpointResultBody({
               <div
                 className="fixed inset-0 z-200 overflow-y-auto bg-zinc-900/60"
                 role="presentation"
-                onMouseDown={(e) => {
-                  if (e.target === e.currentTarget) setExamplePreview(null)
-                }}
+                // a click anywhere outside the box closes it (the box stops its own clicks below)
+                onMouseDown={() => setExamplePreview(null)}
               >
                 {/* min-h-[100dvh] + flex center: works below sm (640px) where Flowbite modal sat at top */}
                 <div className="flex min-h-dvh w-full items-center justify-center p-3">
