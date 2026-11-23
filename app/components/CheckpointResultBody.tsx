@@ -125,7 +125,7 @@ export function CheckpointResultBody({
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="example-image-modal-title"
-                    className="relative my-4 w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl"
+                    className="relative my-4 w-full max-w-2xl lg:max-w-[min(1200px,90vw)] overflow-hidden rounded-lg bg-white shadow-xl"
                     onMouseDown={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-start justify-between gap-2 border-b border-zinc-200 px-3 py-3 sm:px-5">
@@ -144,12 +144,12 @@ export function CheckpointResultBody({
                         <X className="h-5 w-5" aria-hidden />
                       </button>
                     </div>
-                    <div className="max-h-[min(75dvh,calc(100dvh-8rem))] overflow-y-auto p-3 sm:p-4">
+                    <div className="max-h-[min(75dvh,calc(100dvh-8rem))] lg:max-h-[calc(100dvh-7rem)] overflow-y-auto p-3 sm:p-4">
                       <div className="flex justify-center rounded-lg bg-zinc-50 p-2">
                         <img
                           src={examplePreview.url}
                           alt={examplePreview.filename}
-                          className="max-h-[min(70dvh,800px)] w-full object-contain"
+                          className="max-h-[min(70dvh,800px)] lg:max-h-[calc(100dvh-10rem)] w-full object-contain"
                         />
                       </div>
                     </div>
