@@ -1,4 +1,5 @@
 'use client'
+import { StoreIcon } from './StoreIcon'
 
 /**
  * The page being scanned, in the same black laptop + phone frames as the results hero
@@ -7,7 +8,8 @@
  * scan line; a small status chip sits on the laptop screen.
  */
 
-export type InstantPreviewHint = { host: string; faviconUrl: string }
+/** faviconUrl: the store's icon, '' when it has none (Shopify logo shown), null while unknown */
+export type InstantPreviewHint = { host: string; faviconUrl: string | null }
 
 
 function ScanOverlay({ grid }: { grid: number }) {
@@ -35,10 +37,9 @@ function Placeholder({ hint, small }: { hint: InstantPreviewHint | null; small?:
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--surface-muted)] px-3">
       {hint && (
         <>
-          <img
+          <StoreIcon
             src={hint.faviconUrl}
-            alt=""
-            className={`${small ? 'h-8 w-8' : 'h-12 w-12'} rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] object-contain p-1`}
+            className={`${small ? 'h-8 w-8' : 'h-12 w-12'} rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-1`}
           />
           {!small && <p className="max-w-[90%] truncate text-center text-xs font-semibold text-[var(--text-muted)]">{hint.host}</p>}
         </>

@@ -6,10 +6,7 @@ import { Cog } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { z } from "zod";
 import { toast } from "react-toastify";
-import { ScanDevices } from "../components/ScanDevices";
-import {
-  type InstantPreviewHint,
-} from "../components/DualViewportLoader";
+import { ScanDevices, type InstantPreviewHint } from "../components/ScanDevices";
 import { api, asset, START_URL } from "@/lib/base";
 import { detectPageTypeFromUrl, isTestEmail } from "@/lib/conversionCheckpoints/pageType";
 import { QuadrantScanSequence } from "../components/QuadrantScanSequence";
@@ -90,7 +87,8 @@ function instantPreviewFromWebsiteUrl(raw: string): InstantPreviewHint | null {
     if (!host) return null;
     return {
       host,
-      faviconUrl: `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`,
+      // the store's own icon comes from /api/precheck (below): null until it answers
+      faviconUrl: null,
     };
   } catch {
     return null;
@@ -188,13 +186,22 @@ export default function Home() {
   const removedStepsCountRef = useRef(0);
   const displayProgressPercentRef = useRef(0);
 
-  const analyzeInstantPreview = useMemo(
-    () =>
-      showAnalyze && websiteUrl.trim()
-        ? instantPreviewFromWebsiteUrl(websiteUrl)
-        : null,
-    [showAnalyze, websiteUrl],
-  );
+  // the store's own icon ('' = none: the Shopify logo shows), asked once per store
+  const [storeIcon, setStoreIcon] = useState<string | null>(null);
+  useEffect(() => {
+    if (!websiteUrl.trim()) return;
+    let off = false;
+    setStoreIcon(null);
+    fetch(api(`/precheck?url=${encodeURIComponent(websiteUrl.trim())}`))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { favicon?: string } | null) => { if (!off) setStoreIcon(d?.favicon || ""); })
+      .catch(() => { if (!off) setStoreIcon(""); });
+    return () => { off = true; };
+  }, [websiteUrl]);
+  const analyzeInstantPreview = useMemo(() => {
+    const hint = showAnalyze && websiteUrl.trim() ? instantPreviewFromWebsiteUrl(websiteUrl) : null;
+    return hint ? { ...hint, faviconUrl: storeIcon } : null;
+  }, [showAnalyze, websiteUrl, storeIcon]);
 
   /** Step removal timeouts must not be cleared when `mounted` advances (that was preventing rows from removing). */
   const analysisStepRemoveTimeoutsRef = useRef<number[]>([]);
