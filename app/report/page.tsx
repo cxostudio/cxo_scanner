@@ -350,17 +350,17 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
 
   useEffect(() => {
     if (!focus) return
-    const t = setTimeout(() => { document.getElementById(`f-${focus}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); scrollToPin(focus) }, 250)
+    const t = setTimeout(() => { alignTop(focus); scrollToPin(focus) }, 250)
     return () => clearTimeout(t)
   }, [focus, scrollToPin])
 
-  const toggle = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  // one checkpoint open at a time, lined up with the sticky screenshot (24px from the top), its pin in view
+  const toggle = (id: string) => setOpen((s) => (s.has(id) ? new Set() : new Set([id])))
   const pick = (id: string, from: 'pin' | 'list') => {
     setSelected(id)
-    if (from === 'pin') {
-      setOpen((s) => new Set(s).add(id))
-      setTimeout(() => document.getElementById(`f-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60)
-    } else scrollToPin(id)
+    if (from === 'pin') setOpen(new Set([id]))
+    // after the open/close has rendered, so the position is the final one
+    requestAnimationFrame(() => requestAnimationFrame(() => { alignTop(id); scrollToPin(id) }))
   }
   const shots = flow ? (area.page?.images || []).filter((i) => i.role === area.id) : []
   const shotsHere = shots.filter((i) => i.device === device)
@@ -425,11 +425,11 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
               onToggle={() => { toggle(r.ruleId); pick(r.ruleId, 'list') }} />
           ))}
           {area.passed.map((r) => (
-            <Finding key={r.ruleId} r={r} kind="pass" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => toggle(r.ruleId)} />
+            <Finding key={r.ruleId} r={r} kind="pass" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => { toggle(r.ruleId); pick(r.ruleId, 'list') }} />
           ))}
           {area.unknown.length > 0 && !area.blind && <p className="pt-2 text-[13px] text-[var(--text-muted)]">We couldn't check these: our scan could not see enough to judge them, so they are left out of your score.</p>}
           {area.unknown.map((r) => (
-            <Finding key={r.ruleId} r={r} kind="unknown" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => toggle(r.ruleId)} />
+            <Finding key={r.ruleId} r={r} kind="unknown" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => { toggle(r.ruleId); pick(r.ruleId, 'list') }} />
           ))}
         </div>
       </div>
@@ -622,4 +622,11 @@ function howPicked(how: string): string {
   if (how === 'all products') return 'We scanned your all-products page,'
   if (how) return `We scanned the ${how},`
   return 'We scanned'
+}
+
+/** Put a checkpoint 24px from the top of the window (desktop: level with the sticky screenshot). */
+function alignTop(id: string) {
+  const row = document.getElementById(`f-${id}`)
+  if (!row) return
+  window.scrollTo({ top: window.scrollY + row.getBoundingClientRect().top - 24, behavior: 'smooth' })
 }

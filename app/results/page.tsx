@@ -276,13 +276,8 @@ function ResultsView() {
   const view = located[device]
   const shot = view && typeof view === 'object' ? view : null
 
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  // one check open at a time: the open one sits next to its pin, nothing above it moves
+  const toggle = (id: string) => setOpen((prev) => (prev.has(id) ? new Set() : new Set([id])))
 
   // a pin opens its check, a check shows its pin: both end up side by side at the top
   // (the check at the sticky offset, the pin's element at the top of the page view)
@@ -293,7 +288,7 @@ function ResultsView() {
     if (from === 'pin') {
       const idx = results.findIndex((r) => r.ruleId === id)
       if (idx >= visible) setVisible(idx + 1)
-      setOpen((prev) => new Set(prev).add(id))
+      setOpen(new Set([id]))
     }
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {

@@ -488,3 +488,7 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 .cxo-page-out { opacity: 0; transform: translateY(-6px); transition: opacity 0.35s var(--ease), transform 0.35s var(--ease); }
 .cxo-scan-aside .cxo-row { transition: border-color var(--duration-base) var(--ease), background var(--duration-base) var(--ease), color var(--duration-base) var(--ease), opacity var(--duration-base) var(--ease); }
 @media (prefers-reduced-motion: reduce) { .cxo-fade-in, .cxo-page-in { animation: none; } .cxo-page-out { transition: none; } }
+
+/* everything clickable shows the hand (Tailwind's base styles reset buttons to the arrow) */
+button:not(:disabled), [role="button"]:not([aria-disabled="true"]), a[href], summary, label[for], select { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
