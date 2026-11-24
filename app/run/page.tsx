@@ -6,7 +6,6 @@ import { Cog } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { z } from "zod";
 import { toast } from "react-toastify";
-import emailjs from "@emailjs/browser";
 import { ScanDevices } from "../components/ScanDevices";
 import {
   type InstantPreviewHint,
@@ -98,9 +97,6 @@ function instantPreviewFromWebsiteUrl(raw: string): InstantPreviewHint | null {
   }
 }
 
-const EMAILJS_SERVICE_ID = "service_j08d36o";
-const EMAILJS_TEMPLATE_ID = "template_fiqbjw9";
-const EMAILJS_PUBLIC_KEY = "gnuaIRx_bs0IdMu7r";
 
 const RuleSchema = z.object({
   id: z.string().min(1, "Rule ID is required"),
@@ -1195,32 +1191,6 @@ export default function Home() {
         throw new Error("No rules available for this URL");
       }
 
-      // ✅ Browser info
-      const browser = navigator.userAgent;
-      const screenSize = `${window.screen.width}x${window.screen.height}`;
-      const timeZone =
-        Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
-
-      const browserData = [
-        `ua=${browser}`,
-        `platform=${navigator.platform}`,
-        `language=${navigator.language}`,
-        `screen=${screenSize}`,
-        `timezone=${timeZone}`,
-      ].join(" | ");
-
-      // ✅ Get IP (safe)
-      let ipAddress = "Unknown";
-      try {
-        const res = await fetch("https://api.ipify.org?format=json");
-        if (res.ok) {
-          const data = await res.json();
-          ipAddress = data?.ip || "Unknown";
-        }
-      } catch {
-        console.warn("IP fetch failed");
-      }
-
       // ✅ UI setup
       setShowAnalyze(true);
       setProgress(null);
@@ -1312,56 +1282,6 @@ export default function Home() {
       await new Promise<void>((r) => window.setTimeout(r, 380));
       router.replace("/results");
 
-      setTimeout(() => {
-        let passResult: string | number = "N/A";
-        let failResult: string | number = "N/A";
-
-        try {
-          const stored = localStorage.getItem("scanResults");
-          if (stored) {
-            const parsed = z
-              .array(
-                z
-                  .object({
-                    ruleId: z.string(),
-                    ruleTitle: z.string(),
-                    passed: z.boolean(),
-                    reason: z.string(),
-                  })
-                  .passthrough(),
-              )
-              .parse(JSON.parse(stored));
-
-            const pass = parsed.filter((r) => r.passed).length;
-            passResult = `${pass}/${parsed.length}`;
-            failResult = `${parsed.length - pass}/${parsed.length}`;
-          }
-        } catch {
-          console.warn("Summary parsing failed");
-        }
-
-        emailjs
-          .send(
-            EMAILJS_SERVICE_ID,
-            EMAILJS_TEMPLATE_ID,
-            {
-              level: selectedChallenge ?? "",
-              price: selectedRevenue ?? "",
-              url: validUrl,
-              email: emailTrimmed,
-              ip_address: ipAddress,
-              browser,
-              screen_size: screenSize,
-              time_zone: timeZone,
-              browser_data: browserData,
-              pass_result: passResult,
-              fail_result: failResult,
-            },
-            { publicKey: EMAILJS_PUBLIC_KEY },
-          )
-          .catch((err) => console.error("EmailJS failed:", err));
-
-      }, 0);
     } catch (err) {
       console.error(err);
       // back to the card with "Try again" instead of a dead loader

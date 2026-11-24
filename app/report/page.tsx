@@ -254,8 +254,8 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
           const checked = a.rows.length - a.unknown.length
           return (
             <button key={a.id} type="button" onClick={() => go(a.id)} className="group overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:border-[var(--border-strong)]">
-              <div className="relative h-[120px] overflow-hidden border-b border-[var(--border)] bg-[var(--surface-muted)] max-[560px]:h-[90px]">
-                {thumb && <img src={thumb} alt="" className="block w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />}
+              <div className="relative aspect-[16/10] overflow-hidden border-b border-[var(--border)] bg-[var(--surface-muted)]">
+                {thumb && <img src={thumb} alt="" className="block h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />}
               </div>
               <div className="p-4">
                 <div className="flex items-baseline justify-between gap-2">
