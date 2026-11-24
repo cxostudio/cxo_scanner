@@ -37,7 +37,7 @@ async function bestSeller(origin: string): Promise<{ url: string; how: string } 
 }
 
 /** The first product linked from a page (a collection, else the homepage): when the catalogue lookup finds nothing. */
-async function firstLinkedProduct(pageUrls: string[]): Promise<{ url: string; how: string } | null> {
+export async function firstLinkedProduct(pageUrls: string[]): Promise<{ url: string; how: string } | null> {
   for (const page of pageUrls) {
     try {
       const html = await (await fetch(page, { headers: { 'User-Agent': UA, Accept: 'text/html' }, signal: AbortSignal.timeout(12000), redirect: 'follow' })).text()

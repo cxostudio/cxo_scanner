@@ -25,6 +25,10 @@ export function detectPageTypeFromUrl(url: string): UrlPageType {
     if (segments.length === 1 && localeRegex.test(segments[0])) return 'homepage'
 
     const productPatterns = ['product', 'products', 'item', 'p', 'dp', 'gp', 'sku', 'buy']
+    // a collection, even one named "products" (/collections/products): unless a product follows it
+    // (/collections/x/products/y is a product page)
+    const ci = segments.findIndex((s) => s === 'collections' || s === 'collection')
+    if (ci >= 0 && !segments.slice(ci + 2).some((s) => productPatterns.includes(s))) return 'category'
     const hasProductKeyword = segments.some((segment) => productPatterns.includes(segment))
     const hasAmazonASIN = segments.some((segment) => /^[a-z0-9]{10}$/i.test(segment))
     if (hasProductKeyword || hasAmazonASIN) return 'product'

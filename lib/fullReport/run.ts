@@ -7,7 +7,7 @@
 import { createClient as createStuckClient, type SupabaseClient as StuckClient } from '@supabase/supabase-js'
 import { noStoreFetch as stuckFetch } from '@/lib/supabaseFetch'
 import { createHash, randomUUID } from 'crypto'
-import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
+import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, setJobUrl, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { saveImage, signedUrls, type ReportImage } from './images'
 import { visionPins } from './visionPins'
@@ -15,7 +15,7 @@ import { areaOf, type ReportArea } from './areas'
 import { previews, selfOrigin } from '@/lib/scanJobs/runServer'
 import { resultsEmailFor } from '@/lib/scanJobs/finish'
 import { sendEmail } from '@/lib/email/send'
-import { pickReportPages, type ReportPageKey } from './pages'
+import { firstLinkedProduct, pickReportPages, type ReportPageKey } from './pages'
 
 const api = (p: string) => `${selfOrigin()}/scan/api${p}`
 const AREA_ORDER: ReportPageKey[] = ['homepage', 'category', 'product']
@@ -83,6 +83,19 @@ export async function runPage(job: ScanJob): Promise<void> {
       const data = (await res.json().catch(() => ({}))) as { results?: unknown[]; error?: string; reportImages?: ReportImage[] }
       if (res.ok && Array.isArray(data.results)) { results = data.results; images = data.reportImages || []; break }
       lastErr = data.error || `scan ${res.status}`
+      // the best seller redirects or is gone (sold out, another market): once, another product of the store
+      if (res.status === 422 && job.answers?.page === 'product' && attempt === 1) {
+        const origin = new URL(job.url).origin
+        const siblings = await listJobsByPrefix(`${parentScanId}__`).catch(() => [] as ScanJob[])
+        const col = siblings.find((j) => j.answers?.page === 'category')?.url
+        const alt = await firstLinkedProduct([...(col ? [col] : []), `${origin}/`]).catch(() => null)
+        if (alt && alt.url !== job.url) {
+          console.warn('[report] product page unusable, trying another', job.url, '→', alt.url)
+          job = { ...job, url: alt.url }
+          await setJobUrl(job.id, alt.url).catch(() => {})
+          continue
+        }
+      }
       if (res.status === 422 || res.status === 403) break
     }
     if (!results.length) throw new Error(lastErr || 'scan failed')

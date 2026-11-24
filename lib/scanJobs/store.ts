@@ -115,3 +115,9 @@ export async function claimStart(id: string): Promise<boolean> {
   if (error) throw new Error(error.message)
   return Boolean(data)
 }
+
+/** Point a job at another URL (a full-report page that switched to another product). */
+export async function setJobUrl(id: string, url: string): Promise<void> {
+  const { error } = await db().from(T).update({ url, updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
