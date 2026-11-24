@@ -55,6 +55,7 @@ import {
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { runScanV2, PageCheckError } from '@/lib/scanV2'
+import { isBypass } from '@/lib/usage/bypass'
 import { saveTestScan } from '@/lib/lab/store'
 import { saveLeadScan } from '@/lib/leads/store'
 import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
@@ -1079,7 +1080,8 @@ export async function POST(request: NextRequest) {
     // The scan is COUNTED only when it completes (see registerScan before the
     // success return below). Defensive: the client also pre-checks via
     // /api/scan/limit. Fails open if Supabase is unconfigured/unreachable.
-    if (email) {
+    // Louis's browsers (bypass cookie, any network) skip the limits
+    if (email && !isBypass(request)) {
       const limit = await checkScanLimit(email)
       if (!limit.allowed) {
         return NextResponse.json(
