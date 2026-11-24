@@ -1,6 +1,8 @@
 // The scanned page with its findings pinned, and the result markers. Shared by the free results
 // page (app/results) and the full report (app/report), so both look the same.
 
+import { useEffect, useMemo, useRef, useState } from 'react'
+
 export type Device = 'desktop' | 'mobile'
 export type Box = { x: number; y: number; w: number; h: number }
 export type Located = { screenshot: string; width: number; height: number; pins: { findingId: string; box: Box }[] }
@@ -112,59 +114,108 @@ export const PhoneIcon = () => (
 )
 /** The numbered pins and outlines over a screenshot. Boxes are in the shot's own units
  *  (pixels of a page screenshot, or 0-1 fractions with width = height = 1). */
+// How pins stay readable when findings sit on the same spot (a cart drawer, a checkout summary):
+// 1. Badges that would touch on screen (within one badge of each other) merge into one row of numbers.
+// 2. Outlines are drawn only for the finding you picked, or the badge row you hover, never all at once.
+// So the page shows a few clean number rows, and one outline at a time.
+const BADGE = 30
 export function PinOverlay({ shot, num, selected, onPin }: { shot: { width: number; height: number; pins: Located['pins'] }; num: Map<string, number>; selected: string | null; onPin: (id: string) => void }) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  const [hover, setHover] = useState<string | null>(null)
+  useEffect(() => {
+    const el = ref.current?.parentElement
+    if (!el) return
+    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const clusters = useMemo(() => {
+    const items = shot.pins
+      .map((p) => ({ id: p.findingId, n: num.get(p.findingId) || 0, box: p.box }))
+      .filter((it) => it.n)
+      .map((it) => {
+        const right = ((it.box.x + it.box.w) / shot.width) * (size?.w || 0)
+        const top = (it.box.y / shot.height) * (size?.h || 0)
+        return { ...it, ax: Math.min(right + 10, (size?.w || 0) - 4), ay: Math.max(top, 16) }
+      })
+      .sort((a, b) => a.ay - b.ay || a.n - b.n)
+    const out: { key: string; ax: number; ay: number; items: typeof items }[] = []
+    for (const it of items) {
+      const near = size && out.find((c) => Math.abs(c.ay - it.ay) < BADGE && Math.abs(c.ax - it.ax) < BADGE * (c.items.length + 1))
+      if (near) {
+        near.items.push(it)
+        near.ax = Math.max(near.ax, it.ax)
+      } else out.push({ key: it.id, ax: it.ax, ay: it.ay, items: [it] })
+    }
+    return out.map((c) => ({ ...c, items: c.items.sort((a, b) => a.n - b.n) }))
+  }, [shot, num, size])
+
+  const outlined = new Set<string>(selected ? [selected] : [])
+  for (const c of clusters) if (c.key === hover) c.items.forEach((it) => outlined.add(it.id))
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`
+
   return (
-    <>
-      {groupPins(shot.pins, num).map((g) => {
-              const on = g.items.some((it) => it.id === selected)
-              return (
-                <span key={g.key}>
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute rounded-[6px] transition-all"
+    <span ref={ref} className="contents">
+      {size &&
+        clusters.flatMap((c) => c.items).filter((it) => outlined.has(it.id)).map((it) => {
+          const on = it.id === selected
+          return (
+            <span
+              key={`box-${it.id}`}
+              aria-hidden="true"
+              className="pointer-events-none absolute rounded-[6px]"
+              style={{
+                left: pct(it.box.x, shot.width),
+                top: pct(it.box.y, shot.height),
+                width: pct(it.box.w, shot.width),
+                height: pct(it.box.h, shot.height),
+                border: `${on ? 3 : 2}px ${on ? 'solid' : 'dashed'} var(--result-fail-fg)`,
+                background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
+                zIndex: 1,
+              }}
+            />
+          )
+        })}
+      {size &&
+        clusters.map((c) => {
+          const on = c.items.some((it) => it.id === selected)
+          return (
+            <span
+              key={c.key}
+              className="absolute flex -translate-x-full -translate-y-1/2 gap-1"
+              style={{ left: c.ax, top: c.ay, zIndex: on ? 3 : 2 }}
+              onMouseEnter={() => setHover(c.key)}
+              onMouseLeave={() => setHover((h) => (h === c.key ? null : h))}
+            >
+              {c.items.map((it) => {
+                const sel = it.id === selected
+                return (
+                  <button
+                    key={it.id}
+                    type="button"
+                    onClick={() => onPin(it.id)}
+                    aria-label={`Finding ${it.n}`}
+                    className="grid shrink-0 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
                     style={{
-                      left: `${(g.box.x / shot.width) * 100}%`,
-                      top: `${(g.box.y / shot.height) * 100}%`,
-                      width: `${(g.box.w / shot.width) * 100}%`,
-                      height: `${(g.box.h / shot.height) * 100}%`,
-                      border: `${on ? 3 : 2}px solid var(--result-fail-fg)`,
-                      background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
-                    }}
-                  />
-                  <span
-                    className="absolute flex -translate-x-full -translate-y-1/2 gap-1"
-                    style={{
-                      left: `min(calc(${((g.box.x + g.box.w) / shot.width) * 100}% + 10px), calc(100% - 4px))`,
-                      top: `max(${(g.box.y / shot.height) * 100}%, 16px)`,
-                      zIndex: on ? 3 : 2,
+                      width: sel ? 34 : 28,
+                      height: sel ? 34 : 28,
+                      fontSize: sel ? 14 : 12,
+                      background: 'var(--result-fail-fg)',
+                      color: 'var(--text-inverse)',
+                      borderColor: 'var(--surface)',
                     }}
                   >
-                    {g.items.map((it) => {
-                      const sel = it.id === selected
-                      return (
-                        <button
-                          key={it.id}
-                          type="button"
-                          onClick={() => onPin(it.id)}
-                          aria-label={`Finding ${it.n}`}
-                          className="grid shrink-0 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
-                          style={{
-                            width: sel ? 34 : 28,
-                            height: sel ? 34 : 28,
-                            fontSize: sel ? 14 : 12,
-                            background: 'var(--result-fail-fg)',
-                            color: 'var(--text-inverse)',
-                            borderColor: 'var(--surface)',
-                          }}
-                        >
-                          {it.n}
-                        </button>
-                      )
-                    })}
-                  </span>
-                </span>
-              )
-            })}
-    </>
+                    {it.n}
+                  </button>
+                )
+              })}
+            </span>
+          )
+        })}
+    </span>
   )
 }

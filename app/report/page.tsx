@@ -225,7 +225,6 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
           <p className="mt-2 max-w-[640px] text-[15px] leading-[1.6] text-[var(--text-muted)]">CXO Studio turns reports like this one into more revenue: we prioritise the fixes for your numbers, design and build them, and A/B test the big ones. On a 30-minute call we go through your report and tell you honestly whether working together would pay off.</p>
           <a href={CALL_URL} className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
         </div>
-        <FeedbackBox />
       </section>
     </main>
     </Feedback.Provider>
@@ -575,35 +574,6 @@ function FlagWrong({ r, verdict }: { r: Row; verdict: string }) {
   )
 }
 
-/** Bottom of every tab: a mistake, a bug, anything. */
-function FeedbackBox() {
-  const ctx = useContext(Feedback)
-  const [msg, setMsg] = useState('')
-  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
-  const send = async () => {
-    if (!msg.trim()) return
-    setState('sending')
-    setState((await sendFeedback({ reportId: ctx.reportId, kind: 'bug', message: msg, tab: ctx.tab, device: ctx.device })) ? 'sent' : 'error')
-  }
-  return (
-    <div className="mt-6 rounded-[20px] border border-[var(--border)] p-8 max-[560px]:p-6">
-      <h2 className="font-[family-name:var(--font-display)] text-[20px] font-bold tracking-[-0.02em] text-[var(--text)]">Spot a mistake or a bug?</h2>
-      <p className="mt-2 max-w-[640px] text-[14px] leading-[1.6] text-[var(--text-muted)]">This report is done by AI against our CRO checklist and can get one wrong. Tell us what looks off: we check every message by hand and use it to make the scan better. For one checkpoint, open it and click "Is this wrong?".</p>
-      {state === 'sent' ? (
-        <p className="mt-4 text-[14px] font-semibold" style={{ color: 'var(--result-pass-fg)' }}>Thanks, we got it. We'll reply by email.</p>
-      ) : (
-        <div className="mt-4 flex flex-col gap-3">
-          <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} maxLength={2000} placeholder="What went wrong, and where?"
-            className="w-full max-w-[640px] rounded-[12px] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--text)] outline-none focus:border-[var(--border-strong)]" />
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={send} disabled={state === 'sending' || !msg.trim()} className="cxo-btn cxo-btn-ghost self-start disabled:opacity-50">{state === 'sending' ? 'Sending…' : 'Send feedback'}</button>
-            {state === 'error' && <span className="text-[13px]" style={{ color: 'var(--result-fail-fg)' }}>Not sent. Try again, or reply to the report email.</span>}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 /* ── scan another page ──────────────────────────────────────────────────── */
 
