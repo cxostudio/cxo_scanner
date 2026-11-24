@@ -10,6 +10,7 @@ import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, PinOverlay, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, LogoSpinner, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { ThankYouUpload } from '../components/ThankYouUpload'
+import { Segmented } from '../components/Segmented'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
 import { scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
@@ -192,20 +193,20 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
             </button>
           )}
         </div>
-        <nav className={`mx-auto flex max-w-[1280px] gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]`} aria-label="Report pages">
-          {tabs.map((t) => {
-            const a = tabAreas.find((x) => x.id === t)
-            const on = t === tab
-            return (
-              <button key={t} type="button" onClick={() => go(t)} aria-current={on ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-[14px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-strong)] ${on ? 'bg-[var(--surface-muted)] text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>
-                {t === 'overview' ? 'Overview' : a!.tab}
-                {a && (a.blind
-                  ? <span className="text-[12px] text-[var(--text-muted)]">?</span>
-                  : a.fails.length > 0 && <span className="rounded-full px-1.5 text-[12px] font-bold tabular-nums" style={{ background: TONE[toneOf(a.score ?? 0)].bg, color: TONE[toneOf(a.score ?? 0)].fg }} title={`${a.fails.length} issues`}>{a.fails.length}</span>)}
-              </button>
-            )
-          })}
+        <nav className="mx-auto max-w-[1280px] px-[var(--gutter)] pb-2.5" aria-label="Report pages">
+          <Segmented<Tab> nav label="Report pages" value={tab} onChange={(t) => go(t)}
+            items={tabs.map((t) => {
+              const a = tabAreas.find((x) => x.id === t)
+              return {
+                id: t,
+                label: <>
+                  {t === 'overview' ? 'Overview' : a!.tab}
+                  {a && (a.blind
+                    ? <span className="text-[12px] text-[var(--text-muted)]">?</span>
+                    : a.fails.length > 0 && <span className="rounded-full px-1.5 text-[12px] font-bold tabular-nums" style={{ background: TONE[toneOf(a.score ?? 0)].bg, color: TONE[toneOf(a.score ?? 0)].fg }} title={`${a.fails.length} issues`}>{a.fails.length}</span>)}
+                </>,
+              }
+            })} />
         </nav>
       </header>
 
@@ -490,14 +491,8 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
         <div className="min-w-0 lg:sticky lg:top-6 lg:order-2 lg:self-start">
           {/* the switch changes the screenshot only, so it sits on it (as in the free scan) */}
           <div className="mb-3 flex justify-end">
-            <div role="group" aria-label="Device" className="inline-flex gap-0.5 rounded-full bg-[var(--surface-muted)] p-[3px] max-[560px]:flex max-[560px]:w-full">
-              {(['desktop', 'mobile'] as Device[]).map((d) => (
-                <button key={d} type="button" onClick={() => setDevice(d)} aria-pressed={device === d}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors max-[560px]:flex-1 max-[560px]:py-2 ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}>
-                  {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}{d === 'desktop' ? 'Desktop' : 'Mobile'}
-                </button>
-              ))}
-            </div>
+            <Segmented label="Device" size="sm" fill value={device} onChange={setDevice}
+              items={[{ id: 'desktop', label: <><MonitorIcon />Desktop</> }, { id: 'mobile', label: <><PhoneIcon />Mobile</> }]} />
           </div>
           {flow ? (
             <FlowShots shots={shown} device={shownDevice} wanted={device} label={area.label} num={num} selected={selected} onPin={(id) => pick(id, 'pin')} scrollRef={shotRef} />

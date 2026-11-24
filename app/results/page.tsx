@@ -13,6 +13,7 @@ import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { useOffer } from '../components/useOffer'
+import { Segmented } from '../components/Segmented'
 import { PageView, LoadingPill, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located, type LocateState } from '../components/PinnedPage'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, TONE, toneOf, type ScanResult } from '@/lib/report'
 import { callLink } from '@/lib/call'
@@ -456,20 +457,8 @@ function ResultsView() {
                   </span>
                 </p>
               </div>
-              <div role="group" aria-label="Device" className="inline-flex gap-0.5 max-[560px]:flex max-[560px]:w-full rounded-full bg-[var(--surface-muted)] p-[3px]">
-                {(['desktop', 'mobile'] as Device[]).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDevice(d)}
-                    aria-pressed={device === d}
-                    className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 max-[560px]:flex-1 max-[560px]:py-2 text-[13px] font-semibold transition-colors ${device === d ? 'bg-[var(--surface)] text-[var(--text)] shadow-[0_1px_2px_rgba(9,9,11,.12)]' : 'text-[var(--text-muted)]'}`}
-                  >
-                    {d === 'desktop' ? <MonitorIcon /> : <PhoneIcon />}
-                    {d === 'desktop' ? 'Desktop' : 'Mobile'}
-                  </button>
-                ))}
-              </div>
+              <Segmented label="Device" size="sm" fill value={device} onChange={setDevice}
+              items={[{ id: 'desktop', label: <><MonitorIcon />Desktop</> }, { id: 'mobile', label: <><PhoneIcon />Mobile</> }]} />
             </div>
 
             <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

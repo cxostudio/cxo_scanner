@@ -494,3 +494,7 @@ button.cxo-row { cursor: pointer; -webkit-tap-highlight-color: transparent; touc
 /* everything clickable shows the hand (Tailwind's base styles reset buttons to the arrow) */
 button:not(:disabled), [role="button"]:not([aria-disabled="true"]), a[href], summary, label[for], select { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+
+/* Segmented switch: the white pill slides to the active tab */
+.cxo-seg-pill { transition: transform var(--duration-base) var(--ease), width var(--duration-base) var(--ease), opacity var(--duration-fast) var(--ease); }
+@media (prefers-reduced-motion: reduce) { .cxo-seg-pill { transition: none; } }
