@@ -2207,6 +2207,29 @@ function firstVariant(shopPage: Page, productPath: string): Promise<string[]> {
     .catch(() => [])
 }
 
+/**
+ * Custom ("headless") storefronts on Shopify: no /cart.js or /products/x.js, but the page data usually
+ * names a variant (gid://shopify/ProductVariant/…, or ?variant=…) and the store's Shopify domain
+ * (<shop>.myshopify.com). Shopify's cart link on that domain opens the store's real checkout.
+ */
+function headlessTarget(shopPage: Page): Promise<{ variant: string; shop: string } | null> {
+  return shopPage
+    .evaluate(() => {
+      const html = document.documentElement.outerHTML
+      const shop = (html.match(/([a-z0-9][a-z0-9-]*\.myshopify\.com)/i) || [])[1]
+      if (!shop) return null
+      // the variant shown in the URL first, then the product's structured data, then the page data
+      const fromUrl = new URLSearchParams(location.search).get('variant')
+      const ld = Array.from(document.querySelectorAll('script[type="application/ld+json"]')).map((s) => s.textContent || '').join(' ')
+      const fromLd = (ld.match(/[?&]variant=(\d{6,})/) || [])[1]
+      const fromGid = (html.match(/gid:\/\/shopify\/ProductVariant\/(\d{6,})/) || [])[1]
+      const fromJson = (html.match(/"variant_?[iI]d"\s*:\s*"?(\d{8,})/) || [])[1]
+      const variant = fromUrl || fromLd || fromGid || fromJson
+      return variant ? { variant, shop: shop.toLowerCase() } : null
+    })
+    .catch(() => null)
+}
+
 /** The market the shopper browsed in (Shopify.country), so checkout is filled for the same country. */
 function marketCountry(shopPage: Page): Promise<string | undefined> {
   // the shop's own country (meta.json) is its home market; our browsers sit in the US, so Shopify.country
@@ -2643,10 +2666,15 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
     // runs alongside the mobile capture, capped, so the whole scan stays inside the function's time limit
     // when our add-to-cart click failed (bundle widgets, custom buttons), checkout can still be reached from
     // the product's own data: its first available variant, through the cart permalink
-    const remoteItems = opts.extended && process.env.BROWSERBASE_API_KEY && /\/products\//.test(new URL(finalUrl).pathname)
+    let remoteOrigin = new URL(desktop.url()).origin
+    let remoteItems = opts.extended && process.env.BROWSERBASE_API_KEY && /\/products\//.test(new URL(finalUrl).pathname)
       ? await cartItems(desktop).then(async (items) => (items.length ? items : await firstVariant(desktop, new URL(finalUrl).pathname)))
       : null
-    const remoteOrigin = new URL(desktop.url()).origin
+    // headless storefront: the cart link on its Shopify domain, with a variant named in the page
+    if (remoteItems && !remoteItems.length) {
+      const h = await headlessTarget(desktop)
+      if (h) { remoteItems = [`${h.variant}:1`]; remoteOrigin = `https://${h.shop}` }
+    }
     const remoteCountry = remoteItems ? await marketCountry(desktop) : undefined
     const remoteP: Promise<RemoteCheckout> | null = remoteItems
       ? Promise.race([
