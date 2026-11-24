@@ -9,7 +9,7 @@ import puppeteer from 'puppeteer-core'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
+import { launchPuppeteerBrowser, type LaunchedBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 
 export type Tile = { label: string; dataUrl: string }
@@ -2361,7 +2361,34 @@ function sweepStaleProfiles() {
  * add-to-cart, hover measurement, mobile menu), about 20 to 45 seconds. On for test scans; the free scan turns
  * them on once such a checkpoint is Live.
  */
-export async function captureEvidence(rawUrl: string, opts: { extended?: boolean } = {}): Promise<Evidence> {
+export async function captureEvidence(rawUrl: string, opts: { extended?: boolean; remote?: boolean } = {}): Promise<Evidence> {
+  try {
+    return await captureOnce(rawUrl, opts)
+  } catch (e) {
+    // bot protection (or a page that won't load) on our own browser: once more in Browserbase,
+    // with its proxies, captcha solving and a real browser fingerprint. Normal stores never get here.
+    if (!opts.remote && e instanceof PageCheckError && (e.code === 'blocked' || e.code === 'unreachable') && process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID) {
+      console.warn('[capture] retrying in Browserbase:', e.code, rawUrl)
+      return captureOnce(rawUrl, { ...opts, remote: true })
+    }
+    throw e
+  }
+}
+
+/** A Browserbase browser, used like a local one (closing it ends the session). */
+async function remoteBrowser(): Promise<LaunchedBrowser> {
+  const key = process.env.BROWSERBASE_API_KEY!
+  const projectId = process.env.BROWSERBASE_PROJECT_ID!
+  const open = (body: object) =>
+    fetch('https://api.browserbase.com/v1/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BB-API-Key': key }, body: JSON.stringify(body) }).catch(() => null)
+  let res = await open({ projectId, proxies: true, browserSettings: { solveCaptchas: true, viewport: { width: DESKTOP.width, height: DESKTOP.height } } })
+  if (res && res.status === 402) res = await open({ projectId })
+  const session = res && res.ok ? ((await res.json()) as { connectUrl: string }) : null
+  if (!session?.connectUrl) throw new PageCheckError('blocked', 'This store blocks automated visits, so we could not see the page.')
+  return (await puppeteer.connect({ browserWSEndpoint: session.connectUrl })) as unknown as LaunchedBrowser
+}
+
+async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: boolean } = {}): Promise<Evidence> {
   const t0 = Date.now()
   // where the time goes, per step (kept in the facts, shown in the lab diagnostics)
   const stages: Record<string, number> = {}
@@ -2374,7 +2401,7 @@ export async function captureEvidence(rawUrl: string, opts: { extended?: boolean
   sweepStaleProfiles()
   // Google's speed data takes 20 to 50 seconds: ask now, read it at the end
   const psiP = opts.extended ? pageSpeed(rawUrl).catch((e) => ({ error: String((e as Error)?.message || e).slice(0, 80) })) : null
-  const browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
+  const browser = opts.remote ? await remoteBrowser() : await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${DESKTOP.width},${DESKTOP.height}` })
   try {
     // Desktop first, then mobile: one tab at a time keeps the serverless browser within memory.
     const desktop = await browser.newPage()

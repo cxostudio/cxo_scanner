@@ -35,6 +35,23 @@ async function bestSeller(origin: string): Promise<{ url: string; how: string } 
   return null
 }
 
+/** The first product linked from a page (a collection, else the homepage): when the catalogue lookup finds nothing. */
+async function firstLinkedProduct(pageUrls: string[]): Promise<{ url: string; how: string } | null> {
+  for (const page of pageUrls) {
+    try {
+      const html = await (await fetch(page, { headers: { 'User-Agent': UA, Accept: 'text/html' }, signal: AbortSignal.timeout(12000), redirect: 'follow' })).text()
+      const origin = new URL(page).origin
+      for (const m of Array.from(html.matchAll(/href=["']([^"'#?]+)["']/gi))) {
+        let u: URL
+        try { u = new URL(m[1], origin) } catch { continue }
+        if (u.origin !== origin || !/\/products?\/[^/]+\/?$/i.test(u.pathname)) continue
+        return { url: u.toString(), how: `first product linked from ${new URL(page).pathname === '/' ? 'the homepage' : 'the collection'}` }
+      }
+    } catch (e) { console.warn('[report] product link search failed', page, e) }
+  }
+  return null
+}
+
 export async function pickReportPages(raw: string): Promise<ReportPage[]> {
   const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
   const origin = u.origin
@@ -42,7 +59,7 @@ export async function pickReportPages(raw: string): Promise<ReportPage[]> {
   const pages: ReportPage[] = [{ key: 'homepage', url: `${origin}/`, how: 'homepage' }, { key: 'category', ...col }]
   // a product URL given by the buyer wins over our pick
   const given = /\/products\/[^/]+/i.test(u.pathname) ? { url: u.toString(), how: 'the page you gave us' } : null
-  const p = given || prod
+  const p = given || prod || (await firstLinkedProduct([col.url, `${origin}/`]))
   if (p) pages.push({ key: 'product', ...p })
   return pages
 }
