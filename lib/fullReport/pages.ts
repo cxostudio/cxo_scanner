@@ -18,7 +18,8 @@ async function firstCollection(origin: string): Promise<{ url: string; how: stri
     for (const m of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
       let href = m[1]
       try { const u = new URL(href, origin); if (u.origin !== new URL(origin).origin) continue; href = u.pathname } catch { continue }
-      if (!/\/collections\/[^/]+\/?$/i.test(href) || SKIP.test(href) || seen.has(href)) continue
+      // a real collection: /collections/<handle>, with an optional locale (/en-eu/collections/…); not app pages like /a/collections/…
+      if (!/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?collections\/[^/]+\/?$/i.test(href) || SKIP.test(href) || seen.has(href)) continue
       seen.add(href)
       return { url: new URL(href, origin).toString(), how: 'first collection linked from the homepage' }
     }
