@@ -54,7 +54,10 @@ import {
   type CheckpointPresentation,
 } from '@/lib/conversionCheckpoints/checkpointPresentation'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
-import { runScanV2, PageCheckError } from '@/lib/scanV2'
+import { runScanV2, judgeEvidence, PageCheckError } from '@/lib/scanV2'
+import { captureEvidence } from '@/lib/scanV2/capture'
+import { V2_MODEL } from '@/lib/scanV2/judge'
+import { saveEvidence, loadEvidence } from '@/lib/scanJobs/evidence'
 import { isBypass } from '@/lib/usage/bypass'
 import { saveTestScan } from '@/lib/lab/store'
 import { saveLeadScan } from '@/lib/leads/store'
@@ -206,6 +209,9 @@ const ScanRequestSchema = z.object({
   scanId: z.string().optional(), // shared across a scan's batch/fallback requests so it counts once
   engine: z.enum(['v1', 'v2']).optional(), // v2 = lib/scanV2 (default); SCAN_ENGINE=v1 switches back
   reportJob: z.string().uuid().optional(), // a page of a paid full report: its scan_jobs row id (checked below)
+  // background scans (lib/scanJobs/background): 'capture' takes the page and keeps it, 'judge' answers
+  // the checkpoints on the kept capture later. Without it, both in one go as before.
+  phase: z.enum(['capture', 'judge']).optional(),
 })
 
 // Helper function to sleep/delay
@@ -1061,7 +1067,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine, reportJob } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine, reportJob, phase } = validationResult.data
+    if (phase && (!scanId || reportJob)) return NextResponse.json({ error: 'phase needs a scanId and no reportJob' }, { status: 400 })
     // the paid full report: only a page job the server created for a report (lib/fullReport) unlocks it
     let paidScan = false
     let reportPage = ''
@@ -1215,7 +1222,25 @@ export async function POST(request: NextRequest) {
     // ── Engine v2 (lib/scanV2): one evidence capture, a stronger model judges every checkpoint.
     if (useV2) {
       try {
-        const v2 = await runScanV2(validUrl, v2Rules, apiKey, { extended: paidScan })
+        // background scan, step 1: take the page and keep it for the judge (no AI, nothing counted)
+        if (phase === 'capture') {
+          const t0 = Date.now()
+          const ev = await captureEvidence(validUrl, { extended: false })
+          await saveEvidence(scanId!, ev)
+          console.log(`[scan] capture kept ${scanId} ${validUrl} ${Date.now() - t0}ms`)
+          return NextResponse.json({ captured: true, ms: Date.now() - t0 })
+        }
+        // background scan, step 2: judge the kept capture
+        let v2: Awaited<ReturnType<typeof runScanV2>>
+        if (phase === 'judge') {
+          const ev = await loadEvidence(scanId!)
+          if (!ev) return NextResponse.json({ error: 'capture not found', code: 'no_capture' }, { status: 409 })
+          const t1 = Date.now()
+          const j = await judgeEvidence(ev, v2Rules, apiKey)
+          v2 = { results: j.results, screenshot: ev.desktopTiles[0]?.dataUrl ?? null, niche: j.niche, evidence: ev, timings: { captureMs: 0, judgeMs: Date.now() - t1 }, model: V2_MODEL(), diag: { measured: j.measured, usage: j.usage, checkpoints: v2Rules.length } as never }
+        } else {
+          v2 = await runScanV2(validUrl, v2Rules, apiKey, { extended: paidScan })
+        }
         if (email && scanId) await registerScan(email, scanId).catch(() => {})
         // lead dashboard (/admin/leads): score, counts and answers only, no screenshots or page text
         if (email) await saveLeadScan({ scanId, email, url: validUrl, niche: v2.niche, results: v2.results, checkpoints: checkpointByRuleId })
@@ -1238,7 +1263,9 @@ export async function POST(request: NextRequest) {
         }
         // full report: keep the cart and checkout screenshots for the report page
         const reportImages = paidScan && reportJob ? await saveFlowImages(reportJob, v2.evidence).catch((e) => { console.warn('[scan] report images not saved', e); return [] }) : undefined
-        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId, reportImages })
+        // background scans: the first screens double as the results page previews
+        const previews = phase === 'judge' ? { desktop: v2.evidence.desktopTiles[0]?.dataUrl ?? null, mobile: v2.evidence.mobileTiles[0]?.dataUrl ?? null } : undefined
+        return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId, reportImages, previews })
       } catch (e) {
         if (e instanceof PageCheckError) {
           return NextResponse.json({ error: e.message, code: e.code }, { status: 422 })

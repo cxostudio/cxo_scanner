@@ -40,7 +40,8 @@ export async function checkDomainLimit(email: string, url: string, scanId?: stri
     const { data, error } = await sb.from('scan_jobs').select('scan_id,url,email,status')
       .gte('created_at', since).ilike('url', `%${host}%`).neq('status', 'failed').limit(200)
     if (error) { console.error('[domainLimit] failing open:', error.message); return open }
-    const used = (data || []).filter((r) => r.scan_id !== scanId && !String(r.scan_id).startsWith('report_') && storeHost(r.url) === host && !isTestEmail(r.email)).length
+    // a background scan counts once it has an email (a visitor who left at the URL step used nothing)
+    const used = (data || []).filter((r) => r.scan_id !== scanId && !String(r.scan_id).startsWith('report_') && storeHost(r.url) === host && !!r.email && !isTestEmail(r.email)).length
     return { allowed: used < DOMAIN_DAILY_LIMIT, used, limit: DOMAIN_DAILY_LIMIT, host }
   } catch (e) {
     console.error('[domainLimit] failing open:', e)
