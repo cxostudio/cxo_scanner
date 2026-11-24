@@ -82,7 +82,7 @@ async function leadOf(email: string): Promise<{ report?: ScanJob; scan?: ScanJob
     scan: jobs.find((j) => !j.scan_id?.startsWith('report_') && j.status === 'done'),
   }
 }
-const hostOf = (u?: string | null) => { try { return new URL(/^https?:/i.test(u || '') ? u! : `https://${u}`).hostname.replace(/^www\./, '') } catch { return u || '' } }
+const hostOf = (u?: string | null) => { if (!u) return ''; try { return new URL(/^https?:/i.test(u || '') ? u! : `https://${u}`).hostname.replace(/^www\./, '') } catch { return u || '' } }
 const reportUrl = (j: ScanJob) => `https://cxo.studio/scan/report?id=${j.id}`
 const scanUrl = (j: ScanJob) => `https://cxo.studio/scan/results?id=${j.id}`
 
