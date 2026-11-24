@@ -109,6 +109,12 @@ export async function saveSnapshot(id: string, snapshot: ScanSnapshot): Promise<
   if (error) throw new Error(error.message)
 }
 
+/** Change the snapshot of a finished job (a full report's thank-you page upload). Keeps it done. */
+export async function updateDoneSnapshot(id: string, snapshot: ScanSnapshot): Promise<void> {
+  const { error } = await db().from(T).update({ snapshot, updated_at: new Date().toISOString() }).eq('id', id).eq('status', 'done')
+  if (error) throw new Error(error.message)
+}
+
 /** Take a job's one-time start (a full report's kickoff): true for the first caller only. */
 export async function claimStart(id: string): Promise<boolean> {
   const { data, error } = await db().from(T).update({ status: 'server', updated_at: new Date().toISOString() }).eq('id', id).eq('status', 'running').select('id').maybeSingle()

@@ -9,16 +9,17 @@ import { AppWindow, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
 import { PageView, PinOverlay, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, LogoSpinner, OrderCard, type OrderInfo } from '../components/ReportBuild'
+import { ThankYouUpload } from '../components/ThankYouUpload'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
 import { scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
 
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 
-type Area = 'site' | 'homepage' | 'category' | 'product' | 'cart' | 'checkout'
+type Area = 'site' | 'homepage' | 'category' | 'product' | 'cart' | 'checkout' | 'thankyou'
 type Tab = 'overview' | Area
 type Row = ScanResult & { area: Area }
-type Shot = { role: 'cart' | 'checkout'; device: Device; label: string; url: string; pins?: Located['pins'] }
+type Shot = { role: 'cart' | 'checkout' | 'thankyou'; device: Device; label: string; url: string; pins?: Located['pins'] }
 type Page = {
   key: 'homepage' | 'category' | 'product'; how: string; url: string; status: string
   located: { desktop: Located | null; mobile: Located | null } | null
@@ -28,7 +29,9 @@ type Page = {
   /** a newer scan of this page the buyer asked for: running, or failed (the results shown stay the previous ones) */
   rescan?: { status: string; url: string; error: string | null } | null
 }
-type Report = { order?: OrderInfo | null; rescansLeft?: number; status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[] }
+/** The thank-you page: screenshots the buyer uploads (the scan can't place an order). */
+type ThankYou = { checks: number; at: string | null; shots: { device: Device; url: string; pins?: Located['pins'] }[]; results: Row[] }
+type Report = { order?: OrderInfo | null; rescansLeft?: number; status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[]; thankYou?: ThankYou | null }
 
 // shopping order; store-wide checks last, they are seen on every page
 const AREAS: { id: Area; label: string; tab: string; page: Page['key']; blurb: string }[] = [
@@ -39,6 +42,8 @@ const AREAS: { id: Area; label: string; tab: string; page: Page['key']; blurb: s
   { id: 'checkout', label: 'Checkout', tab: 'Checkout', page: 'product', blurb: 'The last step: is anything there making shoppers hesitate?' },
   { id: 'site', label: 'General elements', tab: 'General', page: 'product', blurb: 'Header, menu, footer and speed: what shoppers meet on every page. Shown on your best seller.' },
 ]
+// not scanned: judged from the buyer's own screenshots, so kept out of the store score
+const THANK_YOU = { id: 'thankyou' as Area, label: 'Thank-you page', tab: 'Thank you', page: 'product' as Page['key'], blurb: 'After the order: does it confirm clearly, reassure, and bring the shopper back?' }
 
 const pri = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
 const eff = (r: ScanResult) => ({ Easy: 0, Moderate: 1, Difficult: 2 } as Record<string, number>)[r.checkpoint?.difficulty || ''] ?? 1
@@ -123,8 +128,19 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
     const f = j.filter((r) => r.status !== 'na' && !r.coveredByShopify && !r.passed).sort(byImpact)
     return { ...a, rows, blind, fails: f, passed: j.filter((r) => r.passed), unknown: rows.filter(isUnknown), score: j.length && !blind ? scoreOf(j) : null, page: data.pages.find((p) => p.key === a.page) }
   }).filter((a) => a.rows.length), [all, data.pages])
+  // the thank-you tab: always there when the checkpoints exist, results once the buyer uploads
+  const ty = data.thankYou
+  const thank = useMemo<AreaSummary | null>(() => {
+    if (!ty) return null
+    const rows = ty.results
+    const j = rows.filter((r) => !isUnknown(r))
+    const f = j.filter((r) => r.status !== 'na' && !r.passed).sort(byImpact)
+    const shots: Shot[] = ty.shots.map((x) => ({ role: 'thankyou', device: x.device, label: THANK_YOU.label, url: x.url, pins: x.pins }))
+    return { ...THANK_YOU, page: undefined, rows, blind: false, fails: f, passed: j.filter((r) => r.passed), unknown: rows.filter(isUnknown), score: j.length ? scoreOf(j) : null, shots }
+  }, [ty])
+  const tabAreas = thank ? [...areas, thank] : areas
 
-  const tabs: Tab[] = ['overview', ...areas.map((a) => a.id)]
+  const tabs: Tab[] = ['overview', ...tabAreas.map((a) => a.id)]
   const [tab, setTab] = useState<Tab>('overview')
   const [device, setDevice] = useState<Device>('desktop')
   const [focus, setFocus] = useState<string | null>(null)
@@ -149,8 +165,8 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
     window.scrollTo({ top: 0 })
   }
   const next = tabs[tabs.indexOf(tab) + 1]
-  const nextLabel = next ? (next === 'overview' ? 'Overview' : AREAS.find((a) => a.id === next)!.tab) : null
-  const current = areas.find((a) => a.id === tab)
+  const nextLabel = next ? (next === 'overview' ? 'Overview' : [...AREAS, THANK_YOU].find((a) => a.id === next)!.tab) : null
+  const current = tabAreas.find((a) => a.id === tab)
   // one width for the bar, the tabs, every tab's content and the footer
   const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
 
@@ -178,7 +194,7 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
         </div>
         <nav className={`mx-auto flex max-w-[1280px] gap-1 overflow-x-auto px-[var(--gutter)] pb-2.5 [scrollbar-width:none]`} aria-label="Report pages">
           {tabs.map((t) => {
-            const a = areas.find((x) => x.id === t)
+            const a = tabAreas.find((x) => x.id === t)
             const on = t === tab
             return (
               <button key={t} type="button" onClick={() => go(t)} aria-current={on ? 'page' : undefined}
@@ -195,6 +211,8 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
 
       {tab === 'overview' ? (
         <Overview host={host} total={new Set(all.map((r) => r.ruleId)).size} fails={fails} est={est ? est.lift10 : null} score={scoreOf(judged)} areas={areas} go={go} />
+      ) : current?.id === 'thankyou' && ty ? (
+        <ThankYouView area={current} thankYou={ty} reportId={id} reload={reload} device={device} setDevice={setDevice} focus={focus} />
       ) : current ? (
         <AreaView key={current.id} area={current} device={device} setDevice={setDevice} focus={focus} reportId={id} rescansLeft={data.rescansLeft ?? 0} reload={reload} />
       ) : null}
@@ -216,7 +234,7 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
 
 /* ── overview ───────────────────────────────────────────────────────────── */
 
-type AreaSummary = { id: Area; label: string; tab: string; blurb: string; blind: boolean; rows: Row[]; fails: Row[]; passed: Row[]; unknown: Row[]; score: number | null; page?: Page }
+type AreaSummary = { id: Area; label: string; tab: string; blurb: string; blind: boolean; rows: Row[]; fails: Row[]; passed: Row[]; unknown: Row[]; score: number | null; page?: Page; shots?: Shot[] }
 
 function Overview({ host, total, fails, est, score, areas, go }: { host: string; total: number; fails: Row[]; est: number | null; score: number; areas: AreaSummary[]; go: (t: Tab, id?: string) => void }) {
   const quick = fails.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length
@@ -329,7 +347,7 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
   const [selected, setSelected] = useState<string | null>(focus)
   const shotRef = useRef<HTMLDivElement | null>(null)
   const num = useMemo(() => new Map(area.fails.map((r, i) => [r.ruleId, i + 1])), [area.fails])
-  const flow = area.id === 'cart' || area.id === 'checkout'
+  const flow = area.id === 'cart' || area.id === 'checkout' || area.id === 'thankyou'
   const located = !flow ? area.page?.located?.[device] || null : null
   const fallback = !flow ? area.page?.preview?.[device] || null : null
 
@@ -362,7 +380,7 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
       setTimeout(() => document.getElementById(`f-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60)
     } else scrollToPin(id)
   }
-  const shots = flow ? (area.page?.images || []).filter((i) => i.role === area.id) : []
+  const shots = area.shots || (flow ? (area.page?.images || []).filter((i) => i.role === area.id) : [])
   const shotsHere = shots.filter((i) => i.device === device)
   const shown = shotsHere.length ? shotsHere : shots
   const shownDevice: Device = shotsHere.length ? device : shots[0]?.device || device
@@ -432,6 +450,31 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
             <Finding key={r.ruleId} r={r} kind="unknown" open={open.has(r.ruleId)} active={selected === r.ruleId} onToggle={() => toggle(r.ruleId)} />
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** The thank-you tab: the upload panel until there are results, then the results like any other part. */
+function ThankYouView({ area, thankYou, reportId, reload, device, setDevice, focus }: { area: AreaSummary; thankYou: ThankYou; reportId: string; reload: () => void; device: Device; setDevice: (d: Device) => void; focus: string | null }) {
+  const [replacing, setReplacing] = useState(false)
+  const has = thankYou.results.length > 0
+  if (!has || replacing) {
+    return (
+      <div className="mx-auto max-w-[1280px] px-[var(--gutter)] pt-8">
+        <h1 className="font-[family-name:var(--font-display)] text-[clamp(24px,3vw,32px)] font-bold tracking-[-0.03em] text-[var(--text)]">{area.label}</h1>
+        <p className="mt-1 max-w-[720px] text-[15px] text-[var(--text-muted)]">{area.blurb}</p>
+        <div className="mt-6 max-w-[860px]">
+          <ThankYouUpload reportId={reportId} checks={thankYou.checks} onDone={() => { setReplacing(false); reload() }} onCancel={has ? () => setReplacing(false) : undefined} />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div>
+      <AreaView key={`thankyou-${thankYou.at}`} area={area} device={device} setDevice={setDevice} focus={focus} reportId={reportId} rescansLeft={0} reload={reload} />
+      <div className="mx-auto max-w-[1280px] px-[var(--gutter)] pt-4">
+        <button type="button" onClick={() => setReplacing(true)} className="text-[14px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text)]">Upload new screenshots</button>
       </div>
     </div>
   )
