@@ -249,13 +249,25 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
 
       <div className="mt-8 grid grid-cols-3 gap-3 max-[810px]:grid-cols-2">
         {areas.map((a) => {
+          const strips = a.id === 'site' ? areas.filter((x) => ['homepage', 'category', 'product'].includes(x.id)).map(thumbOf).filter((u): u is string => !!u) : []
           const t = a.score === null ? null : TONE[toneOf(a.score)]
           const thumb = thumbOf(a)
           const checked = a.rows.length - a.unknown.length
           return (
             <button key={a.id} type="button" onClick={() => go(a.id)} className="group overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:border-[var(--border-strong)]">
               <div className="relative aspect-[16/10] overflow-hidden border-b border-[var(--border)] bg-[var(--surface-muted)]">
-                {thumb && <img src={thumb} alt="" className="block h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />}
+                {a.id === 'site' && strips.length > 1 ? (
+                  // store-wide checks: the same header on three different pages, stacked
+                  <div className="flex h-full flex-col">
+                    {strips.map((src, i) => (
+                      <div key={i} className="min-h-0 flex-1 overflow-hidden border-b border-[var(--border)] last:border-0">
+                        <img src={src} alt="" className="block w-full transition-transform duration-300 group-hover:scale-[1.02]" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  thumb && <img src={thumb} alt="" className="block h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />
+                )}
               </div>
               <div className="p-4">
                 <div className="flex items-baseline justify-between gap-2">
