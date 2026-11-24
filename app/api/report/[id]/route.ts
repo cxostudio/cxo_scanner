@@ -7,6 +7,7 @@ import type { ReportPageSnapshot } from '@/lib/fullReport/run'
 import { stripe } from '@/lib/stripe'
 
 export const runtime = 'nodejs'
+const RESCANS = 3
 export const dynamic = 'force-dynamic'
 
 /** The full report for /report?id=: results tagged by store area, screenshots as short-lived links, or the progress while it runs. */
@@ -14,7 +15,19 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const parent = await getJob(params.id).catch(() => null)
   if (!parent || !parent.scan_id.startsWith('report_') || parent.scan_id.includes('__')) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  const jobs = await listJobsByPrefix(`${parent.scan_id}__`)
+  const all = await listJobsByPrefix(`${parent.scan_id}__`)
+  // a page can be rescanned ("scan another page", scan_id …__<page>~<n>): show the latest finished scan of
+  // each page, and the newer one still running (or failed) next to it
+  const keys = Array.from(new Set(all.map((j) => j.answers?.page || 'product')))
+  const jobs = keys.map((k) => {
+    const mine = all.filter((j) => (j.answers?.page || 'product') === k)
+    return [...mine].reverse().find((j) => j.status === 'done') || mine[mine.length - 1]
+  })
+  const pending = new Map(keys.map((k, i) => {
+    const latest = all.filter((j) => (j.answers?.page || 'product') === k).pop()!
+    return [k, latest.id !== jobs[i].id ? { status: latest.status, url: latest.url, error: latest.status === 'failed' ? latest.error : null } : null]
+  }))
+  const rescansLeft = Math.max(0, RESCANS - all.filter((j) => j.scan_id.includes('~')).length)
   const done = parent.status === 'done'
 
   const tags = new Map<string, string[]>()
@@ -32,7 +45,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const s = snaps[k]
     const loc = (d: 'desktop' | 'mobile') => { const l = s?.located?.[d]; return l && link(l.file) ? { screenshot: link(l.file)!, width: l.width, height: l.height, pins: l.pins } : null }
     return {
-      key: page, how: j.answers?.how || '', url: j.url, status: j.status, error: j.status === 'failed' ? j.error : null,
+      key: page, how: j.answers?.how || '', url: j.url, status: j.status, error: j.status === 'failed' ? j.error : null, rescan: pending.get(page) || null,
       located: done ? { desktop: loc('desktop'), mobile: loc('mobile') } : null,
       // older reports kept the previews inline
       preview: done ? { desktop: link(s?.previewFiles?.desktop) || s?.previewDesktop || null, mobile: link(s?.previewFiles?.mobile) || s?.previewMobile || null } : null,
@@ -52,6 +65,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   return NextResponse.json({
     order,
+    rescansLeft,
     status: parent.status, url: parent.url, locale: parent.locale, createdAt: parent.created_at,
     answers: { revenue: parent.answers?.revenue, aov: parent.answers?.aov, cr: parent.answers?.cr }, pages,
   }, { headers: { 'Cache-Control': 'no-store' } })

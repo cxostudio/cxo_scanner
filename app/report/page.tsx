@@ -25,8 +25,10 @@ type Page = {
   preview: { desktop: string | null; mobile: string | null } | null
   images: Shot[]
   results: Row[]
+  /** a newer scan of this page the buyer asked for: running, or failed (the results shown stay the previous ones) */
+  rescan?: { status: string; url: string; error: string | null } | null
 }
-type Report = { order?: OrderInfo | null; status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[] }
+type Report = { order?: OrderInfo | null; rescansLeft?: number; status: string; url: string; locale: string; createdAt: string; answers: { revenue?: string; aov?: string; cr?: string }; pages: Page[] }
 
 // shopping order; store-wide checks last, they are seen on every page
 const AREAS: { id: Area; label: string; tab: string; page: Page['key']; blurb: string }[] = [
@@ -50,6 +52,7 @@ export default function ReportPage() {
   const [id, setId] = useState<string | null>(null)
   const [data, setData] = useState<Report | null>(null)
   const [missing, setMissing] = useState(false)
+  const [tick, setTick] = useState(0)
 
   useEffect(() => { setId(new URLSearchParams(window.location.search).get('id')) }, [])
   useEffect(() => {
@@ -62,18 +65,19 @@ export default function ReportPage() {
       if (!r || r.status === 404) { setMissing(true); return }
       const d = (await r.json()) as Report
       setData(d)
-      if (d.status !== 'done' && d.status !== 'failed') timer = setTimeout(load, 5000)
+      const rescanning = d.pages.some((p) => p.rescan && p.rescan.status !== 'failed')
+      if ((d.status !== 'done' && d.status !== 'failed') || rescanning) timer = setTimeout(load, 5000)
     }
     load()
     return () => { stop = true; clearTimeout(timer) }
-  }, [id])
+  }, [id, tick])
 
   if (missing) return <Shell><p className="text-[var(--text-muted)]">We can't find this report. Check the link in your email, or reply to it and we'll sort it out.</p></Shell>
   // the first load: just the logo spinner (the report itself appears in a second)
   if (!data) return <LogoSpinner label="Loading your report" />
   if (data.status === 'failed') return <Shell><h1 className="h1">We couldn't finish your report</h1><p className="mt-3 text-[var(--text-muted)]">Something on {hostOf(data.url)} stopped our scan. We've been notified and will get back to you by email.</p></Shell>
   if (data.status !== 'done') return <Progress data={data} />
-  return <ReportView data={data} id={id!} />
+  return <ReportView data={data} id={id!} reload={() => setTick((t) => t + 1)} />
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -103,7 +107,7 @@ function Progress({ data }: { data: Report }) {
 
 /* ── the report ─────────────────────────────────────────────────────────── */
 
-function ReportView({ data, id }: { data: Report; id: string }) {
+function ReportView({ data, id, reload }: { data: Report; id: string; reload: () => void }) {
   const host = hostOf(data.url)
   const all = useMemo(() => data.pages.flatMap((p) => p.results), [data])
   const judged = all.filter((r) => !isUnknown(r))
@@ -192,7 +196,7 @@ function ReportView({ data, id }: { data: Report; id: string }) {
       {tab === 'overview' ? (
         <Overview host={host} total={new Set(all.map((r) => r.ruleId)).size} fails={fails} est={est ? est.lift10 : null} score={scoreOf(judged)} areas={areas} go={go} />
       ) : current ? (
-        <AreaView key={current.id} area={current} device={device} setDevice={setDevice} focus={focus} />
+        <AreaView key={current.id} area={current} device={device} setDevice={setDevice} focus={focus} reportId={id} rescansLeft={data.rescansLeft ?? 0} reload={reload} />
       ) : null}
 
       {/* ── next step ── */}
@@ -320,7 +324,7 @@ function Unknown() {
 
 /* ── one part of the store ──────────────────────────────────────────────── */
 
-function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; device: Device; setDevice: (d: Device) => void; focus: string | null }) {
+function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reload }: { area: AreaSummary; device: Device; setDevice: (d: Device) => void; focus: string | null; reportId: string; rescansLeft: number; reload: () => void }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []))
   const [selected, setSelected] = useState<string | null>(focus)
   const shotRef = useRef<HTMLDivElement | null>(null)
@@ -385,6 +389,10 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
           )}
         </div>
       </div>
+
+      {(area.id === 'category' || area.id === 'product') && area.page && (
+        <Rescan reportId={reportId} page={area.id} current={area.page} left={rescansLeft} reload={reload} />
+      )}
 
       <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* the page, pinned */}
@@ -552,4 +560,66 @@ function FeedbackBox() {
       )}
     </div>
   )
+}
+
+/* ── scan another page ──────────────────────────────────────────────────── */
+
+/** Swap the collection or product page the report scanned for one the buyer picks (3 per report). */
+function Rescan({ reportId, page, current, left, reload }: { reportId: string; page: 'category' | 'product'; current: Page; left: number; reload: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [state, setState] = useState<'idle' | 'sending' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const what = page === 'category' ? 'collection' : 'product'
+  const r = current.rescan
+  const running = r && r.status !== 'failed'
+  const submit = async () => {
+    setState('sending'); setError('')
+    const res = await fetch(api(`/report/${reportId}/rescan`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page, url }) }).catch(() => null)
+    const d = res ? await res.json().catch(() => ({})) : {}
+    if (!res || !res.ok) { setState('error'); setError((d as { error?: string }).error || 'Something went wrong. Try again.'); return }
+    setState('idle'); setOpen(false); setUrl(''); reload()
+  }
+  if (running) return (
+    <div className="mt-5 flex items-center gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--bg-subtle)] px-4 py-3 text-[14px] text-[var(--text)]">
+      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[var(--text-muted)] border-t-transparent" aria-hidden />
+      <span>Scanning <b>{pathOf(r!.url)}</b>{page === 'product' ? ', with its cart and checkout' : ''}. About 3 minutes: this tab updates by itself. Until then you see the previous page.</span>
+    </div>
+  )
+  return (
+    <div className="mt-5 flex flex-col gap-3">
+      {r?.status === 'failed' && (
+        <p className="rounded-[14px] px-4 py-3 text-[14px]" style={{ background: 'var(--result-fail-bg)', color: 'var(--result-fail-fg)' }}>We couldn't scan {pathOf(r.url)}{r.error ? `: ${r.error}` : '.'} Your previous results stay.</p>
+      )}
+      {!open ? (
+        <p className="text-[14px] text-[var(--text-muted)]">
+          {howPicked(current.how)} <b className="text-[var(--text)]">{pathOf(current.url)}</b>.{' '}
+          {left > 0 ? <button type="button" onClick={() => setOpen(true)} className="font-semibold text-[var(--text)] underline">Scan another {what}</button> : <span>You have used your 3 page changes.</span>}
+        </p>
+      ) : (
+        <div className="flex max-w-[720px] flex-col gap-2 rounded-[14px] border border-[var(--border)] p-4">
+          <label className="text-[14px] font-semibold text-[var(--text)]" htmlFor={`rescan-${page}`}>Which {what} should we scan instead?</label>
+          <div className="flex flex-wrap gap-2">
+            <input id={`rescan-${page}`} value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && url.trim()) submit() }} placeholder={`Paste the link of a ${what} page from your store`}
+              className="min-w-[240px] flex-1 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[15px] text-[var(--text)] outline-none focus:border-[var(--border-strong)]" />
+            <button type="button" onClick={submit} disabled={!url.trim() || state === 'sending'} className="cxo-btn cxo-btn-primary !h-auto !py-2.5 disabled:opacity-50">{state === 'sending' ? 'Starting…' : 'Scan this page'}</button>
+            <button type="button" onClick={() => { setOpen(false); setError('') }} className="px-2 text-[14px] text-[var(--text-muted)] underline">Cancel</button>
+          </div>
+          <p className="text-[13px] text-[var(--text-muted)]">About 3 minutes{page === 'product' ? '. The cart, checkout and general elements are rescanned with it' : ''}. {left} of 3 page changes left.</p>
+          {state === 'error' && <p className="text-[13px]" style={{ color: 'var(--result-fail-fg)' }}>{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** How the scanned page was chosen, in words a buyer understands. */
+function howPicked(how: string): string {
+  if (how === 'chosen by you') return 'You chose'
+  if (how === 'best-selling' || how === 'best seller') return 'We scanned your best seller,'
+  if (how === 'catalog' || how === 'page') return 'We scanned the first product of your catalogue,'
+  if (how === 'the page you gave us') return 'We scanned the page you gave us,'
+  if (how === 'all products') return 'We scanned your all-products page,'
+  if (how) return `We scanned the ${how},`
+  return 'We scanned'
 }

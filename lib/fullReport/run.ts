@@ -46,19 +46,23 @@ export async function startReport(input: { email: string; url: string; locale: s
 export async function kickoff(parent: ScanJob): Promise<void> {
   try {
     const pages = await pickReportPages(parent.url)
-    await Promise.all(pages.map(async (p) => {
-      const child = await createJob({
-        scanId: `${parent.scan_id}__${p.key}`, email: parent.email, url: p.url, locale: parent.locale,
-        answers: { ...(parent.answers || {}), kind: 'report', page: p.key, how: p.how }, origin: parent.origin,
-      })
-      const r = await fetch(api('/report/page'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-report-key': internalKey() }, body: JSON.stringify({ id: child.id }) })
-      if (!r.ok) await failJob(child.id, `page start ${r.status}`)
-    }))
+    await Promise.all(pages.map((p) => startPageJob(parent, p.key, p.url, p.how || '')))
   } catch (e) {
     console.error('[report] kickoff failed', e)
     await failJob(parent.id, e instanceof Error ? e.message : 'kickoff failed')
     await alertTeam(parent, [`The report could not start: ${e instanceof Error ? e.message : 'kickoff failed'}`])
   }
+}
+
+/** One page of a report: its job, then its scan in its own function. suffix: "~<n>" for a rescan. */
+export async function startPageJob(parent: ScanJob, key: ReportPageKey, url: string, how: string, suffix = ''): Promise<ScanJob> {
+  const child = await createJob({
+    scanId: `${parent.scan_id}__${key}${suffix}`, email: parent.email, url, locale: parent.locale,
+    answers: { ...(parent.answers || {}), kind: 'report', page: key, how }, origin: parent.origin,
+  })
+  const r = await fetch(api('/report/page'), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-report-key': internalKey() }, body: JSON.stringify({ id: child.id }) }).catch(() => null)
+  if (!r || !r.ok) await failJob(child.id, `page start ${r ? r.status : 'failed'}`)
+  return child
 }
 
 /** A secret only this deployment knows, so /api/report/page can't be called from outside. */
@@ -84,7 +88,7 @@ export async function runPage(job: ScanJob): Promise<void> {
       if (res.ok && Array.isArray(data.results)) { results = data.results; images = data.reportImages || []; break }
       lastErr = data.error || `scan ${res.status}`
       // the best seller redirects or is gone (sold out, another market): once, another product of the store
-      if (res.status === 422 && job.answers?.page === 'product' && attempt === 1) {
+      if (res.status === 422 && job.answers?.page === 'product' && attempt === 1 && !job.scan_id.includes('~')) {
         const origin = new URL(job.url).origin
         const siblings = await listJobsByPrefix(`${parentScanId}__`).catch(() => [] as ScanJob[])
         const col = siblings.find((j) => j.answers?.page === 'category')?.url
