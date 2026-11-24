@@ -365,17 +365,17 @@ function BrowserFrame({ host, path, src }: { host: string; path: string; src: st
 
 /** The path shown in the address bar: the scanned URL's, or the usual one for the cart and checkout. */
 function addressPath(a: AreaSummary): string {
-  if (a.id === 'cart') return '/cart'
+  // a drawer opens on the product page (the scan saves a separate /cart shot only when there is a drawer)
+  if (a.id === 'cart') return (a.page?.images || []).filter((i) => i.role === 'cart' && i.device === 'desktop').length > 1 && a.page?.url ? pathOf(a.page.url) : '/cart'
   if (a.id === 'checkout') return '/checkout'
   return a.page?.url ? pathOf(a.page.url) : '/'
 }
 
 function thumbOf(a: AreaSummary): string | null {
   if (a.id === 'cart' || a.id === 'checkout') {
+    // the first cart screenshot is what "Add to cart" opens: the drawer, or the cart page on stores without one
     const desk = (a.page?.images || []).filter((i) => i.role === a.id && i.device === 'desktop')
-    // the cart page reads better than the drawer (dimmed page behind it) at card size
-    const page = a.id === 'cart' ? desk.find((i) => !/drawer|panel|side/i.test(i.label)) || desk[1] : null
-    return page?.url || desk[0]?.url || a.page?.images.find((i) => i.role === a.id)?.url || null
+    return desk[0]?.url || a.page?.images.find((i) => i.role === a.id)?.url || null
   }
   return a.page?.located?.desktop?.screenshot || a.page?.preview?.desktop || null
 }
