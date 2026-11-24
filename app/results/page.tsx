@@ -375,7 +375,8 @@ function ResultsView() {
   )
 
   return (
-    <main className="cxo-page-in cxo-results min-h-screen">
+    <main className="cxo-page-in cxo-results relative isolate min-h-screen">
+      <div className="cxo-orbs" aria-hidden="true"><i /><i /><i /><i /></div>
       {/* test scans only (CXO studio and +test emails): label this scan blind in the lab */}
       {labId && (
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[var(--surface-muted)] px-[var(--gutter)] py-2.5 text-sm text-[var(--text)]">
