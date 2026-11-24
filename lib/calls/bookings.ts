@@ -146,7 +146,7 @@ async function remind(b: Booking, kind: '24h' | '1h'): Promise<string> {
   return `reminder ${kind} → ${b.email} ${res.sent ? 'sent' : `not sent (${res.error})`}`
 }
 
-/** Reminders due now. 24h: sent once between 24h and 3h before, unless booked less than 6h ago.
+/** Reminders due now. 24h: sent once between 24h and 3h before, in daytime (8:00 to 21:00 their time), unless booked less than 6h ago.
  *  1h: sent once between 65 and 10 minutes before, unless booked less than 2h ago. */
 export async function runCallReminders(opts: { dry?: boolean; now?: number } = {}): Promise<string[]> {
   const now = opts.now ?? Date.now()
@@ -157,8 +157,11 @@ export async function runCallReminders(opts: { dry?: boolean; now?: number } = {
   for (const b of (data || []) as Booking[]) {
     const left = new Date(b.start_time).getTime() - now
     const bookedAgo = now - new Date(b.created_at).getTime()
+    // the 24h one never goes out at night: between 8:00 and 21:00 in their time zone (else the next morning)
+    const hour = Number(new Date(now).toLocaleString('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: b.timezone || 'Europe/Brussels' }).slice(0, 2))
+    const daytime = hour >= 8 && hour < 21
     const kind = !b.reminded_1h && left <= 65 * MIN && left > 10 * MIN && bookedAgo > 2 * HOUR ? '1h'
-      : !b.reminded_24h && left <= 24 * HOUR && left > 3 * HOUR && bookedAgo > 6 * HOUR ? '24h' : null
+      : !b.reminded_24h && daytime && left <= 24 * HOUR && left > 3 * HOUR && bookedAgo > 6 * HOUR ? '24h' : null
     if (!kind) continue
     if (opts.dry) { out.push(`reminder ${kind} → ${b.email} (dry run)`); continue }
     if (!(await claim(b.uid, kind === '1h' ? 'reminded_1h' : 'reminded_24h'))) continue
