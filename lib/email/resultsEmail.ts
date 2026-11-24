@@ -21,6 +21,14 @@ export type ResultsEmailInput = {
   privacyUrl: string
   report?: boolean        // the paid full report is ready (not the free scan)
   reportOk?: boolean      // free scan: can the full report be delivered for this store (false: no report line)
+  page?: 'homepage' | 'product' | 'category' | 'other'  // the page the free scan ran on (names it in the title)
+}
+
+/** "Your homepage", "Votre page produit"...: the page the free scan ran on. */
+export function pageName(i: { page?: string }, locale: 'en' | 'fr'): string {
+  const en: Record<string, string> = { homepage: 'Your homepage', product: 'Your product page', category: 'Your collection page' }
+  const fr: Record<string, string> = { homepage: "Votre page d'accueil", product: 'Votre page produit', category: 'Votre page collection' }
+  return (locale === 'fr' ? fr : en)[i.page || ''] || (locale === 'fr' ? 'Votre page' : 'Your page')
 }
 
 // token values (app/tokens.css): text, muted, border, canvas, surface, fail, gain, finding
@@ -33,11 +41,11 @@ export const BODY = "'Inter Tight', 'Inter', 'Helvetica Neue', Arial, sans-serif
 
 const COPY = {
   en: {
-    subject: (i: ResultsEmailInput) => i.euroPerMonth ? `Your product page leaves about ${i.euroPerMonth} a month on the table` : `Your conversion scan of ${i.host} is ready`,
+    subject: (i: ResultsEmailInput) => i.euroPerMonth ? `${pageName(i, 'en')} leaves about ${i.euroPerMonth} a month on the table` : `Your conversion scan of ${i.host} is ready`,
     h1Plain: (i: ResultsEmailInput) => `Your conversion scan of ${i.host} is ready`,
     preheader: (i: ResultsEmailInput) => `${i.toFix} checkpoints to fix on ${i.host}. Start with the 3 inside.`,
     eyebrow: (i: ResultsEmailInput) => `Free conversion scan · ${i.host}`,
-    h1a: 'Your product page leaves about', h1b: 'a month on the table',
+    h1a: '', h1b: 'a month on the table',
     intro: (i: ResultsEmailInput) =>
       `We ran ${i.checked} conversion checkpoints on your page. ${i.toFix} need fixing${i.easyHigh ? `, ${i.easyHigh} of them high-impact and easy` : ''}. Here is where to start.`,
     score: 'Conversion score', tone: (s: number) => (s >= 80 ? 'Good' : s >= 50 ? 'Room to grow' : 'Leaking sales'),
@@ -51,11 +59,11 @@ const COPY = {
     privacy: 'Privacy policy',
   },
   fr: {
-    subject: (i: ResultsEmailInput) => i.euroPerMonth ? `Votre page produit laisse environ ${i.euroPerMonth} par mois sur la table` : `Votre scan de conversion de ${i.host} est prêt`,
+    subject: (i: ResultsEmailInput) => i.euroPerMonth ? `${pageName(i, 'fr')} laisse environ ${i.euroPerMonth} par mois sur la table` : `Votre scan de conversion de ${i.host} est prêt`,
     h1Plain: (i: ResultsEmailInput) => `Votre scan de conversion de ${i.host} est prêt`,
     preheader: (i: ResultsEmailInput) => `${i.toFix} points de contrôle à corriger sur ${i.host}. Commencez par les 3 à l’intérieur.`,
     eyebrow: (i: ResultsEmailInput) => `Scan de conversion gratuit · ${i.host}`,
-    h1a: 'Votre page produit laisse environ', h1b: 'par mois sur la table',
+    h1a: '', h1b: 'par mois sur la table',
     intro: (i: ResultsEmailInput) =>
       `Nous avons passé ${i.checked} points de contrôle sur votre page. ${i.toFix} sont à corriger${i.easyHigh ? `, dont ${i.easyHigh} à fort impact et faciles` : ''}. Voici par où commencer.`,
     score: 'Score de conversion', tone: (s: number) => (s >= 80 ? 'Bon' : s >= 50 ? 'Marge de progression' : 'Ventes perdues'),
@@ -104,7 +112,8 @@ const REPORT_COPY = {
 
 export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html: string; text: string } {
   const base = COPY[i.locale] ?? COPY.en
-  const t = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
+  const t0 = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
+  const t = t0.h1a ? t0 : { ...t0, h1a: i.locale === 'fr' ? `${pageName(i, 'fr')} laisse environ` : `${pageName(i, 'en')} leaves about` }
   // free scan: a call for stores that qualify, the report for the others. Full report: every buyer
   // showed intent by paying, so all of them are offered a call
   const nextLine = i.report || i.qualified ? 'call' : i.reportOk === false ? '' : 'report'

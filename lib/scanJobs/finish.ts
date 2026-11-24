@@ -2,6 +2,7 @@
 import { completeJob, markEmailed, type ScanJob, type ScanSnapshot } from './store'
 import { reportEligibility } from '@/lib/fullReport/eligible'
 import { buildResultsEmail } from '@/lib/email/resultsEmail'
+import { detectPageTypeFromUrl } from '@/lib/conversionCheckpoints/pageType'
 import { sendEmail } from '@/lib/email/send'
 import { estimate, eur } from '@/lib/estimate'
 import { isQualified, scoreOf, type ScanResult } from '@/lib/report'
@@ -40,6 +41,7 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot, opts: { report
   try { host = new URL(snap.scanUrl).hostname.replace(/^www\./, '') } catch { /* keep */ }
   return buildResultsEmail({
     locale: fr ? 'fr' : 'en', host,
+    page: detectPageTypeFromUrl(/^https?:/i.test(snap.scanUrl || '') ? snap.scanUrl : `https://${snap.scanUrl || job.url}`),
     euroPerMonth: est ? shortEur(est.lift10, fr) : '',
     score: scoreOf(scored), toFix: failed.length, checked: base.length,
     easyHigh: failed.filter((r) => r.checkpoint?.priority === 'High' && r.checkpoint?.difficulty === 'Easy').length,
