@@ -2653,6 +2653,7 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
     const mobileP = opts.extended ? null : runMobile()
     await scrollForLazyContent(desktop)
     await cleanPage(desktop)
+    mark('d.scroll')
     let facts: Record<string, unknown> = {}
     let text = ''
     let hiddenText = ''
@@ -2680,8 +2681,10 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
       if (motion) facts.heroMotion = motion
       text = await desktop.evaluate(() => (document.body.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n')).catch(() => '')
       hiddenText = await readHiddenText(desktop)
+      mark('d.facts')
       desktopTiles = await tiles(desktop, 'desktop', DESKTOP.width, DESKTOP.height, DESKTOP.tiles).catch(() => [])
       desktopShare = await pageHeight(desktop).then((h) => Math.min(1, (DESKTOP.height * DESKTOP.tiles) / Math.max(h, 1))).catch(() => 1)
+      mark('d.tiles')
       if (text.trim().length > 200 && desktopTiles.length) break
     }
     resolveShare(desktopShare)
@@ -2694,10 +2697,12 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
       const gallery = await readGallery(desktop, process.env.SCAN_GALLERY_OVERVIEW === '1').catch(() => ({ count: 0, videos: 0, ratios: [] as number[] }) as { tile?: Tile; count: number; videos: number; ratios: number[] })
       galleryTile = gallery.tile
       ;(facts as Record<string, unknown>).gallery = { images: gallery.count, videos: gallery.videos, frameRatios: gallery.ratios }
+      mark('d.gallery')
       const tabs = await openTabs(desktop).catch(() => ({ tiles: [] as Tile[], text: '' }))
       tabTiles = tabs.tiles
       await desktop.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
       if (tabs.text) hiddenText = [hiddenText, `OPENED PRODUCT TABS:\n${tabs.text}`].filter(Boolean).join('\n---\n')
+      mark('d.tabs')
     }
     if (text.trim().length <= 200 || !desktopTiles.length)
       throw new PageCheckError('unreachable', "We couldn't read this page: it kept reloading or blocked our visit. Try again, or try another product URL.")
