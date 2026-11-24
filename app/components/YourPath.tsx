@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { SalesProjection, projection } from "./SalesProjection";
-import { ScanLaptop, type LaptopShot } from "./ScanLaptop";
+import { type LaptopShot } from "./ScanLaptop";
+import { LaptopMockup } from "./LaptopMockup";
 
 /**
  * End of the results page: what fixing the leaks is worth, and the path from today's scan.
@@ -291,16 +292,10 @@ export function YourPath({
             <p className="mt-2 font-[family-name:var(--font-display)] text-[22px] font-bold leading-[1.25] tracking-[-0.02em] text-[var(--text)] sm:text-[26px]">
               One page scanned. Your whole store is next.
             </p>
-            <p className="mt-3 text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              This was a snapshot: {checked}
-              {total ? ` of our ${total}` : ""} checkpoints, on one page.
-            </p>
             {laptop && (
-              <ScanLaptop
-                shot={laptop.shot}
-                fallback={laptop.fallback}
-                passed={laptop.passed}
-              />
+              <div className="mt-6">
+                <LaptopMockup src={laptop.shot?.screenshot || laptop.fallback || null} />
+              </div>
             )}
           </div>
           <ol className="flex min-w-0 flex-col">
@@ -335,9 +330,9 @@ export function YourPath({
                   Today: your product page scan
                 </p>
                 <p className="mt-1 text-[15px] leading-[1.6] text-[var(--text-muted)]">
-                  {checked} checkpoints run,{" "}
-                  <strong className="text-[var(--text)]">{toFix} to fix</strong>
-                  . Start with the high-impact, easy ones above.
+                  {checked}
+                  {total ? ` of ${total}` : ""} checkpoints,{" "}
+                  <strong className="text-[var(--text)]">{toFix} to fix</strong>.
                 </p>
               </div>
             </li>

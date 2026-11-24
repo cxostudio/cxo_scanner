@@ -36,7 +36,7 @@ export function PageView({
   const frame =
     device === 'desktop'
       ? 'rounded-[var(--radius-lg)] border border-[var(--border-strong)]'
-      : 'ml-auto w-full max-w-[340px] rounded-[34px] border-[8px] border-[var(--text)] max-[1023px]:mx-auto'
+      : 'ml-auto w-full max-w-[340px] rounded-[34px] max-[560px]:max-w-[280px] border-[8px] border-[var(--text)] max-[1023px]:mx-auto'
   return (
     <div className={`overflow-hidden bg-[var(--surface)] ${frame}`}>
       {device === 'desktop' && (
@@ -47,7 +47,7 @@ export function PageView({
           <span className="ml-2 min-w-0 truncate text-xs text-[var(--text-muted)]">{url}</span>
         </div>
       )}
-      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
+      <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)] max-[560px]:max-h-[460px]' : 'aspect-[9/19.5] max-h-[calc(100vh-80px)]'}`}>
         {shot ? (
           <div className="relative">
             {/* keep the preview under it until the pinned screenshot has downloaded */}

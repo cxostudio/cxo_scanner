@@ -84,7 +84,8 @@ export function CheckpointResultBody({
           <p className="font-[family-name:var(--font-display)] text-[17px] font-bold tracking-[-0.01em] text-[var(--result-fg)]">
             Examples:
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* phones: a row to swipe through; from 640px: the grid */}
+          <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
             {checkpoint.examples.map((ex) => (
               <button
                 key={ex.url}
@@ -93,9 +94,9 @@ export function CheckpointResultBody({
                   e.stopPropagation()
                   setExamplePreview(ex)
                 }}
-                className="group w-full cursor-pointer overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)]"
+                className="group w-[78%] shrink-0 snap-start cursor-pointer overflow-hidden rounded-[var(--radius-md)] border sm:w-full border-[var(--border)] bg-[var(--surface)] text-left transition hover:border-[var(--border-strong)]"
               >
-                <div className="relative aspect-auto sm:aspect-video w-full overflow-hidden bg-zinc-100">
+                <div className="relative aspect-[4/3] w-full overflow-hidden bg-[var(--surface-muted)] sm:aspect-video">
                   <img
                     src={ex.thumbnailUrl}
                     alt={ex.filename}

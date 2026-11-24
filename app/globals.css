@@ -334,6 +334,8 @@ a.border-zinc-300 {
   100% { transform: translate3d(18%, -2%, 0) rotate(8deg) scale(1.05); }
 }
 @media (prefers-reduced-motion: reduce) { .cxo-wash::before { animation: none; } }
+/* results page: a calmer wash behind the verdict (the findings carry the colour there) */
+body:has(.cxo-results) .cxo-wash::before { opacity: 0.12; }
 
 @layer components {
 /* ───────────────────────────────────────────────────────────────────────────

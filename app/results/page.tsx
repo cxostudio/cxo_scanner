@@ -135,6 +135,8 @@ function ResultsView() {
   const [located, setLocated] = useState<Record<Device, LocateState>>({ desktop: null, mobile: null })
   const [device, setDevice] = useState<Device>('desktop')
   const [selected, setSelected] = useState<string | null>(null)
+  // phones: the check of the pin just tapped moves to the top of the list (keeps its number)
+  const [lead, setLead] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [visible, setVisible] = useState(10)
   // pitch mockups for the free scan: '' (current), 'b' (locked rows in the list), 'cd' (findings free, fixes and the rest of the store paid)
@@ -286,6 +288,7 @@ function ResultsView() {
     setSelected(id)
     if (!results) return
     if (from === 'pin') {
+      setLead(window.matchMedia('(min-width: 1024px)').matches ? null : id)
       const idx = results.findIndex((r) => r.ruleId === id)
       if (idx >= visible) setVisible(idx + 1)
       setOpen((prev) => new Set(prev).add(id))
@@ -372,7 +375,7 @@ function ResultsView() {
   )
 
   return (
-    <main className="cxo-page-in min-h-screen">
+    <main className="cxo-page-in cxo-results min-h-screen">
       {/* test scans only (CXO studio and +test emails): label this scan blind in the lab */}
       {labId && (
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[var(--surface-muted)] px-[var(--gutter)] py-2.5 text-sm text-[var(--text)]">
@@ -499,7 +502,7 @@ function ResultsView() {
                       <div
                         key={r.ruleId}
                         id={`f-${r.ruleId}`}
-                        className={`scroll-mt-6 rounded-[16px] border px-4 transition-colors ${active || isOpen ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
+                        className={`scroll-mt-6 rounded-[16px] border px-4 transition-colors ${lead === r.ruleId ? 'max-[1023px]:order-first' : ''} ${active || isOpen ? 'border-[var(--border-strong)] bg-[var(--bg-subtle)]' : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]'}`}
                         style={{ ['--result-fg' as string]: `var(--result-${t}-fg)`, ['--result-bg' as string]: `var(--result-${t}-bg)` }}
                       >
                         <button

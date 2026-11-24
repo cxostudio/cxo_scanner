@@ -168,10 +168,9 @@ type Coverage = {
 
 
 const WHAT_YOU_GET = [
-  'Every checkpoint on your homepage, collections, product pages, cart and checkout',
-  'Each issue ranked by its impact on revenue, so you know what to fix first',
-  'The fix, step by step, and why it matters, backed by research and A/B tests',
-  'Online, ready to share with your developer or agency',
+  'Issues ranked by revenue impact',
+  'The fix for each, and why it works',
+  'Online, easy to share with your developer',
 ]
 
 /**
@@ -230,25 +229,25 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
               {estimated ? `${cov ? left : lockedCount} more checkpoints are waiting on your store` : `${lockedCount} more ${lockedCount === 1 ? 'issue' : 'issues'} to fix on this page`}
             </h3>}
             <p className="text-[15px] leading-[1.6] text-[var(--text-muted)]">
-              {embedded ? <>If the findings ring true, get the full report: we scan every page your shoppers go through, from your homepage to the checkout, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.</> : <>The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.</>}
+              {embedded ? <>Every page your shoppers go through, checked the same way.</> : <>The free scan ran {ran.length || 'a few'}{cov ? ` of our ${cov.total}` : ''} checkpoints, on one page. The full report is our complete e-commerce conversion audit: every page a shopper goes through, from your homepage to the payment step, checked against what we have seen work on hundreds of stores and in 200+ A/B tests.</>}
             </p>
             {cov && (
-              <ul className="flex flex-col overflow-hidden rounded-[12px] border border-[var(--border)]">
+              <ul className="flex flex-col border-y border-[var(--border)]">
                 {cov.pages
                   .filter((p) => p.checks > 0)
                   .map((p) => {
                     const sc = estimated ? scanned.get(p.key) : p.key === pageKey ? { run: 0, found: toFix } : undefined
                     return (
-                      <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3 last:border-b-0">
+                      <li key={p.key} className="flex items-center gap-3 border-b border-[var(--border)] py-3 last:border-b-0">
                         {sc ? (
-                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--result-pass-bg)] text-[var(--result-pass-fg)]"><Check /></span>
+                          <span className="grid h-5 w-5 shrink-0 place-items-center text-[var(--result-pass-fg)]"><Check /></span>
                         ) : (
-                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-muted)]"><LockIcon size={11} /></span>
+                          <span className="grid h-5 w-5 shrink-0 place-items-center text-[var(--text-subtle)]"><LockIcon size={12} /></span>
                         )}
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
                           <span className="min-w-0 text-sm font-semibold text-[var(--text)]">
                             {p.label}{' '}
-                            <span className="font-normal text-[var(--text-muted)]">· {sc && estimated ? <span className="text-[var(--result-fail-fg)]">{sc.found} {sc.found === 1 ? 'issue' : 'issues'} found in {sc.run} free checkpoints</span> : p.hint || 'not scanned yet'}</span>
+                            <span className="font-normal text-[var(--text-muted)]">{sc && estimated ? <span className="text-[var(--result-fail-fg)]">· {sc.found} {sc.found === 1 ? 'issue' : 'issues'} in your free scan</span> : p.hint ? `· ${p.hint}` : ''}</span>
                           </span>
                           <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
                             {sc && !estimated ? (
@@ -256,7 +255,7 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                                 <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
                               </>
                             ) : (
-                              <b className="text-[var(--text)]">{p.checks} checkpoints</b>
+                              <span className="tabular-nums">{p.checks} checks</span>
                             )}
                           </span>
                         </span>
@@ -266,17 +265,13 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
               </ul>
             )}
             {/* the bonus: the real-store screenshots behind the checkpoints, and the brands we studied */}
-            <div className="flex flex-col gap-3 overflow-hidden rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] p-4">
-              <div className="flex items-start gap-3 max-[560px]:flex-col max-[560px]:gap-2">
-                <span className="shrink-0 rounded-full bg-[var(--text)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--text-inverse)]">Bonus</span>
-                <p className="text-[14px] leading-snug text-[var(--text)]">
-                  <b>{cov && cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : 'Hundreds of'} real-store screenshots</b>
-                  <span className="text-[var(--text-muted)]">. We studied leading e-commerce brands to build every checkpoint: see how they solve each issue before you brief your developer.</span>
-                </p>
-              </div>
+            <div className="flex flex-col gap-3 overflow-hidden">
+              <p className="text-[14px] leading-snug text-[var(--text-muted)]">
+                <b className="font-semibold text-[var(--text)]">Included: {cov && cov.examples > 50 ? `${Math.floor(cov.examples / 10) * 10}+` : 'hundreds of'} real-store examples</b>, from brands like these, so you see each fix done right.
+              </p>
               <BrandMarquee />
             </div>
-            <ul className="flex flex-col gap-2 text-[14px] leading-snug text-[var(--text)]">
+            <ul className="flex flex-wrap gap-x-5 gap-y-2 text-[14px] leading-snug text-[var(--text)]">
               {WHAT_YOU_GET.map((w) => (
                 <li key={w} className="flex items-start gap-2">
                   <span className="mt-[3px] shrink-0 text-[var(--result-pass-fg)]"><Check /></span>

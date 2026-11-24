@@ -3,6 +3,7 @@
 // checks: Live checkpoints the scanner runs for that page (what the paid report delivers today).
 // expectedIssues: checks x the share that failed on that page across our lab stores (an estimate).
 // Store-wide checks run on every page; they are counted once, with the product page.
+import { isUploadRule } from '@/lib/fullReport/upload'
 import { NextResponse } from 'next/server'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { buildCheckpointPresentationMap } from '@/lib/conversionCheckpoints/checkpointPresentation'
@@ -107,6 +108,7 @@ export async function GET(req: Request) {
     const rate = t && t.judged >= 20 ? t.fail / t.judged : 0.3
     return { key: p.key, label: p.label, checks, expectedIssues: Math.round(checks * rate) }
   })
+  const uploadChecks = res.rules.filter(isUploadRule).length
   const presentation = buildCheckpointPresentationMap(res.records)
   const examples = live.reduce((n, r) => n + (presentation.get(r.id)?.examples?.length || 0), 0)
   const data: Coverage = {
@@ -116,7 +118,11 @@ export async function GET(req: Request) {
     accuracy: labelled >= 200 ? Math.round((1000 * agree) / labelled) / 10 : null,
     examples,
     siteIds: live.filter((r) => pageOf.get(r.id) === 'site').map((r) => r.id),
-    pages: pages.map((p) => (p.key === 'site' ? { ...p, hint: 'header, menu, footer, speed' } : p)),
+    pages: [
+      ...pages.map((p) => (p.key === 'site' ? { ...p, hint: 'header, menu, footer, speed' } : p)),
+      // the thank-you page: judged from the buyer's screenshots in the report (lib/fullReport/upload), not in the total
+      ...(uploadChecks ? [{ key: 'thankyou', label: 'Thank-you page', hint: 'from your screenshots', checks: uploadChecks, expectedIssues: 0 }] : []),
+    ],
   }
   cache = { at: Date.now(), data }
   return NextResponse.json(data, EDGE)
