@@ -249,22 +249,14 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
 
       <div className="mt-8 grid grid-cols-3 gap-3 max-[810px]:grid-cols-2">
         {areas.map((a) => {
-          const strips = a.id === 'site' ? areas.filter((x) => ['homepage', 'category', 'product'].includes(x.id)).map(thumbOf).filter((u): u is string => !!u) : []
           const t = a.score === null ? null : TONE[toneOf(a.score)]
           const thumb = thumbOf(a)
           const checked = a.rows.length - a.unknown.length
           return (
             <button key={a.id} type="button" onClick={() => go(a.id)} className="group overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:border-[var(--border-strong)]">
               <div className="relative aspect-[16/10] overflow-hidden border-b border-[var(--border)] bg-[var(--surface-muted)]">
-                {a.id === 'site' && strips.length > 1 ? (
-                  // store-wide checks: the same header on three different pages, stacked
-                  <div className="flex h-full flex-col">
-                    {strips.map((src, i) => (
-                      <div key={i} className="min-h-0 flex-1 overflow-hidden border-b border-[var(--border)] last:border-0">
-                        <img src={src} alt="" className="block w-full transition-transform duration-300 group-hover:scale-[1.02]" />
-                      </div>
-                    ))}
-                  </div>
+                {a.id === 'site' ? (
+                  <SiteWide host={host} />
                 ) : (
                   thumb && <img src={thumb} alt="" className="block h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />
                 )}
@@ -309,6 +301,40 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** General elements card: not a screenshot but the idea. Three pages stacked, each with the same header
+ *  and footer drawn crisp, the page content faded. The store's favicon sits in the header. */
+function SiteWide({ host }: { host: string }) {
+  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
+  const Page = ({ front }: { front?: boolean }) => (
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-[10px] border bg-[var(--surface)]" style={{ borderColor: front ? 'var(--border-strong)' : 'var(--border)', boxShadow: front ? 'var(--shadow-raised)' : 'none' }}>
+      {/* shared header: logo, menu, search, cart */}
+      <div className="flex h-[17%] shrink-0 items-center gap-[5%] border-b border-[var(--border)] px-[5%]">
+        {front ? <img src={favicon} alt="" className="h-[58%] w-auto rounded-[3px]" /> : <span className="h-[50%] aspect-square rounded-[3px] bg-[var(--border-strong)]" />}
+        <span className="flex flex-1 gap-[6%]">{[0, 1, 2].map((i) => <span key={i} className="h-[3px] w-[16%] rounded-full" style={{ background: front ? 'var(--text-muted)' : 'var(--border-strong)' }} />)}</span>
+        <span className="h-[42%] w-[22%] rounded-full border" style={{ borderColor: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />
+        <span className="h-[42%] aspect-square rounded-[3px] border-[1.5px]" style={{ borderColor: front ? 'var(--text-muted)' : 'var(--border-strong)' }} />
+      </div>
+      {/* what changes page to page: faded */}
+      <div className="flex flex-1 flex-col gap-[6%] p-[5%] opacity-60">
+        <span className="h-[38%] rounded-[4px] bg-[var(--bg-subtle)]" />
+        <span className="grid flex-1 grid-cols-3 gap-[5%]">{[0, 1, 2].map((i) => <span key={i} className="rounded-[4px] bg-[var(--bg-subtle)]" />)}</span>
+      </div>
+      {/* shared footer: links and trust badges */}
+      <div className="flex h-[15%] shrink-0 items-center gap-[4%] border-t border-[var(--border)] bg-[var(--surface-muted)] px-[5%]">
+        {[0, 1, 2].map((i) => <span key={i} className="h-[3px] w-[12%] rounded-full" style={{ background: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />)}
+        <span className="ml-auto flex gap-[6px]">{[0, 1, 2].map((i) => <span key={i} className="h-[7px] w-[11px] rounded-[2px] border" style={{ borderColor: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />)}</span>
+      </div>
+    </div>
+  )
+  return (
+    <div className="relative h-full w-full bg-[var(--surface-muted)]" aria-hidden="true">
+      <div className="absolute left-[27%] top-[8%] h-[72%] w-[50%] transition-transform duration-300 group-hover:-translate-y-[3px]"><Page /></div>
+      <div className="absolute left-[23%] top-[13%] h-[72%] w-[50%] transition-transform duration-300 group-hover:-translate-y-[1.5px]"><Page /></div>
+      <div className="absolute left-[19%] top-[18%] h-[72%] w-[50%]"><Page front /></div>
     </div>
   )
 }
