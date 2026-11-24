@@ -15,9 +15,9 @@ import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { useOffer } from '../components/useOffer'
 import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located, type LocateState } from '../components/PinnedPage'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, TONE, toneOf, type ScanResult } from '@/lib/report'
+import { callLink } from '@/lib/call'
 
 // Calendly once available; until then the existing booking form (same as YourPath)
-const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const CHECKLIST_URL = process.env.NEXT_PUBLIC_CHECKLIST_URL || 'https://cxo.studio/checklist'
 // the paid full report (a payment link); until it exists, the full-scan page
 const FULL_REPORT_PRICE = process.env.NEXT_PUBLIC_FULL_REPORT_PRICE || ''
@@ -543,7 +543,7 @@ function ResultsView() {
                 {/* free scan: the other findings exist but stay in the full report */}
                 {/* free scan: this section only gives the findings; the report is pitched in "What's next" */}
                 {gate && report.freeOnly ? null : gate ? (
-                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
+                  <FullStoreOffer variant={gate} pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} fixesShown={report.failed.length} lockedCount={report.freeOnly ? report.remaining : report.locked.length} estimated={report.freeOnly} freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={callLink({ source: 'free-scan', email, store: url })} price={offer.price} offer={offer} />
                 ) : (
                 <LockedFindings
                   locked={report.locked}
@@ -551,7 +551,7 @@ function ResultsView() {
                   monthlyAtStake={numbers ? numbers.lift10 : null}
                   shortEur={shortEur}
                   buyUrl={buyUrl}
-                  callUrl={CALL_URL}
+                  callUrl={callLink({ source: 'free-scan', email, store: url })}
                   price={FULL_REPORT_PRICE}
                 />
                 )}
@@ -568,13 +568,13 @@ function ResultsView() {
             toFix={report ? (report.freeOnly ? report.failed.length : report.toFix) : 0}
             eur={eur}
             shortEur={shortEur}
-            callUrl={CALL_URL}
+            callUrl={callLink({ source: 'free-scan', email, store: url })}
             fullScanUrl={buyUrl}
             price={offer.price}
             host={host}
             offerSlot={
               gate && report?.freeOnly ? (
-                <FullStoreOffer embedded variant="cd" pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} lockedCount={report.remaining} estimated freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={CALL_URL} price={offer.price} offer={offer} />
+                <FullStoreOffer embedded variant="cd" pageKey={detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)} toFix={report.toFix} lockedCount={report.remaining} estimated freeRun={report.freeRun} ran={results.map((r) => ({ id: r.ruleId, failed: r.status === 'fail' }))} qualified={qualified} buyUrl={buyUrl} callUrl={callLink({ source: 'free-scan', email, store: url })} price={offer.price} offer={offer} />
               ) : undefined
             }
             laptop={

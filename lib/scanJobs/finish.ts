@@ -5,8 +5,8 @@ import { buildResultsEmail } from '@/lib/email/resultsEmail'
 import { sendEmail } from '@/lib/email/send'
 import { estimate, eur } from '@/lib/estimate'
 import { isQualified, scoreOf, type ScanResult } from '@/lib/report'
+import { callLink } from '@/lib/call'
 
-const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 // links in the email may only point at our own sites
 const SITES = [/^https:\/\/(www\.)?cxo\.studio$/, /^https:\/\/cxo-studio-[a-z0-9-]+\.vercel\.app$/, /^https:\/\/audit\.cxo\.studio$/, /^https:\/\/cxo-scanner-[a-z0-9-]+\.vercel\.app$/]
 export const siteOrigin = (o: string | null | undefined) => (o && SITES.some((r) => r.test(o)) ? o : 'https://cxo.studio')
@@ -47,7 +47,7 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot, opts: { report
     resultsUrl: `${origin}${opts.link || `/scan/results?id=${job.id}`}`,
     report: opts.report,
     reportOk: opts.reportOk,
-    callUrl: CALL_URL,
+    callUrl: callLink({ source: 'email-results', email: job.email, store: host }),
     qualified: isQualified(snap.revenue || ''),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
     avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',

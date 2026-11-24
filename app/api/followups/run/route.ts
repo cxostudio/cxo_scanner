@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runFollowups } from '@/lib/followups/run'
 import { sweepStuckReports } from '@/lib/fullReport/run'
+import { runCallReminders } from '@/lib/calls/bookings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,9 @@ export async function GET(request: NextRequest) {
   try {
     // reports whose page died without answering: close them (they alert the team)
     const swept = request.nextUrl.searchParams.get('dry') === '1' ? [] : await sweepStuckReports().catch((e) => [`sweep failed: ${e instanceof Error ? e.message : e}`])
-    const log = [...swept, ...(await runFollowups({ dry: request.nextUrl.searchParams.get('dry') === '1' }))]
+    const dry = request.nextUrl.searchParams.get('dry') === '1'
+    const reminders = await runCallReminders({ dry }).catch((e) => [`call reminders failed: ${e instanceof Error ? e.message : e}`])
+    const log = [...swept, ...reminders, ...(await runFollowups({ dry }))]
     if (log.length) console.log('[followups]', log)
     return NextResponse.json({ ok: true, log })
   } catch (e) {

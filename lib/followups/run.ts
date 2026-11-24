@@ -2,6 +2,7 @@
 //   offer  under €50k/month: 15 minutes before the 1-hour €69 offer ends, if they haven't bought
 //   call1  €50k/month and up: 24 hours after the scan, "book a call" with their first fix
 //   call2  €50k/month and up: day 5, one case study, then nothing more
+// Nothing for an address with a call booked on Cal.com (lib/calls/bookings.ts).
 // One of each per address, ever (public.scan_followups, written before sending). Unsubscribed
 // addresses (public.email_optouts) get nothing. Tables: supabase/followups.sql.
 import { createHmac } from 'crypto'
@@ -15,8 +16,9 @@ import { estimate, eur } from '@/lib/estimate'
 import { isQualified, type ScanResult } from '@/lib/report'
 import { offerFor } from '@/lib/offer'
 import { reportEligibility } from '@/lib/fullReport/eligible'
+import { bookedEmails } from '@/lib/calls/bookings'
+import { callLink } from '@/lib/call'
 
-const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR
 
 let client: SupabaseClient | null = null
@@ -57,7 +59,7 @@ export function followupEmailFor(kind: FollowupKind, job: ScanJob) {
     topFix: top ? firstSentence(String(top.checkpoint?.requiredActions || ''), 160) : undefined,
     euroPerMonth: est ? (est.lift10 >= 1000 ? (fr ? `${k.replace('.', ',')} k€` : `€${k}k`) : eur(est.lift10)) : '',
     resultsUrl: `${siteOrigin(job.origin)}/scan/results?id=${job.id}`,
-    callUrl: CALL_URL,
+    callUrl: callLink({ source: kind === 'call2' ? 'email-call2' : 'email-call1', email: job.email, store: host }),
     unsubscribeUrl: unsubscribeUrl(job.id),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
     avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',
@@ -87,10 +89,11 @@ export async function runFollowups(opts: { dry?: boolean; now?: number } = {}): 
   const jobs = (data as ScanJob[]).filter((j) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(j.email || '') && j.snapshot)
   if (!jobs.length) return out
   const emails = Array.from(new Set(jobs.map((j) => j.email.trim().toLowerCase())))
-  const [opt, sent, bought] = await Promise.all([
+  const [opt, sent, bought, booked] = await Promise.all([
     db().from('email_optouts').select('email').in('email', emails),
     db().from('scan_followups').select('email,kind').in('email', emails),
     db().from('scan_jobs').select('email').like('scan_id', 'report_cs_%').in('email', emails),
+    bookedEmails(emails).catch(() => new Set<string>()),
   ])
   if (opt.error || sent.error) throw new Error(opt.error?.message || sent.error?.message)
   const out_ = new Set((opt.data || []).map((r) => r.email))
@@ -103,6 +106,8 @@ export async function runFollowups(opts: { dry?: boolean; now?: number } = {}): 
   for (const j of jobs) {
     const email = j.email.trim().toLowerCase()
     if (out_.has(email)) continue
+    // a call is already booked: no more sales follow-ups (the call reminders take over)
+    if (booked.has(email)) continue
     const qualified = isQualified(j.answers?.revenue || (j.snapshot as ScanSnapshot).revenue || '')
     const a = age(j)
     if (!qualified && a >= 44 * MIN && a <= 60 * MIN && !had.has(`${email}|offer`) && !buyers.has(email)) latest.set(`${email}|offer`, j)

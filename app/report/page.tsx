@@ -13,8 +13,8 @@ import { ThankYouUpload } from '../components/ThankYouUpload'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
 import { scoreOf, effortLabel, TONE, toneOf, SCORE_SCALE, type ScanResult } from '@/lib/report'
+import { callLink } from '@/lib/call'
 
-const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 
 type Area = 'site' | 'homepage' | 'category' | 'product' | 'cart' | 'checkout' | 'thankyou'
 type Tab = 'overview' | Area
@@ -223,7 +223,7 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
         <div className="rounded-[20px] bg-[var(--bg-subtle)] p-8 max-[560px]:p-6">
           <h2 className="font-[family-name:var(--font-display)] text-[clamp(22px,2.6vw,28px)] font-bold tracking-[-0.03em] text-[var(--text)]">Want us to fix it with you?</h2>
           <p className="mt-2 max-w-[640px] text-[15px] leading-[1.6] text-[var(--text-muted)]">CXO Studio turns reports like this one into more revenue: we prioritise the fixes for your numbers, design and build them, and A/B test the big ones. On a 30-minute call we go through your report and tell you honestly whether working together would pay off.</p>
-          <a href={CALL_URL} className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
+          <a href={callLink({ source: 'report', store: host })} target="_blank" rel="noopener" className="cxo-btn cxo-btn-primary mt-5 inline-flex">Book a call</a>
         </div>
       </section>
     </main>

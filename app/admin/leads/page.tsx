@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/base'
 import { eur } from '@/lib/estimate'
+import { callLink } from '@/lib/call'
 
 type Answer = 'pass' | 'fail' | 'na' | 'unknown'
 type ScanRow = { id: string; created_at: string; scan_id: string | null; url: string; page_type: string | null; niche: string | null; score: number | null; passed: number | null; failed: number | null; na: number | null; unknown: number | null; test: boolean; results: { id: string; title: string; answer: Answer; reason: string; priority?: string; difficulty?: string }[] | null }
@@ -35,7 +36,7 @@ type LeadRow = {
   earlier: number
 }
 
-const BOOKING_URL = 'https://tally.so/r/w2dP9M'
+const BOOKING_URL = callLink({ source: 'admin' })
 const STATUSES: { id: Status; label: string; fg: string; bg: string }[] = [
   { id: 'new', label: 'New', fg: 'var(--status-progress-fg)', bg: 'var(--status-progress-bg)' },
   { id: 'contacted', label: 'Contacted', fg: 'var(--status-test-fg)', bg: 'var(--status-test-bg)' },
