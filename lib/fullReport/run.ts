@@ -209,6 +209,8 @@ export async function finalize(parentScanId: string): Promise<void> {
 async function reportProblems(pages: ScanJob[]): Promise<string[]> {
   const out: string[] = []
   for (const j of pages) if (j.status === 'failed') out.push(`${j.answers?.page} page failed (${j.url}): ${j.error || 'no reason'}`)
+  // a page we never found (no product: no product page, cart or checkout at all)
+  for (const k of ['homepage', 'category', 'product']) if (!pages.some((j) => j.answers?.page === k)) out.push(`No ${k === 'category' ? 'collection' : k} page was found to scan${k === 'product' ? ': the report has no product page, cart or checkout' : ''}.`)
   const cp = await getConversionCheckpointRules().catch(() => null)
   const tags = new Map<string, string[]>()
   if (cp && cp.ok) for (const r of cp.rules) tags.set(r.id, r.pageTypeIds || [])
