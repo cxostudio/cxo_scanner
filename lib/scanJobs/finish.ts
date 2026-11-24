@@ -47,7 +47,7 @@ export function resultsEmailFor(job: ScanJob, snap: ScanSnapshot, opts: { report
     resultsUrl: `${origin}${opts.link || `/scan/results?id=${job.id}`}`,
     report: opts.report,
     reportOk: opts.reportOk,
-    callUrl: callLink({ source: 'email-results', email: job.email, store: host }),
+    callUrl: callLink({ source: 'email-results', email: job.email, store: host, locale: fr ? 'fr' : 'en' }),
     qualified: isQualified(snap.revenue || ''),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
     avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',

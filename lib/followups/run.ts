@@ -59,7 +59,7 @@ export function followupEmailFor(kind: FollowupKind, job: ScanJob) {
     topFix: top ? firstSentence(String(top.checkpoint?.requiredActions || ''), 160) : undefined,
     euroPerMonth: est ? (est.lift10 >= 1000 ? (fr ? `${k.replace('.', ',')} k€` : `€${k}k`) : eur(est.lift10)) : '',
     resultsUrl: `${siteOrigin(job.origin)}/scan/results?id=${job.id}`,
-    callUrl: callLink({ source: kind === 'call2' ? 'email-call2' : 'email-call1', email: job.email, store: host }),
+    callUrl: callLink({ source: kind === 'call2' ? 'email-call2' : 'email-call1', email: job.email, store: host, locale: fr ? 'fr' : 'en' }),
     unsubscribeUrl: unsubscribeUrl(job.id),
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png',
     avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',
