@@ -258,7 +258,7 @@ function Overview({ host, total, fails, est, score, areas, go }: { host: string;
                 {a.id === 'site' ? (
                   <SiteWide host={host} />
                 ) : (
-                  thumb && <img src={thumb} alt="" className="block h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]" />
+                  <BrowserFrame host={host} path={addressPath(a)} src={thumb} />
                 )}
               </div>
               <div className="p-4">
@@ -339,8 +339,44 @@ function SiteWide({ host }: { host: string }) {
   )
 }
 
+/** Overview card picture: the page's desktop screenshot in a desktop browser window, on the same grey as
+ *  the General elements card. The address bar carries the store's favicon, domain and the page's path. */
+function BrowserFrame({ host, path, src }: { host: string; path: string; src: string | null }) {
+  const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
+  return (
+    <div className="relative h-full w-full bg-[var(--surface-muted)]" aria-hidden="true">
+      {/* the window runs off the bottom edge: only the first screen of the page is shown */}
+      <div className="absolute left-[8%] right-[8%] top-[10%] bottom-[-6%] flex flex-col overflow-hidden rounded-t-[10px] border border-[var(--border-strong)] bg-[var(--surface)] shadow-[var(--shadow-raised)] transition-transform duration-300 group-hover:-translate-y-[3px]">
+        <div className="flex h-[22px] shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-muted)] px-2.5">
+          <span className="flex shrink-0 gap-[4px]">{[0, 1, 2].map((i) => <span key={i} className="h-[6px] w-[6px] rounded-full bg-[var(--border-strong)]" />)}</span>
+          <span className="mx-auto flex h-[14px] min-w-0 max-w-[78%] items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2">
+            <img src={favicon} alt="" className="h-[9px] w-[9px] shrink-0 rounded-[2px]" />
+            <span className="truncate text-[9px] leading-none text-[var(--text-muted)]">{host}<span className="text-[var(--text-subtle)]">{path === '/' ? '' : path}</span></span>
+          </span>
+          <span className="w-[26px] shrink-0" />
+        </div>
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {src ? <img src={src} alt="" className="block h-full w-full object-cover object-top" /> : <span className="absolute inset-0 bg-[var(--bg-subtle)]" />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The path shown in the address bar: the scanned URL's, or the usual one for the cart and checkout. */
+function addressPath(a: AreaSummary): string {
+  if (a.id === 'cart') return '/cart'
+  if (a.id === 'checkout') return '/checkout'
+  return a.page?.url ? pathOf(a.page.url) : '/'
+}
+
 function thumbOf(a: AreaSummary): string | null {
-  if (a.id === 'cart' || a.id === 'checkout') return a.page?.images.find((i) => i.role === a.id && i.device === 'desktop')?.url || a.page?.images.find((i) => i.role === a.id)?.url || null
+  if (a.id === 'cart' || a.id === 'checkout') {
+    const desk = (a.page?.images || []).filter((i) => i.role === a.id && i.device === 'desktop')
+    // the cart page reads better than the drawer (dimmed page behind it) at card size
+    const page = a.id === 'cart' ? desk.find((i) => !/drawer|panel|side/i.test(i.label)) || desk[1] : null
+    return page?.url || desk[0]?.url || a.page?.images.find((i) => i.role === a.id)?.url || null
+  }
   return a.page?.located?.desktop?.screenshot || a.page?.preview?.desktop || null
 }
 
