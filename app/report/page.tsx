@@ -372,13 +372,13 @@ function AreaView({ area, device, setDevice, focus, reportId, rescansLeft, reloa
     return () => clearTimeout(t)
   }, [focus, scrollToPin])
 
-  // one checkpoint open at a time, lined up with the sticky screenshot (24px from the top), its pin in view
-  const toggle = (id: string) => setOpen((s) => (s.has(id) ? new Set() : new Set([id])))
+  // checkpoints stack: each opens and closes on its own and the page never jumps. Clicking one in the list
+  // only moves the screenshot to its pin; clicking a pin opens its checkpoint and brings it into view.
+  const toggle = (id: string) => setOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const pick = (id: string, from: 'pin' | 'list') => {
     setSelected(id)
-    if (from === 'pin') setOpen(new Set([id]))
-    // after the open/close has rendered, so the position is the final one
-    requestAnimationFrame(() => requestAnimationFrame(() => { alignTop(id); scrollToPin(id) }))
+    if (from === 'pin') setOpen((s) => new Set(s).add(id))
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (from === 'pin') alignTop(id); scrollToPin(id) }))
   }
   const shots = area.shots || (flow ? (area.page?.images || []).filter((i) => i.role === area.id) : [])
   const shotsHere = shots.filter((i) => i.device === device)

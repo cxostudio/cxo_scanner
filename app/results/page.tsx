@@ -276,8 +276,8 @@ function ResultsView() {
   const view = located[device]
   const shot = view && typeof view === 'object' ? view : null
 
-  // one check open at a time: the open one sits next to its pin, nothing above it moves
-  const toggle = (id: string) => setOpen((prev) => (prev.has(id) ? new Set() : new Set([id])))
+  // checks stack: each opens and closes on its own, the page doesn't jump
+  const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   // a pin opens its check, a check shows its pin: both end up side by side at the top
   // (the check at the sticky offset, the pin's element at the top of the page view)
@@ -288,15 +288,15 @@ function ResultsView() {
     if (from === 'pin') {
       const idx = results.findIndex((r) => r.ruleId === id)
       if (idx >= visible) setVisible(idx + 1)
-      setOpen(new Set([id]))
+      setOpen((prev) => new Set(prev).add(id))
     }
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         const row = document.getElementById(`f-${id}`)
-        if (row && window.matchMedia('(min-width: 1024px)').matches) {
-          window.scrollTo({ top: window.scrollY + row.getBoundingClientRect().top - STICKY_TOP, behavior: 'smooth' })
-        } else if (row && from === 'pin') {
-          row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // only a pin click moves the page (to its check); a list click leaves the page where it is
+        if (row && from === 'pin') {
+          if (window.matchMedia('(min-width: 1024px)').matches) window.scrollTo({ top: window.scrollY + row.getBoundingClientRect().top - STICKY_TOP, behavior: 'smooth' })
+          else row.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
         const el = shotRef.current
         const pin = shot?.pins.find((p) => p.findingId === id)
