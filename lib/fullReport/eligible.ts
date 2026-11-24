@@ -27,6 +27,13 @@ async function someProduct(raw: string): Promise<string | null> {
   return h ? `${u.origin}/products/${h}` : null
 }
 
+/** Does the store serve Shopify's product list? Standard Shopify storefronts do, custom ones don't. */
+async function productList(origin: string): Promise<boolean> {
+  const r = await fetch(`${origin}/products.json?limit=1`, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }).catch(() => null)
+  const d = r && r.ok ? ((await r.json().catch(() => null)) as { products?: unknown[] } | null) : null
+  return !!d?.products?.length
+}
+
 export async function reportEligibility(url: string): Promise<Eligibility> {
   let key = url
   try { key = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).toString() } catch { return { ok: false, reason: 'bad url' } }
@@ -34,18 +41,16 @@ export async function reportEligibility(url: string): Promise<Eligibility> {
   if (hit && Date.now() - hit.at < 30 * 60_000) return hit.v
   let v: Eligibility
   try {
+    const origin = new URL(key).origin
+    // either signal is enough: the product's own data, or Shopify's product list (some stores rate-limit
+    // one of them from servers). Custom storefronts serve neither.
     const product = await someProduct(key)
-    if (!product) v = { ok: false, reason: 'no Shopify product found' }
-    else if (await productData(product)) v = { ok: true, reason: 'Shopify product data available', productUrl: product }
-    else {
-      // the given page may be a product without data (sold out, gift card): try the catalogue's first one
-      const other = await someProduct(new URL(product).origin)
-      v = other && other !== product && (await productData(other))
-        ? { ok: true, reason: 'Shopify product data available', productUrl: other }
-        : { ok: false, reason: 'no Shopify product data (custom storefront)', productUrl: product }
-    }
+    if (product && (await productData(product))) v = { ok: true, reason: 'Shopify product data available', productUrl: product }
+    else if (await productList(origin)) v = { ok: true, reason: 'Shopify product list available', productUrl: product || undefined }
+    else v = { ok: false, reason: product ? 'no Shopify product data (custom storefront)' : 'no Shopify product found (custom storefront)' }
   } catch (e) {
-    v = { ok: false, reason: e instanceof Error ? e.message : 'check failed' }
+    // can't tell: don't block a sale on our own hiccup
+    v = { ok: true, reason: `check failed (${e instanceof Error ? e.message : 'error'}), allowed` }
   }
   cache.set(key, { at: Date.now(), v })
   return v
