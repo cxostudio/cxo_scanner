@@ -176,7 +176,8 @@ function ReportView({ data, id, reload }: { data: Report; id: string; reload: ()
     <main className="min-h-screen bg-[var(--surface)] pb-24">
       {/* ── top bar ── */}
       <header className="border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className={`mx-auto flex max-w-[1280px] items-center gap-4 px-[var(--gutter)] py-3`}>
+        {/* min-h-11 = the "Start with…" button: the bar keeps one height with or without it */}
+        <div className={`mx-auto flex min-h-[calc(44px+1.5rem)] max-w-[1280px] items-center gap-4 px-[var(--gutter)] py-3`}>
           <a href="https://cxo.studio" aria-label="CXO studio" className="shrink-0"><img src={asset('/cxo-logo.png')} alt="CXO studio" className="block h-[22px] w-auto max-[560px]:h-[18px]" /></a>
           <span className="h-8 w-px shrink-0 bg-[var(--border)]" aria-hidden />
           {/* favicon and the two lines are the same height: 40px (20 + 4 gap + 16) */}
