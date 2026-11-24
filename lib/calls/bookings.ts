@@ -93,8 +93,10 @@ function fmt(iso: string, tz: string | null, locale: 'en' | 'fr') {
     const day = d.toLocaleDateString(loc, { weekday: 'long', day: 'numeric', month: 'long', timeZone })
     const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', timeZone })
     const ymd = (x: Date) => x.toLocaleDateString('en-CA', { timeZone })
-    return { when: locale === 'fr' ? `${day} à ${time}` : `${day} at ${time}`, time, today: ymd(d) === ymd(new Date()) }
-  } catch { return { when: d.toISOString(), time: '', today: false } }
+    // the time zone, named in their language: "Central European Time", "heure d’Europe centrale"
+    const zone = new Intl.DateTimeFormat(loc, { timeZone, timeZoneName: 'longGeneric' }).formatToParts(d).find((p) => p.type === 'timeZoneName')?.value || timeZone
+    return { when: locale === 'fr' ? `${day} à ${time} (${zone})` : `${day} at ${time} (${zone})`, time, zone, today: ymd(d) === ymd(new Date()) }
+  } catch { return { when: d.toISOString(), time: '', zone: '', today: false } }
 }
 
 async function alertTeam(b: Booking, rescheduled: boolean) {
@@ -134,9 +136,9 @@ async function remind(b: Booking, kind: '24h' | '1h', to?: string): Promise<stri
   const locale = (b.locale === 'fr' ? 'fr' : 'en') as 'en' | 'fr'
   const lead = await leadOf(b.email).catch(() => ({} as Awaited<ReturnType<typeof leadOf>>))
   const prep = lead.report ? reportUrl(lead.report) : lead.scan ? scanUrl(lead.scan) : undefined
-  const { when, time, today } = fmt(b.start_time, b.timezone, locale)
+  const { when, time, zone, today } = fmt(b.start_time, b.timezone, locale)
   const mail = buildReminderEmail({
-    kind, locale, firstName: (b.name || '').split(/\s+/)[0] || '', when, time, today,
+    kind, locale, firstName: (b.name || '').split(/\s+/)[0] || '', when, time, zone, today,
     store: b.store || hostOf(lead.report?.url || lead.scan?.url) || undefined,
     joinUrl: b.meeting_url || undefined, prepUrl: prep, prepIsReport: !!lead.report,
     rescheduleUrl: `https://cal.com/reschedule/${b.uid}`, cancelUrl: `https://cal.com/booking/${b.uid}?cancel=true`,

@@ -1,4 +1,4 @@
-// Test lab: scans from test emails (CXO Studio, +test) are kept so Louis can label them blind
+// Test lab: scans from test emails (CXO studio, +test) are kept so Louis can label them blind
 // and we can measure the scanner's accuracy per checkpoint before a checkpoint goes Live.
 // Everything lives in one private Supabase Storage bucket, no database table needed:
 //   scans/{id}/meta/{t}.json  url, niche, checkpoints with their definitions, the scanner's answers

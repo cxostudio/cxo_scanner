@@ -9,7 +9,7 @@ export type ScannerStatus = 'Live' | 'Draft' | 'Off'
 
 /**
  * One checkpoint as the scanner uses it. Airtable is the single source of truth:
- * the question, CXO Studio's pass / fail / not-relevant definitions, device, niches,
+ * the question, CXO studio's pass / fail / not-relevant definitions, device, niches,
  * check method and status all come from the "Conversion Checkpoints" table.
  */
 export type ScanRule = {

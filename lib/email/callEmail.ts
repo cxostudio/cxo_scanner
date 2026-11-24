@@ -9,6 +9,7 @@ export type ReminderInput = {
   when: string              // "Wednesday 26 November at 14:00", in their time zone
   time: string              // "14:00"
   today?: boolean           // the call is later today, not tomorrow
+  zone?: string             // "Central European Time", in their language
   store?: string
   joinUrl?: string
   prepUrl?: string          // their report or free scan
@@ -41,7 +42,7 @@ export function buildReminderEmail(i: ReminderInput): { subject: string; html: s
     : {
         subject: fr ? `Dans 1 heure : notre appel${about}` : `In 1 hour: our call${about}`,
         h1: fr ? `On se parle dans 1 heure` : `We talk in 1 hour`,
-        body: [hi, fr ? `Notre appel commence à ${i.time}. Le lien est ci-dessous.` : `Our call starts at ${i.time}. The link is below.`],
+        body: [hi, fr ? `Notre appel commence à ${i.time}${i.zone ? ` (${i.zone})` : ''}. Le lien est ci-dessous.` : `Our call starts at ${i.time}${i.zone ? ` (${i.zone})` : ''}. The link is below.`],
         cta: fr ? "Rejoindre l'appel" : 'Join the call',
         url: i.joinUrl || i.rescheduleUrl,
       }
@@ -50,8 +51,8 @@ export function buildReminderEmail(i: ReminderInput): { subject: string; html: s
     [fr ? 'Déplacer' : 'Reschedule', i.rescheduleUrl],
     [fr ? 'Annuler' : 'Cancel', i.cancelUrl],
   ] as [string, string][]
-  const sign = 'Louis', role = fr ? 'Fondateur, CXO Studio' : 'Founder, CXO Studio'
-  const footer = fr ? 'Vous recevez cet email car vous avez réservé un appel avec CXO Studio.' : 'You get this email because you booked a call with CXO Studio.'
+  const sign = 'Louis', role = fr ? 'Fondateur, CXO studio' : 'Founder, CXO studio'
+  const footer = fr ? 'Vous recevez cet email car vous avez réservé un appel avec CXO studio.' : 'You get this email because you booked a call with CXO studio.'
   const html = `<!doctype html>
 <html lang="${i.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light only"><title>${esc(t.subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700&display=swap" rel="stylesheet">
@@ -62,7 +63,7 @@ export function buildReminderEmail(i: ReminderInput): { subject: string; html: s
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
         <tr><td align="center" style="padding:0 0 20px;"><img src="${esc(i.logoUrl)}" width="132" alt="CXO studio" style="display:block;border:0;width:132px;height:auto;"></td></tr>
         <tr><td class="card" style="background:${C.surface};border:1px solid ${C.border};border-radius:16px;padding:36px 36px 32px;">
-          <div style="font:500 13px/1.4 ${BODY};color:${C.muted};">${esc(fr ? 'Votre appel avec CXO Studio' : 'Your call with CXO Studio')} · ${esc(i.when)}</div>
+          <div style="font:500 13px/1.4 ${BODY};color:${C.muted};">${esc(fr ? 'Votre appel avec CXO studio' : 'Your call with CXO studio')} · ${esc(i.when)}</div>
           <h1 class="h1" style="margin:12px 0 0;font:700 28px/1.2 ${DISPLAY};letter-spacing:-0.5px;color:${C.text};">${esc(t.h1)}</h1>
           ${t.body.map((p) => `<p style="margin:14px 0 0;font:400 16px/1.6 ${BODY};color:${C.muted};">${esc(p)}</p>`).join('\n          ')}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;">
@@ -74,7 +75,7 @@ export function buildReminderEmail(i: ReminderInput): { subject: string; html: s
             <td valign="middle" style="font:400 14px/1.45 ${BODY};color:${C.text};"><span style="font-weight:600;">${sign}</span><br><span style="color:${C.muted};">${esc(role)}</span></td>
           </tr></table>
         </td></tr>
-        <tr><td align="center" style="padding:20px 12px 0;font:400 12px/1.6 ${BODY};color:${C.subtle};">${esc(footer)}<br>CXO Studio · Amsterdam</td></tr>
+        <tr><td align="center" style="padding:20px 12px 0;font:400 12px/1.6 ${BODY};color:${C.subtle};">${esc(footer)}<br>CXO studio · Amsterdam</td></tr>
       </table>
     </td></tr>
   </table>

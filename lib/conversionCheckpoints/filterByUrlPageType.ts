@@ -1,7 +1,7 @@
 /**
  * Server-only: pick the checkpoints a scan runs.
  *   - page type: inferred from the URL, matched to the Airtable "Page Type" links
- *   - status: Live always; Draft only in test mode (CXO Studio and +test emails)
+ *   - status: Live always; Draft only in test mode (CXO studio and +test emails)
  *   - check method: only what the scanner can check (not manual audit items or customer uploads)
  */
 

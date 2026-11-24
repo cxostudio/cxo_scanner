@@ -98,7 +98,7 @@ function copy(i: FollowupInput): Copy {
 export function buildFollowupEmail(i: FollowupInput): { subject: string; html: string; text: string } {
   const t = copy(i)
   const fr = i.locale === 'fr'
-  const sign = 'Louis', role = fr ? 'Fondateur, CXO Studio' : 'Founder, CXO Studio'
+  const sign = 'Louis', role = fr ? 'Fondateur, CXO studio' : 'Founder, CXO studio'
   const unsub = fr ? 'Ne plus recevoir ces emails' : 'Stop these emails'
   const footer = fr ? 'Vous recevez cet email après votre scan de conversion gratuit sur cxo.studio.' : 'You get this email after your free conversion scan on cxo.studio.'
   const html = `<!doctype html>
@@ -135,7 +135,7 @@ export function buildFollowupEmail(i: FollowupInput): { subject: string; html: s
           </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 12px 0;font:400 12px/1.6 ${BODY};color:${C.subtle};">
-          ${esc(footer)}<br>CXO Studio · Amsterdam · <a href="${esc(i.unsubscribeUrl)}" style="color:${C.subtle};">${esc(unsub)}</a>
+          ${esc(footer)}<br>CXO studio · Amsterdam · <a href="${esc(i.unsubscribeUrl)}" style="color:${C.subtle};">${esc(unsub)}</a>
         </td></tr>
       </table>
     </td></tr>

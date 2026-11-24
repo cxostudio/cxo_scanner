@@ -325,7 +325,7 @@ export default function LabScan({ params }: { params: { id: string } }) {
         <Compare scan={scan} labels={labels} notes={notes} />
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-          {/* the checkpoint, with CXO Studio's definitions */}
+          {/* the checkpoint, with CXO studio's definitions */}
           <section className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-[var(--card-padding)] lg:sticky lg:top-6">
             <div className="flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
               <span>

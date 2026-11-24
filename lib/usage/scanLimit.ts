@@ -63,7 +63,7 @@ export async function checkScanLimit(email: string): Promise<ScanLimitResult> {
   if (!supabase || !cleanEmail) {
     return { allowed: true, used: 0, limit: SCAN_DAILY_LIMIT, enforced: false }
   }
-  // test mode (CXO Studio and +test emails): no daily limit
+  // test mode (CXO studio and +test emails): no daily limit
   if (isTestEmail(cleanEmail)) {
     return { allowed: true, used: 0, limit: SCAN_DAILY_LIMIT, enforced: false }
   }

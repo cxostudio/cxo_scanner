@@ -69,7 +69,7 @@ export function OrderCard({ order }: { order: OrderInfo }) {
   )
 }
 
-/** Full-screen loading: the CXO Studio mark inside a turning ring (report and thank-you page). */
+/** Full-screen loading: the CXO studio mark inside a turning ring (report and thank-you page). */
 export function LogoSpinner({ label }: { label: string }) {
   return (
     <main className="grid min-h-dvh place-items-center bg-[var(--surface)]" aria-busy="true">

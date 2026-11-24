@@ -16,7 +16,7 @@ async function handle(request: NextRequest): Promise<{ ok: boolean; fr: boolean 
   return { ok: true, fr: job.locale === 'fr' }
 }
 
-const page = (ok: boolean, fr: boolean) => `<!doctype html><html lang="${fr ? 'fr' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CXO Studio</title>
+const page = (ok: boolean, fr: boolean) => `<!doctype html><html lang="${fr ? 'fr' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CXO studio</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;600&family=Plus+Jakarta+Sans:wght@700&display=swap" rel="stylesheet"></head>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#fafafa;font-family:'Inter Tight',Arial,sans-serif;color:#09090b">
 <main style="max-width:460px;padding:32px 24px;text-align:center">

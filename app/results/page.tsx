@@ -373,7 +373,7 @@ function ResultsView() {
 
   return (
     <main className="cxo-page-in min-h-screen">
-      {/* test scans only (CXO Studio and +test emails): label this scan blind in the lab */}
+      {/* test scans only (CXO studio and +test emails): label this scan blind in the lab */}
       {labId && (
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[var(--surface-muted)] px-[var(--gutter)] py-2.5 text-sm text-[var(--text)]">
           <span>Test scan: Live and Draft checkpoints, saved to the lab.</span>

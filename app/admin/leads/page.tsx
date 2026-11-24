@@ -94,7 +94,7 @@ function draftEmail(l: LeadRow) {
         `Je vous montre comment les corriger en 20 minutes : ${BOOKING_URL}`,
         '',
         'Louis',
-        'CXO Studio',
+        'CXO studio',
       ].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n'),
     }
   }
@@ -112,7 +112,7 @@ function draftEmail(l: LeadRow) {
       `Happy to walk you through the fixes in 20 minutes: ${BOOKING_URL}`,
       '',
       'Louis',
-      'CXO Studio',
+      'CXO studio',
     ].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n'),
   }
 }

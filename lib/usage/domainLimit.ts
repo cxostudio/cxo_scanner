@@ -5,7 +5,7 @@ import { noStoreFetch } from '@/lib/supabaseFetch'
 /**
  * Per-store limit, on top of the per-email one: a store can be scanned at most
  * DOMAIN_DAILY_LIMIT times in any 24 hours, whatever email is used (so swapping
- * emails doesn't buy more scans of the same store). CXO Studio and +test emails
+ * emails doesn't buy more scans of the same store). CXO studio and +test emails
  * are not limited. Counted from public.scan_jobs (one row per free scan).
  * Fails OPEN, like the email limit.
  *

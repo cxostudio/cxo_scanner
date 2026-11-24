@@ -46,7 +46,7 @@ const COPY = {
     ctaNote: 'Your results open on any device, with every issue pinned on your page.',
     call: 'Prefer to talk it through?', callLink: 'Book a call with us',
     report: 'Want every page checked, from homepage to checkout?', reportLink: 'Get the full-store report',
-    sign: 'Louis', signRole: 'Founder, CXO Studio',
+    sign: 'Louis', signRole: 'Founder, CXO studio',
     footer: 'You get this email because you ran a free conversion scan on cxo.studio.',
     privacy: 'Privacy policy',
   },
@@ -64,7 +64,7 @@ const COPY = {
     ctaNote: 'Vos résultats s’ouvrent sur n’importe quel appareil, chaque problème épinglé sur votre page.',
     call: 'Vous préférez en parler ?', callLink: 'Réservez un appel avec nous',
     report: 'Vous voulez chaque page vérifiée, de l’accueil au paiement ?', reportLink: 'Obtenir le rapport complet',
-    sign: 'Louis', signRole: 'Fondateur, CXO Studio',
+    sign: 'Louis', signRole: 'Fondateur, CXO studio',
     footer: 'Vous recevez cet e-mail parce que vous avez lancé un scan de conversion gratuit sur cxo.studio.',
     privacy: 'Politique de confidentialité',
   },
@@ -189,7 +189,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
           </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 12px 0;font:400 12px/1.6 ${BODY};color:${C.subtle};">
-          ${esc(t.footer)}<br>CXO Studio · Amsterdam · <a href="${esc(i.privacyUrl)}" style="color:${C.subtle};">${esc(t.privacy)}</a>
+          ${esc(t.footer)}<br>CXO studio · Amsterdam · <a href="${esc(i.privacyUrl)}" style="color:${C.subtle};">${esc(t.privacy)}</a>
         </td></tr>
       </table>
     </td></tr>

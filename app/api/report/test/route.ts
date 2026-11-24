@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 /**
- * A full report without paying, for CXO Studio and +test emails only: the same run the Stripe
+ * A full report without paying, for CXO studio and +test emails only: the same run the Stripe
  * order will start. POST { url, email, locale?, revenue?, aov?, cr? } → { id, link }
  */
 export async function POST(request: NextRequest) {

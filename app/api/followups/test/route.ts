@@ -7,7 +7,7 @@ import { previewCallEmail, previewNoLead, resendReminderFor } from '@/lib/calls/
 
 export const runtime = 'nodejs'
 
-/** Send one follow-up (or call reminder / booking alert) now, to the scan's own address, for CXO Studio and +test scans only. POST { jobId, kind } */
+/** Send one follow-up (or call reminder / booking alert) now, to the scan's own address, for CXO studio and +test scans only. POST { jobId, kind } */
 export async function POST(request: NextRequest) {
   const { jobId, kind, email, to } = (await request.json().catch(() => ({}))) as { jobId?: string; kind?: string; email?: string; to?: string }
   // { to, kind, nolead: true }: the emails for someone with no scan or report

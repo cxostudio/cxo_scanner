@@ -1,5 +1,5 @@
 // Send one email with Resend (https://resend.com). The key lives in Vercel only: RESEND_API_KEY.
-// Sender: EMAIL_FROM, e.g. "Louis from CXO Studio <scan@cxo.studio>" (the domain must be verified in Resend).
+// Sender: EMAIL_FROM, e.g. "Louis from CXO studio <scan@cxo.studio>" (the domain must be verified in Resend).
 // Without a key it logs and does nothing, so scans never fail because of email.
 
 // Test inboxes: scans and reports run with these addresses never email them (results, report, follow-ups).
@@ -14,7 +14,7 @@ export async function sendEmail(msg: { to: string; subject: string; html: string
   if (isTestInbox(msg.to)) { console.log('[email] test inbox, not sent:', msg.subject); return { sent: true, id: 'test-inbox' } }
   const key = process.env.RESEND_API_KEY
   if (!key) { console.warn('[email] RESEND_API_KEY not set; email not sent to', msg.to); return { sent: false, error: 'not configured' } }
-  const from = process.env.EMAIL_FROM || 'Louis from CXO Studio <scan@cxo.studio>'
+  const from = process.env.EMAIL_FROM || 'Louis from CXO studio <scan@cxo.studio>'
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',

@@ -6,7 +6,7 @@ import type { Evidence } from './capture'
 import type { ScanRule } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 
-// A checkpoint with CXO Studio's definitions, straight from Airtable (getCheckpointRules.ts).
+// A checkpoint with CXO studio's definitions, straight from Airtable (getCheckpointRules.ts).
 export type Rule = ScanRule
 export type Verdict = { id: string; answer: 'pass' | 'fail' | 'na' | 'unknown'; evidence: string; seen?: string[]; rule?: string; by?: 'Seen in' | 'Code check' | 'Measured' }
 
@@ -80,7 +80,7 @@ ${page.rules}
 
 First decide the store's niche, ${page.niche}. Use exactly one of: ${NICHES.join(', ')}. Fashion covers apparel, footwear, bags and jewellery.
 
-Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO Studio's definitions and override the generic description. Use the description only for context.
+Each checkpoint comes with "pass when", "fail when" and "not relevant when" rules, plus niche notes. Follow them exactly: they are CXO studio's definitions and override the generic description. Use the description only for context.
 - "device" says which screenshots to judge. "desktop only" or "mobile only": ignore the other device. "judge desktop and mobile": the checkpoint must be met on BOTH. When one device clearly shows it and the other device's screenshots of the same part of the page clearly do not, answer "fail" and start the evidence with the device that misses it ("On mobile, ..."). When the other device's screenshots do not cover that part of the page, judge on the device that does.
 - Pictures are judged only on what you see in the images. Words in the page text ("hugs your foot", "shown in use") never prove that a photo exists. For a checkpoint about images, name the image you mean (for example "the 3rd gallery image shows it worn"); if you cannot point to one, it is not there.
 - Seen means seen in a screenshot. Text that is only in the page text (the other messages of a rotating announcement bar, hidden carousel slides, closed drawers) proves the store has it, not that shoppers see it: it does not pass checkpoints about what is visible on the first screen, near the button or in the cart.
