@@ -55,9 +55,10 @@ export async function handleCalEvent(event: string, p: CalPayload): Promise<stri
   const email = String(a.email || '').trim().toLowerCase()
   if (!email || !p.startTime) return 'ignored (no attendee email or time)'
   const meta = (p.metadata || {}) as Record<string, unknown>
-  const responses = Object.fromEntries(Object.entries(p.responses || {}).filter(([k]) => !['name', 'email', 'location', 'guests', 'rescheduleReason', 'website'].includes(k)).map(([k, v]) => [k, answerText(v)]).filter(([, v]) => v))
+  const responses = Object.fromEntries(Object.entries(p.responses || {}).filter(([k]) => !['name', 'email', 'location', 'guests', 'rescheduleReason'].includes(k) && !/^(website|site|url|store)$/i.test(k)).map(([k, v]) => [k, answerText(v)]).filter(([, v]) => v))
   // the "Website" booking question (identifier: website), pre-filled from our pages when we know the store
-  const website = hostOf(answerText((p.responses || {} as Record<string, unknown>)['website']).trim())
+  const websiteKey = Object.keys(p.responses || {}).find((k) => /^(website|site|url|store)$/i.test(k))
+  const website = websiteKey ? hostOf(answerText((p.responses as Record<string, unknown>)[websiteKey]).trim()) : ''
   const row = {
     uid: p.uid, email, name: a.name || null, start_time: p.startTime, end_time: p.endTime || null, status: 'booked',
     meeting_url: String(meta.videoCallUrl || (/^https?:/i.test(p.location || '') ? p.location : '') || '') || null,
