@@ -4,7 +4,7 @@
 // cookie) skip them. Any refusal or error: /start carries on with the classic scan, nobody is blocked.
 import { NextRequest, NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
-import { captureInBackground, startBackgroundScan } from '@/lib/scanJobs/background'
+import { runInBackground, startBackgroundScan } from '@/lib/scanJobs/background'
 import { countRecentBackground } from '@/lib/scanJobs/store'
 import { isBypass } from '@/lib/usage/bypass'
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const job = await startBackgroundScan({ url, locale: b.locale === 'fr' ? 'fr' : 'en', origin: typeof b.origin === 'string' ? b.origin.slice(0, 200) : null, ip })
-    waitUntil(captureInBackground(job))
+    waitUntil(runInBackground(job))
     return NextResponse.json({ id: job.id })
   } catch (e) {
     console.error('[scan-start] failed', e)

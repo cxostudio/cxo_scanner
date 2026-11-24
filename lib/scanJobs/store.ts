@@ -32,6 +32,7 @@ export type ScanJob = {
     revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string; quiet?: boolean
     // background scans
     bg?: boolean; ip?: string; role?: string; judge?: boolean; scanUrl?: string; resolvedFrom?: string; resolvedHow?: string
+    timing?: Record<string, unknown>
   } | null
   origin: string | null
   status: JobStatus

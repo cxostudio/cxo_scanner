@@ -1,11 +1,12 @@
 // Background free scans, for the URL-first /start (cxo-studio Onboarding.astro):
-//   URL step     → startBackgroundScan: a job without an email, the page capture starts (no AI)
-//   email step   → requestJudge: the AI judges the kept capture (starts as soon as the capture is in)
+//   URL step     → startBackgroundScan + runInBackground: the page is captured, then judged by the
+//                  AI right away, in one call (/api/scan phase 'both'); the visitor answers meanwhile
 //   email given  → attachEmail: limits, the email and answers on the job; the results email goes
 //                  out when both the results and the email are there, whichever comes last
+// (requestJudge and judgeInBackground stay for jobs captured by the older two-step flow.)
 // The visitor then lands on /scan/results?id=…, which waits by itself while the scan finishes.
-// Test emails (CXO studio, +test) don't use this: /start sends them through the classic scan so
-// the lab keeps getting full test scans with Draft checkpoints.
+// +test emails don't use this: /start sends them through the classic scan so the lab keeps getting
+// full test scans with Draft checkpoints. CXO studio's other addresses go through it, like customers.
 import { randomUUID } from 'crypto'
 import { selfOrigin } from './runServer'
 import { createJob, completeJob, failJob, getJob, markEmailed, mergeAnswers, moveStatus, setJobEmail, updateDoneSnapshot, type ScanJob, type ScanSnapshot } from './store'
@@ -66,6 +67,60 @@ export async function captureInBackground(job: ScanJob): Promise<void> {
     if (fresh?.answers?.judge) await judgeInBackground(fresh)
   } catch (e) {
     console.error('[bg-scan] capture failed', job.id, e)
+    await failJob(job.id, e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** The URL step: find the product page, capture it and judge it in one call; store the scan. */
+export async function runInBackground(job: ScanJob): Promise<void> {
+  const t0 = Date.now()
+  try {
+    let url = abs(job.url)
+    let resolvedFrom: string | undefined
+    let resolvedHow: string | undefined
+    const [resolved, rulesHint] = await Promise.all([
+      // the free scan is a product-page scan: a homepage or collection becomes the best seller
+      detectPageTypeFromUrl(url) !== 'product'
+        ? fetch(api(`/resolve-product?url=${encodeURIComponent(url)}`)).then(async (r) => ({ ok: r.ok, d: (await r.json().catch(() => null)) as { url?: string; resolved?: boolean; how?: string } | null })).catch(() => null)
+        : Promise.resolve(null),
+      rulesFor(url).catch(() => null),
+    ])
+    if (resolved?.ok && resolved.d?.resolved && resolved.d.url) { resolvedFrom = url; resolvedHow = resolved.d.how || ''; url = resolved.d.url }
+    const resolveMs = Date.now() - t0
+    const rules = resolvedFrom || !rulesHint ? await rulesFor(url) : rulesHint
+    await mergeAnswers(job.id, { scanUrl: url, resolvedFrom, resolvedHow })
+    const pageOnly = rules.filter((r) => { const ids = (r.pageTypeIds || []).map((x) => x.toLowerCase()); return !(ids.length && ids.every((x) => x === CART)) }).length
+    let data: { results?: unknown[]; previews?: { desktop: string | null; mobile: string | null }; timings?: Record<string, unknown>; error?: string } = {}
+    let status = 0
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (attempt === 2) await moveStatus(job.id, 'judging', 'capturing').catch(() => false)
+      const res = await fetch(api('/scan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, rules, scanId: job.scan_id, jobId: job.id, phase: 'both' }) })
+      status = res.status
+      data = await res.json().catch(() => ({}))
+      if (res.ok && Array.isArray(data.results)) break
+      if (res.status === 422) break // the page can't be scanned: retrying won't help
+    }
+    if (!Array.isArray(data.results) || !data.results.length) return failJob(job.id, data.error || `scan ${status}`)
+    let results = data.results
+    const t2 = Date.now()
+    try {
+      const c = await fetch(api('/scan/combine'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ results }) })
+      if (c.ok) { const d = (await c.json()) as { results?: unknown[] }; if (Array.isArray(d.results)) results = d.results }
+    } catch (e) { console.warn('[bg-scan] combine failed, keeping raw results', e) }
+    const latest = (await getJob(job.id)) || job
+    const a = latest.answers || {}
+    const snap: ScanSnapshot = {
+      results, scanUrl: url, revenue: a.revenue, aov: a.aov, cr: a.cr, locale: latest.locale,
+      pageChecks: pageOnly || rules.length, resolvedFrom: a.resolvedFrom ?? resolvedFrom, resolvedHow: a.resolvedHow ?? resolvedHow, labId: null,
+      previewDesktop: data.previews?.desktop ?? null, previewMobile: data.previews?.mobile ?? null,
+    }
+    // where the time went (lab diagnostics, speed work)
+    await mergeAnswers(job.id, { timing: { resolveMs, ...(data.timings || {}), combineMs: Date.now() - t2, totalMs: Date.now() - t0 } } as NonNullable<ScanJob['answers']>)
+    await completeJob(job.id, snap)
+    const done = await getJob(job.id)
+    if (done && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(done.email)) await sendResultsOnce(done)
+  } catch (e) {
+    console.error('[bg-scan] scan failed', job.id, e)
     await failJob(job.id, e instanceof Error ? e.message : String(e))
   }
 }

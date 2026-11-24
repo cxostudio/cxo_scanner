@@ -1,4 +1,4 @@
-import { getJob } from '@/lib/scanJobs/store'
+import { getJob, moveStatus } from '@/lib/scanJobs/store'
 import { saveFlowImages } from '@/lib/fullReport/images'
 import { NextRequest, NextResponse } from 'next/server'
 import { OpenRouter } from '@openrouter/sdk'
@@ -211,7 +211,9 @@ const ScanRequestSchema = z.object({
   reportJob: z.string().uuid().optional(), // a page of a paid full report: its scan_jobs row id (checked below)
   // background scans (lib/scanJobs/background): 'capture' takes the page and keeps it, 'judge' answers
   // the checkpoints on the kept capture later. Without it, both in one go as before.
-  phase: z.enum(['capture', 'judge']).optional(),
+  phase: z.enum(['capture', 'judge', 'both']).optional(),
+  // background scans (phase 'both'): the job whose status shows the step on the waiting screen
+  jobId: z.string().uuid().optional(),
 })
 
 // Helper function to sleep/delay
@@ -1067,7 +1069,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine, reportJob, phase } = validationResult.data
+    const { url, rules: incomingRules, captureScreenshot = true, iframeSelector, email, scanId, engine, reportJob, phase, jobId } = validationResult.data
     if (phase && (!scanId || reportJob)) return NextResponse.json({ error: 'phase needs a scanId and no reportJob' }, { status: 400 })
     // the paid full report: only a page job the server created for a report (lib/fullReport) unlocks it
     let paidScan = false
@@ -1232,7 +1234,18 @@ export async function POST(request: NextRequest) {
         }
         // background scan, step 2: judge the kept capture
         let v2: Awaited<ReturnType<typeof runScanV2>>
-        if (phase === 'judge') {
+        if (phase === 'both') {
+          // background scan in one go: capture, then judge in the same function (no storage round trip)
+          const t0 = Date.now()
+          const ev = await captureEvidence(validUrl, { extended: false })
+          const captureMs = Date.now() - t0
+          if (jobId) await moveStatus(jobId, 'capturing', 'judging').catch(() => false)
+          const t1 = Date.now()
+          const j = await judgeEvidence(ev, v2Rules, apiKey)
+          const judgeMs = Date.now() - t1
+          console.log(`[scan] background ${scanId} ${validUrl} capture ${captureMs}ms judge ${judgeMs}ms`)
+          v2 = { results: j.results, screenshot: ev.desktopTiles[0]?.dataUrl ?? null, niche: j.niche, evidence: ev, timings: { captureMs, judgeMs, stageMs: ev.facts.stageMs } as never, model: V2_MODEL(), diag: { measured: j.measured, usage: j.usage, checkpoints: v2Rules.length } as never }
+        } else if (phase === 'judge') {
           const ev = await loadEvidence(scanId!)
           if (!ev) return NextResponse.json({ error: 'capture not found', code: 'no_capture' }, { status: 409 })
           const t1 = Date.now()
@@ -1264,7 +1277,7 @@ export async function POST(request: NextRequest) {
         // full report: keep the cart and checkout screenshots for the report page
         const reportImages = paidScan && reportJob ? await saveFlowImages(reportJob, v2.evidence).catch((e) => { console.warn('[scan] report images not saved', e); return [] }) : undefined
         // background scans: the first screens double as the results page previews
-        const previews = phase === 'judge' ? { desktop: v2.evidence.desktopTiles[0]?.dataUrl ?? null, mobile: v2.evidence.mobileTiles[0]?.dataUrl ?? null } : undefined
+        const previews = phase === 'judge' || phase === 'both' ? { desktop: v2.evidence.desktopTiles[0]?.dataUrl ?? null, mobile: v2.evidence.mobileTiles[0]?.dataUrl ?? null } : undefined
         return NextResponse.json({ results: v2.results.map(withCheckpoint), screenshot: v2.screenshot, engine: 'v2', model: v2.model, timings: v2.timings, diag: v2.diag, labId, reportImages, previews })
       } catch (e) {
         if (e instanceof PageCheckError) {
