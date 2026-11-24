@@ -244,12 +244,12 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
                         ) : (
                           <span className="grid h-5 w-5 shrink-0 place-items-center text-[var(--text-subtle)]"><LockIcon size={12} /></span>
                         )}
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start max-[560px]:gap-0.5">
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                           <span className="min-w-0 text-sm font-semibold text-[var(--text)]">
                             {p.label}{' '}
                             <span className="font-normal text-[var(--text-muted)]">{sc && estimated ? <span className="text-[var(--result-fail-fg)]">· {sc.found} {sc.found === 1 ? 'issue' : 'issues'} in your free scan</span> : p.hint ? `· ${p.hint}` : ''}</span>
                           </span>
-                          <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)] max-[560px]:text-left">
+                          <span className="shrink-0 text-right text-[13px] text-[var(--text-muted)]">
                             {sc && !estimated ? (
                               <>
                                 <b className="text-[var(--result-fail-fg)]">{toFix} issues</b> · {lockedCount} fixes locked
