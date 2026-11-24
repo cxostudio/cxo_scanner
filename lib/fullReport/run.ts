@@ -271,7 +271,7 @@ async function alertTeam(parent: ScanJob, problems: string[]): Promise<void> {
   if (!res.sent) console.error('[report] alert not sent', res)
 }
 
-function reportEmailFor(job: ScanJob, snap: ReportSnapshot) {
+export function reportEmailFor(job: ScanJob, snap: ReportSnapshot) {
   return resultsEmailFor(job, { ...snap, scanUrl: job.url }, { report: true, link: `/scan/report?id=${job.id}` })
 }
 

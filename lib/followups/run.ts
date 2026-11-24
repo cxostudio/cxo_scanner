@@ -128,3 +128,9 @@ export async function runFollowups(opts: { dry?: boolean; now?: number } = {}): 
   }
   return out
 }
+
+/** Test only: the latest finished free scan of an address. */
+export async function latestFreeScan(email: string): Promise<ScanJob | null> {
+  const { data } = await db().from('scan_jobs').select('*').eq('email', email.trim().toLowerCase()).eq('status', 'done').not('scan_id', 'like', 'report_%').order('created_at', { ascending: false }).limit(1)
+  return ((data || [])[0] as ScanJob) || null
+}
