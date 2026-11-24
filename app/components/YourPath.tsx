@@ -388,12 +388,16 @@ export function YourPath({
                         "General elements: header, menu, footer, speed",
                       ]}
                     />
-                    <a
-                      href={fullScanUrl}
-                      className={`cxo-btn ${qualified ? "cxo-btn-ghost" : "cxo-btn-primary"} self-start`}
-                    >
-                      Get the full report, {price} <Arrow />
-                    </a>
+                    {fullScanUrl ? (
+                      <a
+                        href={fullScanUrl}
+                        className={`cxo-btn ${qualified ? "cxo-btn-ghost" : "cxo-btn-primary"} self-start`}
+                      >
+                        Get the full report, {price} <Arrow />
+                      </a>
+                    ) : (
+                      <p className="text-[14px] leading-[1.6] text-[var(--text-muted)]">The full report isn't available for your store yet: our scan can't add a product to your cart, so it couldn't check your cart and checkout.</p>
+                    )}
                   </>
                 )}
               </div>

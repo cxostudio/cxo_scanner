@@ -2,6 +2,7 @@
 // Creates a Stripe Checkout session and sends the buyer to Stripe's payment page.
 // After paying, Stripe sends them to /scan/order?session_id=…; a cancel goes back to the results.
 import { NextRequest, NextResponse } from 'next/server'
+import { reportEligibility } from '@/lib/fullReport/eligible'
 import type Stripe from 'stripe'
 import { offerPrice, reportPrice, safeOrigin, stripe } from '@/lib/stripe'
 import { offerFor } from '@/lib/offer'
@@ -17,6 +18,11 @@ export async function GET(req: NextRequest) {
   const answer = (k: string) => (q.get(k) || '').slice(0, 60)
   const origin = safeOrigin(q.get('back'), req.nextUrl.origin)
   const results = `${origin}/scan/results`
+  // never sell a report we can't deliver: no cart and checkout on custom storefronts (lib/fullReport/eligible)
+  if (storeUrl) {
+    const ok = await reportEligibility(storeUrl).catch(() => ({ ok: true }))
+    if (!ok.ok) return NextResponse.redirect(`${results}?checkout=unavailable`, 303)
+  }
   try {
     // within 1 hour of the email's first free scan: the offer price, checked here, not trusted from the page
     const offer = await offerFor(email)

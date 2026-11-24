@@ -199,10 +199,12 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
   }
   // one count everywhere: every Live check on the store, minus the ones the free scan ran
   const left = cov ? Math.max(0, cov.total - ran.length) : 0
-  const buy = (
+  const buy = buyUrl ? (
     <a key="buy" href={buyUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'}`}>
       Get the full report, {price} <Arrow />
     </a>
+  ) : (
+    <p key="buy" className="text-[14px] leading-[1.6] text-[var(--text-muted)]">The full report isn't available for your store yet: our scan can't add a product to your cart, so it couldn't check your cart and checkout.</p>
   )
   const call = (
     <a key="call" href={callUrl} className={`cxo-btn ${qualified ? 'cxo-btn-primary' : 'cxo-btn-ghost'}`}>
@@ -295,8 +297,8 @@ export function FullStoreOffer({ variant, pageKey, toFix, lockedCount, qualified
       <div className={embedded ? 'flex flex-col gap-2' : 'flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] p-[var(--card-padding)]'}>
         <div className="flex flex-wrap items-center gap-3">{embedded ? [buy] : qualified ? [call] : [buy]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
-          {qualified && !embedded ? 'On a call we go through your results and tell you honestly if working together is worth it.' : 'One-off payment, no subscription.'}
-          {offer?.active && ` ${offer.price} until the offer ends, then ${offer.regular}.`}
+          {qualified && !embedded ? 'On a call we go through your results and tell you honestly if working together is worth it.' : buyUrl ? 'One-off payment, no subscription.' : ''}
+          {offer?.active && buyUrl && ` ${offer.price} until the offer ends, then ${offer.regular}.`}
         </p>
       </div>
     </section>

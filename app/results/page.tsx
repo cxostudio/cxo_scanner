@@ -142,6 +142,12 @@ function ResultsView() {
   const [labId, setLabId] = useState<string | null>(null)
   // the 1-hour offer after the first free scan (server-side; lab scans see the regular price)
   const offer = useOffer(email, !labId)
+  // can the full report check this store's cart and checkout? (lib/fullReport/eligible): if not, we don't sell it
+  const [reportOk, setReportOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!url) return
+    fetch(api(`/report/eligible?url=${encodeURIComponent(url)}`)).then((r) => r.json()).then((d) => setReportOk(d.ok !== false)).catch(() => setReportOk(true))
+  }, [url])
   const shotRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -264,7 +270,7 @@ function ResultsView() {
 
   const host = hostOf(url)
   const ls = (k: string) => { try { return typeof window !== 'undefined' ? localStorage.getItem(k) || '' : '' } catch { return '' } }
-  const buyUrl = api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '', revenue: revenueBand, aov: ls('scanAov'), cr: ls('scanCr'), locale: ls('scanLocale') || 'en' })}`)
+  const buyUrl = reportOk === false ? '' : api(`/checkout?${new URLSearchParams({ url, email, lab: labId || '', back: typeof window !== 'undefined' ? window.location.origin : '', revenue: revenueBand, aov: ls('scanAov'), cr: ls('scanCr'), locale: ls('scanLocale') || 'en' })}`)
   const pageName = PAGE_NAME[detectPageTypeFromUrl(/^https?:\/\//i.test(url) ? url : `https://${url}`)]
   const qualified = isQualified(revenueBand)
   const view = located[device]

@@ -14,6 +14,7 @@ import { sendEmail } from '@/lib/email/send'
 import { estimate, eur } from '@/lib/estimate'
 import { isQualified, type ScanResult } from '@/lib/report'
 import { offerFor } from '@/lib/offer'
+import { reportEligibility } from '@/lib/fullReport/eligible'
 
 const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR
@@ -115,6 +116,8 @@ export async function runFollowups(opts: { dry?: boolean; now?: number } = {}): 
       const offer = await offerFor(j.email).catch(() => null)
       const left = offer?.active && offer.endsAt ? new Date(offer.endsAt).getTime() - now : 0
       if (!offer?.active || left < 2 * MIN || left > 16 * MIN) { out.push(`offer → ${j.id} not due (offer ${offer?.active ? `ends in ${Math.round(left / MIN)} min` : 'not running'})`); continue }
+      const eligible = await reportEligibility((j.snapshot as ScanSnapshot).scanUrl || j.url).catch(() => ({ ok: true }))
+      if (!eligible.ok) { out.push(`offer → ${j.id} skipped (report can't be delivered for this store)`); continue }
     }
     out.push(await send(kind, j, dry))
   }

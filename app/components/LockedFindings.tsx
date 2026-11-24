@@ -47,10 +47,12 @@ export function LockedFindings({
   if (!locked.length) return null
   const high = locked.filter((r) => r.checkpoint?.priority === 'High').length
   const label = (r: ScanResult) => LEVERS.find((l) => l.id === lever(r))?.short || 'Conversion'
-  const buy = (
+  const buy = buyUrl ? (
     <a key="buy" href={buyUrl} className={`cxo-btn ${qualified ? 'cxo-btn-ghost' : 'cxo-btn-primary'}`}>
       Unlock the full report <Arrow />
     </a>
+  ) : (
+    <p key="buy" className="text-[14px] leading-[1.6] text-[var(--text-muted)]">The full report isn't available for your store yet: our scan can't add a product to your cart, so it couldn't check your cart and checkout.</p>
   )
   const call = (
     <a key="call" href={callUrl} className={`cxo-btn ${qualified ? 'cxo-btn-primary' : 'cxo-btn-ghost'}`}>
@@ -97,10 +99,10 @@ export function LockedFindings({
         {/* one next step: the call from €50k/month, the report below it */}
         <div className="flex flex-wrap items-center gap-3">{qualified ? [call] : [buy]}</div>
         <p className="text-[13px] leading-[1.6] text-[var(--text-muted)]">
-          {price && !qualified ? <><strong className="text-[var(--text)]">Full report: {price}.</strong> </> : null}
+          {price && !qualified && buyUrl ? <><strong className="text-[var(--text)]">Full report: {price}.</strong> </> : null}
           {qualified
             ? 'On a call we go through your results and tell you honestly if working together is worth it.'
-            : 'Fix them yourself with the full report: each issue, where it is and how to fix it.'}
+            : buyUrl ? 'Fix them yourself with the full report: each issue, where it is and how to fix it.' : ''}
         </p>
       </div>
     </section>

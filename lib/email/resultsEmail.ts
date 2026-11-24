@@ -20,6 +20,7 @@ export type ResultsEmailInput = {
   avatarUrl: string       // Louis, for the signature
   privacyUrl: string
   report?: boolean        // the paid full report is ready (not the free scan)
+  reportOk?: boolean      // free scan: can the full report be delivered for this store (false: no report line)
 }
 
 // token values (app/tokens.css): text, muted, border, canvas, surface, fail, gain, finding
@@ -106,7 +107,7 @@ export function buildResultsEmail(i: ResultsEmailInput): { subject: string; html
   const t = i.report ? { ...base, ...(REPORT_COPY[i.locale] ?? REPORT_COPY.en) } : base
   // free scan: a call for stores that qualify, the report for the others. Full report: every buyer
   // showed intent by paying, so all of them are offered a call
-  const nextLine = i.report || i.qualified ? 'call' : 'report'
+  const nextLine = i.report || i.qualified ? 'call' : i.reportOk === false ? '' : 'report'
   const tone = i.score >= 80 ? [C.gain, C.gainBg] : i.score >= 50 ? [C.finding, C.findingBg] : [C.fail, C.failBg]
   const top = i.top.slice(0, 3)
 
