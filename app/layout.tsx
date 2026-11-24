@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   description: 'Scan your product page against 40 conversion checkpoints and see what costs you sales.',
   // without this the browser asks cxo.studio for /favicon.ico and gets the Astro site's default icon
   // (the scanner lives under /scan, and metadata icon links don't get the basePath added)
-  icons: { icon: [{ url: '/scan/cxo-mark.png', type: 'image/png', sizes: '256x256' }], apple: '/scan/cxo-mark.png' },
+  icons: { icon: [{ url: '/scan/favicon.png', type: 'image/png', sizes: '256x256' }], apple: '/scan/favicon.png' },
 }
 
 export const viewport: Viewport = {
