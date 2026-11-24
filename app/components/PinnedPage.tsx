@@ -46,56 +46,7 @@ export function PageView({
         {shot ? (
           <div className="relative">
             <img src={shot.screenshot} alt={`Your ${pageName} on ${device}, with the findings pinned`} className="block w-full" />
-            {groupPins(shot.pins, num).map((g) => {
-              const on = g.items.some((it) => it.id === selected)
-              return (
-                <span key={g.key}>
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute rounded-[6px] transition-all"
-                    style={{
-                      left: `${(g.box.x / shot.width) * 100}%`,
-                      top: `${(g.box.y / shot.height) * 100}%`,
-                      width: `${(g.box.w / shot.width) * 100}%`,
-                      height: `${(g.box.h / shot.height) * 100}%`,
-                      border: `${on ? 3 : 2}px solid var(--result-fail-fg)`,
-                      background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
-                    }}
-                  />
-                  <span
-                    className="absolute flex -translate-x-full -translate-y-1/2 gap-1"
-                    style={{
-                      left: `min(calc(${((g.box.x + g.box.w) / shot.width) * 100}% + 10px), calc(100% - 4px))`,
-                      top: `max(${(g.box.y / shot.height) * 100}%, 16px)`,
-                      zIndex: on ? 3 : 2,
-                    }}
-                  >
-                    {g.items.map((it) => {
-                      const sel = it.id === selected
-                      return (
-                        <button
-                          key={it.id}
-                          type="button"
-                          onClick={() => onPin(it.id)}
-                          aria-label={`Finding ${it.n}`}
-                          className="grid shrink-0 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
-                          style={{
-                            width: sel ? 34 : 28,
-                            height: sel ? 34 : 28,
-                            fontSize: sel ? 14 : 12,
-                            background: 'var(--result-fail-fg)',
-                            color: 'var(--text-inverse)',
-                            borderColor: 'var(--surface)',
-                          }}
-                        >
-                          {it.n}
-                        </button>
-                      )
-                    })}
-                  </span>
-                </span>
-              )
-            })}
+            <PinOverlay shot={shot} num={num} selected={selected} onPin={onPin} />
           </div>
         ) : (
           <div className="relative">
@@ -159,3 +110,61 @@ export const PhoneIcon = () => (
     <path d="M11 18.5h2" />
   </svg>
 )
+/** The numbered pins and outlines over a screenshot. Boxes are in the shot's own units
+ *  (pixels of a page screenshot, or 0-1 fractions with width = height = 1). */
+export function PinOverlay({ shot, num, selected, onPin }: { shot: { width: number; height: number; pins: Located['pins'] }; num: Map<string, number>; selected: string | null; onPin: (id: string) => void }) {
+  return (
+    <>
+      {groupPins(shot.pins, num).map((g) => {
+              const on = g.items.some((it) => it.id === selected)
+              return (
+                <span key={g.key}>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute rounded-[6px] transition-all"
+                    style={{
+                      left: `${(g.box.x / shot.width) * 100}%`,
+                      top: `${(g.box.y / shot.height) * 100}%`,
+                      width: `${(g.box.w / shot.width) * 100}%`,
+                      height: `${(g.box.h / shot.height) * 100}%`,
+                      border: `${on ? 3 : 2}px solid var(--result-fail-fg)`,
+                      background: on ? 'color-mix(in srgb, var(--result-fail-fg) 10%, transparent)' : 'transparent',
+                    }}
+                  />
+                  <span
+                    className="absolute flex -translate-x-full -translate-y-1/2 gap-1"
+                    style={{
+                      left: `min(calc(${((g.box.x + g.box.w) / shot.width) * 100}% + 10px), calc(100% - 4px))`,
+                      top: `max(${(g.box.y / shot.height) * 100}%, 16px)`,
+                      zIndex: on ? 3 : 2,
+                    }}
+                  >
+                    {g.items.map((it) => {
+                      const sel = it.id === selected
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          onClick={() => onPin(it.id)}
+                          aria-label={`Finding ${it.n}`}
+                          className="grid shrink-0 place-items-center rounded-full border-[3px] font-bold shadow-[var(--shadow-raised)] transition-transform hover:scale-110"
+                          style={{
+                            width: sel ? 34 : 28,
+                            height: sel ? 34 : 28,
+                            fontSize: sel ? 14 : 12,
+                            background: 'var(--result-fail-fg)',
+                            color: 'var(--text-inverse)',
+                            borderColor: 'var(--surface)',
+                          }}
+                        >
+                          {it.n}
+                        </button>
+                      )
+                    })}
+                  </span>
+                </span>
+              )
+            })}
+    </>
+  )
+}

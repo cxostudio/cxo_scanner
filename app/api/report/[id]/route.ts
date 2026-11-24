@@ -36,7 +36,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       located: done ? { desktop: loc('desktop'), mobile: loc('mobile') } : null,
       // older reports kept the previews inline
       preview: done ? { desktop: link(s?.previewFiles?.desktop) || s?.previewDesktop || null, mobile: link(s?.previewFiles?.mobile) || s?.previewMobile || null } : null,
-      images: done ? (s?.images || []).map((i) => ({ role: i.role, device: i.device, label: i.label, url: link(i.file) })).filter((i) => i.url) : [],
+      images: done ? (s?.images || []).map((i) => ({ role: i.role, device: i.device, label: i.label, url: link(i.file), pins: (s?.flowPins || []).filter((p) => p.file === i.file).map(({ findingId, box }) => ({ findingId, box })) })).filter((i) => i.url) : [],
       results: done && s ? ((s.results || []) as { ruleId: string }[]).map((r) => ({ ...r, area: areaOf(page, tags.get(r.ruleId)) })) : [],
     }
   })

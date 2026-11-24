@@ -7,7 +7,8 @@
 import { createHash, randomUUID } from 'crypto'
 import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
-import { saveImage, type ReportImage } from './images'
+import { saveImage, signedUrls, type ReportImage } from './images'
+import { visionPins } from './visionPins'
 import { areaOf, type ReportArea } from './areas'
 import { previews, selfOrigin } from '@/lib/scanJobs/runServer'
 import { resultsEmailFor } from '@/lib/scanJobs/finish'
@@ -26,6 +27,8 @@ export type ReportPageSnapshot = ScanSnapshot & {
   located?: { desktop?: Located | null; mobile?: Located | null }
   /** plain screenshots when pinning failed */
   previewFiles?: { desktop?: string | null; mobile?: string | null }
+  /** pins on the cart and checkout screenshots: box in fractions of that image */
+  flowPins?: { file: string; findingId: string; box: { x: number; y: number; w: number; h: number } }[]
 }
 export type ReportSnapshot = ScanSnapshot & { kind: 'report'; pages: { key: ReportPageKey; id: string; status: string }[] }
 
@@ -131,12 +134,40 @@ export async function locatePage(id: string): Promise<void> {
         if (!res.ok) return null
         const d = (await res.json()) as { screenshot?: string; width?: number; height?: number; pins?: Located['pins'] }
         if (!d.screenshot || !d.width || !d.height) return null
+        const pins = d.pins || []
+        // what element matching couldn't place (mostly "something is missing"): place it by looking at the screenshot
+        const left = findings.filter((f) => !pins.some((p) => p.findingId === f.id))
+        if (left.length) {
+          const extra = await visionPins([d.screenshot], left, snap.page === 'homepage' ? 'homepage' : snap.page === 'category' ? 'collection page' : 'product page', device).catch(() => [])
+          for (const v of extra) pins.push({ findingId: v.findingId, box: { x: Math.round(v.box.x * d.width), y: Math.round(v.box.y * d.height), w: Math.round(v.box.w * d.width), h: Math.round(v.box.h * d.height) } })
+        }
         const file = await saveImage(`${job.id}/${Date.now().toString(36)}-located-${device}.jpg`, d.screenshot)
-        return { file, width: d.width, height: d.height, pins: d.pins || [] }
+        return { file, width: d.width, height: d.height, pins }
       } catch (e) { console.warn('[report] locate failed', device, e); return null }
     }
-    const [desktop, mobile] = await Promise.all([one('desktop'), one('mobile')])
-    await completeJob(job.id, { ...snap, located: { desktop, mobile } } as ReportPageSnapshot)
+    // the cart and checkout exist only as screenshots from the scan: pin their findings on those
+    const flow = async (): Promise<NonNullable<ReportPageSnapshot['flowPins']>> => {
+      const images = snap.images || []
+      if (!images.length) return []
+      const links = await signedUrls(images.map((i) => i.file)).catch(() => new Map<string, string>())
+      const failedIn = (area: 'cart' | 'checkout') => (snap.results as Row[]).filter((r) => r.status !== 'unknown' && r.status !== 'na' && !r.passed && areaOf('product', tags.get(r.ruleId)) === area)
+        .map((r) => ({ id: r.ruleId, title: r.ruleTitle, reason: r.reason }))
+      const jobs: Promise<NonNullable<ReportPageSnapshot['flowPins']>>[] = []
+      for (const area of ['cart', 'checkout'] as const) {
+        const fs = failedIn(area)
+        if (!fs.length) continue
+        for (const device of ['desktop', 'mobile'] as const) {
+          const set = images.filter((i) => i.role === area && i.device === device && links.get(i.file))
+          if (!set.length) continue
+          jobs.push(visionPins(set.map((i) => links.get(i.file)!), fs, area === 'cart' ? 'cart' : 'checkout', device)
+            .then((ps) => ps.map((p) => ({ file: set[p.image].file, findingId: p.findingId, box: p.box })))
+            .catch(() => []))
+        }
+      }
+      return (await Promise.all(jobs)).flat()
+    }
+    const [desktop, mobile, flowPins] = await Promise.all([one('desktop'), one('mobile'), snap.page === 'product' ? flow() : Promise.resolve([])])
+    await completeJob(job.id, { ...snap, located: { desktop, mobile }, flowPins } as ReportPageSnapshot)
   } catch (e) {
     console.error('[report] locate step failed', job.scan_id, e)
     await completeJob(job.id, snap)

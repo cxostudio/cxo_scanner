@@ -7,7 +7,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { AppWindow, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { CheckpointResultBody } from '../components/CheckpointResultBody'
-import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
+import { PageView, PinOverlay, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located } from '../components/PinnedPage'
 import { BuildSteps, LogoSpinner, OrderCard, type OrderInfo } from '../components/ReportBuild'
 import { api, asset } from '@/lib/base'
 import { estimate, eur } from '@/lib/estimate'
@@ -18,7 +18,7 @@ const CALL_URL = process.env.NEXT_PUBLIC_CALL_URL || 'https://tally.so/r/w2dP9M'
 type Area = 'site' | 'homepage' | 'category' | 'product' | 'cart' | 'checkout'
 type Tab = 'overview' | Area
 type Row = ScanResult & { area: Area }
-type Shot = { role: 'cart' | 'checkout'; device: Device; label: string; url: string }
+type Shot = { role: 'cart' | 'checkout'; device: Device; label: string; url: string; pins?: Located['pins'] }
 type Page = {
   key: 'homepage' | 'category' | 'product'; how: string; url: string; status: string
   located: { desktop: Located | null; mobile: Located | null } | null
@@ -330,6 +330,13 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
   const fallback = !flow ? area.page?.preview?.[device] || null : null
 
   const scrollToPin = useCallback((id: string) => {
+    const el0 = shotRef.current
+    const flowShot = el0?.querySelector<HTMLElement>(`[data-pins~="${id}"]`)
+    if (flowShot && el0) {
+      const box = JSON.parse(flowShot.dataset.box || '{}')[id] as { y: number } | undefined
+      el0.scrollTo({ top: Math.max(0, flowShot.offsetTop + (box?.y || 0) * flowShot.offsetHeight - 16), behavior: 'smooth' })
+      return
+    }
     const box = located?.pins.find((p) => p.findingId === id)?.box
     const el = shotRef.current
     const img = el?.querySelector('img')
@@ -394,7 +401,7 @@ function AreaView({ area, device, setDevice, focus }: { area: AreaSummary; devic
             </div>
           </div>
           {flow ? (
-            <FlowShots shots={shown} device={shownDevice} wanted={device} label={area.label} />
+            <FlowShots shots={shown} device={shownDevice} wanted={device} label={area.label} num={num} selected={selected} onPin={(id) => pick(id, 'pin')} scrollRef={shotRef} />
           ) : (
             <PageView device={device} state={located} fallback={fallback} url={area.page?.url || ''} num={num} selected={selected} onPin={(id) => pick(id, 'pin')} scrollRef={shotRef} pageName={area.label.toLowerCase()} />
           )}
@@ -428,7 +435,7 @@ function unknownNote(area: Area): string {
   return 'Our scan could not see enough of this part to judge it.'
 }
 
-function FlowShots({ shots, device, wanted, label }: { shots: Shot[]; device: Device; wanted: Device; label: string }) {
+function FlowShots({ shots, device, wanted, label, num, selected, onPin, scrollRef }: { shots: Shot[]; device: Device; wanted: Device; label: string; num: Map<string, number>; selected: string | null; onPin: (id: string) => void; scrollRef: React.MutableRefObject<HTMLDivElement | null> }) {
   if (!shots.length) return <div className="grid aspect-[4/3] place-items-center rounded-[var(--radius-lg)] border border-dashed border-[var(--border-strong)] text-sm text-[var(--text-muted)]">No screenshot of the {label.toLowerCase()}</div>
   const frame = device === 'desktop'
     ? 'rounded-[var(--radius-lg)] border border-[var(--border-strong)]'
@@ -437,8 +444,15 @@ function FlowShots({ shots, device, wanted, label }: { shots: Shot[]; device: De
     <div>
       {device !== wanted && <p className="mb-2 text-[13px] text-[var(--text-muted)]">Only captured on {device}.</p>}
       <div className={`overflow-hidden bg-[var(--surface)] ${frame}`}>
-        <div className={`overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-80px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
-          {shots.map((s, i) => <img key={i} src={s.url} alt={`Your ${label.toLowerCase()} on ${device}`} className="block w-full border-b border-[var(--border)] last:border-0" />)}
+        <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-80px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
+          {shots.map((s, i) => (
+            <div key={i} className="relative border-b border-[var(--border)] last:border-0"
+              data-pins={(s.pins || []).map((p) => p.findingId).join(' ')} data-box={JSON.stringify(Object.fromEntries((s.pins || []).map((p) => [p.findingId, p.box])))}>
+              <img src={s.url} alt={`Your ${label.toLowerCase()} on ${device}`} className="block w-full" />
+              {/* boxes are fractions of the image: a 1 x 1 shot */}
+              <PinOverlay shot={{ width: 1, height: 1, pins: s.pins || [] }} num={num} selected={selected} onPin={onPin} />
+            </div>
+          ))}
         </div>
       </div>
     </div>
