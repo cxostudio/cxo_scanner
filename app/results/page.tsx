@@ -87,6 +87,8 @@ function hydrate(snap: Record<string, unknown>) {
  */
 export default function ResultsPage() {
   const [state, setState] = useState<'checking' | 'ready' | 'waiting' | 'missing' | 'failed'>('checking')
+  // background scans (URL-first /start): where the scan is, shown while the visitor waits
+  const [stage, setStage] = useState('')
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('id')
     if (!id) { setState('ready'); return }
@@ -99,6 +101,7 @@ export default function ResultsPage() {
       const d = (await r.json().catch(() => ({}))) as { status?: string; snapshot?: Record<string, unknown> | null }
       if (d.status === 'done' && d.snapshot) { hydrate(d.snapshot); return setState('ready') }
       if (d.status === 'failed') return setState('failed')
+      setStage(d.status || '')
       setState('waiting')
       if (tries++ < 72) window.setTimeout(load, 5000) // up to 6 minutes
     }
@@ -108,7 +111,14 @@ export default function ResultsPage() {
   if (state === 'ready') return <ResultsView />
   if (state === 'checking') return <main className="min-h-screen bg-[var(--bg-subtle)]" />
   const msg = {
-    waiting: { h: 'Your results are almost ready', p: 'We are finishing the scan of your page. This page updates by itself, it usually takes about a minute.' },
+    waiting: {
+      h: 'Your results are almost ready',
+      p: stage === 'capturing'
+        ? 'We are taking screenshots of your page on desktop and mobile. This page updates by itself.'
+        : stage === 'captured' || stage === 'judging'
+          ? 'We are checking your page against our conversion checkpoints. This page updates by itself, it usually takes under a minute.'
+          : 'We are finishing the scan of your page. This page updates by itself, it usually takes about a minute.',
+    },
     missing: { h: 'This link has expired', p: 'Scan results are kept for 12 months. Run a new free scan to see where your page leaks revenue today.' },
     failed: { h: 'We couldn’t finish this scan', p: 'Some pages block automated visits or take too long to load. Run a new scan, or try another product page.' },
   }[state]

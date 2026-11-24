@@ -2,7 +2,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { noStoreFetch } from '@/lib/supabaseFetch'
 
-export type JobStatus = 'running' | 'server' | 'done' | 'failed'
+// background scans (lib/scanJobs/background) also pass through: capturing → captured → judging
+export type JobStatus = 'running' | 'server' | 'done' | 'failed' | 'capturing' | 'captured' | 'judging'
 
 /** Everything the results page reads from local storage, so it can open on any device. */
 export type ScanSnapshot = {
@@ -27,7 +28,11 @@ export type ScanJob = {
   email: string
   url: string
   locale: string
-  answers: { revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string; quiet?: boolean } | null
+  answers: {
+    revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string; quiet?: boolean
+    // background scans
+    bg?: boolean; ip?: string; role?: string; judge?: boolean; scanUrl?: string; resolvedFrom?: string; resolvedHow?: string
+  } | null
   origin: string | null
   status: JobStatus
   heartbeat_at: string
@@ -126,4 +131,40 @@ export async function claimStart(id: string): Promise<boolean> {
 export async function setJobUrl(id: string, url: string): Promise<void> {
   const { error } = await db().from(T).update({ url, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+// ── background scans (lib/scanJobs/background) ────────────────────────────────────────────────
+
+/** Move a job from one status to the next: true only for the caller that moved it (no double judge). */
+export async function moveStatus(id: string, from: JobStatus, to: JobStatus): Promise<boolean> {
+  const { data, error } = await db().from(T).update({ status: to, updated_at: new Date().toISOString() }).eq('id', id).eq('status', from).select('id').maybeSingle()
+  if (error) throw new Error(error.message)
+  return Boolean(data)
+}
+
+/** Merge fields into a job's answers (read, merge, write: the visitor answers one question at a time). */
+export async function mergeAnswers(id: string, patch: NonNullable<ScanJob['answers']>): Promise<ScanJob | null> {
+  const job = await getJob(id)
+  if (!job) return null
+  const answers = { ...(job.answers || {}), ...patch }
+  const { data, error } = await db().from(T).update({ answers, updated_at: new Date().toISOString() }).eq('id', id).select('*').maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as ScanJob) || null
+}
+
+/** Give a background job its email (once: the first address wins). */
+export async function setJobEmail(id: string, email: string): Promise<ScanJob | null> {
+  const { data, error } = await db().from(T).update({ email: email.trim().toLowerCase(), updated_at: new Date().toISOString() }).eq('id', id).eq('email', '').select('*').maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as ScanJob) || null
+}
+
+/** Background scans started recently by one visitor (by IP) or on one store. */
+export async function countRecentBackground(input: { ip?: string; host?: string; sinceMs: number }): Promise<number> {
+  let q = db().from(T).select('id', { count: 'exact', head: true }).like('scan_id', 'bg_%').gte('created_at', new Date(Date.now() - input.sinceMs).toISOString())
+  if (input.ip) q = q.eq('answers->>ip', input.ip)
+  if (input.host) q = q.ilike('url', `%${input.host}%`)
+  const { count, error } = await q
+  if (error) throw new Error(error.message)
+  return count || 0
 }
