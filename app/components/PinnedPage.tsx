@@ -30,6 +30,9 @@ export function PageView({
   pageName?: string
 }) {
   const shot = state && typeof state === 'object' ? state : null
+  // images that finished downloading: until then the spinner stays on
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set())
+  const seen = (src: string) => setLoaded((l) => (l.has(src) ? l : new Set(l).add(src)))
   const frame =
     device === 'desktop'
       ? 'rounded-[var(--radius-lg)] border border-[var(--border-strong)]'
@@ -47,25 +50,36 @@ export function PageView({
       <div ref={scrollRef} className={`relative overflow-y-auto ${device === 'desktop' ? 'max-h-[calc(100vh-120px)]' : 'h-[min(680px,calc(100vh-80px))]'} max-[560px]:max-h-[460px]`}>
         {shot ? (
           <div className="relative">
-            <img src={shot.screenshot} alt={`Your ${pageName} on ${device}, with the findings pinned`} className="block w-full" />
-            <PinOverlay shot={shot} num={num} selected={selected} onPin={onPin} />
+            {/* keep the preview under it until the pinned screenshot has downloaded */}
+            {!loaded.has(shot.screenshot) && fallback && <img src={fallback} alt="" aria-hidden className="absolute inset-x-0 top-0 block w-full opacity-60" />}
+            <img src={shot.screenshot} alt={`Your ${pageName} on ${device}, with the findings pinned`} onLoad={() => seen(shot.screenshot)} className={`relative block w-full ${loaded.has(shot.screenshot) ? '' : 'opacity-0'}`} />
+            {loaded.has(shot.screenshot) ? <PinOverlay shot={shot} num={num} selected={selected} onPin={onPin} /> : <LoadingPill label="Pinning the findings on your page…" />}
           </div>
         ) : (
           <div className="relative">
             {fallback ? (
-              <img src={fallback} alt={`Your ${pageName} on ${device}`} className={`block w-full ${state === 'loading' ? 'opacity-60' : ''}`} />
+              <img src={fallback} alt={`Your ${pageName} on ${device}`} onLoad={() => seen(fallback)} className={`block w-full transition-opacity ${state === 'loading' || !loaded.has(fallback) ? 'opacity-60' : ''}`} />
             ) : (
-              <div className="grid aspect-[4/3] place-items-center text-sm text-[var(--text-muted)]">{state === 'loading' ? '' : 'Preview unavailable'}</div>
+              // no picture yet: a grey page shape, so the frame never looks empty or broken
+              <div className={`grid aspect-[4/3] place-items-center text-sm text-[var(--text-muted)] ${state === 'loading' ? 'animate-pulse bg-[var(--bg-subtle)]' : ''}`}>{state === 'loading' ? '' : 'Preview unavailable'}</div>
             )}
-            {state === 'loading' && (
-              <span className="absolute left-1/2 top-24 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--text)] shadow-[var(--shadow-raised)]">
-                Pinning the findings on your page…
-              </span>
+            {(state === 'loading' || (fallback && !loaded.has(fallback))) && (
+              <LoadingPill label={state === 'loading' ? 'Pinning the findings on your page…' : 'Loading your page…'} />
             )}
           </div>
         )}
       </div>
     </div>
+  )
+}
+
+/** The waiting label on the page picture: a spinner and what we're doing. */
+function LoadingPill({ label }: { label: string }) {
+  return (
+    <span role="status" className="absolute left-1/2 top-24 z-10 inline-flex -translate-x-1/2 items-center gap-2.5 whitespace-nowrap rounded-full bg-[var(--surface)] py-2 pl-3 pr-4 text-sm font-semibold text-[var(--text)] shadow-[var(--shadow-raised)]">
+      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--text)]" aria-hidden />
+      {label}
+    </span>
   )
 }
 
