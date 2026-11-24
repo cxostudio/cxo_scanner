@@ -9,7 +9,7 @@ export type ReminderInput = {
   when: string              // "Wednesday 26 November at 14:00", in their time zone
   time: string              // "14:00"
   today?: boolean           // the call is later today, not tomorrow
-  zone?: string             // "Central European Time", in their language
+  zone?: string             // short code: CET, GMT, EST...
   store?: string
   joinUrl?: string
   prepUrl?: string          // their report or free scan
@@ -23,7 +23,7 @@ export type ReminderInput = {
 export function buildReminderEmail(i: ReminderInput): { subject: string; html: string; text: string } {
   const fr = i.locale === 'fr'
   const hi = i.firstName ? (fr ? `Bonjour ${i.firstName},` : `Hi ${i.firstName},`) : (fr ? 'Bonjour,' : 'Hi,')
-  const about = i.store ? (fr ? ` sur ${i.store}` : ` about ${i.store}`) : ''
+  const about = i.store ? (fr ? ` sur ${i.store}` : ` about ${i.store}`) : (fr ? ' sur votre site' : ' about your website')
   const prep = i.prepUrl
     ? fr
       ? `Pour profiter des 30 minutes : ouvrez ${i.prepIsReport ? 'votre rapport' : 'les résultats de votre scan'} et notez les 2 ou 3 points dont vous voulez parler. On part de là.`

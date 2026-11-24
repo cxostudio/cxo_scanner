@@ -55,12 +55,14 @@ export async function handleCalEvent(event: string, p: CalPayload): Promise<stri
   const email = String(a.email || '').trim().toLowerCase()
   if (!email || !p.startTime) return 'ignored (no attendee email or time)'
   const meta = (p.metadata || {}) as Record<string, unknown>
-  const responses = Object.fromEntries(Object.entries(p.responses || {}).filter(([k]) => !['name', 'email', 'location', 'guests', 'rescheduleReason'].includes(k)).map(([k, v]) => [k, answerText(v)]).filter(([, v]) => v))
+  const responses = Object.fromEntries(Object.entries(p.responses || {}).filter(([k]) => !['name', 'email', 'location', 'guests', 'rescheduleReason', 'website'].includes(k)).map(([k, v]) => [k, answerText(v)]).filter(([, v]) => v))
+  // the "Website" booking question (identifier: website), pre-filled from our pages when we know the store
+  const website = hostOf(answerText((p.responses || {} as Record<string, unknown>)['website']).trim())
   const row = {
     uid: p.uid, email, name: a.name || null, start_time: p.startTime, end_time: p.endTime || null, status: 'booked',
     meeting_url: String(meta.videoCallUrl || (/^https?:/i.test(p.location || '') ? p.location : '') || '') || null,
     timezone: a.timeZone || null, locale: /^fr/i.test(a.language?.locale || '') ? 'fr' : 'en',
-    source: typeof meta.source === 'string' ? meta.source : null, store: typeof meta.store === 'string' ? meta.store : null,
+    source: typeof meta.source === 'string' ? meta.source : null, store: website || (typeof meta.store === 'string' ? hostOf(meta.store) : null) || null,
     responses, reminded_24h: null, reminded_1h: null, updated_at: new Date().toISOString(),
   }
   const { error } = await db().from('call_bookings').upsert(row, { onConflict: 'uid' })
@@ -86,6 +88,15 @@ const hostOf = (u?: string | null) => { if (!u) return ''; try { return new URL(
 const reportUrl = (j: ScanJob) => `https://cxo.studio/scan/report?id=${j.id}`
 const scanUrl = (j: ScanJob) => `https://cxo.studio/scan/results?id=${j.id}`
 
+/** CET, GMT, WET... (British codes), EST, PST... (US codes) where British has only an offset; else "GMT+4". */
+function zoneCode(d: Date, timeZone: string): string {
+  const get = (l: string) => new Intl.DateTimeFormat(l, { timeZone, timeZoneName: 'short' }).formatToParts(d).find((p) => p.type === 'timeZoneName')?.value || ''
+  const gb = get('en-GB')
+  if (gb && !/^(GMT|UTC)[+\-−]/.test(gb)) return gb
+  const us = get('en-US')
+  return us && !/^(GMT|UTC)[+\-−]/.test(us) ? us : gb || timeZone
+}
+
 function fmt(iso: string, tz: string | null, locale: 'en' | 'fr') {
   const d = new Date(iso), timeZone = tz || 'Europe/Brussels'
   const loc = locale === 'fr' ? 'fr-BE' : 'en-GB'
@@ -93,8 +104,8 @@ function fmt(iso: string, tz: string | null, locale: 'en' | 'fr') {
     const day = d.toLocaleDateString(loc, { weekday: 'long', day: 'numeric', month: 'long', timeZone })
     const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', timeZone })
     const ymd = (x: Date) => x.toLocaleDateString('en-CA', { timeZone })
-    // the time zone, named in their language: "Central European Time", "heure d’Europe centrale"
-    const zone = new Intl.DateTimeFormat(loc, { timeZone, timeZoneName: 'longGeneric' }).formatToParts(d).find((p) => p.type === 'timeZoneName')?.value || timeZone
+    // the time zone as a short code: CET, GMT, WET, EST, PST
+    const zone = zoneCode(d, timeZone)
     return { when: locale === 'fr' ? `${day} à ${time} (${zone})` : `${day} at ${time} (${zone})`, time, zone, today: ymd(d) === ymd(new Date()) }
   } catch { return { when: d.toISOString(), time: '', zone: '', today: false } }
 }
