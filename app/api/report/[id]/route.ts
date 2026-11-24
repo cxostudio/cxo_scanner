@@ -5,6 +5,7 @@ import { areaOf } from '@/lib/fullReport/areas'
 import { signedUrls } from '@/lib/fullReport/images'
 import type { ReportPageSnapshot } from '@/lib/fullReport/run'
 import { stripe } from '@/lib/stripe'
+import { isUploadRule, type UploadState } from '@/lib/fullReport/upload'
 
 export const runtime = 'nodejs'
 const RESCANS = 3
@@ -31,12 +32,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const done = parent.status === 'done'
 
   const tags = new Map<string, string[]>()
+  let uploadChecks = 0
   if (done) {
     const cp = await getConversionCheckpointRules().catch(() => null)
     if (cp && cp.ok) for (const r of cp.rules) tags.set(r.id, r.pageTypeIds || [])
+    if (cp && cp.ok) uploadChecks = cp.rules.filter(isUploadRule).length
   }
+  // the thank-you page: screenshots the buyer uploaded (lib/fullReport/upload)
+  const up = done ? ((parent.snapshot as { upload?: UploadState } | null)?.upload || null) : null
   const snaps = jobs.map((j) => (j.status === 'done' ? (j.snapshot as ReportPageSnapshot | null) : null))
-  const files = done ? snaps.flatMap((s) => [s?.located?.desktop?.file, s?.located?.mobile?.file, s?.previewFiles?.desktop, s?.previewFiles?.mobile, ...(s?.images || []).map((i) => i.file)]).filter((f): f is string => !!f) : []
+  const files = done ? [...snaps.flatMap((s) => [s?.located?.desktop?.file, s?.located?.mobile?.file, s?.previewFiles?.desktop, s?.previewFiles?.mobile, ...(s?.images || []).map((i) => i.file)]), ...(up?.shots || []).map((x) => x.file)].filter((f): f is string => !!f) : []
   const url = await signedUrls(files).catch(() => new Map<string, string>())
   const link = (f?: string | null) => (f ? url.get(f) || null : null)
 
@@ -68,5 +73,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     rescansLeft,
     status: parent.status, url: parent.url, locale: parent.locale, createdAt: parent.created_at,
     answers: { revenue: parent.answers?.revenue, aov: parent.answers?.aov, cr: parent.answers?.cr }, pages,
+    thankYou: done && uploadChecks ? {
+      checks: uploadChecks,
+      at: up?.at || null,
+      shots: (up?.shots || []).map((x) => ({ device: x.device, url: link(x.file), pins: (up?.pins || []).filter((p) => p.file === x.file).map(({ findingId, box }) => ({ findingId, box })) })).filter((x) => x.url),
+      results: (up?.results || []).map((r) => ({ ...r, area: 'thankyou' })),
+    } : null,
   }, { headers: { 'Cache-Control': 'no-store' } })
 }
