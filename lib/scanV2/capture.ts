@@ -1418,7 +1418,7 @@ async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
     try {
       await page.evaluate((s: string) => document.querySelector(s)?.scrollIntoView({ block: 'start' }), sel)
       await page.click(sel).catch(() => page.evaluate((s: string) => (document.querySelector(s) as HTMLElement | null)?.click(), sel))
-      await new Promise((r) => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, 350))
       const box = await page.evaluate((s: string) => {
         const el = document.querySelector(s)
         if (!el) return null
@@ -1430,7 +1430,10 @@ async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
       }, sel)
       if (!box) continue
       if (box.text) texts.push(`[${t.name}] ${box.text}`)
-      const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: box.y, width: DESKTOP.width, height: DESKTOP.height }, captureBeyondViewport: true }).catch(() => null)
+      // scroll there and shoot the viewport: same picture as a clip beyond the viewport, without the
+      // full-page relayout that costs about 1.5 s per tab
+      await page.evaluate((y: number) => window.scrollTo(0, y), box.y).catch(() => {})
+      const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
       if (b64) tiles.push({ label: `desktop product tab "${t.name}" opened`, dataUrl: `data:image/jpeg;base64,${b64}` })
     } catch {}
   }
