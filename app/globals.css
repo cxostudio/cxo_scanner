@@ -339,14 +339,14 @@ a.border-zinc-300 {
 body:has(.cxo-results) .cxo-wash { display: none; }
 .cxo-orbs { position: absolute; inset: 0 0 auto 0; height: min(110vh, 1000px); z-index: -1; overflow: hidden; pointer-events: none; background: var(--bg-subtle);
   -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent); mask-image: linear-gradient(180deg, #000 70%, transparent); }
-.cxo-orbs i { position: absolute; border-radius: 50%; filter: blur(90px); animation: cxo-orb 24s ease-in-out infinite alternate; }
+.cxo-orbs i { position: absolute; border-radius: 50%; filter: blur(110px); animation: cxo-orb 24s ease-in-out infinite alternate; }
 /* brand colours from --gradient-brand (cyan, light cyan, green), plus one warm touch */
-.cxo-orbs i:nth-child(1) { width: 560px; height: 560px; left: -180px; top: -200px; background: rgba(64, 198, 255, 0.38); }
-.cxo-orbs i:nth-child(2) { width: 520px; height: 520px; right: -140px; top: 60px; background: rgba(75, 254, 133, 0.34); animation-delay: -8s; }
-.cxo-orbs i:nth-child(3) { width: 420px; height: 420px; right: 18%; top: 380px; background: rgba(121, 223, 255, 0.30); animation-delay: -14s; }
-.cxo-orbs i:nth-child(4) { width: 380px; height: 380px; left: 30%; top: 620px; background: rgba(255, 196, 150, 0.22); animation-delay: -4s; }
+.cxo-orbs i:nth-child(1) { width: 900px; height: 760px; left: -240px; top: -260px; background: rgba(64, 198, 255, 0.42); }
+.cxo-orbs i:nth-child(2) { width: 820px; height: 820px; right: -220px; top: -80px; background: rgba(75, 254, 133, 0.36); animation-delay: -8s; }
+.cxo-orbs i:nth-child(3) { width: 700px; height: 560px; right: 22%; top: 300px; background: rgba(121, 223, 255, 0.34); animation-delay: -14s; }
+.cxo-orbs i:nth-child(4) { width: 720px; height: 520px; left: 8%; top: 520px; background: rgba(255, 196, 150, 0.26); animation-delay: -4s; }
 @keyframes cxo-orb { 0% { transform: translate3d(0, 0, 0) scale(1); } 100% { transform: translate3d(40px, 30px, 0) scale(1.08); } }
-@media (max-width: 810px) { .cxo-orbs i { filter: blur(70px); } .cxo-orbs i:nth-child(1) { width: 380px; height: 380px; } .cxo-orbs i:nth-child(2) { width: 340px; height: 340px; right: -160px; } }
+@media (max-width: 810px) { .cxo-orbs i { filter: blur(70px); } .cxo-orbs i:nth-child(1) { width: 520px; height: 480px; } .cxo-orbs i:nth-child(2) { width: 480px; height: 480px; right: -200px; } .cxo-orbs i:nth-child(3), .cxo-orbs i:nth-child(4) { width: 420px; height: 380px; } }
 @media (prefers-reduced-motion: reduce) { .cxo-orbs i { animation: none; } }
 
 @layer components {
