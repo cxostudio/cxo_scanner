@@ -166,3 +166,17 @@ export async function runCallReminders(opts: { dry?: boolean; now?: number } = {
   }
   return out
 }
+
+/** Test only (app/api/followups/test): the reminder or team alert as it would go out for a call booked by this scan's address, tomorrow at 14:00. */
+export async function previewCallEmail(job: ScanJob, kind: '24h' | '1h' | 'booked') {
+  const start = new Date(Date.now() + (kind === '1h' ? HOUR : 24 * HOUR))
+  start.setUTCMinutes(0, 0, 0)
+  const b: Booking = {
+    uid: 'preview', email: job.email, name: 'Louis Grommen', start_time: start.toISOString(), end_time: null, status: 'booked',
+    meeting_url: 'https://meet.google.com/', timezone: 'Europe/Brussels', locale: job.locale === 'fr' ? 'fr' : 'en', source: 'report',
+    store: hostOf(job.url), responses: { 'Monthly revenue': '€50k to €100k' }, reminded_24h: null, reminded_1h: null, created_at: new Date().toISOString(),
+  }
+  if (kind !== 'booked') return remind(b, kind)
+  await alertTeam(b, false)
+  return 'team alert sent'
+}
