@@ -9,11 +9,11 @@ export const runtime = 'nodejs'
 
 /** Send one follow-up (or call reminder / booking alert) now, to the scan's own address, for CXO Studio and +test scans only. POST { jobId, kind } */
 export async function POST(request: NextRequest) {
-  const { jobId, kind, email } = (await request.json().catch(() => ({}))) as { jobId?: string; kind?: string; email?: string }
+  const { jobId, kind, email, to } = (await request.json().catch(() => ({}))) as { jobId?: string; kind?: string; email?: string; to?: string }
   // { email, kind: reminder24 | reminder1 }: the real stored booking of a test address
   if (email && (kind === 'reminder24' || kind === 'reminder1')) {
-    if (!isTestEmail(email)) return NextResponse.json({ error: 'Test addresses only' }, { status: 403 })
-    return NextResponse.json(await resendReminderFor(email, kind === 'reminder24' ? '24h' : '1h'))
+    if (!isTestEmail(email) || (to && !isTestEmail(to))) return NextResponse.json({ error: 'Test addresses only' }, { status: 403 })
+    return NextResponse.json(await resendReminderFor(email, kind === 'reminder24' ? '24h' : '1h', to))
   }
   const CALL = ['reminder24', 'reminder1', 'booked']
   if (!jobId || !['offer', 'call1', 'call2', ...CALL].includes(kind || '')) return NextResponse.json({ error: 'jobId and kind (offer, call1, call2, reminder24, reminder1, booked) are required' }, { status: 400 })

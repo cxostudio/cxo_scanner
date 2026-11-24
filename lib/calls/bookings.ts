@@ -130,7 +130,7 @@ async function claim(uid: string, col: 'reminded_24h' | 'reminded_1h'): Promise<
   return !error && !!data?.length
 }
 
-async function remind(b: Booking, kind: '24h' | '1h'): Promise<string> {
+async function remind(b: Booking, kind: '24h' | '1h', to?: string): Promise<string> {
   const locale = (b.locale === 'fr' ? 'fr' : 'en') as 'en' | 'fr'
   const lead = await leadOf(b.email).catch(() => ({} as Awaited<ReturnType<typeof leadOf>>))
   const prep = lead.report ? reportUrl(lead.report) : lead.scan ? scanUrl(lead.scan) : undefined
@@ -142,8 +142,8 @@ async function remind(b: Booking, kind: '24h' | '1h'): Promise<string> {
     rescheduleUrl: `https://cal.com/reschedule/${b.uid}`, cancelUrl: `https://cal.com/booking/${b.uid}?cancel=true`,
     logoUrl: 'https://audit.cxo.studio/scan/cxo_studio_logo.png', avatarUrl: 'https://audit.cxo.studio/scan/email/louis.jpg',
   })
-  const res = await sendEmail({ to: b.email, ...mail })
-  return `reminder ${kind} → ${b.email} ${res.sent ? 'sent' : `not sent (${res.error})`}`
+  const res = await sendEmail({ to: to || b.email, ...mail })
+  return `reminder ${kind} → ${to || b.email} ${res.sent ? 'sent' : `not sent (${res.error})`}`
 }
 
 /** Reminders due now. 24h: sent once between 24h and 3h before, in daytime (8:00 to 21:00 their time), unless booked less than 6h ago.
@@ -185,10 +185,10 @@ export async function previewCallEmail(job: ScanJob, kind: '24h' | '1h' | 'booke
 }
 
 /** Test only: the latest booked call of a test address, as stored, and its reminder sent now (nothing is marked as sent). */
-export async function resendReminderFor(email: string, kind: '24h' | '1h') {
+export async function resendReminderFor(email: string, kind: '24h' | '1h', to?: string) {
   const { data, error } = await db().from('call_bookings').select('*').eq('email', email.trim().toLowerCase()).order('created_at', { ascending: false }).limit(1)
   if (error) throw new Error(error.message)
   const b = (data || [])[0] as Booking | undefined
   if (!b) return { log: 'no booking stored for this address' }
-  return { booking: { start: b.start_time, status: b.status, source: b.source, store: b.store, meeting: !!b.meeting_url, locale: b.locale, answers: b.responses }, log: b.status === 'booked' ? await remind(b, kind) : `not sent: booking is ${b.status}` }
+  return { booking: { start: b.start_time, status: b.status, source: b.source, store: b.store, meeting: !!b.meeting_url, locale: b.locale, answers: b.responses }, log: b.status === 'booked' ? await remind(b, kind, to) : `not sent: booking is ${b.status}` }
 }
