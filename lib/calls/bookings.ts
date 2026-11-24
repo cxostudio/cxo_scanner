@@ -192,3 +192,15 @@ export async function resendReminderFor(email: string, kind: '24h' | '1h', to?: 
   if (!b) return { log: 'no booking stored for this address' }
   return { booking: { start: b.start_time, status: b.status, source: b.source, store: b.store, meeting: !!b.meeting_url, locale: b.locale, answers: b.responses }, log: b.status === 'booked' ? await remind(b, kind, to) : `not sent: booking is ${b.status}` }
 }
+
+/** Test only: a call booked by someone we know nothing about (no scan, no report, no store), sent to a test inbox. */
+export async function previewNoLead(kind: '24h' | '1h' | 'booked', to: string) {
+  const start = new Date(Date.now() + (kind === '1h' ? HOUR : 24 * HOUR)); start.setUTCMinutes(30, 0, 0)
+  const b: Booking = {
+    uid: 'preview', email: 'no-lead-preview@example.com', name: 'Sam Peeters', start_time: start.toISOString(), end_time: null, status: 'booked',
+    meeting_url: 'https://meet.google.com/', timezone: 'Europe/Brussels', locale: 'en', source: 'site-call', store: null,
+    responses: {}, reminded_24h: null, reminded_1h: null, created_at: new Date().toISOString(),
+  }
+  if (kind === 'booked') { const mail = buildBookedAlert({ name: b.name!, email: b.email, when: fmt(b.start_time, b.timezone, 'en').when, source: b.source!, links: [], answers: [] }); await sendEmail({ to, ...mail }); return 'alert sent' }
+  return remind(b, kind, to)
+}

@@ -3,13 +3,18 @@ import { getJob } from '@/lib/scanJobs/store'
 import { isTestEmail } from '@/lib/conversionCheckpoints/filterByUrlPageType'
 import { followupEmailFor, unsubscribeUrl } from '@/lib/followups/run'
 import { sendEmail } from '@/lib/email/send'
-import { previewCallEmail, resendReminderFor } from '@/lib/calls/bookings'
+import { previewCallEmail, previewNoLead, resendReminderFor } from '@/lib/calls/bookings'
 
 export const runtime = 'nodejs'
 
 /** Send one follow-up (or call reminder / booking alert) now, to the scan's own address, for CXO Studio and +test scans only. POST { jobId, kind } */
 export async function POST(request: NextRequest) {
   const { jobId, kind, email, to } = (await request.json().catch(() => ({}))) as { jobId?: string; kind?: string; email?: string; to?: string }
+  // { to, kind, nolead: true }: the emails for someone with no scan or report
+  if (to && (kind === 'reminder24' || kind === 'reminder1' || kind === 'booked') && (jobId === 'nolead')) {
+    if (!isTestEmail(to)) return NextResponse.json({ error: 'Test addresses only' }, { status: 403 })
+    return NextResponse.json({ log: await previewNoLead(kind === 'reminder24' ? '24h' : kind === 'reminder1' ? '1h' : 'booked', to) })
+  }
   // { email, kind: reminder24 | reminder1 }: the real stored booking of a test address
   if (email && (kind === 'reminder24' || kind === 'reminder1')) {
     if (!isTestEmail(email) || (to && !isTestEmail(to))) return NextResponse.json({ error: 'Test addresses only' }, { status: 403 })
