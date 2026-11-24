@@ -74,9 +74,9 @@ export function PageView({
 }
 
 /** The waiting label on the page picture: a spinner and what we're doing. */
-function LoadingPill({ label }: { label: string }) {
+export function LoadingPill({ label, className = 'top-24' }: { label: string; className?: string }) {
   return (
-    <span role="status" className="absolute left-1/2 top-24 z-10 inline-flex -translate-x-1/2 items-center gap-2.5 whitespace-nowrap rounded-full bg-[var(--surface)] py-2 pl-3 pr-4 text-sm font-semibold text-[var(--text)] shadow-[var(--shadow-raised)]">
+    <span role="status" className={`absolute left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-2.5 whitespace-nowrap rounded-full bg-[var(--surface)] py-2 pl-3 pr-4 text-sm font-semibold text-[var(--text)] shadow-[var(--shadow-raised)] ${className}`}>
       <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--text)]" aria-hidden />
       {label}
     </span>

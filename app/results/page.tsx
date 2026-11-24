@@ -13,7 +13,7 @@ import { api, asset } from '@/lib/base'
 import { detectPageTypeFromUrl, type UrlPageType } from '@/lib/conversionCheckpoints/pageType'
 import { estimate, eur, type Estimate } from '@/lib/estimate'
 import { useOffer } from '../components/useOffer'
-import { PageView, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located, type LocateState } from '../components/PinnedPage'
+import { PageView, LoadingPill, Num, Pass, MonitorIcon, PhoneIcon, type Device, type Located, type LocateState } from '../components/PinnedPage'
 import { isQualified, lever, scoreOf, effortLabel, LEVERS, TONE, toneOf, type ScanResult } from '@/lib/report'
 import { callLink } from '@/lib/call'
 
@@ -422,7 +422,7 @@ function ResultsView() {
 
           </div>
 
-          <Devices desktop={deskImg} mobile={phoneImg} />
+          <Devices desktop={deskImg} mobile={phoneImg} pinning={located.desktop === 'loading' || located.mobile === 'loading'} />
         </section>
       </div>
 
@@ -627,20 +627,25 @@ function Ring({ score, color }: { score: number; color: string }) {
  * whole group fades out at the bottom together, so the phone never turns see-through
  * over the laptop.
  */
-function Devices({ desktop, mobile }: { desktop: string | null; mobile: string | null }) {
+function Devices({ desktop, mobile, pinning }: { desktop: string | null; mobile: string | null; pinning: boolean }) {
+  // the first screen arrives first, the full page a few seconds later: say it is still coming
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set())
+  const seen = (src: string) => setLoaded((l) => (l.has(src) ? l : new Set(l).add(src)))
+  const waiting = pinning || !desktop || !loaded.has(desktop) || (!!mobile && !loaded.has(mobile))
   const fade = { WebkitMaskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)', maskImage: 'linear-gradient(180deg, #000 55%, transparent 100%)' }
   return (
     <div className="cxo-reveal cxo-reveal-1 relative w-full max-[1023px]:h-[360px] max-[560px]:h-[260px] lg:aspect-[21/20] lg:max-h-[780px]" style={fade} aria-hidden={!desktop && !mobile}>
       <div className="absolute inset-y-0 left-0 right-[14%] overflow-hidden rounded-t-[18px] border-[10px] border-b-0 border-[var(--text)] bg-[var(--text)]">
         <div className="h-full overflow-hidden rounded-t-[6px] bg-[var(--surface-muted)]">
-          {desktop ? <img src={desktop} alt="Your product page on desktop" className="block w-full object-cover object-top" /> : null}
+          {desktop ? <img src={desktop} alt="Your product page on desktop" onLoad={() => seen(desktop)} className="block w-full object-cover object-top" /> : <div className="h-full w-full animate-pulse bg-[var(--bg-subtle)]" />}
         </div>
+        {waiting && <LoadingPill label={pinning ? 'Loading your full page…' : 'Loading your page…'} className="top-[46%] max-[560px]:top-[40%]" />}
       </div>
       {mobile && (
         <div className="absolute right-0 top-[18%] w-[30%] min-w-[110px] max-w-[200px]">
           <div className="overflow-hidden rounded-[26px] border-[7px] border-[var(--text)] bg-[var(--text)] shadow-[0_24px_48px_-18px_rgba(9,9,11,.35)]">
             <div className="aspect-[9/19] overflow-hidden rounded-[18px] bg-[var(--surface)]">
-              <img src={mobile} alt="Your product page on a phone" className="block w-full object-cover object-top" />
+              <img src={mobile} alt="Your product page on a phone" onLoad={() => seen(mobile)} className="block w-full object-cover object-top" />
             </div>
           </div>
         </div>
