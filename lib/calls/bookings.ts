@@ -180,3 +180,12 @@ export async function previewCallEmail(job: ScanJob, kind: '24h' | '1h' | 'booke
   await alertTeam(b, false)
   return 'team alert sent'
 }
+
+/** Test only: the latest booked call of a test address, as stored, and its reminder sent now (nothing is marked as sent). */
+export async function resendReminderFor(email: string, kind: '24h' | '1h') {
+  const { data, error } = await db().from('call_bookings').select('*').eq('email', email.trim().toLowerCase()).order('created_at', { ascending: false }).limit(1)
+  if (error) throw new Error(error.message)
+  const b = (data || [])[0] as Booking | undefined
+  if (!b) return { log: 'no booking stored for this address' }
+  return { booking: { start: b.start_time, status: b.status, source: b.source, store: b.store, meeting: !!b.meeting_url, locale: b.locale, answers: b.responses }, log: b.status === 'booked' ? await remind(b, kind) : `not sent: booking is ${b.status}` }
+}
