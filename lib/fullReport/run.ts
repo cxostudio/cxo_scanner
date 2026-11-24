@@ -4,6 +4,8 @@
 //
 //   startReport() ─▶ kickoff (pick pages, create page jobs) ─▶ POST /api/report/page × 3
 //   runPage() ─▶ /api/scan (all Live checkpoints, paid mode) ─▶ combine ─▶ finalize()
+import { createClient as createStuckClient, type SupabaseClient as StuckClient } from '@supabase/supabase-js'
+import { noStoreFetch as stuckFetch } from '@/lib/supabaseFetch'
 import { createHash, randomUUID } from 'crypto'
 import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
@@ -254,4 +256,48 @@ async function alertTeam(parent: ScanJob, problems: string[]): Promise<void> {
 
 function reportEmailFor(job: ScanJob, snap: ReportSnapshot) {
   return resultsEmailFor(job, { ...snap, scanUrl: job.url }, { report: true, link: `/scan/report?id=${job.id}` })
+}
+
+/**
+ * Report pages whose function died without reporting back (time limit, crash) stay "running" forever and
+ * the report never closes. Every 5 minutes (followups cron): a page quiet for 8 minutes is failed, and its
+ * report closes with the pages it has (the team alert says which page is missing).
+ */
+export async function sweepStuckReports(): Promise<string[]> {
+  const out: string[] = []
+  const quiet = new Date(Date.now() - 8 * 60_000).toISOString()
+  const since = new Date(Date.now() - 2 * 24 * 3600_000).toISOString()
+  const { data, error } = await stuckDb().from('scan_jobs').select('id,scan_id,status,updated_at')
+    .like('scan_id', 'report_%').in('status', ['running', 'server']).lt('updated_at', quiet).gte('created_at', since).limit(200)
+  if (error) throw new Error(error.message)
+  const parents = new Set<string>()
+  for (const j of (data || []) as { id: string; scan_id: string }[]) {
+    if (j.scan_id.includes('__')) {
+      await failJob(j.id, 'timed out (no answer for 8 minutes)')
+      parents.add(j.scan_id.split('__')[0])
+      out.push(`page ${j.scan_id} timed out`)
+    } else parents.add(j.scan_id)
+  }
+  for (const p of Array.from(parents)) {
+    const all = await listJobsByPrefix(p)
+    const parent = all.find((j) => j.scan_id === p)
+    const pages = all.filter((j) => j.scan_id.startsWith(`${p}__`))
+    if (!parent || parent.status === 'done' || parent.status === 'failed') continue
+    if (!pages.length) {
+      // kickoff died before creating any page
+      await failJob(parent.id, 'never started (no page after 8 minutes)')
+      await alertTeam(parent, ['The report never started: no page was created within 8 minutes.'])
+      out.push(`report ${p} never started`)
+      continue
+    }
+    await finalize(p)
+    out.push(`report ${p} closed`)
+  }
+  return out
+}
+
+let stuckClient: StuckClient | null = null
+function stuckDb(): StuckClient {
+  if (!stuckClient) stuckClient = createStuckClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: stuckFetch } })
+  return stuckClient
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runFollowups } from '@/lib/followups/run'
+import { sweepStuckReports } from '@/lib/fullReport/run'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,7 +12,9 @@ export async function GET(request: NextRequest) {
   const ok = request.headers.get('x-vercel-cron') === '1' || (!!secret && request.headers.get('authorization') === `Bearer ${secret}`)
   if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
-    const log = await runFollowups({ dry: request.nextUrl.searchParams.get('dry') === '1' })
+    // reports whose page died without answering: close them (they alert the team)
+    const swept = request.nextUrl.searchParams.get('dry') === '1' ? [] : await sweepStuckReports().catch((e) => [`sweep failed: ${e instanceof Error ? e.message : e}`])
+    const log = [...swept, ...(await runFollowups({ dry: request.nextUrl.searchParams.get('dry') === '1' }))]
     if (log.length) console.log('[followups]', log)
     return NextResponse.json({ ok: true, log })
   } catch (e) {
