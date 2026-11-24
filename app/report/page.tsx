@@ -36,14 +36,14 @@ type Report = { order?: OrderInfo | null; rescansLeft?: number; status: string; 
 // shopping order; store-wide checks last, they are seen on every page
 const AREAS: { id: Area; label: string; tab: string; page: Page['key']; blurb: string }[] = [
   { id: 'homepage', label: 'Homepage', tab: 'Homepage', page: 'homepage', blurb: 'Where most visits start: does it say what you sell and why to trust you?' },
-  { id: 'category', label: 'Collection page', tab: 'Collection', page: 'category', blurb: 'Where shoppers compare: can they find and choose a product fast?' },
-  { id: 'product', label: 'Product page', tab: 'Product', page: 'product', blurb: 'Where the decision is made: does it answer every question before add to cart?' },
+  { id: 'category', label: 'Collection page', tab: 'Collection page', page: 'category', blurb: 'Where shoppers compare: can they find and choose a product fast?' },
+  { id: 'product', label: 'Product page', tab: 'Product page', page: 'product', blurb: 'Where the decision is made: does it answer every question before add to cart?' },
   { id: 'cart', label: 'Cart', tab: 'Cart', page: 'product', blurb: 'One step from paying: does it keep the momentum and the order value up?' },
   { id: 'checkout', label: 'Checkout', tab: 'Checkout', page: 'product', blurb: 'The last step: is anything there making shoppers hesitate?' },
   { id: 'site', label: 'General elements', tab: 'General', page: 'product', blurb: 'Header, menu, footer and speed: what shoppers meet on every page. Shown on your best seller.' },
 ]
 // not scanned: judged from the buyer's own screenshots, so kept out of the store score
-const THANK_YOU = { id: 'thankyou' as Area, label: 'Thank-you page', tab: 'Thank you', page: 'product' as Page['key'], blurb: 'After the order: does it confirm clearly, reassure, and bring the shopper back?' }
+const THANK_YOU = { id: 'thankyou' as Area, label: 'Thank-you page', tab: 'Thank you page', page: 'product' as Page['key'], blurb: 'After the order: does it confirm clearly, reassure, and bring the shopper back?' }
 
 const pri = (r: ScanResult) => (r.checkpoint?.priority === 'High' ? 0 : r.checkpoint?.priority === 'Medium' ? 1 : 2)
 const eff = (r: ScanResult) => ({ Easy: 0, Moderate: 1, Difficult: 2 } as Record<string, number>)[r.checkpoint?.difficulty || ''] ?? 1
