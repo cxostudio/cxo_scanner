@@ -1784,6 +1784,86 @@ export async function open(page: Page, url: string) {
   return res
 }
 
+/**
+ * Like a shopper: pick an option if one is required, then click the real "Add to cart" button.
+ * For storefronts without Shopify's /cart.js (headless): success shows as a cart drawer or a cart count.
+ * The store's own add-to-cart request usually names the variant (gid://shopify/ProductVariant/…):
+ * kept, so checkout can be opened through the cart link even when the page doesn't name one.
+ */
+async function clickAddToCart(page: Page): Promise<{ ok: boolean; note: string; variant?: string }> {
+  let variant: string | undefined
+  const onRequest = (req: { postData: () => string | undefined; url: () => string }) => {
+    const body = `${req.url()} ${req.postData() || ''}`
+    const m = body.match(/ProductVariant(?:\/|%2F)(\d{6,})/) || body.match(/"(?:merchandiseId|variantId|variant_id|id)"\s*:\s*"?(\d{10,})/)
+    if (m && !variant) variant = m[1]
+  }
+  page.on('request', onRequest as never)
+  try {
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {})
+    await clearOverlays(page).catch(() => {})
+    const ATC = /add to (cart|bag|basket)|ajouter au panier|in den warenkorb|in (de )?winkelwagen|toevoegen|añadir al carrito|aggiungi al carrello|dodaj do koszyka|add to order|buy now/i
+    const state = () => page.evaluate((src: string) => {
+      const re = new RegExp(src, 'i')
+      const vis = (el: Element) => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el); return r.width > 40 && r.height > 20 && st.visibility !== 'hidden' && st.display !== 'none' }
+      const btns = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a')).filter((el) => vis(el) && re.test(((el as HTMLElement).innerText || (el as HTMLInputElement).value || el.getAttribute('aria-label') || '').trim()))
+      const b = btns.sort((a, c) => c.getBoundingClientRect().width * c.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height)[0] as HTMLElement | undefined
+      const header = Array.from(document.querySelectorAll('header, [class*="header" i]')).map((h) => (h as HTMLElement).innerText).join(' ').replace(/\s+/g, ' ').slice(0, 2000)
+      if (!b) return { found: false, header }
+      b.scrollIntoView({ block: 'center' })
+      const r = b.getBoundingClientRect()
+      return { found: true, disabled: (b as HTMLButtonElement).disabled || b.getAttribute('aria-disabled') === 'true', x: r.left + r.width / 2, y: r.top + r.height / 2, header }
+    }, ATC.source)
+    let s0 = await state()
+    // "Select a size" instead of "Add to cart", or a disabled button: a choice is required first
+    const needsChoice = !s0.found || s0.disabled
+    if (!s0.found) {
+      const asks = await page.evaluate(() => Array.from(document.querySelectorAll('button, [role="button"]')).some((b) => /select (a |your )?(size|colou?r|option)|choose (a |your )?(size|option)|kies (je |een )?maat|choisi(r|ssez) (une |votre )?taille|größe wählen|selecciona/i.test((b as HTMLElement).innerText || ''))).catch(() => false)
+      if (!asks) return { ok: false, note: 'no add-to-cart button found' }
+    }
+    // a required choice first (size, colour…): the first option that isn't sold out
+    if (needsChoice) {
+      await page.evaluate(() => {
+        const groups = Array.from(document.querySelectorAll('fieldset, [role="radiogroup"], [class*="size" i], [class*="variant" i], [class*="option" i], [class*="swatch" i]'))
+        for (const g of groups) {
+          const opts = Array.from(g.querySelectorAll('button, [role="radio"], input[type="radio"], label')).filter((o) => {
+            const t = `${(o as HTMLElement).innerText || ''} ${o.getAttribute('aria-label') || ''} ${o.getAttribute('class') || ''}`
+            const r = o.getBoundingClientRect()
+            return r.width > 10 && r.height > 10 && !(o as HTMLButtonElement).disabled && o.getAttribute('aria-disabled') !== 'true' && !/sold ?out|unavailable|épuisé|ausverkauft|uitverkocht|agotado|disabled/i.test(t)
+          })
+          if (opts.length > 1) { (opts[0] as HTMLElement).click(); break }
+        }
+        const sel = Array.from(document.querySelectorAll('select')).find((x) => x.options.length > 1 && !x.value)
+        if (sel) { sel.selectedIndex = 1; sel.dispatchEvent(new Event('change', { bubbles: true })) }
+      }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 800))
+      s0 = await state()
+      if (!s0.found || s0.disabled) return { ok: false, note: 'add-to-cart button stays disabled (option needed)' }
+    }
+    await page.mouse.click(s0.x!, s0.y!)
+    await new Promise((r) => setTimeout(r, 2500))
+    await page.waitForNetworkIdle({ idleTime: 600, timeout: 6000 }).catch(() => {})
+    // did it work? a cart drawer / dialog with a checkout button, or a cart count in the header that changed
+    const after = await page.evaluate((before: string) => {
+      const CART = /cart|bag|basket|panier|warenkorb|winkelwagen|carrito|carrello|koszyk/i
+      const CHECKOUT = /check ?out|kasse|paiement|commander|afrekenen|pagar|pagamento|zamów|go to (cart|bag)|view (cart|bag)/i
+      const panels = Array.from(document.querySelectorAll('[role="dialog"], aside, [class*="drawer" i], [class*="minicart" i], [class*="cart" i]')).filter((el) => {
+        const r = el.getBoundingClientRect(); const st = getComputedStyle(el)
+        return r.width > 200 && r.height > 200 && r.right > 0 && r.left < window.innerWidth && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.1
+      })
+      const drawer = panels.some((el) => CART.test((el as HTMLElement).innerText.slice(0, 400)) && CHECKOUT.test((el as HTMLElement).innerText))
+      const header = Array.from(document.querySelectorAll('header, [class*="header" i]')).map((h) => (h as HTMLElement).innerText).join(' ').replace(/\s+/g, ' ').slice(0, 2000)
+      const count = (t: string) => { const m = t.match(/(?:cart|bag|basket|panier|warenkorb)[^0-9]{0,12}(\d{1,2})|(\d{1,2})[^0-9]{0,6}(?:items?|articles?|artikel)/i); return m ? Number(m[1] || m[2]) : 0 }
+      return { drawer, counted: count(header) > count(before) }
+    }, s0.header || '').catch(() => ({ drawer: false, counted: false }))
+    const ok = after.drawer || after.counted || !!variant
+    return { ok, note: ok ? `one item added by clicking add to cart (${after.drawer ? 'drawer opened' : after.counted ? 'cart count went up' : 'store confirmed the item'})` : 'clicked add to cart, nothing changed', variant }
+  } catch (e) {
+    return { ok: false, note: `add-to-cart click failed (${String((e as Error)?.message || e).slice(0, 60)})` }
+  } finally {
+    page.off('request', onRequest as never)
+  }
+}
+
 /** One item into the Shopify cart, then the header again: does the cart icon show the count? */
 async function cartTest(page: Page): Promise<{ note: string; tile?: Tile }> {
   const note = await page
@@ -2648,6 +2728,21 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
       await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
       cart = await cartTest(desktop)
     }
+    // no Shopify cart endpoint (headless storefront) or a refused add: click "Add to cart" like a shopper
+    let clickedVariant: string | undefined
+    if (!cart.note.startsWith('one item') && opts.extended) {
+      const clicked = await clickAddToCart(desktop)
+      if (process.env.SCANV2_DEBUG) console.log('[cart click]', clicked.note, clicked.variant)
+      if (clicked.ok) {
+        cart = { note: clicked.note }
+        clickedVariant = clicked.variant
+        // start the cart views from a settled page: the cart itself survives the reload
+        await desktop.goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {})
+        await runDelayedScripts(desktop)
+        await desktop.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {})
+        await cleanPage(desktop)
+      }
+    }
     const itemInCart = cart.note.startsWith('one item')
     if (process.env.SCANV2_DEBUG) console.log('[cart test]', cart.note, desktop.url())
     let desktopCartView = itemInCart && opts.extended ? await cartView(desktop, 'desktop', DESKTOP.width, DESKTOP.height).catch(() => undefined) : undefined
@@ -2673,7 +2768,10 @@ async function captureOnce(rawUrl: string, opts: { extended?: boolean; remote?: 
     // headless storefront: the cart link on its Shopify domain, with a variant named in the page
     if (remoteItems && !remoteItems.length) {
       const h = await headlessTarget(desktop)
-      if (h) { remoteItems = [`${h.variant}:1`]; remoteOrigin = `https://${h.shop}` }
+      // the variant our add-to-cart click sent wins: it is the one really in stock and in the cart
+      const shop = h?.shop || (await desktop.evaluate(() => (document.documentElement.outerHTML.match(/([a-z0-9][a-z0-9-]*\.myshopify\.com)/i) || [])[1] || null).catch(() => null))
+      const variant = clickedVariant || h?.variant
+      if (shop && variant) { remoteItems = [`${variant}:1`]; remoteOrigin = `https://${String(shop).toLowerCase()}` }
     }
     const remoteCountry = remoteItems ? await marketCountry(desktop) : undefined
     const remoteP: Promise<RemoteCheckout> | null = remoteItems
