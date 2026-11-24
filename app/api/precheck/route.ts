@@ -1,7 +1,8 @@
 // GET /api/precheck?url=… : the first step of cxo.studio/start. One plain request to the store,
 // no browser, no AI, so it is instant and costs nothing:
 //   - is it a Shopify store? (true / false / null when we can't tell, e.g. a bot wall)
-//   - its name, favicon and share image, so the visitor sees their store while answering
+//   - its name, its own icon (empty when it has none: the page then shows the Shopify logo) and share
+//     image, so the visitor sees their store while answering
 // The free scan itself still starts when the email is given (phase 1).
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid url' }, { status: 400 })
   }
   const host = url.hostname.replace(/^www\./, '')
-  const out = { ok: true, host, url: url.toString(), shopify: null as boolean | null, title: '', image: '', favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64` }
+  const out = { ok: true, host, url: url.toString(), shopify: null as boolean | null, title: '', image: '', favicon: '' }
   try {
     const res = await fetch(url.toString(), { headers: { 'User-Agent': UA, Accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(7000) })
     const headerSays = !!(res.headers.get('x-shopid') || res.headers.get('x-shopify-stage') || res.headers.get('x-sorting-hat-shopid') || /shopify/i.test(res.headers.get('powered-by') || ''))
@@ -38,6 +39,9 @@ export async function GET(req: NextRequest) {
     out.title = meta(html, /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)/i) || meta(html, /<title[^>]*>([^<]{1,120})/i)
     const img = meta(html, /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)/i)
     if (img) out.image = new URL(img.startsWith('//') ? `https:${img}` : img, res.url || url.toString()).toString()
+    // the store's own icon, from its <link rel="icon">: no generic globe when it has none
+    const icon = meta(html, /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']+)/i) || meta(html, /<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](?:shortcut )?icon["']/i)
+    if (icon) out.favicon = new URL(icon.startsWith('//') ? `https:${icon}` : icon, res.url || url.toString()).toString()
   } catch {
     // unreachable or too slow: unknown, the scan will find out
   }
