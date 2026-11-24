@@ -32,7 +32,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const s = snaps[k]
     const loc = (d: 'desktop' | 'mobile') => { const l = s?.located?.[d]; return l && link(l.file) ? { screenshot: link(l.file)!, width: l.width, height: l.height, pins: l.pins } : null }
     return {
-      key: page, how: j.answers?.how || '', url: j.url, status: j.status,
+      key: page, how: j.answers?.how || '', url: j.url, status: j.status, error: j.status === 'failed' ? j.error : null,
       located: done ? { desktop: loc('desktop'), mobile: loc('mobile') } : null,
       // older reports kept the previews inline
       preview: done ? { desktop: link(s?.previewFiles?.desktop) || s?.previewDesktop || null, mobile: link(s?.previewFiles?.mobile) || s?.previewMobile || null } : null,
