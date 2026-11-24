@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'crypto'
 import { completeJob, createJob, failJob, getJob, listJobsByPrefix, markEmailed, saveSnapshot, type ScanJob, type ScanSnapshot } from '@/lib/scanJobs/store'
 import { getConversionCheckpointRules } from '@/lib/conversionCheckpoints/getCheckpointRules'
 import { saveImage, type ReportImage } from './images'
-import { areaOf } from './areas'
+import { areaOf, type ReportArea } from './areas'
 import { previews, selfOrigin } from '@/lib/scanJobs/runServer'
 import { resultsEmailFor } from '@/lib/scanJobs/finish'
 import { sendEmail } from '@/lib/email/send'
@@ -52,6 +52,7 @@ export async function kickoff(parent: ScanJob): Promise<void> {
   } catch (e) {
     console.error('[report] kickoff failed', e)
     await failJob(parent.id, e instanceof Error ? e.message : 'kickoff failed')
+    await alertTeam(parent, [`The report could not start: ${e instanceof Error ? e.message : 'kickoff failed'}`])
   }
 }
 
@@ -150,7 +151,11 @@ export async function finalize(parentScanId: string): Promise<void> {
   const pages = all.filter((j) => j.scan_id.startsWith(`${parentScanId}__`))
   if (!parent || !pages.length || pages.some((j) => j.status !== 'done' && j.status !== 'failed')) return
   const ok = pages.filter((j) => j.status === 'done')
-  if (!ok.length) { await failJob(parent.id, 'every page failed'); return }
+  if (!ok.length) {
+    await failJob(parent.id, 'every page failed')
+    await alertTeam(parent, [`The whole report failed: no page could be scanned.`, ...pages.map((j) => `${j.answers?.page}: ${j.error || 'failed'}`)])
+    return
+  }
   const order = (k?: string) => AREA_ORDER.indexOf((k || 'product') as ReportPageKey)
   const snap: ReportSnapshot = {
     kind: 'report', scanUrl: parent.url, locale: parent.locale,
@@ -161,8 +166,57 @@ export async function finalize(parentScanId: string): Promise<void> {
   const done = await completeJob(parent.id, snap)
   if (!done || !(await markEmailed(parent.id))) return
   const mail = reportEmailFor(done, snap)
-  const sent = await sendEmail({ to: done.email, ...mail })
+  // quiet test reports (batch runs): no "report ready" email, alerts still go out
+  const sent = done.answers?.quiet ? { sent: true as const } : await sendEmail({ to: done.email, ...mail })
   if (!sent.sent) console.error('[report] email not sent', sent.error)
+  const problems = await reportProblems(pages)
+  if (!sent.sent) problems.push(`The report email to the buyer was not sent: ${sent.error}`)
+  if (problems.length) await alertTeam(done, problems)
+}
+
+/** What a buyer would notice: a page missing, the cart or checkout mostly unchecked, many "couldn't check". */
+async function reportProblems(pages: ScanJob[]): Promise<string[]> {
+  const out: string[] = []
+  for (const j of pages) if (j.status === 'failed') out.push(`${j.answers?.page} page failed (${j.url}): ${j.error || 'no reason'}`)
+  const cp = await getConversionCheckpointRules().catch(() => null)
+  const tags = new Map<string, string[]>()
+  if (cp && cp.ok) for (const r of cp.rules) tags.set(r.id, r.pageTypeIds || [])
+  const per = new Map<ReportArea, { all: number; unknown: number }>()
+  for (const j of pages) {
+    if (j.status !== 'done') continue
+    for (const r of ((j.snapshot?.results || []) as Row[])) {
+      const a = areaOf(j.answers?.page || 'product', tags.get(r.ruleId))
+      const v = per.get(a) || { all: 0, unknown: 0 }
+      v.all++; if (r.status === 'unknown') v.unknown++
+      per.set(a, v)
+    }
+  }
+  for (const [a, v] of Array.from(per)) {
+    if (!v.all) continue
+    if ((a === 'cart' || a === 'checkout') && v.unknown / v.all >= 0.5) out.push(`${a === 'cart' ? 'Cart' : 'Checkout'} mostly not checked: ${v.unknown} of ${v.all} checkpoints "couldn't check".`)
+    else if (v.unknown / v.all >= 0.25) out.push(`${a}: ${v.unknown} of ${v.all} checkpoints "couldn't check".`)
+  }
+  const product = pages.find((j) => j.answers?.page === 'product')
+  if (product?.status === 'done' && !((product.snapshot as ReportPageSnapshot | null)?.images || []).some((i) => i.role === 'checkout')) out.push('No checkout screenshot was saved.')
+  return out
+}
+
+/** Email the team inbox (FEEDBACK_TO, else EMAIL_REPLY_TO) about a report that needs a human look. */
+async function alertTeam(parent: ScanJob, problems: string[]): Promise<void> {
+  const to = process.env.FEEDBACK_TO || process.env.EMAIL_REPLY_TO
+  if (!to) return
+  const paid = /^report_cs_live_/.test(parent.scan_id) ? 'PAID' : /^report_cs_test_/.test(parent.scan_id) ? 'sandbox order' : 'test report'
+  let store = parent.url
+  try { store = new URL(/^https?:/i.test(store) ? store : `https://${store}`).hostname.replace(/^www\./, '') } catch { /* keep */ }
+  const link = `https://cxo.studio/scan/report?id=${parent.id}`
+  const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  const res = await sendEmail({
+    to, replyTo: parent.email,
+    subject: `Report needs a look · ${store} · ${paid}`,
+    text: [`${store} (${paid}) needs a human look:`, '', ...problems.map((p) => `- ${p}`), '', `Report: ${link}`, 'Reply to this email to write to the buyer.'].join('\n'),
+    html: `<p><b>${esc(store)}</b> (${esc(paid)}) needs a human look:</p><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul><p><a href="${esc(link)}">Open the report</a><br>Reply to this email to write to the buyer.</p>`,
+  }).catch((e) => ({ sent: false, error: String(e) }))
+  if (!res.sent) console.error('[report] alert not sent', res)
 }
 
 function reportEmailFor(job: ScanJob, snap: ReportSnapshot) {

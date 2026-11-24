@@ -27,7 +27,7 @@ export type ScanJob = {
   email: string
   url: string
   locale: string
-  answers: { revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string } | null
+  answers: { revenue?: string; aov?: string; cr?: string; kind?: 'report'; page?: string; how?: string; quiet?: boolean } | null
   origin: string | null
   status: JobStatus
   heartbeat_at: string

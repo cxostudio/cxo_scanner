@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   const url = (b.url || '').trim()
   if (!isTestEmail(email)) return NextResponse.json({ error: 'Test emails only' }, { status: 403 })
   if (!url) return NextResponse.json({ error: 'url is required' }, { status: 400 })
-  const job = await startReport({ email, url, locale: b.locale || 'en', answers: { revenue: b.revenue, aov: b.aov, cr: b.cr }, origin: 'https://cxo.studio' })
+  const job = await startReport({ email, url, locale: b.locale || 'en', answers: { revenue: b.revenue, aov: b.aov, cr: b.cr, quiet: String(b.quiet) === 'true' }, origin: 'https://cxo.studio' })
   if (await claimStart(job.id)) waitUntil(kickoff(job))
   return NextResponse.json({ id: job.id, link: `https://cxo.studio/scan/report?id=${job.id}` })
 }
