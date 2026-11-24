@@ -8,7 +8,7 @@ import { attachEmail, requestJudge } from '@/lib/scanJobs/background'
 import { getJob, mergeAnswers } from '@/lib/scanJobs/store'
 import { checkScanLimit } from '@/lib/usage/scanLimit'
 import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
-import { isBypass } from '@/lib/usage/bypass'
+import { isBypass, isInternalEmail } from '@/lib/usage/bypass'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const email = str(b.email, 200).toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: 'Enter a valid email address', code: 'invalid_email' }, { status: 400 })
     if (job.status === 'failed') return NextResponse.json({ error: 'scan failed', code: 'scan_failed' }, { status: 409 })
-    if (!isBypass(req)) {
+    if (!isBypass(req) && !isInternalEmail(email)) {
       const limit = await checkScanLimit(email)
       if (!limit.allowed) return NextResponse.json({ error: `You've reached today's limit of ${limit.limit} scans. Please try again tomorrow.`, code: 'daily_limit_reached' }, { status: 429 })
       const store = await checkDomainLimit(email, job.answers?.scanUrl || job.url, job.scan_id)

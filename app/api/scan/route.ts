@@ -58,7 +58,7 @@ import { runScanV2, judgeEvidence, PageCheckError } from '@/lib/scanV2'
 import { captureEvidence } from '@/lib/scanV2/capture'
 import { V2_MODEL } from '@/lib/scanV2/judge'
 import { saveEvidence, loadEvidence } from '@/lib/scanJobs/evidence'
-import { isBypass } from '@/lib/usage/bypass'
+import { isBypass, isInternalEmail } from '@/lib/usage/bypass'
 import { saveTestScan } from '@/lib/lab/store'
 import { saveLeadScan } from '@/lib/leads/store'
 import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
@@ -1088,7 +1088,7 @@ export async function POST(request: NextRequest) {
     // success return below). Defensive: the client also pre-checks via
     // /api/scan/limit. Fails open if Supabase is unconfigured/unreachable.
     // Louis's browsers (bypass cookie, any network) skip the limits
-    if (email && !isBypass(request)) {
+    if (email && !isBypass(request) && !isInternalEmail(email)) {
       const limit = await checkScanLimit(email)
       if (!limit.allowed) {
         return NextResponse.json(

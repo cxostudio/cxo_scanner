@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkScanLimit } from '@/lib/usage/scanLimit'
-import { isBypass } from '@/lib/usage/bypass'
+import { isBypass, isInternalEmail } from '@/lib/usage/bypass'
 import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
 
 /** Puppeteer-free, but keep on Node runtime for consistency with the other scan routes. */
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Louis's browsers (bypass cookie) skip the limits
-  if (isBypass(request)) return NextResponse.json({ allowed: true, bypass: true })
+  if (isBypass(request) || isInternalEmail(email)) return NextResponse.json({ allowed: true, bypass: true })
 
   const result = await checkScanLimit(email)
 

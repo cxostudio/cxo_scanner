@@ -6,7 +6,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { captureInBackground, startBackgroundScan } from '@/lib/scanJobs/background'
 import { countRecentBackground } from '@/lib/scanJobs/store'
-import { checkDomainLimit, domainLimitMessage } from '@/lib/usage/domainLimit'
 import { isBypass } from '@/lib/usage/bypass'
 
 export const runtime = 'nodejs'
@@ -30,9 +29,8 @@ export async function POST(req: NextRequest) {
   if (!isBypass(req)) {
     const recent = await countRecentBackground({ ip, sinceMs: 3600_000 }).catch(() => 0)
     if (recent >= PER_VISITOR_HOUR) return NextResponse.json({ error: 'Too many scans started from here. Please try again in an hour.', code: 'visitor_limit' }, { status: 429 })
-    // per store: only scans that got an email count (lib/usage/domainLimit)
-    const store = await checkDomainLimit('visitor@cxo.invalid', url)
-    if (!store.allowed) return NextResponse.json({ error: domainLimitMessage(store.host), code: 'store_limit_reached' }, { status: 429 })
+    // the per-store limit is checked at the email step (/api/scan/start/<id>), where CXO studio's
+    // own addresses can skip it
   }
   try {
     const job = await startBackgroundScan({ url, locale: b.locale === 'fr' ? 'fr' : 'en', origin: typeof b.origin === 'string' ? b.origin.slice(0, 200) : null, ip })
