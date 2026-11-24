@@ -326,7 +326,7 @@ function SiteWide({ host }: { host: string }) {
       {/* shared footer: links and trust badges */}
       <div className="flex h-[15%] shrink-0 items-center gap-[4%] border-t border-[var(--border)] bg-[var(--surface-muted)] px-[5%]">
         {[0, 1, 2].map((i) => <span key={i} className="h-[3px] w-[12%] rounded-full" style={{ background: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />)}
-        <span className="ml-auto flex gap-[6px]">{[0, 1, 2].map((i) => <span key={i} className="h-[7px] w-[11px] rounded-[2px] border" style={{ borderColor: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />)}</span>
+        <span className="ml-auto flex w-[24%] gap-[12%]">{[0, 1, 2].map((i) => <span key={i} className="aspect-[3/2] flex-1 rounded-[2px] border" style={{ borderColor: front ? 'var(--text-subtle)' : 'var(--border-strong)' }} />)}</span>
       </div>
     </div>
   )
