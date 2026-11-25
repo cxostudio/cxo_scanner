@@ -846,6 +846,14 @@ async function toTop(page: Page) {
   await page
     .evaluate(async () => {
       for (const el of [document.documentElement, document.body]) el?.style.setProperty('scroll-behavior', 'auto', 'important')
+      // a popup or menu can leave the page scroll-locked (overflow: hidden on html/body): unlock it
+      for (const el of [document.documentElement, document.body]) {
+        if (!el) continue
+        const st = getComputedStyle(el)
+        if (st.overflowY === 'hidden' || st.overflow === 'hidden') { el.style.setProperty('overflow', 'visible', 'important'); el.style.setProperty('overflow-y', 'visible', 'important') }
+        if (st.position === 'fixed') el.style.setProperty('position', 'static', 'important')
+        if (el === document.body && st.height !== 'auto' && el.scrollHeight > window.innerHeight && el.clientHeight <= window.innerHeight) el.style.setProperty('height', 'auto', 'important')
+      }
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
       for (let i = 0; i < 20 && window.scrollY > 0; i++) {
         await new Promise((r) => setTimeout(r, 50))
@@ -870,8 +878,12 @@ async function tiles(page: Page, prefix: string, w: number, vh: number, max: num
       const top = Math.min(i * vh, Math.max(0, h - vh))
       await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
       await new Promise((r) => setTimeout(r, 150))
-      b64 = (await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)) as string | null
-    } else {
+      const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
+      // only when the page really scrolled there; a locked page falls back to the clip below
+      if (Math.abs(at - top) <= 2) b64 = (await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)) as string | null
+    }
+    if (!b64) {
+      if (onScreen) await toTop(page)
       b64 = (await page
         .screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: i * vh, width: w, height }, captureBeyondViewport: true })
         .catch(() => null)) as string | null

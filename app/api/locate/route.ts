@@ -310,10 +310,16 @@ async function stitchedShot(page: Page, width: number, height: number, vh: numbe
     const top = Math.min(y, Math.max(0, height - vh))
     await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
     await new Promise((r) => setTimeout(r, 200))
-    const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => top)
-    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
-    if (b64) parts.push({ y: at, b64 })
-    if (at + vh >= height) break
+    const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => 0)
+    // the page didn't scroll there (locked): shoot that band the old way rather than the top again
+    let b64: string | null = null
+    if (Math.abs(at - top) <= 2) b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    else {
+      await toTop(page) // a clip beyond the viewport is only right from the top of the page
+      b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64', clip: { x: 0, y: top, width, height: Math.min(vh, height - top) }, captureBeyondViewport: true }).catch(() => null)) as string | null
+    }
+    if (b64) parts.push({ y: top, b64 })
+    if (top + vh >= height) break
   }
   await toTop(page)
   const canvas = await page.browser().newPage()
@@ -347,6 +353,14 @@ async function toTop(page: Page) {
   await page
     .evaluate(async () => {
       for (const el of [document.documentElement, document.body]) el?.style.setProperty('scroll-behavior', 'auto', 'important')
+      // a popup or menu can leave the page scroll-locked (overflow: hidden on html/body): unlock it
+      for (const el of [document.documentElement, document.body]) {
+        if (!el) continue
+        const st = getComputedStyle(el)
+        if (st.overflowY === 'hidden' || st.overflow === 'hidden') { el.style.setProperty('overflow', 'visible', 'important'); el.style.setProperty('overflow-y', 'visible', 'important') }
+        if (st.position === 'fixed') el.style.setProperty('position', 'static', 'important')
+        if (el === document.body && st.height !== 'auto' && el.scrollHeight > window.innerHeight && el.clientHeight <= window.innerHeight) el.style.setProperty('height', 'auto', 'important')
+      }
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
       for (let i = 0; i < 20 && window.scrollY > 0; i++) {
         await new Promise((r) => setTimeout(r, 50))
