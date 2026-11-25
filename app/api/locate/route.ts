@@ -58,6 +58,8 @@ export async function POST(request: NextRequest) {
     browser = await launchPuppeteerBrowser({ windowSizeArg: `--window-size=${WIDTH},${D.height}` })
     const page = await browser.newPage()
     await page.setViewport({ width: WIDTH, height: D.height, deviceScaleFactor: 1, isMobile: D.mobile, hasTouch: D.mobile })
+    const debug: string[] = []
+    const withDebugEarly = request.nextUrl.searchParams.get('debug') === '1'
     await page.setUserAgent(D.mobile ? MOBILE_UA : DESKTOP_UA)
     // load it exactly as the scan does (language header, heavy third-party scripts blocked, delayed
     // scripts run): some stores render a blank page to a plain headless load (deathwishcoffee.com)
@@ -284,9 +286,10 @@ export async function POST(request: NextRequest) {
     )
 
     await toTop(page)
-    const screenshot = await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72)
+    if (withDebugEarly) debug.push(`before shot: ${JSON.stringify(await page.evaluate(() => ({ y: window.scrollY, se: document.scrollingElement?.tagName, seTop: document.scrollingElement?.scrollTop, html: getComputedStyle(document.documentElement).overflowY, body: getComputedStyle(document.body).overflowY, active: (document.activeElement as HTMLElement | null)?.tagName + '.' + String((document.activeElement as HTMLElement | null)?.className || '').slice(0, 40), firstTop: Math.round(document.querySelector('header, [class*="header" i]')?.getBoundingClientRect().top ?? -1), mainTop: Math.round(document.querySelector('main')?.getBoundingClientRect().top ?? -1) })).catch((e) => String(e)))}`)
+    const screenshot = await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72, withDebugEarly ? debug : undefined)
 
-    const debug: string[] = [`${candidates.length} elements`]
+    debug.push(`${candidates.length} elements`)
     const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug, device)
     const withDebug = request.nextUrl.searchParams.get('debug') === '1'
     return NextResponse.json({ device, screenshot, width: WIDTH, height, pins, ...(withDebug ? { debug, candidates } : {}) })
@@ -304,13 +307,14 @@ export async function POST(request: NextRequest) {
 /** One tall screenshot made of screen-sized shots taken while scrolling down, like a shopper sees
  *  the page. A single shot "beyond the viewport" leaves the lower page blank on themes that only
  *  paint what's on screen (brooklinen.com, geteasybird.com): pins then float on an empty page. */
-async function stitchedShot(page: Page, width: number, height: number, vh: number, quality: number): Promise<string> {
+async function stitchedShot(page: Page, width: number, height: number, vh: number, quality: number, log?: string[]): Promise<string> {
   const parts: { y: number; b64: string }[] = []
   for (let y = 0; y < height; y += vh) {
     const top = Math.min(y, Math.max(0, height - vh))
     await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
     await new Promise((r) => setTimeout(r, 200))
     const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => 0)
+    log?.push(`band ${top}: at ${at}`)
     // the page didn't scroll there (locked): shoot that band the old way rather than the top again
     let b64: string | null = null
     if (Math.abs(at - top) <= 2) b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
