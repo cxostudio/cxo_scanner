@@ -91,10 +91,14 @@ export async function GET(request: NextRequest) {
       rules,
       ...filterMeta,
     })
-    // Browser-side cache: reuse this URL's rules for N days; hard reload bypasses it.
+    // Browser-side cache: reuse this URL's rules for N days; hard reload bypasses it. The public list
+    // (no Draft checkpoints) is also kept 10 minutes in Vercel's shared cache: background scans fetch
+    // it from a fresh server every time (6.7 s cold, against well under a second from the cache).
     response.headers.set(
       'Cache-Control',
-      `private, max-age=${CHECKPOINTS_BROWSER_CACHE_SECONDS}`,
+      opts.includeDrafts
+        ? `private, max-age=${CHECKPOINTS_BROWSER_CACHE_SECONDS}`
+        : `public, max-age=${CHECKPOINTS_BROWSER_CACHE_SECONDS}, s-maxage=600, stale-while-revalidate=86400`,
     )
     return response
   } catch (err) {
