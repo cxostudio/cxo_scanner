@@ -426,7 +426,11 @@ async function toTop(page: Page) {
         if (!el) continue
         const st = getComputedStyle(el)
         if (st.overflowY === 'hidden' || st.overflow === 'hidden') { el.style.setProperty('overflow', 'visible', 'important'); el.style.setProperty('overflow-y', 'visible', 'important') }
-        if (st.position === 'fixed') el.style.setProperty('position', 'static', 'important')
+        // scroll locks also pin the page (position fixed/absolute) and shift it up by the scroll
+        // amount with a negative top: the shot then starts deep down the page (brooklinen.com)
+        if (st.position !== 'static' && st.position !== 'relative') { el.style.setProperty('position', 'static', 'important'); el.style.setProperty('top', 'auto', 'important') }
+        if (st.position === 'relative' && parseFloat(st.top) < 0) el.style.setProperty('top', '0', 'important')
+        if (st.transform && st.transform !== 'none') el.style.setProperty('transform', 'none', 'important')
         if (el === document.body && st.height !== 'auto' && el.scrollHeight > window.innerHeight && el.clientHeight <= window.innerHeight) el.style.setProperty('height', 'auto', 'important')
       }
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
