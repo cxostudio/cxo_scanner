@@ -241,6 +241,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ device, screenshot: `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`, width: WIDTH, height: h, pins: [] })
     }
 
+    // ?shot=tall (test): a window as tall as the page, no scrolling at all; the elements are measured
+    // on that same layout, so pins and picture match whatever the page does with its height
+    const tall = request.nextUrl.searchParams.get('shot') === 'tall'
+    if (tall) {
+      const fullH = await page.evaluate((m: number) => Math.min(m, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)), MAX_HEIGHT).catch(() => D.height)
+      await page.setViewport({ width: WIDTH, height: Math.max(D.height, fullH), deviceScaleFactor: 1, isMobile: D.mobile, hasTouch: D.mobile })
+      await new Promise((r) => setTimeout(r, 900))
+      await toTop(page)
+    }
     const { candidates, height } = await page.evaluate(
       (maxH: number, maxN: number) => {
         const out: { id: string; kind: string; text: string; box: { x: number; y: number; w: number; h: number } }[] = []
@@ -287,7 +296,9 @@ export async function POST(request: NextRequest) {
 
     await toTop(page)
     if (withDebugEarly) debug.push(`before shot: ${JSON.stringify(await page.evaluate(() => ({ y: window.scrollY, se: document.scrollingElement?.tagName, seTop: document.scrollingElement?.scrollTop, html: getComputedStyle(document.documentElement).overflowY, body: getComputedStyle(document.body).overflowY, active: (document.activeElement as HTMLElement | null)?.tagName + '.' + String((document.activeElement as HTMLElement | null)?.className || '').slice(0, 40), firstTop: Math.round(document.querySelector('header, [class*="header" i]')?.getBoundingClientRect().top ?? -1), mainTop: Math.round(document.querySelector('main')?.getBoundingClientRect().top ?? -1), chain: (() => { const out: string[] = []; let el: Element | null = document.querySelector('main'); while (el) { const st = getComputedStyle(el); if (el.scrollTop || st.transform !== 'none' || st.position !== 'static' || st.overflowY !== 'visible') out.push(`${el.tagName}.${String(el.className).slice(0, 30)} st${el.scrollTop} ${st.position} ${st.overflowY} ${st.transform.slice(0, 40)}`); el = el.parentElement } return out })(), vv: [window.visualViewport?.offsetTop, window.visualViewport?.pageTop, window.visualViewport?.scale], scrolled: Array.from(document.querySelectorAll('*')).filter((e) => e.scrollTop > 50).map((e) => `${e.tagName}.${String(e.className).slice(0, 30)}#${e.id} ${e.scrollTop}/${e.scrollHeight}`).slice(0, 5) })).catch((e) => String(e)))}`)
-    const screenshot = await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72, withDebugEarly ? debug : undefined)
+    const screenshot = tall
+      ? `data:image/jpeg;base64,${await page.screenshot({ type: 'jpeg', quality: D.mobile ? 70 : 72, encoding: 'base64', clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: false })}`
+      : await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72, withDebugEarly ? debug : undefined)
 
     debug.push(`${candidates.length} elements`)
     const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug, device)
