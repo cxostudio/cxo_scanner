@@ -286,7 +286,7 @@ export async function POST(request: NextRequest) {
     )
 
     await toTop(page)
-    if (withDebugEarly) debug.push(`before shot: ${JSON.stringify(await page.evaluate(() => ({ y: window.scrollY, se: document.scrollingElement?.tagName, seTop: document.scrollingElement?.scrollTop, html: getComputedStyle(document.documentElement).overflowY, body: getComputedStyle(document.body).overflowY, active: (document.activeElement as HTMLElement | null)?.tagName + '.' + String((document.activeElement as HTMLElement | null)?.className || '').slice(0, 40), firstTop: Math.round(document.querySelector('header, [class*="header" i]')?.getBoundingClientRect().top ?? -1), mainTop: Math.round(document.querySelector('main')?.getBoundingClientRect().top ?? -1) })).catch((e) => String(e)))}`)
+    if (withDebugEarly) debug.push(`before shot: ${JSON.stringify(await page.evaluate(() => ({ y: window.scrollY, se: document.scrollingElement?.tagName, seTop: document.scrollingElement?.scrollTop, html: getComputedStyle(document.documentElement).overflowY, body: getComputedStyle(document.body).overflowY, active: (document.activeElement as HTMLElement | null)?.tagName + '.' + String((document.activeElement as HTMLElement | null)?.className || '').slice(0, 40), firstTop: Math.round(document.querySelector('header, [class*="header" i]')?.getBoundingClientRect().top ?? -1), mainTop: Math.round(document.querySelector('main')?.getBoundingClientRect().top ?? -1), chain: (() => { const out: string[] = []; let el: Element | null = document.querySelector('main'); while (el) { const st = getComputedStyle(el); if (el.scrollTop || st.transform !== 'none' || st.position !== 'static' || st.overflowY !== 'visible') out.push(`${el.tagName}.${String(el.className).slice(0, 30)} st${el.scrollTop} ${st.position} ${st.overflowY} ${st.transform.slice(0, 40)}`); el = el.parentElement } return out })(), vv: [window.visualViewport?.offsetTop, window.visualViewport?.pageTop, window.visualViewport?.scale], scrolled: Array.from(document.querySelectorAll('*')).filter((e) => e.scrollTop > 50).map((e) => `${e.tagName}.${String(e.className).slice(0, 30)}#${e.id} ${e.scrollTop}/${e.scrollHeight}`).slice(0, 5) })).catch((e) => String(e)))}`)
     const screenshot = await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72, withDebugEarly ? debug : undefined)
 
     debug.push(`${candidates.length} elements`)
@@ -314,7 +314,7 @@ async function stitchedShot(page: Page, width: number, height: number, vh: numbe
     const top = Math.min(y, Math.max(0, height - vh))
     // the page didn't stay there (locked, or its scripts moved it): shoot that band the old way
     let b64 = await shotAt(page, top, quality)
-    log?.push(`band ${top}: ${b64 ? 'on screen' : 'fallback'}`)
+    log?.push(`band ${top}: ${b64 ? 'on screen' : 'fallback'} main ${await page.evaluate(() => Math.round(document.querySelector('main')?.getBoundingClientRect().top ?? -1)).catch(() => -2)}`)
     if (!b64) {
       await toTop(page) // a clip beyond the viewport is only right from the top of the page
       b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64', clip: { x: 0, y: top, width, height: Math.min(vh, height - top) }, captureBeyondViewport: true }).catch(() => null)) as string | null
