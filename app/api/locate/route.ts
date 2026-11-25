@@ -395,7 +395,9 @@ async function shotAt(page: Page, y: number, quality: number): Promise<string | 
   for (let i = 0; i < 3; i++) {
     if (Math.abs((await scrollToY(page, y)) - y) > 2) continue
     await page.bringToFront().catch(() => {})
-    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    // captureBeyondViewport defaults to true in Puppeteer: it then shoots a region computed from
+    // layout metrics that can lag behind the scroll (the shot came back ~2300px off). The screen, as is.
+    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64', captureBeyondViewport: false }).catch(() => null)) as string | null
     const after = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
     if (b64 && Math.abs(after - y) <= 2) return b64
   }

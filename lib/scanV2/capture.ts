@@ -885,7 +885,9 @@ async function shotAt(page: Page, y: number, quality: number): Promise<string | 
   for (let i = 0; i < 3; i++) {
     if (Math.abs((await scrollToY(page, y)) - y) > 2) continue
     await page.bringToFront().catch(() => {})
-    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    // captureBeyondViewport defaults to true in Puppeteer: it then shoots a region computed from
+    // layout metrics that can lag behind the scroll (the shot came back ~2300px off). The screen, as is.
+    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64', captureBeyondViewport: false }).catch(() => null)) as string | null
     const after = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
     if (b64 && Math.abs(after - y) <= 2) return b64
   }
@@ -1521,8 +1523,8 @@ async function openTabs(page: Page): Promise<{ tiles: Tile[]; text: string }> {
       if (box.text) texts.push(`[${t.name}] ${box.text}`)
       // scroll there and shoot the viewport: same picture as a clip beyond the viewport, without the
       // full-page relayout that costs about 1.5 s per tab
-      await page.evaluate((y: number) => window.scrollTo(0, y), box.y).catch(() => {})
-      const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)
+      await scrollToY(page, box.y)
+      const b64 = await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', captureBeyondViewport: false }).catch(() => null)
       if (b64) tiles.push({ label: `desktop product tab "${t.name}" opened`, dataUrl: `data:image/jpeg;base64,${b64}` })
     } catch {}
   }
