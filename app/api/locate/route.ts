@@ -381,7 +381,10 @@ async function scrollToY(page: Page, y: number): Promise<number> {
     .evaluate(async (t: number) => {
       const go = ((window as unknown as Record<string, unknown>).__cxoScroll as typeof window.scrollTo | undefined) || window.scrollTo.bind(window)
       go({ top: t, left: 0, behavior: 'instant' as ScrollBehavior })
-      await new Promise((r) => setTimeout(r, 150))
+      // a screenshot right after a scroll can return the frame painted before it: wait for two
+      // painted frames at the new position (setTimeout covers a throttled rAF)
+      await Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), new Promise((r) => setTimeout(r, 400))])
+      await new Promise((r) => setTimeout(r, 120))
       return Math.round(window.scrollY)
     }, y)
     .catch(() => -1)
@@ -391,6 +394,7 @@ async function scrollToY(page: Page, y: number): Promise<number> {
 async function shotAt(page: Page, y: number, quality: number): Promise<string | null> {
   for (let i = 0; i < 3; i++) {
     if (Math.abs((await scrollToY(page, y)) - y) > 2) continue
+    await page.bringToFront().catch(() => {})
     const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
     const after = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
     if (b64 && Math.abs(after - y) <= 2) return b64
