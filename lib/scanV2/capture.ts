@@ -1561,6 +1561,26 @@ export function netStats(page: Page): NetStats | null {
 }
 
 export async function prepare(page: Page) {
+  // no smooth scrolling, ever: a smooth scroll (CSS scroll-behavior or a script's behavior: 'smooth')
+  // keeps animating after we scroll, and screenshots came back up to ~2300px off (brooklinen.com)
+  await page
+    .evaluateOnNewDocument(() => {
+      const instant = (o: unknown) => (o && typeof o === 'object' ? { ...(o as object), behavior: 'instant' } : o)
+      const wrap = <T extends (...a: never[]) => unknown>(f: T) => function (this: unknown, ...a: unknown[]) { return (f as unknown as (...x: unknown[]) => unknown).apply(this, a.map(instant)) }
+      window.scrollTo = wrap(window.scrollTo) as typeof window.scrollTo
+      window.scroll = wrap(window.scroll) as typeof window.scroll
+      window.scrollBy = wrap(window.scrollBy) as typeof window.scrollBy
+      Element.prototype.scrollIntoView = wrap(Element.prototype.scrollIntoView) as typeof Element.prototype.scrollIntoView
+      Element.prototype.scrollTo = wrap(Element.prototype.scrollTo) as typeof Element.prototype.scrollTo
+      const css = () => {
+        const st = document.createElement('style')
+        st.textContent = 'html,body,*{scroll-behavior:auto!important}'
+        ;(document.head || document.documentElement).appendChild(st)
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', css, { once: true })
+      else css()
+    })
+    .catch(() => {})
   const stats: NetStats = { images: {}, cdnImages: 0, imageResponses: 0, thirdPartyScripts: [], fontFiles: [], text: { total: 0, compressed: 0, br: 0, plain: [], plainKiB: 0, plainBig: 0 } }
   NET.set(page, stats)
   page.on('response', (res) => {
