@@ -840,6 +840,54 @@ function pageHeight(page: Page) {
     .catch(() => 0)
 }
 
+/** While screenshots are taken, the page's own scripts can't scroll it (a chat widget or carousel
+ *  calling scrollIntoView/focus moved brooklinen.com ~1500px mid-shot); only scrollToY can. */
+async function freezeScroll(page: Page, on: boolean) {
+  await page
+    .evaluate((freeze: boolean) => {
+      const w = window as unknown as Record<string, unknown>
+      if (freeze && !w.__cxoScroll) {
+        w.__cxoScroll = window.scrollTo.bind(window)
+        w.__cxoSaved = [window.scrollTo, window.scroll, window.scrollBy, Element.prototype.scrollIntoView, HTMLElement.prototype.focus]
+        const noop = () => {}
+        window.scrollTo = noop as typeof window.scrollTo
+        window.scroll = noop as typeof window.scroll
+        window.scrollBy = noop as typeof window.scrollBy
+        Element.prototype.scrollIntoView = noop
+        const focus = HTMLElement.prototype.focus
+        HTMLElement.prototype.focus = function (o?: FocusOptions) { return focus.call(this, { ...(o || {}), preventScroll: true }) }
+      } else if (!freeze && w.__cxoSaved) {
+        const [a, b, c, d, e] = w.__cxoSaved as [typeof window.scrollTo, typeof window.scroll, typeof window.scrollBy, typeof Element.prototype.scrollIntoView, typeof HTMLElement.prototype.focus]
+        window.scrollTo = a; window.scroll = b; window.scrollBy = c; Element.prototype.scrollIntoView = d; HTMLElement.prototype.focus = e
+        delete w.__cxoScroll; delete w.__cxoSaved
+      }
+    }, on)
+    .catch(() => {})
+}
+
+/** Scroll to y (instant, past a frozen page's scripts) and return where the page really is. */
+async function scrollToY(page: Page, y: number): Promise<number> {
+  return page
+    .evaluate(async (t: number) => {
+      const go = ((window as unknown as Record<string, unknown>).__cxoScroll as typeof window.scrollTo | undefined) || window.scrollTo.bind(window)
+      go({ top: t, left: 0, behavior: 'instant' as ScrollBehavior })
+      await new Promise((r) => setTimeout(r, 150))
+      return Math.round(window.scrollY)
+    }, y)
+    .catch(() => -1)
+}
+
+/** A screenshot of the screen at y, only if the page stayed at y for the whole shot (3 tries). */
+async function shotAt(page: Page, y: number, quality: number): Promise<string | null> {
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs((await scrollToY(page, y)) - y) > 2) continue
+    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    const after = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
+    if (b64 && Math.abs(after - y) <= 2) return b64
+  }
+  return null
+}
+
 /** Back to the very top, for real: themes with `scroll-behavior: smooth` (brooklinen.com) animate a
  *  plain scrollTo, and a full-page shot taken mid-animation starts lower down, with every pin off. */
 async function toTop(page: Page) {
@@ -871,26 +919,23 @@ async function tiles(page: Page, prefix: string, w: number, vh: number, max: num
   // each tile is shot on screen, scrolled there like a shopper: a clip "beyond the viewport" comes
   // back blank below the first screen on themes that only paint what's visible (brooklinen.com)
   const onScreen = (await page.viewport())?.height === vh
+  if (onScreen) await freezeScroll(page, true)
   for (let i = 0; i < n; i++) {
     const height = Math.min(vh, Math.max(1, h - i * vh))
     let b64: string | null = null
     if (onScreen) {
-      const top = Math.min(i * vh, Math.max(0, h - vh))
-      await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
-      await new Promise((r) => setTimeout(r, 150))
-      const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
-      // only when the page really scrolled there; a locked page falls back to the clip below
-      if (Math.abs(at - top) <= 2) b64 = (await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)) as string | null
+      // only when the page stayed there for the shot; a locked page falls back to the clip below
+      b64 = await shotAt(page, Math.min(i * vh, Math.max(0, h - vh)), JPEG_QUALITY)
     }
     if (!b64) {
-      if (onScreen) await toTop(page)
+      if (onScreen) { await scrollToY(page, 0); }
       b64 = (await page
         .screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: i * vh, width: w, height }, captureBeyondViewport: true })
         .catch(() => null)) as string | null
     }
     if (b64) out.push({ label: `${prefix} screenshot ${i + 1} (${i * vh}-${i * vh + height}px from top)`, dataUrl: `data:image/jpeg;base64,${b64}` })
   }
-  if (onScreen) await toTop(page)
+  if (onScreen) { await freezeScroll(page, false); await toTop(page) }
   // the footer, when the tiles stopped before it
   if (h > n * vh) {
     const y = Math.max(0, h - vh)

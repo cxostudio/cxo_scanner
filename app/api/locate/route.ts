@@ -309,22 +309,20 @@ export async function POST(request: NextRequest) {
  *  paint what's on screen (brooklinen.com, geteasybird.com): pins then float on an empty page. */
 async function stitchedShot(page: Page, width: number, height: number, vh: number, quality: number, log?: string[]): Promise<string> {
   const parts: { y: number; b64: string }[] = []
+  await freezeScroll(page, true)
   for (let y = 0; y < height; y += vh) {
     const top = Math.min(y, Math.max(0, height - vh))
-    await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
-    await new Promise((r) => setTimeout(r, 200))
-    const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => 0)
-    log?.push(`band ${top}: at ${at}`)
-    // the page didn't scroll there (locked): shoot that band the old way rather than the top again
-    let b64: string | null = null
-    if (Math.abs(at - top) <= 2) b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
-    else {
+    // the page didn't stay there (locked, or its scripts moved it): shoot that band the old way
+    let b64 = await shotAt(page, top, quality)
+    log?.push(`band ${top}: ${b64 ? 'on screen' : 'fallback'}`)
+    if (!b64) {
       await toTop(page) // a clip beyond the viewport is only right from the top of the page
       b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64', clip: { x: 0, y: top, width, height: Math.min(vh, height - top) }, captureBeyondViewport: true }).catch(() => null)) as string | null
     }
     if (b64) parts.push({ y: top, b64 })
     if (top + vh >= height) break
   }
+  await freezeScroll(page, false)
   await toTop(page)
   const canvas = await page.browser().newPage()
   try {
@@ -349,6 +347,55 @@ async function stitchedShot(page: Page, width: number, height: number, vh: numbe
   } finally {
     await canvas.close().catch(() => {})
   }
+}
+
+
+/** While screenshots are taken, the page's own scripts can't scroll it (a chat widget or carousel
+ *  calling scrollIntoView/focus moved brooklinen.com ~1500px mid-shot); only scrollToY can. */
+async function freezeScroll(page: Page, on: boolean) {
+  await page
+    .evaluate((freeze: boolean) => {
+      const w = window as unknown as Record<string, unknown>
+      if (freeze && !w.__cxoScroll) {
+        w.__cxoScroll = window.scrollTo.bind(window)
+        w.__cxoSaved = [window.scrollTo, window.scroll, window.scrollBy, Element.prototype.scrollIntoView, HTMLElement.prototype.focus]
+        const noop = () => {}
+        window.scrollTo = noop as typeof window.scrollTo
+        window.scroll = noop as typeof window.scroll
+        window.scrollBy = noop as typeof window.scrollBy
+        Element.prototype.scrollIntoView = noop
+        const focus = HTMLElement.prototype.focus
+        HTMLElement.prototype.focus = function (o?: FocusOptions) { return focus.call(this, { ...(o || {}), preventScroll: true }) }
+      } else if (!freeze && w.__cxoSaved) {
+        const [a, b, c, d, e] = w.__cxoSaved as [typeof window.scrollTo, typeof window.scroll, typeof window.scrollBy, typeof Element.prototype.scrollIntoView, typeof HTMLElement.prototype.focus]
+        window.scrollTo = a; window.scroll = b; window.scrollBy = c; Element.prototype.scrollIntoView = d; HTMLElement.prototype.focus = e
+        delete w.__cxoScroll; delete w.__cxoSaved
+      }
+    }, on)
+    .catch(() => {})
+}
+
+/** Scroll to y (instant, past a frozen page's scripts) and return where the page really is. */
+async function scrollToY(page: Page, y: number): Promise<number> {
+  return page
+    .evaluate(async (t: number) => {
+      const go = ((window as unknown as Record<string, unknown>).__cxoScroll as typeof window.scrollTo | undefined) || window.scrollTo.bind(window)
+      go({ top: t, left: 0, behavior: 'instant' as ScrollBehavior })
+      await new Promise((r) => setTimeout(r, 150))
+      return Math.round(window.scrollY)
+    }, y)
+    .catch(() => -1)
+}
+
+/** A screenshot of the screen at y, only if the page stayed at y for the whole shot (3 tries). */
+async function shotAt(page: Page, y: number, quality: number): Promise<string | null> {
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs((await scrollToY(page, y)) - y) > 2) continue
+    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    const after = await page.evaluate(() => Math.round(window.scrollY)).catch(() => -1)
+    if (b64 && Math.abs(after - y) <= 2) return b64
+  }
+  return null
 }
 
 /** Back to the very top, for real: themes with `scroll-behavior: smooth` (brooklinen.com) animate a
