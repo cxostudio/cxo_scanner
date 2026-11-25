@@ -1018,6 +1018,7 @@ export default function Home() {
   // answered there, so prefill URL, email and revenue, jump to the last step and
   // start the scan right away when `start=1`.
   const [autoStart, setAutoStart] = useState(false);
+  const [followJob, setFollowJob] = useState<string | null>(null);
   const prefillDone = useRef(false);
   useEffect(() => {
     // runs once: the answers are removed from the address bar below, so a second run
@@ -1045,7 +1046,10 @@ export default function Home() {
       localStorage.setItem("scanLocale", q.get("locale") || "en");
     } catch {}
     setCurrentStep(3);
-    setAutoStart(true);
+    // a background scan started on /start (lib/scanJobs/background): follow it on this screen
+    const job = q.get("job");
+    if (job && /^[0-9a-f-]{36}$/i.test(job)) setFollowJob(job);
+    else setAutoStart(true);
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
   useEffect(() => {
@@ -1055,6 +1059,82 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, websiteUrl, email]);
+
+  // Background scan: the page was captured and judged on the server while the visitor answered the
+  // questions. Same screen as a scan run here (devices, checklist, progress), driven by the job's
+  // status; done → the results. A failed job runs the classic scan instead, so nobody is stuck.
+  useEffect(() => {
+    if (!followJob || !websiteUrl) return;
+    const id = followJob;
+    let stopped = false;
+    let pulse = 0;
+    const run = async () => {
+      try { localStorage.setItem("scanRevenue", selectedRevenue ?? ""); } catch {}
+      try {
+        Object.keys(localStorage).filter((k) => k.startsWith("scanLocate")).forEach((k) => localStorage.removeItem(k));
+        ["scanPreviewMobile", "scanPreviewDesktop", "scanLabId"].forEach((k) => localStorage.removeItem(k));
+        ["scanPreviewMobile", "scanPreviewDesktop", "previewUnavailable"].forEach((k) => sessionStorage.removeItem(k));
+      } catch { /* private mode */ }
+      // the checkpoint count for "Running N checkpoints" (the free scan's list, browser-cached)
+      fetch(api(`/conversion-checkpoints?pageType=product`))
+        .then((r) => r.json())
+        .then((d) => {
+          const all = z.array(RuleSchema).safeParse(d?.rules ?? []);
+          if (all.success && !stopped) { const free = all.data.filter((r) => r.freeScan); setRules(free.length ? free : all.data); }
+        })
+        .catch(() => {});
+      setShowAnalyze(true);
+      setProgress({ current: 0, total: 100 });
+      setWebsiteScreenshot(null);
+      setRemovedSteps(new Set());
+      setDisplayedMounted(0);
+      // progress eases toward a cap per step: capturing ≤ 60, judging ≤ 92, done → 100
+      let cap = 60;
+      const startedAt = performance.now();
+      pulse = window.setInterval(() => {
+        const share = 1 - Math.exp(-(performance.now() - startedAt) / 35_000);
+        setProgress((prev) => (prev ? { current: Math.max(prev.current, Math.min(cap, Math.floor(share * 92))), total: 100 } : prev));
+      }, 200);
+      let preview = false;
+      const deadline = Date.now() + 6 * 60_000;
+      while (!stopped && Date.now() < deadline) {
+        const d = (await fetch(api(`/scan/job/${id}`), { cache: "no-store" }).then((r) => r.json()).catch(() => null)) as { status?: string; scanUrl?: string } | null
+        const status = d?.status || "";
+        if (!preview) {
+          // the devices show the page being scanned (the product page found from a homepage, if any)
+          preview = true;
+          const target = d?.scanUrl || websiteUrl;
+          if (target !== websiteUrl) setWebsiteUrl(target);
+          void startWebsitePreviewStream(target).catch((e) => console.error("Preview stream:", e));
+        }
+        if (status === "judging") cap = 92;
+        if (status === "done") {
+          window.clearInterval(pulse);
+          for (let p = Math.max(60, cap); p <= 100; p += 4) {
+            setProgress({ current: Math.min(100, p), total: 100 });
+            await new Promise((r) => setTimeout(r, 60));
+          }
+          setProgress({ current: 100, total: 100 });
+          await waitForAnalyzeUiCompletion();
+          await new Promise<void>((r) => window.setTimeout(r, POST_SCAN_UI_BEFORE_REDIRECT_MS));
+          setLeaving(true);
+          await new Promise<void>((r) => window.setTimeout(r, 380));
+          router.replace(`/results?id=${encodeURIComponent(id)}`);
+          return;
+        }
+        if (status === "failed") break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      // failed or too slow: run the scan here, the classic way
+      window.clearInterval(pulse);
+      if (stopped) return;
+      setShowAnalyze(false);
+      setAutoStart(true);
+    };
+    void run();
+    return () => { stopped = true; window.clearInterval(pulse); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followJob]);
 
   const handleStartScan = async () => {
     // the results page picks its next step from the revenue band (components/YourPath)

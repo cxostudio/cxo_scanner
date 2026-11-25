@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const job = await getJob(params.id).catch(() => null)
   if (!job) return NextResponse.json({ error: 'not found' }, { status: 404 })
   return NextResponse.json(
-    { status: job.status, snapshot: job.status === 'done' ? job.snapshot : null, error: job.status === 'failed' ? job.error : null, timing: job.answers?.timing ?? null, age: Math.round((Date.now() - new Date(job.created_at).getTime()) / 1000) },
+    { status: job.status, snapshot: job.status === 'done' ? job.snapshot : null, error: job.status === 'failed' ? job.error : null, timing: job.answers?.timing ?? null, scanUrl: job.answers?.scanUrl ?? null, age: Math.round((Date.now() - new Date(job.created_at).getTime()) / 1000) },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

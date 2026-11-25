@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Page } from 'puppeteer-core'
 import { OpenRouter } from '@openrouter/sdk'
 import { launchPuppeteerBrowser } from '@/lib/puppeteer/launchPuppeteer'
 import { prepare as prepareForScan, open as openLikeScan } from '@/lib/scanV2/capture'
@@ -201,7 +202,7 @@ export async function POST(request: NextRequest) {
         }
       })
       .catch(() => undefined)
-    await page.evaluate(() => window.scrollTo(0, 0))
+    await toTop(page)
     await new Promise((r) => setTimeout(r, 600))
     // sticky bars that appear on scroll (add-to-cart bar, back-to-top) would be printed in the middle
     // of a full-page shot: hide everything fixed except the header at the very top
@@ -279,6 +280,7 @@ export async function POST(request: NextRequest) {
       MAX_ELEMENTS,
     )
 
+    await toTop(page)
     const shot = await page.screenshot({ type: 'jpeg', quality: D.mobile ? 70 : 72, clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: true })
     const screenshot = `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`
 
@@ -295,6 +297,22 @@ export async function POST(request: NextRequest) {
 }
 
 /** One AI call: finding → element id. Unknown ids and low-confidence matches are dropped. */
+
+/** Back to the very top, for real: themes with `scroll-behavior: smooth` (brooklinen.com) animate a
+ *  plain scrollTo, and a full-page shot taken mid-animation starts lower down, with every pin off. */
+async function toTop(page: Page) {
+  await page
+    .evaluate(async () => {
+      for (const el of [document.documentElement, document.body]) el?.style.setProperty('scroll-behavior', 'auto', 'important')
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      for (let i = 0; i < 20 && window.scrollY > 0; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      }
+    })
+    .catch(() => {})
+}
+
 async function matchFindings(findings: Finding[], candidates: Candidate[], screenshot: string, debug: string[] = [], device: Device = 'desktop') {
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey || !candidates.length) {

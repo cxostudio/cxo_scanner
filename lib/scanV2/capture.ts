@@ -840,7 +840,23 @@ function pageHeight(page: Page) {
     .catch(() => 0)
 }
 
+/** Back to the very top, for real: themes with `scroll-behavior: smooth` (brooklinen.com) animate a
+ *  plain scrollTo, and a full-page shot taken mid-animation starts lower down, with every pin off. */
+async function toTop(page: Page) {
+  await page
+    .evaluate(async () => {
+      for (const el of [document.documentElement, document.body]) el?.style.setProperty('scroll-behavior', 'auto', 'important')
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      for (let i = 0; i < 20 && window.scrollY > 0; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      }
+    })
+    .catch(() => {})
+}
+
 async function tiles(page: Page, prefix: string, w: number, vh: number, max: number): Promise<Tile[]> {
+  await toTop(page)
   const h = await pageHeight(page)
   const out: Tile[] = []
   const n = Math.max(1, Math.min(max, Math.ceil(h / vh)))
