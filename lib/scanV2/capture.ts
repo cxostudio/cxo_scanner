@@ -860,13 +860,25 @@ async function tiles(page: Page, prefix: string, w: number, vh: number, max: num
   const h = await pageHeight(page)
   const out: Tile[] = []
   const n = Math.max(1, Math.min(max, Math.ceil(h / vh)))
+  // each tile is shot on screen, scrolled there like a shopper: a clip "beyond the viewport" comes
+  // back blank below the first screen on themes that only paint what's visible (brooklinen.com)
+  const onScreen = (await page.viewport())?.height === vh
   for (let i = 0; i < n; i++) {
     const height = Math.min(vh, Math.max(1, h - i * vh))
-    const b64 = await page
-      .screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: i * vh, width: w, height }, captureBeyondViewport: true })
-      .catch(() => null)
+    let b64: string | null = null
+    if (onScreen) {
+      const top = Math.min(i * vh, Math.max(0, h - vh))
+      await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
+      await new Promise((r) => setTimeout(r, 150))
+      b64 = (await page.screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64' }).catch(() => null)) as string | null
+    } else {
+      b64 = (await page
+        .screenshot({ type: 'jpeg', quality: JPEG_QUALITY, encoding: 'base64', clip: { x: 0, y: i * vh, width: w, height }, captureBeyondViewport: true })
+        .catch(() => null)) as string | null
+    }
     if (b64) out.push({ label: `${prefix} screenshot ${i + 1} (${i * vh}-${i * vh + height}px from top)`, dataUrl: `data:image/jpeg;base64,${b64}` })
   }
+  if (onScreen) await toTop(page)
   // the footer, when the tiles stopped before it
   if (h > n * vh) {
     const y = Math.max(0, h - vh)

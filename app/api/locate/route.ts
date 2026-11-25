@@ -210,9 +210,12 @@ export async function POST(request: NextRequest) {
       .evaluate(() => {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
           const st = getComputedStyle(el)
+          // the screenshot is stitched from screen-sized shots down the page: sticky parts (header,
+          // gallery column, buy box) are laid out once, where they sit at the top, or they'd repeat
+          if (st.position === 'sticky') { el.style.setProperty('position', 'relative', 'important'); el.style.setProperty('top', 'auto', 'important'); continue }
           if (st.position !== 'fixed') continue
           const r = el.getBoundingClientRect()
-          if (r.top <= 1 && r.height < 200) continue
+          if (r.top <= 1 && r.height < 200) { el.style.setProperty('position', 'absolute', 'important'); continue }
           el.style.setProperty('display', 'none', 'important')
         }
       })
@@ -281,8 +284,7 @@ export async function POST(request: NextRequest) {
     )
 
     await toTop(page)
-    const shot = await page.screenshot({ type: 'jpeg', quality: D.mobile ? 70 : 72, clip: { x: 0, y: 0, width: WIDTH, height }, captureBeyondViewport: true })
-    const screenshot = `data:image/jpeg;base64,${Buffer.from(shot).toString('base64')}`
+    const screenshot = await stitchedShot(page, WIDTH, height, D.height, D.mobile ? 70 : 72)
 
     const debug: string[] = [`${candidates.length} elements`]
     const pins = await matchFindings(findings, candidates as Candidate[], screenshot, debug, device)
@@ -297,6 +299,47 @@ export async function POST(request: NextRequest) {
 }
 
 /** One AI call: finding → element id. Unknown ids and low-confidence matches are dropped. */
+
+
+/** One tall screenshot made of screen-sized shots taken while scrolling down, like a shopper sees
+ *  the page. A single shot "beyond the viewport" leaves the lower page blank on themes that only
+ *  paint what's on screen (brooklinen.com, geteasybird.com): pins then float on an empty page. */
+async function stitchedShot(page: Page, width: number, height: number, vh: number, quality: number): Promise<string> {
+  const parts: { y: number; b64: string }[] = []
+  for (let y = 0; y < height; y += vh) {
+    const top = Math.min(y, Math.max(0, height - vh))
+    await page.evaluate((t: number) => window.scrollTo({ top: t, left: 0, behavior: 'instant' as ScrollBehavior }), top).catch(() => {})
+    await new Promise((r) => setTimeout(r, 200))
+    const at = await page.evaluate(() => Math.round(window.scrollY)).catch(() => top)
+    const b64 = (await page.screenshot({ type: 'jpeg', quality, encoding: 'base64' }).catch(() => null)) as string | null
+    if (b64) parts.push({ y: at, b64 })
+    if (at + vh >= height) break
+  }
+  await toTop(page)
+  const canvas = await page.browser().newPage()
+  try {
+    return await canvas.evaluate(
+      async (ps: { y: number; b64: string }[], w: number, h: number, q: number) => {
+        const cv = document.createElement('canvas')
+        cv.width = w
+        cv.height = h
+        const ctx = cv.getContext('2d')!
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(0, 0, w, h)
+        for (const p of ps) {
+          const img = new Image()
+          img.src = `data:image/jpeg;base64,${p.b64}`
+          await img.decode()
+          ctx.drawImage(img, 0, p.y)
+        }
+        return cv.toDataURL('image/jpeg', q / 100)
+      },
+      parts, width, height, quality,
+    )
+  } finally {
+    await canvas.close().catch(() => {})
+  }
+}
 
 /** Back to the very top, for real: themes with `scroll-behavior: smooth` (brooklinen.com) animate a
  *  plain scrollTo, and a full-page shot taken mid-animation starts lower down, with every pin off. */
