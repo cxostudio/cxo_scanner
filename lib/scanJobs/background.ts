@@ -22,7 +22,17 @@ const CART = 'recdyiscpsbfrbbha'
 const abs = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`)
 type Rule = { id: string; pageTypeIds?: string[] } & Record<string, unknown>
 
+// the checkpoint list per page type: the same for every store, kept 10 minutes per server
+const RULES = new Map<string, { at: number; rules: Rule[] }>()
 async function rulesFor(url: string): Promise<Rule[]> {
+  const key = detectPageTypeFromUrl(url)
+  const hit = RULES.get(key)
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rules
+  const rules = await fetchRules(url)
+  RULES.set(key, { at: Date.now(), rules })
+  return rules
+}
+async function fetchRules(url: string): Promise<Rule[]> {
   const r = await fetch(api(`/conversion-checkpoints?pageType=${encodeURIComponent(detectPageTypeFromUrl(url))}`))
   if (!r.ok) throw new Error(`checkpoints ${r.status}`)
   const d = (await r.json()) as { rules?: Rule[] }
@@ -115,7 +125,7 @@ export async function runInBackground(job: ScanJob): Promise<void> {
       previewDesktop: data.previews?.desktop ?? null, previewMobile: data.previews?.mobile ?? null,
     }
     // where the time went (lab diagnostics, speed work)
-    await mergeAnswers(job.id, { timing: { resolveMs, ...(data.timings || {}), combineMs: Date.now() - t2, totalMs: Date.now() - t0 } } as NonNullable<ScanJob['answers']>)
+    await mergeAnswers(job.id, { timing: { resolveMs, ...(data.timings || {}), combineMs: Date.now() - t2, totalMs: Date.now() - t0 }, marks: { scanStart: new Date(t0).toISOString(), scanDone: new Date().toISOString() } } as NonNullable<ScanJob['answers']>)
     await completeJob(job.id, snap)
     const done = await getJob(job.id)
     if (done && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(done.email)) await sendResultsOnce(done)
@@ -179,7 +189,7 @@ async function sendResultsOnce(job: ScanJob): Promise<void> {
 
 /** The email step: the email and answers on the job; the email goes out now if the scan is done. */
 export async function attachEmail(job: ScanJob, input: { email: string; answers: { revenue?: string; aov?: string; cr?: string; role?: string } }): Promise<ScanJob | null> {
-  await mergeAnswers(job.id, { ...input.answers, judge: true })
+  await mergeAnswers(job.id, { ...input.answers, judge: true, marks: { email: new Date().toISOString() } })
   const withEmail = await setJobEmail(job.id, input.email)
   if (!withEmail) return getJob(job.id) // an email was already given: keep the first
   await registerScan(input.email, job.scan_id).catch(() => {})

@@ -1088,19 +1088,25 @@ export default function Home() {
       setWebsiteScreenshot(null);
       setRemovedSteps(new Set());
       setDisplayedMounted(0);
-      // progress eases toward a cap per step: capturing ≤ 60, judging ≤ 92, done → 100
+      // timestamp for the speed figures (/api/scan/speed)
+      void fetch(api(`/scan/start/${id}`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "seen", stage: "loading" }) }).catch(() => {});
+      // progress eases toward a cap per step (capturing ≤ 60, judging ≤ 92, done → 100), counted from
+      // when the scan really started (the URL step): the visitor sees the head start, not a fresh 0%
       let cap = 60;
+      let ageMs = 0;
       const startedAt = performance.now();
+      const at = () => Math.floor((1 - Math.exp(-(performance.now() - startedAt + ageMs) / 30_000)) * 95);
       pulse = window.setInterval(() => {
-        const share = 1 - Math.exp(-(performance.now() - startedAt) / 35_000);
-        setProgress((prev) => (prev ? { current: Math.max(prev.current, Math.min(cap, Math.floor(share * 92))), total: 100 } : prev));
+        setProgress((prev) => (prev ? { current: Math.max(prev.current, Math.min(cap, at())), total: 100 } : prev));
       }, 200);
       let preview = false;
       const deadline = Date.now() + 6 * 60_000;
       while (!stopped && Date.now() < deadline) {
-        const d = (await fetch(api(`/scan/job/${id}`), { cache: "no-store" }).then((r) => r.json()).catch(() => null)) as { status?: string; scanUrl?: string } | null
+        const d = (await fetch(api(`/scan/job/${id}`), { cache: "no-store" }).then((r) => r.json()).catch(() => null)) as { status?: string; scanUrl?: string; age?: number } | null
         const status = d?.status || "";
         if (!preview) {
+          // seconds since the URL step: the bar and the checklist start there
+          ageMs = Math.max(0, (d?.age ?? 0) * 1000 - (performance.now() - startedAt));
           // the devices show the page being scanned (the product page found from a homepage, if any)
           preview = true;
           const target = d?.scanUrl || websiteUrl;

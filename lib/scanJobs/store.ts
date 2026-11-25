@@ -25,6 +25,7 @@ export type ScanJob = {
   id: string
   scan_id: string
   created_at: string
+  updated_at?: string
   email: string
   url: string
   locale: string
@@ -33,6 +34,9 @@ export type ScanJob = {
     // background scans
     bg?: boolean; ip?: string; role?: string; judge?: boolean; scanUrl?: string; resolvedFrom?: string; resolvedHow?: string
     timing?: Record<string, unknown>
+    // background scans, ISO times: scanStart, scanDone, email (form submitted), loading (scan screen
+    // shown), results (results page shown); the URL step is the job's created_at
+    marks?: Record<string, string>
   } | null
   origin: string | null
   status: JobStatus
@@ -145,12 +149,47 @@ export async function moveStatus(id: string, from: JobStatus, to: JobStatus): Pr
 
 /** Merge fields into a job's answers (read, merge, write: the visitor answers one question at a time). */
 export async function mergeAnswers(id: string, patch: NonNullable<ScanJob['answers']>): Promise<ScanJob | null> {
-  const job = await getJob(id)
-  if (!job) return null
-  const answers = { ...(job.answers || {}), ...patch }
-  const { data, error } = await db().from(T).update({ answers, updated_at: new Date().toISOString() }).eq('id', id).select('*').maybeSingle()
+  // read, merge, write only if nobody wrote in between (updated_at unchanged), else again: the scan
+  // finishing and the visitor's email can land at the same moment, and neither may erase the other
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const job = await getJob(id)
+    if (!job) return null
+    const old = job.answers || {}
+    const answers = { ...old, ...patch, ...(patch.marks || old.marks ? { marks: { ...(old.marks || {}), ...(patch.marks || {}) } } : {}) }
+    let q = db().from(T).update({ answers, updated_at: new Date().toISOString() }).eq('id', id)
+    if (job.updated_at) q = q.eq('updated_at', job.updated_at)
+    const { data, error } = await q.select('*').maybeSingle()
+    if (error) throw new Error(error.message)
+    if (data) return data as ScanJob
+    await new Promise((r) => setTimeout(r, 60 + Math.random() * 120))
+  }
+  throw new Error('mergeAnswers: too many concurrent writes')
+}
+
+/** Recent background scans (speed figures). */
+export async function listRecentBackground(limit = 200): Promise<ScanJob[]> {
+  const { data, error } = await db().from(T).select('*').like('scan_id', 'bg_%').order('created_at', { ascending: false }).limit(limit)
   if (error) throw new Error(error.message)
-  return (data as ScanJob) || null
+  return (data as ScanJob[]) || []
+}
+
+/** How long the visitor filled the form, waited, and would have waited before background scans. */
+export function speedOf(job: ScanJob) {
+  const m = job.answers?.marks || {}
+  const t = (k: string) => (m[k] ? new Date(m[k]).getTime() : null)
+  const url = new Date(job.created_at).getTime()
+  const [start, done, email, loading, results] = [t('scanStart'), t('scanDone'), t('email'), t('loading'), t('results')]
+  const s = (ms: number | null) => (ms == null || !Number.isFinite(ms) ? null : Math.round(ms / 100) / 10)
+  const scan = start != null && done != null ? done - start : null
+  return {
+    formS: s(email != null ? email - url : null), // URL step → email submitted
+    scanS: s(scan), // the scan itself
+    headStartS: s(start != null && email != null ? Math.max(0, Math.min(email, done ?? email) - start) : null), // scanned before the email
+    waitS: s(email != null && results != null ? Math.max(0, results - email) : null), // what the visitor waited after the email
+    beforeS: s(scan), // before background scans, the whole scan came after the email
+    doneBeforeEmail: done != null && email != null ? done <= email : null,
+    sawLoading: !!loading,
+  }
 }
 
 /** Give a background job its email (once: the first address wins). */

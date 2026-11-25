@@ -100,7 +100,12 @@ export default function ResultsPage() {
       if (stop) return
       if (!r || r.status === 404) return setState('missing')
       const d = (await r.json().catch(() => ({}))) as { status?: string; snapshot?: Record<string, unknown> | null }
-      if (d.status === 'done' && d.snapshot) { hydrate(d.snapshot); return setState('ready') }
+      if (d.status === 'done' && d.snapshot) {
+        hydrate(d.snapshot)
+        // background scans: when the results first showed (speed figures, /api/scan/speed); kept once
+        void fetch(api(`/scan/start/${id}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seen', stage: 'results' }) }).catch(() => {})
+        return setState('ready')
+      }
       if (d.status === 'failed') return setState('failed')
       setStage(d.status || '')
       setState('waiting')
