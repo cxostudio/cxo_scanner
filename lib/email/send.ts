@@ -2,7 +2,16 @@
 // Sender: EMAIL_FROM, e.g. "Louis from CXO studio <scan@cxo.studio>" (the domain must be verified in Resend).
 // Without a key it logs and does nothing, so scans never fail because of email.
 
+// Addresses that never receive anything from the scanner (results, report, follow-ups, reminders, alerts).
+// forte.test.only@gmail.com: the old contractor's test inbox. More can be added in Vercel as NO_EMAIL_TO, comma separated.
+const BLOCKED = ['forte.test.only@gmail.com']
+export function isBlockedRecipient(to: string) {
+  const list = [...BLOCKED, ...(process.env.NO_EMAIL_TO || '').split(',')].map((e) => e.trim().toLowerCase()).filter(Boolean)
+  return list.includes(to.trim().toLowerCase())
+}
+
 export async function sendEmail(msg: { to: string; subject: string; html: string; text: string; replyTo?: string; headers?: Record<string, string> }): Promise<{ sent: boolean; id?: string; error?: string }> {
+  if (isBlockedRecipient(msg.to)) { console.log('[email] blocked recipient, not sent:', msg.subject); return { sent: true, id: 'blocked' } }
   const key = process.env.RESEND_API_KEY
   if (!key) { console.warn('[email] RESEND_API_KEY not set; email not sent to', msg.to); return { sent: false, error: 'not configured' } }
   const from = process.env.EMAIL_FROM || 'Louis from CXO studio <scan@cxo.studio>'
