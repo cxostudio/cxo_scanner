@@ -1,0 +1,33 @@
+store,group,last run,report id,notes
+beardbrand.com,large or headless,done,01c750c1-cdd2-45d7-9dc0-fe664fa0b563,
+bellroy.com,headless,done,bbbbc49c-0929-4c0c-862b-c1d1542e0ea1,"Headless: cart works, checkout does not"
+bombas.com,"blocked, retried via Browserbase",failed,f7f79c8d-0226-415c-b996-3465f8b63050,Blocked even via Browserbase
+brightland.co,small Shopify (eligible),done,5b48f22d-cfb0-44dd-a916-a967aa09f97d,
+cafedesguerriers.fr,small Shopify (eligible),done,0c88d419-9f33-464c-a412-cbfa9dde5f7f,
+chubbiesshorts.com,headless,done,e7ae8e20-484d-48f2-bf4f-b582e255c2c0,"Headless: checkout works, cart does not"
+cornhole.dk,small Shopify (eligible),done,5dd8b2e2-5cf8-460b-ae20-6412e386f975,
+doreandrose.com,re-run after fixes,done,62c87a57-96e9-402b-ba3d-509d17ad9544,"Collection/product slow, timed out twice, then completed"
+esteden.be,small Shopify (eligible),done,1949d28b-594d-4f88-8bda-7e72ef1589b6,
+eu.hismileteeth.com,large or headless,done,882dc121-7069-4552-be9e-f9a85df0fada,
+gigi-store.be,small Shopify (eligible),done,f2eb9e3d-4022-45e4-b895-018821939977,
+gymshark.com,headless,done,ecae4a5b-db52-4dd2-b62c-b333f4ae09e6,Headless: cart/checkout fail (excluded by eligibility gate)
+helmboots.com,small Shopify (eligible),done,9207f5fc-0d16-438b-a77e-8e98ed87b1b4,
+huel.com,headless,done,b7271b3f-e2fa-4b62-ae66-32333f3babdd,Headless: cart/checkout fail (excluded by eligibility gate)
+kettleandfire.com,re-run after fixes,done,d7d46e25-6870-4477-8eef-e99f64d337f2,
+manscaped.com,"blocked, retried via Browserbase",done,c96b8f0f-5043-4898-ac5f-fe26886e243a,"Blocked, works via Browserbase (few pins: locate uses local browser)"
+na-kd.com,large or headless,done,d8c6668d-3a82-4df4-b0cc-deb574f83925,
+nuori.com,small Shopify (eligible),done,2cd053cd-e75c-43e1-9c13-821c8f7b8d5b,
+ohpolly.com,large or headless,done,77804409-4d17-4bce-9feb-a0ccedf5d1fb,
+packagefreeshop.com,small Shopify (eligible),done,894a34ba-feea-4b8d-a085-86043b48120d,
+partakefoods.com,small Shopify (eligible),done,43eb687f-1194-40d3-861b-13c8c1521f34,
+rothys.com,large or headless,done,7beb7302-0600-49d8-987f-21920c17ffd0,
+ruggable.com,headless,done,cb32ba97-9c52-477b-b920-e5d846a51299,Headless: complete
+sezane.com,"blocked, retried via Browserbase",done,536d8f22-8a4e-4c89-afe7-f436af549576,"Blocked, works via Browserbase (few pins: locate uses local browser)"
+skims.com,"blocked, retried via Browserbase",done,d41e4d49-4b67-4dfd-a7c8-dded91cc4909,
+skinlovers.com,small Shopify (eligible),done,5341fda8-567d-49a7-a3bb-a1d68c4fd4a9,
+tenthousand.cc,re-run after fixes,done,1d1a2d1d-6207-4227-b77c-573e98364b9b,
+tentree.com,large or headless,done,26c58a47-41b5-435f-a759-f5e79a525971,
+thesill.com,small Shopify (eligible),done,3283de4b-f5cf-4883-97d4-e3a8b7e911ba,
+tiege.com,re-run after fixes,done,baf91d81-a9be-472a-8ffb-28234f1e09b2,Product page redirects (geo market)
+tiptoe.fr,small Shopify (eligible),done,abfdfd10-6ff1-4d85-b9e8-1fc2a5571527,
+yellowleafhammocks.com,small Shopify (eligible),done,ed957ed1-5362-4656-836b-654da5a965ec,

@@ -1,0 +1,185 @@
+status,method,pages,title,id
+Draft,AI + measured,1) General,Is the cookie banner compact and quick to accept or reject?,recqdZbBbXoGLLZYV
+Draft,AI on screenshots,1) General,Does the main navigation focus on the pages that make money?,rec5qkI2EcLQ5jQ9D
+Draft,AI on screenshots,1) General,Do menu labels name product types in the words shoppers use?,recy4v2IJlY07COSY
+Draft,Manual (audit only),1) General,"After signing up for a discount, does the code appear on screen right away?",recXu35FN9ZA6WTTT
+Draft,Measured,1) General,"Do dead-end pages (404, no search results, blog, About) offer a next step?",rec2NXZ5QTVyDYSua
+Draft,Measured,1) General,Does the tab title change to bring back shoppers who switch tabs?,rec4FB41t10SPslqM
+Draft,Measured,1) General,Does search suggest products and categories as the shopper types?,recPKeMkL99ewxiFu
+Draft,Measured,1) General,Does the design avoid pure black (#000000) for text and backgrounds?,recSs12TogM60Mf6w
+Draft,AI + measured,2) Home Page,"Is the hero a single message, not an auto-rotating slider?",recdhqkebQtRAqP4l
+Draft,AI on screenshots,2) Home Page,Are the main categories shown as photo tiles in the first two screens?,rec802tQDyuzJxxZd
+Draft,AI on screenshots,2) Home Page,"Are at least two shopping benefits (shipping, returns, guarantee) visible in the first screen?",recFTSjmOpDrdWa3D
+Draft,AI on screenshots,2) Home Page,Does the homepage show at least three customer reviews?,recUSgWqCEq0anlm2
+Draft,Manual (audit only),3) Category Page,"When a promotion applies to this category, is it shown above the grid?",recin5p14RpTXTPtp
+Draft,Measured,3) Category Page,Does applying a filter update the products without losing your place?,recXEoY42x4W6qMHr
+Draft,AI on screenshots,"3) Category Page, 4) Product Page",Does the menu show which section the shopper is in?,recB9iXaHpr1wLOzT
+Draft,AI on screenshots,4) Product Page,Does the gallery show the product on more than one body type or size?,rec0vpX5Qe3QWLYwv
+Draft,AI on screenshots,4) Product Page,Does at least one gallery image point out features with text or arrows?,rec33A6aJXon8YXfR
+Draft,AI on screenshots,4) Product Page,Is there a size guide next to the size picker that opens without leaving the page?,rec5bat6b8tYeSH4V
+Draft,AI on screenshots,4) Product Page,Are measurements shown in the shopper's units?,recFb69uZnZjNStB4
+Draft,AI on screenshots,4) Product Page,"When a product or size is sold out, can the shopper ask to be notified?",recGbDdjsN1u8pusF
+Draft,AI on screenshots,4) Product Page,"If the brand sells on sustainability, does the page give concrete facts?",recJCypfRGqHXDMTG
+Draft,AI on screenshots,4) Product Page,Can the shopper ask a question from the product page?,recRbVoxG8qjJlszm
+Draft,AI on screenshots,4) Product Page,"On mobile, is it clear the gallery holds more images to swipe?",recVqogizZUTrTN4p
+Draft,AI on screenshots,4) Product Page,"Does the page show outside credibility (press, experts, awards) for this product?",recWpE1SNP8ZAYoNn
+Draft,AI on screenshots,4) Product Page,Does the page help the shopper choose between similar products?,recXBUpjSKlHhTss9
+Draft,AI on screenshots,4) Product Page,Does at least one gallery image show the product with another product it is used with?,recf9TVdWozjE1laI
+Draft,AI on screenshots,4) Product Page,Do products without reviews show the store's reviews instead?,rechKY1khGHl2rN0z
+Draft,AI on screenshots,4) Product Page,"If origin is a selling point, does the page say where and how the product is made?",recmj6IwHOuekoyE5
+Draft,AI on screenshots,4) Product Page,Are 2 to 5 key benefits listed in the buy box?,rectt6VIDYK1SbaBH
+Draft,AI on screenshots,4) Product Page,"Are customer photos featured where shoppers see them, not buried in reviews?",recy3ghSc1IY6x9lf
+Draft,Manual (audit only),4) Product Page,"When a variant is picked, do the images, price and stock update to match?",recUTjlYKLjpEzUJs
+Draft,Manual (audit only),4) Product Page,"If the shopper forgets to pick a size, does the page say so next to the size picker?",recgG59KtaXg3RDBF
+Draft,Manual (audit only),4) Product Page,Does the page say a return label is included (when it is)?,reck103eLUDgWD3Gn
+Draft,Measured,4) Product Page,Is it obvious that the product was added to the cart?,rec7y312t00iNPOu7
+Draft,Measured,4) Product Page,Can the shopper zoom into product images to see fine details?,reckvvOz1p1ZbqVVZ
+Draft,AI + measured,5) Cart Page,"On mobile, does the checkout button stay visible while scrolling the cart?",recpH3iBChfoPDvl4
+Draft,AI on screenshots,5) Cart Page,"For higher order values, does the cart show the installment amount?",recZKJhZBlRiZgJq6
+Draft,AI on screenshots,5) Cart Page,"Does the cart suggest a relevant, low-priced add-on?",recaOn94y8pUSo5JK
+Draft,AI on screenshots,5) Cart Page,Is there a reassurance line next to the checkout button?,recha2SJsHo2NcTvM
+Draft,Measured,5) Cart Page,"On desktop, does the checkout button in the cart react on hover and look clickable?",recGtf0uyLiIAUc8S
+Draft,AI on screenshots,6) Checkout Page,Is delivery protection offered at checkout?,recF2wcD29XraBQaP
+Draft,AI on screenshots,6) Checkout Page,Is the phone number optional?,recMmrb4rP1lYJqjK
+Draft,AI on screenshots,6) Checkout Page,Are express buttons kept from taking over the top of checkout?,recRM731MOMVIbNT8
+Draft,AI on screenshots,6) Checkout Page,"Does checkout keep the shipping promise made earlier (price, free threshold, delivery time)?",recRdraUHMBfjsRd9
+Draft,AI on screenshots,6) Checkout Page,"When the checkout asks for a phone number, does it say why?",reciehb4gBXeSR4pm
+Draft,AI on screenshots,6) Checkout Page,Is the pay button the most prominent element in checkout?,recugOkV72c8sERRM
+Draft,Customer upload,6) Checkout Page,Can shoppers pick a delivery day or time slot when it matters?,recKOOlnxkuGVHfhw
+Draft,Customer upload,6) Checkout Page,"Is there a one-click offer after payment, before the thank-you page?",recbTVQtSb0kqLFRG
+Draft,Customer upload,6) Checkout Page,Does the card form show where to find the security code (CVC)?,recupJdLn2hOLn07S
+Draft,Manual (audit only),6) Checkout Page,"On mobile, does each field open the right keyboard (email, numbers)?",rec0bTfKHcCqipFsI
+Draft,Manual (audit only),6) Checkout Page,"Is typed information kept after an error, or when the shopper leaves and comes back?",rec1OrbPDNo0MWha4
+Draft,Manual (audit only),6) Checkout Page,Does the phone field accept any format and preselect the country code?,rec6Hl3uJbvxLcNQ0
+Draft,Manual (audit only),6) Checkout Page,Does the address field suggest addresses as the shopper types?,recCDAsR82WJwt72V
+Draft,Manual (audit only),6) Checkout Page,Does browser autofill fill the checkout correctly?,recsBamNXanQWxvi7
+Draft,Manual (audit only),6) Checkout Page,"Do errors show next to the field, say what is wrong and how to fix it?",recsaIAJwhbpeo4L3
+Draft,Customer upload,7) Thank You Page,"Does the page say when the order will arrive, with which carrier, and how tracking will reach the shopper?",rec1P19dSzhUvS4hp
+Draft,Customer upload,7) Thank You Page,"If the shopper did not opt in at checkout, does the page offer a second chance to subscribe?",rec1cprUrm5FxYAIS
+Draft,Customer upload,7) Thank You Page,Does the page offer a personalized product recommendation based on the customer’s purchase?,recB6q6rpJJvwDQX5
+Draft,Customer upload,7) Thank You Page,Does the page offer the customer a coupon code for their next purchase?,recESD4qtEPQUOONR
+Draft,Customer upload,7) Thank You Page,Can the shopper easily get help after ordering (contact or quick answers)?,recIcoDmPCjXGx4wg
+Draft,Customer upload,7) Thank You Page,Does the page clearly state that the purchase was successfully completed and congratulate the customer?,recY2qgOlJ3kbFgxH
+Draft,Customer upload,7) Thank You Page,Is there a visible link or button to view or print the order receipt?,recb3eTFEeO8UMHHN
+Draft,Customer upload,7) Thank You Page,Does the page push one main next step instead of stacking offers?,recbsuRf4GvP3p4Ea
+Draft,Customer upload,7) Thank You Page,Does the page encourage social following?,recdrvoK7fSPmlyl5
+Draft,Customer upload,7) Thank You Page,"Does the page invite customers to join a loyalty, rewards or referral program?",reciz22npYdFPmUgM
+Draft,Customer upload,7) Thank You Page,"Does the page display trust elements like satisfaction guarantees, return policies?",rectSW5FPOap52gyr
+Draft,Customer upload,7) Thank You Page,Does the page clearly summarize what was in the order?,recyrXe3PmS8Xn4cc
+Draft,Customer upload,7) Thank You Page,"Does the page ask a one-question survey (how they found you, what almost stopped them)?",reczJExIApMjl1aLS
+Draft,Measured,8) Search Results,"Do search results look like a category page (grid, prices, filters)?",recWctdeyEyTRSFcU
+Off,(none),1) General,Is the footer equipped with a language or currency switcher (if applicable)?,rec4FTQCCjhLzVH6e
+Off,(none),1) General,Are search results optimized for mobile with touch-friendly design?,rec4P3S0ttcZ1nEsG
+Off,(none),1) General,Are Accelerated Mobile Pages (AMP) implemented?,rec7eTCV3AWEZlk80
+Off,(none),1) General,"Does the cart widget show relevant cart-related messages (e.g., free shipping threshold)?",rec9iIyKYcXvsiMXQ
+Off,(none),1) General,Is the search bar prominently visible and functional?,recEPKEBfsv4vAyhe
+Off,(none),1) General,"Is there a clear and visible ""Cart"" button within the cart widget?",recJYiTngXunXhMoc
+Off,(none),1) General,Does the cart widget update instantly when items are added or removed?,recLxtT8tiwvbq8AR
+Off,(none),1) General,"Are pop-ups and overlays mobile-friendly, non-intrusive, and easy to close?",recNsejOxs12txRFI
+Off,(none),1) General,Does the cart widget provide a quick cart summary on hover or click?,recOklRmnfHqrnvns
+Off,(none),1) General,"If empty, does the cart widget invite the user to continue shopping or log in to restore their basket?",recTRgFfNuhLeRfPT
+Off,(none),1) General,"Are page load speeds optimized for mobile, ideally loading in under 3 seconds?",recWvi6qAF21gtea1
+Off,(none),1) General,Is the cart icon clearly visible and easily identifiable?,recX4YZlSI7xsBxJ1
+Off,(none),1) General,Is the navigation responsive and optimized for mobile?,recYADbQoq8byMqUM
+Off,(none),1) General,"Is there a clear and visible ""Checkout"" button within the cart widget?",recYuZ0bJJvpz6yE0
+Off,(none),1) General,Is above-the-fold content prioritized?,recb8JfR1vGeS0YCB
+Off,(none),1) General,Are product images and galleries swipe-friendly on mobile devices?,recjvVzFKMCB9qJNk
+Off,(none),1) General,Are all images optimized for mobile to ensure fast loading times without sacrificing quality?,reckqla39PgpB9whB
+Off,(none),1) General,"Does the search bar provide suggestions for zero-results scenarios (e.g., related products or alternative search terms)?",recuwBZKXntt8PttE
+Off,AI + measured,1) General,"Is there a ""Track my order"" link in the header, footer or help menu that works without an account?",recwUrPT3ImIW25Bj
+Off,AI on screenshots,1) General,"Does the 404 page help the shopper continue (search, bestsellers, main categories)?",rec9lknItJPbEZ4Hf
+Off,AI on screenshots,1) General,"Do the help or contact pages say how fast you answer (""We reply within 24 hours"")?",recP6f2NicMoDU8dx
+Off,AI on screenshots,1) General,Is there a product finder or quiz for shoppers who don't know what to pick?,recSP8Q47qohq7z8e
+Off,AI on screenshots,1) General,Does the About page show the people or the story behind the brand?,recZwdu25DdwcsnxK
+Off,Manual (audit only),1) General,"Does the search bar handle typos, misspellings, and synonyms effectively?",rec9YqyUjHjIYlVIH
+Off,Manual (audit only),1) General,Are regular performance audits conducted?,recjwfkAZaEQlwbvq
+Off,Manual (audit only),1) General,Is the database performance optimized?,reclssW2NG1ibLvES
+Off,Manual (audit only),1) General,Is the hosting environment optimized for speed?,recso1Fc1opfJHezA
+Off,Manual (audit only),1) General,Are search results personalized based on user behavior or history?,rect0gobPvYe67a0J
+Off,Measured,1) General,Do text and buttons have enough contrast to read (4.5:1 for normal text)?,recLak6GbIWdNz9I6
+Off,Measured,1) General,Do videos stay silent until the shopper turns sound on?,recU8E5qJOz0455dt
+Off,Measured,1) General,Can customers log in with a one-time email code instead of a password?,recnN4ORFMdnLu75U
+Off,Measured,1) General,"Do icon-only buttons (search, cart, menu, close) have a label for screen readers?",reco4YnNSMmq5oBep
+Off,Measured,1) General,"When moving through the page with the keyboard, can you see where you are (visible focus outline)?",recvYVNn9bWckSevA
+Off,(none),2) Home Page,"Does the homepage promote site-wide offers at the top of the page (e.g., Free Shipping) with urgency and scarcity triggers?",rece6cI4zL9uA7dyO
+Off,AI on screenshots,2) Home Page,"Once you land on the homepage, do you immediately know the main products the store is selling?",reczp6afIpJsZc39A
+Off,Manual (audit only),2) Home Page,Has the hero section been tested using a 5-second test to ensure key messages are clear?,recM631vdg2m8Zdzp
+Off,(none),3) Category Page,"Are urgency and scarcity triggers (e.g., limited stock, time-limited sale) used effectively within the category page?",recDvz5TgdNXVSBeE
+Off,(none),3) Category Page,Are products displayed in a grid or list format that can be toggled by users?,recr26Oe7XMPECyE2
+Off,AI on screenshots,3) Category Page,"Are active filters shown as removable chips, with a ""Clear all""?",recT3D4PgowV9jCVO
+Off,AI on screenshots,3) Category Page,"Does the mobile filter panel say how many products match before applying (""Show 24 results"")?",recW3jjSTzIaNNNb7
+Off,AI on screenshots,3) Category Page,"Do product cards show the colours available (swatches or ""4 colours"")?",recdUbfOiWoXq7dcW
+Off,Measured,3) Category Page,"On desktop, does a product card show a second image on hover?",recZUvxgGB6npoWxc
+Off,Measured,3) Category Page,"After opening a product and pressing back, does the shopper land where they were in the list?",recyPpqNFeKRCelUJ
+Off,(none),4) Product Page,Is there a section showing similar products or recently viewed items to enhance the shopping experience?,rec6uK8W3brtr06RS
+Off,(none),4) Product Page,Are breadcrumbs visible to help navigate back to previous categories?,rec9ZAqYGDxYOs5MQ
+Off,(none),4) Product Page,Are old prices and discounts clearly displayed when the product is on sale?,recB3f0deHneLgkmh
+Off,(none),4) Product Page,Are different shipping method options and costs clearly outlined?,recLHaceypgUq1GPf
+Off,(none),4) Product Page,"Is the ""What’s Included"" section clear, detailing all items or accessories in the package?",recNu16E7w1yxxUzk
+Off,(none),4) Product Page,"Does the main CTA change state after a product is added to the cart (e.g., “Product added!”)?",recS5zgMDOlqx89yW
+Off,(none),4) Product Page,"Does the page address common objections with clear answers (e.g., product fit, durability, or care instructions)?",recXQ21MJ6c54XItA
+Off,(none),4) Product Page,Are quantity discounts clearly displayed near the main CTA?,recYRpLKVM1yOhUWE
+Off,(none),4) Product Page,Is free shipping (if applicable) highlighted near the main CTA?,recayaioapBIMK5jz
+Off,(none),4) Product Page,"Are certifications (e.g., FDA approved, eco-friendly) clearly displayed?",recbCIS5E1L5g6VmY
+Off,(none),4) Product Page,"Is there a before-and-after section for products that promise visual results (e.g., skincare, cleaning products) to showcase the impact?",recbkBWWoWHwBCdpk
+Off,(none),4) Product Page,Does variant-specific information update dynamically based on the selected variant?,reccS2OY65GtRlc4r
+Off,(none),4) Product Page,Is there a hassle-free returns process highlighted near the main CTA?,receLhBqhe6sVClTs
+Off,(none),4) Product Page,Is the product description easy to read and formatted for clarity?,recgkupgIqbIUlsmx
+Off,(none),4) Product Page,Are there images available for each product variant?,recoLkWQeWBZCIcK3
+Off,(none),4) Product Page,Are all the assets optimized and compressed for faster loading times?,recpkzUKPpz4V6ePl
+Off,(none),4) Product Page,"Are customer reviews prominently displayed with ratings, photos, and verified badges?",recw68IIuYq5G3gq7
+Off,(none),4) Product Page,"Are ingredients or materials clearly listed and visually showcased when applicable (e.g., cosmetics, food, supplements)?",recxKDMlPwtxijRTf
+Off,(none),4) Product Page,Is the price of the product clearly visible and prominent?,recz3OBYsXrjq5Ls6
+Off,(none),4) Product Page,Are product titles descriptive and clear?,recz7zJs7yM8AkbEm
+Off,AI + measured,4) Product Page,Are recent reviews shown (newest from the last 3 months)?,rec8XAYwontruAjn9
+Off,AI + measured,4) Product Page,"Is the full ingredient list or nutrition / supplement facts readable on the page (text, or an image you can zoom)?",recOEOW9SVt4lVp8t
+Off,AI on screenshots,4) Product Page,"Is there help choosing a shade (shade finder, swatches on several skin tones, quiz)?",rec73qtZIjVoUhyeg
+Off,AI on screenshots,4) Product Page,"Is compatibility stated near the variant picker (""Fits iPhone 16 Pro"")?",rec7AxFeWiITcxnz8
+Off,AI on screenshots,4) Product Page,"For shoppers in the EU, do prices include VAT and say so?",recMjxXo5y152sMVV
+Off,AI on screenshots,4) Product Page,"Does the page explain delivery for bulky items (to which room, assembly, delivery window)?",recRV0TpS8c0QSRGD
+Off,AI on screenshots,4) Product Page,"Can subscribers pause, skip or cancel by themselves, and does the product page say so?",recZNvzoBeB2VYmVY
+Off,AI on screenshots,4) Product Page,"Is there fit advice next to the size selector (""runs small, size up"" or a size finder)?",recoKwMh2pE1OeCzH
+Off,AI on screenshots,4) Product Page,"Are the product's dimensions shown visually (a diagram or dimensions on a photo), not only in a table?",recwzmVtXtZ6BZZ0v
+Off,Manual (audit only),4) Product Page,"When a product is on sale, is the struck-through price the lowest price of the last 30 days?",rec5ZghS6R7xp2yBD
+Off,Measured,4) Product Page,Does each product page have its own clear title and description for Google results?,rec9A2ytNFmDVzM40
+Off,Measured,4) Product Page,"Does the page give Google its shipping and returns details (structured data), so they show in Google listings?",recJz9Awcl2ziJYy2
+Off,Measured,4) Product Page,"When a product link is shared, does the preview show the product image, name and price?",reccq6hbLRpKmxRqN
+Off,(none),5) Cart Page,"If the free shipping threshold is reached, is it clearly highlighted in the cart?",rec1mxJQISWUucPz8
+Off,(none),5) Cart Page,"Is a ""Verified Customer Reviews"" badge displayed on the cart page?",rec1p6tGSnj9JlHIU
+Off,(none),5) Cart Page,Are the subtotal and total prices clearly displayed?,rec5vtfKpkh3h1R5C
+Off,(none),5) Cart Page,Are estimated taxes shown in the cart summary?,rec9IifGDcVD34bZp
+Off,(none),5) Cart Page,"Is the correct product image displayed for the chosen product variant (e.g., Blue T-shirt)?",recCQJLNEUmYQwxxV
+Off,(none),5) Cart Page,Is the suggested free shipping threshold clearly displayed?,recE3LmybMOLIj78Q
+Off,(none),5) Cart Page,"Is the main CTA clear about the next step (e.g., “Proceed to Secure Checkout”)?",recHb1NWJ3jBckF1t
+Off,(none),5) Cart Page,Are urgency triggers used effectively?,recKQdpZWiCTy7ZuP
+Off,(none),5) Cart Page,Is there information on easy returns or refunds visible on the cart page?,recN7z6QFglVzJvyH
+Off,(none),5) Cart Page,Is the expiration date for promotions clearly displayed on the cart or product pages?,recNeMJAubHd6TtyL
+Off,(none),5) Cart Page,Are scarcity triggers displayed next to each item?,reca6UBXhcGGhHD8S
+Off,(none),5) Cart Page,Is the percentage discount displayed next to the discounted price?,reciuUFEtYYtgk0Re
+Off,(none),5) Cart Page,"Is there a ""100% Secure Checkout"" message displayed prominently?",reckHj0yc05m2lyEV
+Off,(none),5) Cart Page,Are thumbnail images of the products displayed in the cart?,recqJNQkhrNg2zW7o
+Off,(none),6) Checkout Page,Do input fields have floating labels to show the field name while entering data?,rec5iHmtn57AVmrdF
+Off,(none),6) Checkout Page,Does the checkout form highlight the border or background of the field the user is currently typing in?,recBfxNDxYsY07y43
+Off,(none),6) Checkout Page,"Can users easily jump between input fields using the ""Tab"" key?",recEJpS7BQybfdPiW
+Off,(none),6) Checkout Page,"Is there an option to preselect ""Billing address is the same as shipping"" to minimize repetitive input?",recEaMWoPtZScNGC3
+Off,(none),6) Checkout Page,Are numeric keyboards used for number-only fields on mobile?,recGsifKEAMpiCtcG
+Off,(none),6) Checkout Page,Is the country code pre-selected based on the customer’s location for the phone number field?,recLhi7sD7qsAKnI8
+Off,(none),6) Checkout Page,Is there a countdown timer displaying the cutoff time for same-day or next-day dispatch?,recO8nHDozvCvOLGe
+Off,(none),6) Checkout Page,"Are input fields sized appropriately for the expected input (e.g., smaller fields for zip codes)?",recO9ArM2CxJWOCak
+Off,(none),6) Checkout Page,Does the form use (real-time) inline validation with clear success/error indicators?,recSUYLBWY4U5PfBU
+Off,(none),6) Checkout Page,Does the checkout save input fields if the user leaves and returns later?,recW7bWP6CbGAgAxe
+Off,(none),6) Checkout Page,Is the checkout process clear about the next steps if it’s multi-step?,rece0j0vAqUcEmVZq
+Off,(none),6) Checkout Page,"Is the checkout page SSL-encrypted, and does it display a secure URL (HTTPS)?",rechPlMBqn5AeOVnz
+Off,(none),6) Checkout Page,Is the user informed that their phone number is used only for specific purposes?,reckn1dDC8VrPkhE9
+Off,(none),6) Checkout Page,"Do input fields include suggestions to reduce cognitive load (e.g., showing an email format)?",recqlX4YW3FPwgbnG
+Off,(none),6) Checkout Page,"Are security seals and trust badges (e.g., SSL Secure, Norton Verified) visible on the checkout page?",recslY5nsNIsVubsV
+Off,(none),6) Checkout Page,Is password recovery easy during the checkout process?,rectuaTtU7YbogsbM
+Off,(none),6) Checkout Page,Does the error state of incorrectly filled fields clearly state what is wrong and how to correct it?,recvL78BBlpSHs7DY
+Off,AI on screenshots,6) Checkout Page,"If the store has a membership with free delivery, is it offered at checkout?",rec0MZqSu1LFuM9BI
+Off,Manual (audit only),6) Checkout Page,Are shipping rates and free shipping thresholds tested through A/B testing? ,recUjnOGr6xkyISbB
+Off,(none),7) Thank You Page,Does the page explain how the user can track their package?,rece2ozeXUW7nUvQ0
+Off,(none),7) Thank You Page,Is there an FAQ section addressing common post-purchase questions?,reci9n0Yj5ITGr98A
+Off,AI + measured,8) Search Results,"Does search find products by category words (""sheets"", ""case""), not only by exact product names?",recgzCeCt88qIsOG2
+Off,AI on screenshots,8) Search Results,"Does a search with no results offer a way forward (spelling fix, popular products, categories, contact)?",recEwhpkC7Fpe6drp
+Off,AI on screenshots,8) Search Results,Can search results be filtered and sorted?,recUUD0aehm1xJOs6
+Off,AI on screenshots,8) Search Results,"Do search results show products as cards with image, price and rating, like the category grid?",recabn64gTwNLfVr6
